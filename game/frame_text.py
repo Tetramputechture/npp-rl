@@ -9,28 +9,40 @@ from typing import Optional
 
 def extract_text(frame: np.ndarray) -> Optional[str]:
     """Extract text from the given frame."""
-    # Use pytesseract to extract text from the frame
-    text = pytesseract.image_to_string(frame, config='--psm 11')
+    # if frame is None:
+    #     return None
 
-    # Remove non-alphanumeric characters
-    text = ''.join(e for e in text if e.isalnum() or e.isspace())
+    # # Use pytesseract to extract text from the frame
+    # text = pytesseract.image_to_string(frame, config='--psm 11')
 
-    # Remove any leading or trailing whitespace
-    text = text.strip()
-    return text
+    # # Remove non-alphanumeric characters
+    # text = ''.join(e for e in text if e.isalnum() or e.isspace())
+
+    # # Replace multiple spaces with a single space
+    # text = ' '.join(text.split())
+
+    # # Remove any leading or trailing whitespace
+    # text = text.strip()
+    # return text
+    return ''
 
 
-class FrameText:
-    def __init__(self):
-        self.all_text = ''
-        self.top_text = ''
-        self.middle_text = ''
-        self.bottom_text = ''
+def all_frame_text(frame: np.ndarray):
+    """Extract all text from the frame."""
+    return extract_text(frame)
 
-    def set_from_frame(self, frame: np.ndarray):
-        self.all_text = extract_text(frame)
-        height = frame.shape[0]
-        third_height = height // 3
-        self.top_text = extract_text(frame[:third_height, :])
-        self.middle_text = extract_text(frame[third_height:2*third_height, :])
-        self.bottom_text = extract_text(frame[2*third_height:, :])
+
+def level_playing_center_text(frame: np.ndarray):
+    """Extract the level center title from the frame."""
+    # Our coordinates are the rectangle where the top left coordinate is (178, 273)
+    # and the bottom right coordinate is (470, 302)
+    # We extract the text from this rectangle
+    level_center_title = extract_text(frame[280:302, 170:470])
+    return level_center_title
+
+
+def main_menu_text(frame: np.ndarray):
+    """Extract the main menu text from the frame."""
+    # top left is (11, 65)
+    # bottom right is (60, 102)
+    return extract_text(frame[65:102, 11:60])

@@ -16,10 +16,12 @@ The game level is represented as a 640x480 black and white image where:
     * Optional gold pieces (time bonuses)
     * Possible hazards (traps, enemies)
     * Terrain (walls, platforms)
+- The player must reach the exit door after activating the switch to complete the level
 - The player is either alive or dead, with a health bar that depletes every second
   and each gold piece collected adds 1 second to the timer
 - The entire game state and player information is observable from the screen
-- Failure is indicated by reaching the 'Level Fail
+- Failure is indicated by reaching the 'Level Fail' screen or running out of time
+- Success is indicated by reaching the 'Level Complete' screen
 
 Action Space:
 ------------
@@ -31,28 +33,49 @@ Discrete(6):
     4: Jump + Left (Space + A)
     5: Jump + Right (Space + D)
 
-Note: Jump duration is handled internally by the environment state machine,
-allowing for variable jump heights based on how long the action is maintained.
-
 Observation Space:
 ----------------
 Since the entire game can be observed from the screen, the observation space
 is a dictionary containing the following elements:
-- 'screen': RGB image of the game screen
-- 'player_state': Dictionary containing player state information:
-    - 'position': 2D position of the player character
-    - 'velocity': 2D velocity vector of the player
-    - 'acceleration': 2D acceleration vector of the player
-    - 'grounded': Boolean flag indicating if the player is grounded
-    - 'switch_activated': Boolean flag indicating if the switch is activated
-    - 'on_wall': Boolean flag indicating if the player is on a wall
+- 'screen': RGB image of the game screen (480x640x3)
+- 'player_x': Player's x-coordinate in the level (float, pixels)
+- 'player_y': Player's y-coordinate in the level (float, pixels)
+- 'time_remaining': Time remaining in the level (int, milliseconds)
+- 'switch_activated': Whether the switch has been activated (bool)
+- 'player_dead': Whether the player is dead (bool)
+- 'exit_door_x': X-coordinate of the exit door (float, pixels)
+- 'exit_door_y': Y-coordinate of the exit door (float, pixels)
+- 'switch_x': X-coordinate of the switch (float, pixels)
+- 'switch_y': Y-coordinate of the switch (float, pixels)
 
 Rewards:
 -------
-We will start with a greedy structure, where our reward is calculated
-when the agent reaches the exit door. The reward will be the time remaining
-multiplied by a factor, to encourage the agent to complete the level as fast
-as possible.
+Each frame, the agent receives a reward based on the following conditions:
+- If time remaining increases, reward += 10 * seconds gained
+- If time remaining decreases, reward -= 10 * seconds lost
+- If switch is not activated, reward += the change in distance to the switch from the previous frame (encourage movement)
+    - More positive reward for moving closer to the switch
+        - Calculation: reward += (distance_to_switch_prev - distance_to_switch_curr)
+- If switch is activated, reward += 10000
+- If switch is activated, reward -= the change in distance to the exit from the previous frame (penalize distance)
+    - The more the player moves away from the exit, the more negative the reward.
+- If no movement is detected, reward -= 1
+    - This encourages the agent to explore the level, but we make it low because sometimes the agent should stay still.
+- If player reaches exit, reward += 20000
+- If player dies, reward -= 10000
+
+The episode ends when:
+- The player reaches the exit after activating the switch (success)
+- The player health reaches 0 (collision with hazards/enemies)
+- The time remaining reaches 0
+
+Our episode reward will be the sum of all rewards received during the episode.
+We do not want to train on individual rewards, as they may not be indicative of the
+agent's performance throughout the level. Instead, we will use the episode reward
+to evaluate the agent's performance on the level. Take for example a level where the player
+has to take a roundabout way to reach the exit. The agent may receive negative rewards
+for moving away from the exit, but this is necessary to reach the switch and open the exit.
+In this case, the episode reward will be positive, indicating that the agent performed well.
 
 Starting State:
 -------------
@@ -60,8 +83,6 @@ Starting State:
 - Timer starts at level-specific value (typically 90 seconds)
 - Switch is inactive
 - Exit door is closed
-- All gold pieces are uncollected
-- Player velocity is zero
 - Player is grounded
 
 Episode Termination:
@@ -72,15 +93,8 @@ The episode terminates under the following conditions:
     - Player reaches the exit after activating the switch
 
 2. Failure:
-    - Player health reaches 0 (collision with hazards/enemies)
-    - Time remaining reaches 0
-    - Player falls into a void/trap
-    
-Environment
------------
-
-Our Environment should be a RGB image of the game screen, with the player's
-position, velocity, acceleration, and other state information included in the observation.
+    - Player is dead
+    - Time remaining reaches 0 (this results in a player death)
 
 Additional Info:
 --------------
@@ -98,19 +112,21 @@ Additional Info:
     - 'rgb_array': Returns RGB array of current frame
 
 4. Max episode steps:
-    - 300 seconds at 60 FPS (18,000 steps)
+    - 300 seconds at 30 FPS (9000 steps)
 """
 
 import gym
 from gym import spaces
 import numpy as np
+from game.game_process import GameProcess
+from game.game_value_fetcher import GameValueFetcher
 
 
 class NPlusPlus(gym.Env):
     """Custom Environment that follows gym interface"""
     metadata = {'render.modes': ['human', 'rgb_array']}
 
-    def __init__(self):
+    def __init__(self, gp: GameProcess, gvf: GameValueFetcher):
         super().__init__()
 
         # Define action space
@@ -129,6 +145,9 @@ class NPlusPlus(gym.Env):
                 dtype=np.uint8
             )
         })
+
+        self.gp = gp
+        self.gvf = gvf
 
     def step(self, action):
         """Run one timestep of the environment's dynamics.
