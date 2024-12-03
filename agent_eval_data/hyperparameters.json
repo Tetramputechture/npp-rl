@@ -1,0 +1,1 @@
+{"h_size": 16, "n_training_episodes": 500, "n_evaluation_episodes": 10, "max_t": 500, "gamma": 1.0, "lr": 0.01, "env_id": "CartPole-v1", "state_space": 4, "action_space": 2}

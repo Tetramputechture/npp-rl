@@ -6,7 +6,7 @@ from PIL import Image, ImageTk
 from game.game_process import GameProcess
 from game.game_config import game_config
 import numpy as np
-from game.trainer import Trainer
+from game.agent_trainer import Trainer
 
 
 @dataclass

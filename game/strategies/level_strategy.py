@@ -1,6 +1,6 @@
 from game.strategies.base_state_strategy import BaseStateStrategy
 from game.game_config import game_config
-from game.trainer import Trainer
+from game.agent_trainer import AgentTrainer
 
 # Our controls:
 # 1: Move Left (A key)
@@ -18,7 +18,7 @@ class LevelStrategy(BaseStateStrategy):
     def take_action(self, game_value_fetcher, game_controller, frame, frame_text) -> None:
         """Take action based on the current game state."""
         if game_config.training and not self.training_started:
-            self.trainer = Trainer(game_value_fetcher, game_controller)
+            self.trainer = AgentTrainer(game_value_fetcher, game_controller)
             self.trainer.start_training()
             self.training_started = True
         elif not game_config.training and self.training_started:

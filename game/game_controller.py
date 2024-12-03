@@ -4,36 +4,83 @@ import win32gui
 import pygetwindow as gw
 import pydirectinput
 
+MOVEMENT_KEYS = {
+    'left': 'a',
+    'right': 'd',
+    'jump': 'space',
+    'space': 'space',
+    'pause': 'esc',
+    'reset': 'k',
+}
+
 
 class GameController:
     def __init__(self, window_handle):
         self.window_handle = window_handle
+        self.window_focused = False
+        self.held_keys = []
 
-    def press_keys(self, keys, hold=False):
-        """Press and hold or release a list of keys."""
-        # Set focus to the game window
-        # win32gui.SetForegroundWindow(self.window_handle)
+    def _focus_window(self):
+        """Focus the game window, if it's not already focused."""
+        if self.window_focused:
+            return
 
-        # # Get the game window
-        # game_window = gw.getWindowsWithTitle("NPP")[0]
-        # game_window.activate()
+        win32gui.SetForegroundWindow(self.window_handle)
 
-        # Press all keys
-        for key in keys:
-            pydirectinput.keyDown(key)
+        game_window = gw.getWindowsWithTitle("NPP")[0]
+        game_window.activate()
+        self.window_focused = True
 
-        # If hold is False, release all keys
-        if not hold:
-            for key in keys:
-                pydirectinput.keyUp(key)
+    def _press(self, key):
+        self._focus_window()
 
-    def release_keys(self, keys):
-        """Release a list of keys."""
-        self.press_keys(keys, hold=False)
+        pydirectinput.press(key, _pause=False)
 
-    def press_key_then_pause(self, key):
-        """Presses a key immediately followed by a pause.
-        A pause is the ESC key."""
-        self.press_keys([key], hold=True)
-        self.press_keys(["esc"])
-        self.press_keys([key], hold=False)
+    def _key_down(self, key):
+        self._focus_window()
+
+        pydirectinput.keyDown(key, _pause=False)
+        self.held_keys.append(key)
+
+    def _key_up(self, key):
+        self._focus_window()
+
+        pydirectinput.keyUp(key, _pause=False)
+        self.held_keys.remove(key)
+
+    def release_all_keys(self):
+        self._focus_window()
+
+        for key in self.held_keys:
+            pydirectinput.keyUp(key, _pause=False)
+        self.held_keys = []
+
+    def move_left_key_down(self):
+        self._key_down(MOVEMENT_KEYS['left'])
+
+    def move_left_key_up(self):
+        self._key_up(MOVEMENT_KEYS['left'])
+
+    def move_right_key_down(self):
+        self._key_down(MOVEMENT_KEYS['right'])
+
+    def move_right_key_up(self):
+        self._key_up(MOVEMENT_KEYS['right'])
+
+    def jump_key_down(self):
+        self._key_down(MOVEMENT_KEYS['jump'])
+
+    def jump_key_up(self):
+        self._key_up(MOVEMENT_KEYS['jump'])
+
+    def pause_key_down(self):
+        self._key_down(MOVEMENT_KEYS['pause'])
+
+    def pause_key_up(self):
+        self._key_up(MOVEMENT_KEYS['pause'])
+
+    def press_reset_key(self):
+        self._press(MOVEMENT_KEYS['reset'])
+
+    def press_space_key(self):
+        self._press(MOVEMENT_KEYS['space'])
