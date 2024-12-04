@@ -20,24 +20,8 @@ import numpy as np
 from collections import deque
 
 import matplotlib.pyplot as plt
-
-env_id = "CartPole-v1"
-# Create the env
-env = gymnasium.make(env_id, render_mode="rgb_array")
-
-# Create the evaluation env
-eval_env = gymnasium.make(env_id)
-
-# Get the state space and action space
-s_size = env.observation_space.shape[0]
-a_size = env.action_space.n
-print("_____OBSERVATION SPACE_____ \n")
-print("The State Space is: ", s_size)
-# Get a random observation
-print("Sample observation", env.observation_space.sample())
-print("\n _____ACTION SPACE_____ \n")
-print("The Action Space is: ", a_size)
-print("Action Space Sample", env.action_space.sample())  # Take a random action
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import VecEnv
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -142,14 +126,14 @@ class TrainingCallback(BaseCallback):
         }
 
 
-def setup_training_env(env):
+def setup_training_env(env: VecEnv):
     """Prepare environment for training with proper monitoring."""
     # Create logging directory
     log_dir = Path('./training_logs')
     log_dir.mkdir(exist_ok=True)
 
     # Wrap environment with Monitor for logging
-    env = Monitor(env, str(log_dir))
+    env = Monitor(env.unwrapped, str(log_dir))
 
     return env, log_dir
 
@@ -165,7 +149,7 @@ def train_a2c_agent(env, total_timesteps=1000000):
         trained_model: The trained A2C model
     """
     # Prepare environment
-    env, log_dir = setup_training_env(env)
+    # env, log_dir = setup_training_env(env)
 
     # Create A2C model
     model = A2C(
@@ -181,12 +165,16 @@ def train_a2c_agent(env, total_timesteps=1000000):
         rms_prop_eps=1e-5,  # RMSprop epsilon
         use_rms_prop=True,  # Use RMSprop optimizer
         normalize_advantage=True,
-        verbose=1
+        verbose=1,
+        device="cpu"  # Non-CNN policies are faster on CPU
     )
 
     # Setup callback for monitoring
+    log_dir = Path('./training_logs')
+    log_dir.mkdir(exist_ok=True)
+
     callback = TrainingCallback(
-        check_freq=500,    # Check every 500 steps
+        check_freq=10000,    # Check every 10000 steps
         log_dir=log_dir
     )
 
@@ -200,7 +188,7 @@ def train_a2c_agent(env, total_timesteps=1000000):
     return model
 
 
-def evaluate_agent(env, max_steps, n_eval_episodes, policy):
+def evaluate_agent(env: VecEnv, max_steps, n_eval_episodes, policy: A2C):
     """
     Evaluate the agent for ``n_eval_episodes`` episodes and returns average reward and std of reward.
     :param env: The evaluation environment
@@ -215,11 +203,11 @@ def evaluate_agent(env, max_steps, n_eval_episodes, policy):
         total_rewards_ep = 0
 
         for step in range(max_steps):
-            action, _ = policy.act(state)
-            new_state, reward, terminated, truncated, info = env.step(action)
+            action, _ = policy.predict(state)
+            new_state, reward, terminated, info = env.step(action)
             total_rewards_ep += reward
 
-            if terminated or truncated:
+            if terminated:
                 break
             state = new_state
         episode_rewards.append(total_rewards_ep)
@@ -229,7 +217,7 @@ def evaluate_agent(env, max_steps, n_eval_episodes, policy):
     return mean_reward, std_reward
 
 
-def record_video(env, policy, out_directory, fps=30):
+def record_video(env: VecEnv, policy: A2C, out_directory, fps=30):
     """
     Generate a replay video of the agent
     :param env
@@ -245,16 +233,16 @@ def record_video(env, policy, out_directory, fps=30):
     print("Recording video...")
     while not done:
         # Take the action (index) that have the maximum expected future reward given that state
-        action, _ = policy.act(state)
+        action, _ = policy.predict(state)
         # We directly put next_state = state for recording logic
-        state, reward, terminated, truncated, info = env.step(action)
+        state, reward, done, info = env.step(action)
         img = env.render()
         images.append(img)
     imageio.mimsave(out_directory, [np.array(img)
                     for i, img in enumerate(images)], fps=fps)
 
 
-def record_agent_training(model,
+def record_agent_training(model: A2C,
                           hyperparameters,
                           eval_env,
                           video_fps=30
@@ -276,7 +264,7 @@ def record_agent_training(model,
     local_directory = Path('./agent_eval_data')
 
     # Step 2: Save the model
-    torch.save(model, local_directory / "model.pt")
+    model.save(local_directory / "model")
 
     # Step 3: Save the hyperparameters to JSON
     with open(local_directory / "hyperparameters.json", "w") as outfile:
@@ -299,30 +287,9 @@ def record_agent_training(model,
         "eval_datetime": eval_form_datetime,
     }
 
-    # Write a JSON file
-    with open(local_directory / "cartpole_results.json", "w") as outfile:
-        json.dump(evaluate_data, outfile)
-
-    model_card = f"""
-# **Reinforce** Agent playing **{env_id}**
-This is a trained model of a **Reinforce** agent playing **{env_id}** .
-To learn to use this model and train yours check Unit 4 of the Deep Reinforcement Learning Course: https://huggingface.co/deep-rl-course/unit4/introduction
-"""
-
-    readme_path = local_directory / "README.md"
-    readme = ""
-    if readme_path.exists():
-        with readme_path.open("r", encoding="utf8") as f:
-            readme = f.read()
-    else:
-        readme = model_card
-
-    with readme_path.open("w", encoding="utf-8") as f:
-        f.write(readme)
-
     # Step 6: Record a video
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, video_fps)
+    record_video(eval_env, model, video_path, video_fps)
 
     return local_directory
 
@@ -331,7 +298,34 @@ To learn to use this model and train yours check Unit 4 of the Deep Reinforcemen
 
 def start_cartpole_training():
     # Train the agent
-    model = train_a2c_agent(env, total_timesteps=1000000)
+    env_id = "CartPole-v1"
+    # Create the env
+    env = gymnasium.make(env_id, render_mode="rgb_array")
+
+    vec_env = make_vec_env(lambda: gymnasium.make(
+        env_id, render_mode="rgb_array"), n_envs=4)
+
+    # Create the evaluation env
+    eval_env = gymnasium.make(env_id)
+
+    vec_eval_env = make_vec_env(lambda: gymnasium.make(
+        env_id, render_mode="rgb_array"), n_envs=1)
+
+    # Get the state space and action space
+    s_size = env.observation_space.shape[0]
+    a_size = env.action_space.n
+    print("_____OBSERVATION SPACE_____ \n")
+    print("The State Space is: ", s_size)
+    # Get a random observation
+    print("Sample observation", env.observation_space.sample())
+    print("\n _____ACTION SPACE_____ \n")
+    print("The Action Space is: ", a_size)
+    # Take a random action
+    print("Action Space Sample", env.action_space.sample())
+
+    model = train_a2c_agent(vec_env, total_timesteps=250000)
+
+    model.save("cartpole_a2c")
 
     # Record the training
     hyperparameters = {
@@ -339,10 +333,9 @@ def start_cartpole_training():
         "max_t": 1000,
         "n_evaluation_episodes": 10
     }
-    eval_env = gymnasium.make(env_id)
-    dir = record_agent_training(model, hyperparameters, eval_env)
+    out_dir = record_agent_training(model, hyperparameters, vec_eval_env)
 
-    print(f"Training complete. Model saved to {dir}")
+    print(f"Training complete. Model saved to {out_dir}")
 
 
 start_cartpole_training()
