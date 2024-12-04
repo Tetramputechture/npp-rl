@@ -56,9 +56,12 @@ Each frame, the agent receives a reward based on the following conditions:
 - If switch is not activated, reward += the change in distance to the switch from the previous frame (encourage movement)
     - More positive reward for moving closer to the switch
         - Calculation: reward += (distance_to_switch_prev - distance_to_switch_curr)
+    - We also subtract the distance to the switch overall to encourage the agent to move towards the switch
 - If switch is activated, reward += 10000
-- If switch is activated, reward -= the change in distance to the exit from the previous frame (penalize distance)
-    - The more the player moves away from the exit, the more negative the reward.
+- If switch is activated, reward += the change in distance to the exit from the previous frame
+    - Reward for moving closer to the exit after switch is activated
+    - Calculation: reward += (distance_to_exit_prev - distance_to_exit_curr)
+    - We also subtract the distance to the exit overall to encourage the agent to move towards the exit
 - If no movement is detected, reward -= 1
     - This encourages the agent to explore the level, but we make it low because sometimes the agent should stay still.
 - If player reaches exit, reward += 20000 and episode ends
@@ -119,7 +122,7 @@ Additional Info:
     - Since the entire game state is not in direct controler, we have a fixed timestep of 1/60th of a second (0.0167 seconds)
       that we will run the game for after taking an action. After this time, we will capture the frame, pause the game, and
       get the reward. This will be repeated until the episode ends. The max episode steps should be around 600 seconds (36000 frames).
-    
+
 5. Game Value Fetcher class: Class to fetch game values. These should be read when the game is paused.
     Methods:
         set_pm: Set the pymem object.
@@ -132,25 +135,29 @@ Additional Info:
         read_exit_door_y: Read the exit door's y position.
         read_switch_x: Read the switch's x position.
         read_switch_y: Read the switch's y position.
-        
+
 6. Game Controller class: Class to control the game. This should be used to take actions based on the game state.
     Methods:
         focus_window: Focus the game window.
-        
+
 7. get_game_window_frame: Function to get the current RGB window frame as a numpy array.
 
 8. We can assume the env is instantiated when the game is in a level_playing state.
    In this state, we can either be waiting to start the level, or waiting to retry the level after failing or succeeding.
    In these cases, no episode is running, and we should start a new episode by pressing the space key to start the level.
+   
+9. We keep a frame stack of 4 frames to provide the agent with temporal information.
 """
 import gym
-from gym import spaces
+from gymnasium.spaces import discrete, box
 import numpy as np
 from game.game_controller import GameController
 from game.game_window import get_game_window_frame
 from game.game_value_fetcher import GameValueFetcher
 import time
 from typing import Tuple, Dict, Any
+from collections import deque
+import cv2
 
 
 class NPlusPlus(gym.Env):
@@ -163,7 +170,12 @@ class NPlusPlus(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, gvf: GameValueFetcher, gc: GameController):
+    TIMESTEP = 1/60
+    MOVEMENT_THRESHOLD = 1.0
+    MOVEMENT_CHECK_DURATION = 20.0
+    MOVEMENT_CHECK_FRAMES = int(MOVEMENT_CHECK_DURATION / (1/60))
+
+    def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
         """Initialize the N++ environment.
 
         Args:
@@ -171,77 +183,78 @@ class NPlusPlus(gym.Env):
         """
         super().__init__()
 
-        # Store game value fetcher instance
         self.gvf = gvf
-
-        # Store game controller instance
         self.gc = gc
+        self.frame_stack = frame_stack
 
-        # Define timestep duration (in seconds)
-        self.timestep = 1/60  # 60 FPS
+        # Initialize frame stacking
+        self.frames = deque(maxlen=frame_stack)
+
+        # Initialize movement tracking
+        self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
 
         # Track previous state for reward calculation
         self.prev_distance_to_switch = None
         self.prev_distance_to_exit = None
         self.prev_time_remaining = None
 
-        # Define action space
-        # Discrete space with 6 possible actions:
-        # 0: NOOP, 1: Left, 2: Right, 3: Jump, 4: Jump+Left, 5: Jump+Right
-        self.action_space = spaces.Discrete(6)
+        # Action space remains the same
+        self.action_space = discrete.Discrete(6)
+        # Modified observation space for A2C compatibility
+        # Combines preprocessed frames with numerical features
+        self.observation_space = box.Box(
+            low=-np.inf,
+            high=np.inf,
+            # 8 numerical features added as channels, frame_stack frames stacked, 84x84 resolution grayscale
+            shape=(84, 84, frame_stack + 8),
+            dtype=np.float32
+        )
 
-        # Define observation space
-        self.observation_space = spaces.Dict({
-            'screen': spaces.Box(
-                low=0,
-                high=255,
-                shape=(480, 640, 3),
-                dtype=np.uint8
-            ),
-            'player_x': spaces.Box(
-                low=63,
-                high=1217,
-                shape=(),
-                dtype=np.float32
-            ),
-            'player_y': spaces.Box(
-                low=171,
-                high=791,
-                shape=(),
-                dtype=np.float32
-            ),
-            'time_remaining': spaces.Box(
-                low=0,
-                high=999,
-                shape=(),
-                dtype=np.float32
-            ),
-            'switch_activated': spaces.Discrete(2),
-            'exit_door_x': spaces.Box(
-                low=52,
-                high=1258,
-                shape=(),
-                dtype=np.float32
-            ),
-            'exit_door_y': spaces.Box(
-                low=158,
-                high=802,
-                shape=(),
-                dtype=np.float32
-            ),
-            'switch_x': spaces.Box(
-                low=52,
-                high=1258,
-                shape=(),
-                dtype=np.float32
-            ),
-            'switch_y': spaces.Box(
-                low=158,
-                high=802,
-                shape=(),
-                dtype=np.float32
-            )
-        })
+    def _preprocess_frame(self, frame):
+        """Preprocess raw frame for CNN input."""
+        # Resize to 84x84 (standard for DQN/A2C architectures)
+        frame = cv2.resize(frame, (84, 84), interpolation=cv2.INTER_AREA)
+        # Normalize to [0, 1]
+        frame = frame.astype(np.float32) / 255.0
+        return frame
+
+    def _get_numerical_features(self, obs):
+        """Extract and normalize numerical features."""
+        features = np.array([
+            (obs['player_x'] - 63) / (1217 - 63),  # Normalize to [0, 1]
+            (obs['player_y'] - 171) / (791 - 171),
+            obs['time_remaining'] / 999.0,
+            float(obs['switch_activated']),
+            (obs['exit_door_x'] - 52) / (1258 - 52),
+            (obs['exit_door_y'] - 158) / (802 - 158),
+            (obs['switch_x'] - 52) / (1258 - 52),
+            (obs['switch_y'] - 158) / (802 - 158)
+        ], dtype=np.float32)
+
+        # Expand to match frame dimensions
+        features = np.tile(features.reshape((1, 1, -1)), (84, 84, 8))
+        return features
+
+    def _get_stacked_observation(self, obs):
+        """Combine frame stack with numerical features."""
+        # Preprocess current frame
+        frame = self._preprocess_frame(obs['screen'])
+
+        # Update frame stack
+        self.frames.append(frame)
+
+        # If frame stack isn't full, duplicate the first frame
+        while len(self.frames) < self.frame_stack:
+            self.frames.append(frame)
+
+        # Stack frames along channel dimension
+        stacked_frames = np.concatenate(list(self.frames), axis=2)
+
+        # Get numerical features
+        numerical_features = self._get_numerical_features(obs)
+
+        # Combine frames and features
+        return np.concatenate([stacked_frames, numerical_features], axis=2)
 
     def _get_observation(self) -> Dict[str, Any]:
         """Get current observation from game state.
@@ -286,11 +299,15 @@ class NPlusPlus(gym.Env):
         reward = 0.0
 
         # Time-based rewards
+
         time_diff = obs['time_remaining'] - prev_obs['time_remaining']
         if time_diff > 0:  # Collected gold (gained time)
-            reward += 10 * time_diff
+            reward += 100 * time_diff
         else:  # Normal time decrease
             reward += time_diff
+
+        # Lower reward each step to encourage faster completion
+        reward -= 1
 
         # Calculate distances
         curr_distance_to_switch = self._calculate_distance(
@@ -306,15 +323,21 @@ class NPlusPlus(gym.Env):
         if not obs['switch_activated']:
             # Reward for moving closer to switch
             distance_diff = self.prev_distance_to_switch - curr_distance_to_switch
-            reward += distance_diff
+            reward += distance_diff * 5
+
+            # Subtract distance to switch to encourage movement
+            reward -= curr_distance_to_switch
         else:
             # One-time reward for activating switch
             if not prev_obs['switch_activated']:
                 reward += 10000
 
-            # Penalty for moving away from exit
-            distance_diff = curr_distance_to_exit - self.prev_distance_to_exit
-            reward -= distance_diff
+            # Reward for moving closer to exit
+            distance_diff = self.prev_distance_to_exit - curr_distance_to_exit
+            reward += distance_diff * 5
+
+            # Subtract distance to exit to encourage movement
+            reward -= curr_distance_to_exit
 
         # Update previous distances
         self.prev_distance_to_switch = curr_distance_to_switch
@@ -323,6 +346,9 @@ class NPlusPlus(gym.Env):
         # Small penalty for no movement (encourage exploration)
         if obs['player_x'] == prev_obs['player_x'] and obs['player_y'] == prev_obs['player_y']:
             reward -= 1
+
+        # Print reward for debugging
+        print(f"Total Reward: {reward}")
 
         return reward
 
@@ -359,64 +385,80 @@ class NPlusPlus(gym.Env):
             self.gc.jump_key_down()
             self.gc.move_right_key_down()
 
-    def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
-        """Execute action and return new state of the environment.
+    def _check_movement_truncation(self, curr_x: float, curr_y: float) -> bool:
+        """Check if the episode should be truncated due to lack of movement.
 
         Args:
-            action: Integer representing the action to take (0-5)
+            curr_x: Current x position of the player
+            curr_y: Current y position of the player
 
         Returns:
-            tuple containing:
-            - observation: Dict of current game state
-            - reward: Float reward value
-            - terminated: Boolean indicating if episode ended
-            - truncated: Boolean indicating if episode was truncated
-            - info: Dict containing auxiliary information
+            bool: True if episode should be truncated, False otherwise
         """
-        # Store previous observation for reward calculation
+        # Add current position to history
+        self.position_history.append((curr_x, curr_y))
+
+        # We need enough history to make a decision
+        if len(self.position_history) < self.MOVEMENT_CHECK_FRAMES:
+            return False
+
+        # Get the oldest position in our history (20 seconds ago)
+        old_x, old_y = self.position_history[0]
+
+        # Calculate total movement distance over the time window
+        movement_distance = self._calculate_distance(
+            old_x, old_y, curr_x, curr_y)
+
+        # If movement is below threshold, truncate the episode
+        return movement_distance < self.MOVEMENT_THRESHOLD
+
+    def step(self, action):
+        """Execute action and return new state."""
+        # Execute action in environment
         prev_obs = self._get_observation()
-
-        # Execute action
-        self._execute_action(action)
-
-        # Wait for timestep duration
-        time.sleep(self.timestep)
-
-        # Release all keys after the timestep
+        self.gc.press_pause_key()  # Unpause
         self.gc.release_all_keys()
-
-        # Get new observation
+        self._execute_action(action)
+        time.sleep(self.TIMESTEP)
         observation = self._get_observation()
+        self.gc.press_pause_key()  # Pause
 
-        # Calculate reward
+        # Calculate reward (using original reward function)
         reward = self._calculate_reward(observation, prev_obs)
 
+        # Scale reward for better learning stability
+        reward = reward / 1000.0  # Scale large rewards
+
         # Check termination conditions
-        terminated = False
-        if observation['time_remaining'] <= 0 or self.gvf.read_player_dead():
-            terminated = True
-            reward -= 10000  # Death penalty
-        elif (self.gvf.read_switch_activated() and
-              abs(observation['player_x'] - observation['exit_door_x']) < 5 and
-              abs(observation['player_y'] - observation['exit_door_y']) < 5):
-            terminated = True
-            reward += 20000  # Success reward
+        terminated = (observation['time_remaining'] <= 0 or
+                      self.gvf.read_player_dead() or
+                      (observation['switch_activated'] and
+                      abs(observation['player_x'] - observation['exit_door_x']) < 5 and
+                      abs(observation['player_y'] - observation['exit_door_y']) < 5))
 
-        # We don't use truncation in this environment
-        truncated = False
+        # Check truncation
+        truncated = self._check_movement_truncation(
+            observation['player_x'],
+            observation['player_y']
+        )
 
-        # Additional info for debugging and monitoring
+        if truncated:
+            print("Truncating episode due to lack of movement.")
+
+        # Process observation for A2C
+        processed_obs = self._get_stacked_observation(observation)
+
         info = {
+            'raw_reward': reward,
             'time_remaining': observation['time_remaining'],
-            'switch_activated': observation['switch_activated'],
-            'distance_to_switch': self.prev_distance_to_switch,
-            'distance_to_exit': self.prev_distance_to_exit
+            'switch_activated': observation['switch_activated']
         }
 
-        return observation, reward, terminated, truncated, info
+        return processed_obs, reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Reset the environment to initial state.
+        Assumes the game is in a level_playing state and the player is not dead.
 
         Args:
             seed: Optional random seed
@@ -431,18 +473,18 @@ class NPlusPlus(gym.Env):
         if seed is not None:
             np.random.seed(seed)
 
-        # Release any held keys
-        self.gc.release_all_keys()
+        # Reset frame stack
+        self.frames.clear()
 
-        # Press reset key to restart level
-        self.gc.press_reset_key()
+        print("Resetting environment...")
 
-        # Press space to start level
-        self.gc.press_space_key()
-        time.sleep(0.1)  # Small delay to ensure game registers input
+        self.gc.reset_level()
 
         # Get initial observation
         observation = self._get_observation()
+
+        # Pause the game
+        self.gc.press_pause_key()
 
         # Initialize previous distances
         self.prev_distance_to_switch = self._calculate_distance(
@@ -455,14 +497,18 @@ class NPlusPlus(gym.Env):
         )
         self.prev_time_remaining = observation['time_remaining']
 
-        return observation, {}
+        # Process observation for A2C
+        processed_obs = self._get_stacked_observation(observation)
 
-    def render(self, mode='human'):
+        return processed_obs, {}
+
+    def render(self):
         """Render the environment.
 
         Since the game window is already visible, we don't need additional rendering.
+        We can just return the current game window frame.
         """
-        pass
+        return get_game_window_frame()
 
     def close(self):
         """Clean up environment resources."""

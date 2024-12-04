@@ -19,7 +19,8 @@ def get_game_window_rect() -> Optional[tuple]:
 
 
 def get_game_window_frame() -> Optional[np.ndarray]:
-    """Capture current window frame and convert to 640x480 RGB."""
+    """Capture current window frame and convert to 640x480 RGB.
+    Assumes a 1280x720 input."""
     window_rect = get_game_window_rect()
     if not window_rect:
         return None
@@ -27,10 +28,11 @@ def get_game_window_frame() -> Optional[np.ndarray]:
     # Capture window content
     screen = ImageGrab.grab(window_rect)
 
-    # Resize to 640x480 and convert to grayscale
-    frame = screen.resize((640, 480)).convert("RGB")
+    # Crop to only the level playing view
+    frame = screen.crop((48, 180, 1230, 830))
 
-    # Preprocessing for text extraction
+    # Convert to grayscale
+    frame = frame.convert('L')
+
     frame = np.array(frame)
-
     return frame

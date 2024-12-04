@@ -3,6 +3,9 @@ from pymem import Pymem
 
 
 def safe_read_float(pm: Pymem, address: int) -> float:
+    if address == 0:
+        return 0.0
+
     try:
         return pm.read_float(address)
     except Exception as e:
@@ -11,6 +14,9 @@ def safe_read_float(pm: Pymem, address: int) -> float:
 
 
 def safe_read_double(pm: Pymem, address: int) -> float:
+    if address == 0:
+        return 0.0
+
     try:
         return pm.read_double(address)
     except Exception as e:
@@ -19,6 +25,9 @@ def safe_read_double(pm: Pymem, address: int) -> float:
 
 
 def safe_read_byte(pm: Pymem, address: int) -> bool:
+    if address == 0:
+        return False
+
     try:
         return pm.read_bool(address)
     except Exception as e:

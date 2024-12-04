@@ -6,7 +6,6 @@ from PIL import Image, ImageTk
 from game.game_process import GameProcess
 from game.game_config import game_config
 import numpy as np
-from game.agent_trainer import Trainer
 
 
 @dataclass
@@ -26,12 +25,13 @@ class MemoryAddress:
     address_entry: ttk.Entry
     value_label: ttk.Label
     getter: Callable
-    setter: Callable
+    setter: Optional[Callable] = None
     format: Callable = lambda x: str(round(float(x), 2))
+    override: Optional[Callable] = None
 
     def get_safe(self):
         """Get the current value from memory, returning 0 if the address is not set."""
-        if self.address_entry.get() == '' or self.address_entry.get() == '0':
+        if self.address_entry.get() == '' or int(self.address_entry.get(), 16) == 0:
             return 0
 
         return self.getter()
@@ -51,9 +51,7 @@ class NinjAI:
 
     # Class-level constants
     UPDATE_INTERVAL = 32  # 32ms = ~30fps
-    CANVAS_SIZE = (320, 240)
-    TEXT_DISPLAY_HEIGHT = 5
-    TEXT_DISPLAY_WIDTH = 50
+    CANVAS_SIZE = (640, 480)
 
     def __init__(self, root: tk.Tk, game_process: GameProcess):
         """Initialize the NinjAI interface."""
@@ -71,10 +69,6 @@ class NinjAI:
         self._init_gui()
         self._init_memory_addresses()
 
-        # Initialize the trainer
-        self.trainer = Trainer(
-            game_process.game_value_fetcher, game_process.controller)
-
         self._start_update_loop()
 
     def _init_ui_components(self) -> Dict[str, Any]:
@@ -88,7 +82,7 @@ class NinjAI:
             'save_frame_entry': None,
             'training_button': None,
             'automate_init': None,
-            'text_display': None
+            'reset_button': None,
         }
 
     def _init_gui(self):
@@ -104,7 +98,6 @@ class NinjAI:
             self._create_state_override_controls,
             self._create_save_controls,
             self._create_training_controls,
-            self._create_text_display
         ]
 
         for builder in builders:
@@ -200,7 +193,40 @@ class NinjAI:
         self.ui_components['automate_init'].grid(
             row=row + 1, column=0, pady=5, sticky="w")
 
-        return row + 2
+        # Button to manually reset environment
+        self.ui_components['reset_button'] = ttk.Button(
+            self.ui_components['frame'],
+            text="Reset Environment",
+            command=self._manual_env_reset
+        )
+        self.ui_components['reset_button'].grid(
+            row=row + 2, column=0, pady=5, sticky="w")
+
+        # Button to reset player position inline with reset environment button
+        self.ui_components['player_reset_button'] = ttk.Button(
+            self.ui_components['frame'],
+            text="Reset Player",
+            command=self._player_reset
+        )
+        self.ui_components['player_reset_button'].grid(
+            row=row + 2, column=1, pady=5, sticky="w")
+
+        return row + 3
+
+    def _player_reset(self):
+        """Reset the player's position."""
+        self.game.controller.set_window_focused(False)
+        self.game.controller.press_reset_key()
+
+    def _manual_env_reset(self):
+        """Manually reset the game environment."""
+        print("Resetting environment...")
+        self.ui_components['reset_button'].config(state=tk.DISABLED)
+        # Unfocus the button
+        self.ui_components['frame'].focus_set()
+        self.game.controller.set_window_focused(False)
+        self.game.controller.reset_level()
+        self.ui_components['reset_button'].config(state=tk.NORMAL)
 
     def _init_memory_addresses(self):
         """
@@ -214,35 +240,42 @@ class NinjAI:
         # Define all memory addresses
         memory_configs = [
             ("player_x", self.game.game_value_fetcher.read_player_x,
-             game_config.set_player_x_address),
+                game_config.set_player_x_address, None),
             ("player_y", self.game.game_value_fetcher.read_player_y,
-             game_config.set_player_y_address),
+                None, lambda: game_config.player_y_address),
             ("time_remaining", self.game.game_value_fetcher.read_time_remaining,
-             game_config.set_time_remaining_address),
+                game_config.set_time_remaining_address, None),
             ("switch_activated", self.game.game_value_fetcher.read_switch_activated,
-             game_config.set_switch_activated_address),
+                game_config.set_switch_activated_address, None),
             ("player_dead", self.game.game_value_fetcher.read_player_dead,
-             game_config.set_player_dead_address),
+                game_config.set_player_dead_address, None),
             ("exit_door_x", self.game.game_value_fetcher.read_exit_door_x,
-             game_config.set_exit_door_x_address),
+                game_config.set_exit_door_x_address, None),
             ("exit_door_y", self.game.game_value_fetcher.read_exit_door_y,
-             game_config.set_exit_door_y_address),
+                None, lambda: game_config.exit_door_y_address),
             ("switch_x", self.game.game_value_fetcher.read_switch_x,
-             game_config.set_switch_x_address),
+                game_config.set_switch_x_address, None),
             ("switch_y", self.game.game_value_fetcher.read_switch_y,
-             game_config.set_switch_y_address)
+                None, lambda: game_config.switch_y_address)
         ]
 
-        for name, getter, setter in memory_configs:
+        for name, getter, setter, override in memory_configs:
             address_entry = ttk.Entry(frame, width=10)
             value_label = ttk.Label(frame, text="0.0")
+
+            # If we have an override, set the entry field to the override value
+            # and disable the entry field
+            if override is not None:
+                address_entry.insert(0, hex(override()))
+                address_entry.config(state='disabled')
 
             self.memory_addresses[name] = MemoryAddress(
                 label=name.replace('_', ' ').title(),
                 address_entry=address_entry,
                 value_label=value_label,
                 getter=getter,
-                setter=setter
+                setter=setter,
+                override=override
             )
 
             current_row = self._create_memory_address_field(
@@ -257,8 +290,26 @@ class NinjAI:
         # Address entry row
         ttk.Label(parent, text=f"{memory_address.label} Address:").grid(
             row=row, column=0, sticky="w", pady=2)
-        memory_address.address_entry.grid(
-            row=row, column=1, sticky="w", padx=(5, 0), pady=2)
+
+        # If we have a setter, bind the address entry field to the setter
+        if memory_address.setter is not None:
+            memory_address.address_entry.bind(
+                "<FocusOut>",
+                lambda e: self._on_address_changed(memory_address)
+            )
+            # Enable the entry field
+            memory_address.address_entry.config(state='normal')
+        else:
+            # If we have an override, set the entry field to the override value
+            # and disable the entry field
+            memory_address.address_entry.delete(0, tk.END)
+            memory_address.address_entry.insert(
+                0, hex(memory_address.override()))
+            memory_address.address_entry.config(state='disabled')
+
+        address_widget = memory_address.address_entry
+
+        address_widget.grid(row=row, column=1, sticky="w", padx=(5, 0), pady=2)
 
         # Value display row
         ttk.Label(parent, text=f"{memory_address.label}:").grid(
@@ -266,58 +317,17 @@ class NinjAI:
         memory_address.value_label.grid(
             row=row + 1, column=1, sticky="w", padx=(5, 0), pady=2)
 
-        memory_address.address_entry.bind(
-            "<FocusOut>",
-            lambda e: self._on_address_changed(memory_address)
-        )
-
-        return row + 2
-
-    def _create_text_display(self, row: int) -> int:
-        """Create the text display area."""
-        ttk.Label(self.ui_components['frame'], text="Current Frame Text:").grid(
-            row=row, column=0, sticky="w", pady=5
-        )
-
-        text_frame = ttk.Frame(self.ui_components['frame'])
-        text_frame.grid(row=row + 1, column=0,
-                        columnspan=2, sticky="w", pady=5)
-
-        self.ui_components['text_display'] = tk.Text(
-            text_frame,
-            height=self.TEXT_DISPLAY_HEIGHT,
-            width=self.TEXT_DISPLAY_WIDTH,
-            wrap=tk.WORD
-        )
-        scrollbar = ttk.Scrollbar(
-            text_frame,
-            orient=tk.VERTICAL,
-            command=self.ui_components['text_display'].yview
-        )
-
-        self.ui_components['text_display'].pack(
-            side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.ui_components['text_display'].config(yscrollcommand=scrollbar.set)
-
         return row + 2
 
     def _update_frame_display(self):
         """Update the game frame display."""
         if self.game.current_frame is not None:
             rgb_frame = np.array(self.game.current_frame)
-            img = Image.fromarray(rgb_frame, mode='RGB')
+            img = Image.fromarray(rgb_frame, mode='L')
             self.photo = ImageTk.PhotoImage(img.resize(self.CANVAS_SIZE))
             self.ui_components['canvas'].delete("all")
             self.ui_components['canvas'].create_image(
                 0, 0, anchor=tk.NW, image=self.photo)
-
-    def _update_text_display(self):
-        """Update the text display with current frame text."""
-        text_display = self.ui_components['text_display']
-        text_display.delete(1.0, tk.END)
-        text_display.insert(tk.END, str(
-            self.game.state_manager.current_frame_text))
 
     def _update_game_controls(self):
         """Update game control states."""
@@ -344,7 +354,16 @@ class NinjAI:
                 addr.value_label.config(text="0.0")
                 continue
 
-            addr.address_entry.config(state='normal')
+            # if our addr has an override, set our address entry to the override value
+            # and the value label to the current value
+            if addr.override is not None:
+                addr.address_entry.config(state='normal')
+                addr.address_entry.delete(0, tk.END)
+                addr.address_entry.insert(0, hex(addr.override()))
+                addr.address_entry.config(state='disabled')
+            else:
+                addr.address_entry.config(state='normal')
+
             try:
                 value = addr.get_safe()
                 addr.value_label.config(text=addr.format(value))
@@ -374,6 +393,7 @@ class NinjAI:
 
     def _on_training_changed(self):
         """Handle training mode changes."""
+        self.game.controller.set_window_focused(False)
         game_config.set_training(self.training.get())
 
     def _on_automate_init_changed(self):
@@ -385,7 +405,6 @@ class NinjAI:
         self._update_frame_display()
         self._update_game_controls()
         self._update_memory_address_values()
-        self._update_text_display()
 
     def _start_update_loop(self):
         """Start the main update loop."""

@@ -47,9 +47,11 @@ class GameProcess:
         """Start the game process and get window handle."""
         print(f'Starting game process: {GAME_EXECUTABLE_PATH}')
         try:
-            self.process = subprocess.Popen(GAME_EXECUTABLE_PATH)
-            # Wait for window to appear
-            time.sleep(5)
+            # Do not start if the game is already running
+            if not get_game_window_handle():
+                self.process = subprocess.Popen(GAME_EXECUTABLE_PATH)
+                # Wait for window to appear
+                time.sleep(5)
             self.pm = pymem.Pymem("N++.exe")
             self.game_value_fetcher.set_pm(self.pm)
             self.window_handle = get_game_window_handle()

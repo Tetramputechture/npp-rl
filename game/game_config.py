@@ -3,6 +3,16 @@
 # - Set training to ON or OFF
 #   - Must be in the level_playing state
 
+def valid_address(address: int) -> bool:
+    """Check if the address is valid."""
+    return address != 0x00
+
+
+def increment_address(address: int, byte_offset: int) -> int:
+    """Increment the address by a byte offset."""
+    return address + byte_offset
+
+
 class GameConfig:
     def __init__(self):
         self.training = False
@@ -30,12 +40,8 @@ class GameConfig:
     def set_player_x_address(self, player_x_address: int) -> None:
         """Set the player_x_address."""
         self.player_x_address = player_x_address
+        self.player_y_address = increment_address(player_x_address, 4)
         return self.player_x_address
-
-    def set_player_y_address(self, player_y_address: int) -> None:
-        """Set the player_y_address."""
-        self.player_y_address = player_y_address
-        return self.player_y_address
 
     def set_time_remaining_address(self, time_remaining_address: int) -> None:
         """Set the time_remaining_address."""
@@ -55,22 +61,28 @@ class GameConfig:
     def set_exit_door_x_address(self, exit_door_x_address: int) -> None:
         """Set the exit_door_x_address."""
         self.exit_door_x_address = exit_door_x_address
+        self.exit_door_y_address = increment_address(exit_door_x_address, 4)
         return self.exit_door_x_address
-
-    def set_exit_door_y_address(self, exit_door_y_address: int) -> None:
-        """Set the exit_door_y_address."""
-        self.exit_door_y_address = exit_door_y_address
-        return self.exit_door_y_address
 
     def set_switch_x_address(self, switch_x_address: int) -> None:
         """Set the switch_x_address."""
         self.switch_x_address = switch_x_address
+        self.switch_y_address = increment_address(switch_x_address, 4)
         return self.switch_x_address
 
-    def set_switch_y_address(self, switch_y_address: int) -> None:
-        """Set the switch_y_address."""
-        self.switch_y_address = switch_y_address
-        return self.switch_y_address
+    def all_addresses_defined(self) -> bool:
+        """Check if all addresses are defined."""
+        return all([
+            valid_address(self.player_x_address),
+            valid_address(self.player_y_address),
+            valid_address(self.time_remaining_address),
+            valid_address(self.switch_activated_address),
+            valid_address(self.player_dead_address),
+            valid_address(self.exit_door_x_address),
+            valid_address(self.exit_door_y_address),
+            valid_address(self.switch_x_address),
+            valid_address(self.switch_y_address)
+        ])
 
 
 game_config = GameConfig()
