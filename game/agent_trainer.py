@@ -8,7 +8,7 @@ from game.game_config import game_config
 
 import pydirectinput
 import time
-from agents.npp_agent import start_training
+from agents.npp_agent_a2c import start_training
 
 pydirectinput.PAUSE = 0.001
 

@@ -6,6 +6,7 @@ from PIL import Image, ImageTk
 from game.game_process import GameProcess
 from game.game_config import game_config
 import numpy as np
+import time
 
 
 @dataclass
@@ -63,6 +64,9 @@ class NinjAI:
         self.training = tk.BooleanVar()
         self.automate_init_screen = tk.BooleanVar()
         self.photo: Optional[ImageTk.PhotoImage] = None
+
+        # Load config from file
+        game_config.load_config()
 
         # Initialize UI structure
         self.ui_components = self._init_ui_components()
@@ -171,7 +175,15 @@ class NinjAI:
         self.ui_components['save_frame_entry'].grid(
             row=row, column=1, sticky="w", padx=(5, 0), pady=5)
 
-        return row + 1
+        self.ui_components['save_config_button'] = ttk.Button(
+            self.ui_components['frame'],
+            text="Save Config",
+            command=game_config.save_config
+        )
+        self.ui_components['save_config_button'].grid(
+            row=row + 1, column=0, sticky="w", pady=5)
+
+        return row + 2
 
     def _create_training_controls(self, row: int) -> int:
         """Create training-related controls."""
@@ -225,6 +237,9 @@ class NinjAI:
         # Unfocus the button
         self.ui_components['frame'].focus_set()
         self.game.controller.set_window_focused(False)
+        while not self.game.game_value_fetcher.read_player_dead():
+            self.game.controller.press_reset_key()
+            time.sleep(0.1)
         self.game.controller.reset_level()
         self.ui_components['reset_button'].config(state=tk.NORMAL)
 

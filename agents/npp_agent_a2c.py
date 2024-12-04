@@ -18,8 +18,13 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class TrainingCallback(BaseCallback):
     """Custom callback for monitoring A2C training progress.
 
-    This callback tracks episode rewards and lengths, providing regular updates
-    during training and saving the best model when performance improves.
+    This callback tracks episode rewards and lengths, calculating running averages
+    to monitor training progress. It saves the model when performance improves
+    and provides regular updates during training.
+
+    The callback processes the episode information buffer, which contains
+    dictionaries of episode statistics, to extract meaningful metrics about
+    the agent's learning progress.
     """
 
     def __init__(self, check_freq, log_dir, verbose=1):
@@ -29,59 +34,120 @@ class TrainingCallback(BaseCallback):
         self.save_path = str(log_dir / 'best_model')
         self.best_mean_reward = -np.inf
 
+        # Keep track of episode rewards for plotting
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.episode_timestamps = []
+
+    def _get_episode_statistics(self):
+        """Calculate statistics from the episode info buffer.
+
+        The episode info buffer contains dictionaries with 'r' (reward)
+        and 'l' (length) keys for each completed episode.
+
+        Returns:
+            tuple: (mean_reward, mean_length) - Average reward and length
+                  of recent episodes
+        """
+        # Extract rewards and lengths from episode info buffer
+        if len(self.model.ep_info_buffer) == 0:
+            return 0.0, 0.0
+
+        rewards = [ep_info['r'] for ep_info in self.model.ep_info_buffer]
+        lengths = [ep_info['l'] for ep_info in self.model.ep_info_buffer]
+
+        # Calculate means
+        mean_reward = np.mean(rewards)
+        mean_length = np.mean(lengths)
+
+        # Store for later analysis
+        self.episode_rewards.append(mean_reward)
+        self.episode_lengths.append(mean_length)
+        self.episode_timestamps.append(self.n_calls)
+
+        return mean_reward, mean_length
+
     def _on_step(self):
+        """Called after every step during training.
+
+        This method:
+        1. Checks if it's time to evaluate (based on check_freq)
+        2. Calculates current performance metrics
+        3. Saves the model if performance has improved
+        4. Prints progress information
+
+        Returns:
+            bool: Whether to continue training
+        """
         # Check if it's time to evaluate
         if self.n_calls % self.check_freq == 0:
-            # Get current rewards
-            x, y = self.model.ep_info_buffer.get_mean_rewards()
-            mean_reward = np.mean(y)
+            # Calculate current performance metrics
+            mean_reward, mean_length = self._get_episode_statistics()
 
-            # Print training progress
-            print(f"Steps: {self.n_calls}")
-            print(f"Mean reward: {mean_reward:.2f}")
-            print(f"Episodes: {len(self.model.ep_info_buffer)}")
-            print("-" * 40)
+            # Print detailed training progress
+            print("\n" + "="*50)
+            print(f"Training Progress at Step {self.n_calls}")
+            print(f"Mean episode reward: {mean_reward:.2f}")
+            print(f"Mean episode length: {mean_length:.2f}")
+            print(f"Number of episodes: {len(self.model.ep_info_buffer)}")
+            print(f"Best mean reward: {self.best_mean_reward:.2f}")
+            print("="*50 + "\n")
 
             # Save best model
             if mean_reward > self.best_mean_reward:
+                print(
+                    f"New best mean reward: {mean_reward:.2f} -> Saving model")
                 self.best_mean_reward = mean_reward
                 self.model.save(self.save_path)
 
         return True
 
+    def get_training_history(self):
+        """Get the training history for plotting or analysis.
+
+        Returns:
+            dict: Training history containing rewards, lengths, and timestamps
+        """
+        return {
+            'rewards': self.episode_rewards,
+            'lengths': self.episode_lengths,
+            'timestamps': self.episode_timestamps
+        }
+
 
 class CustomLevelCNN(BaseFeaturesExtractor):
     """Custom CNN feature extractor for N++ environment.
 
-    Architecture designed for processing 4 frames of 84x84 grayscale images
-    along with 8 channels of numerical data per frame. The network uses
-    a CNN backbone similar to successful DQN architectures but modified
-    to handle multiple frames and additional numerical data.
+    Architecture designed to process observations from our N++ environment where:
+    Input: Single tensor of shape (84, 84, frame_stack + 8) containing:
+        - First frame_stack channels: Stacked grayscale frames
+        - Last 8 channels: Numerical features broadcast to 84x84 spatial dimensions
 
-    Input format:
-    - Visual: 4 frames of 84x84 grayscale images
-    - Numerical: 32 values (8 channels × 4 frames)
-    Output: 512-dimensional feature vector
+    The network separates and processes visual and numerical data through appropriate 
+    pathways before combining them into a final feature representation.
     """
 
     def __init__(self, observation_space, features_dim=512):
         super().__init__(observation_space, features_dim)
 
-        # Visual processing network
-        # Input: (batch, 4, 84, 84)
+        n_input_channels = observation_space.shape[2]  # frame_stack + 8
+        self.frame_stack = n_input_channels - 8  # Subtract feature channels
+
+        # Visual processing network for the stacked frames
         self.cnn = nn.Sequential(
+            # Reshape and process frame stack
+            # Input: (batch, 84, 84, frame_stack)
+            # Convert to: (batch, frame_stack, 84, 84)
+
             # Layer 1: 84x84 -> 20x20
-            # (84 - 8)/4 + 1 = 20
-            nn.Conv2d(4, 32, kernel_size=8, stride=4),
+            nn.Conv2d(self.frame_stack, 32, kernel_size=8, stride=4),
             nn.ReLU(),
 
             # Layer 2: 20x20 -> 9x9
-            # (20 - 4)/2 + 1 = 9
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
 
             # Layer 3: 9x9 -> 7x7
-            # (9 - 3)/1 + 1 = 7
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
 
@@ -89,43 +155,55 @@ class CustomLevelCNN(BaseFeaturesExtractor):
         )
 
         # Calculate CNN output dimension
-        # Output will be 64 channels * 7 * 7 = 3136
+        # 64 channels * 7 * 7 = 3136
         self.cnn_output_dim = 64 * 7 * 7
 
-        # Network for processing numerical data
-        # Input: 32 values (8 channels × 4 frames)
+        # Network for processing numerical features
+        # Input: Flattened 84x84x8 numerical features
         self.numerical_net = nn.Sequential(
-            nn.Linear(32, 128),
+            # First reduce spatial dimensions with a small CNN
+            nn.Conv2d(8, 16, kernel_size=8, stride=4),  # 84x84 -> 20x20
             nn.ReLU(),
-            nn.Linear(128, 256),
+            nn.Conv2d(16, 32, kernel_size=4, stride=2),  # 20x20 -> 9x9
+            nn.ReLU(),
+            nn.Flatten(),
+            # Process resulting features
+            nn.Linear(32 * 9 * 9, 256),
             nn.ReLU()
         )
 
         # Combined network to merge visual and numerical features
         self.combined_net = nn.Sequential(
-            # 3136 (CNN) + 256 (numerical) = 3392 input features
             nn.Linear(self.cnn_output_dim + 256, 1024),
             nn.ReLU(),
-            nn.Linear(1024, features_dim),  # Final output: 512 dimensions
+            nn.Linear(1024, features_dim),
             nn.ReLU()
         )
 
-    def forward(self, observations):
-        """Forward pass through the network.
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        """Process the combined observation tensor.
 
         Args:
-            observations (dict): Contains:
-                'visual': Tensor of shape (batch_size, 4, 84, 84)
-                'numerical': Tensor of shape (batch_size, 32)
+            observations: Tensor of shape (batch_size, 84, 84, frame_stack + 8)
+                        Contains stacked frames and numerical features
 
         Returns:
             torch.Tensor: Feature vector of shape (batch_size, 512)
         """
-        # Process visual input (4 frames)
-        visual_features = self.cnn(observations['visual'])
+        # Split observation into visual and numerical components
+        # Move channel dimension to proper position for CNNs
+        visual = observations[..., :self.frame_stack]  # Get stacked frames
+        visual = visual.permute(0, 3, 1, 2)  # (batch, frame_stack, 84, 84)
 
-        # Process numerical data (32 values)
-        numerical_features = self.numerical_net(observations['numerical'])
+        # Get numerical features
+        numerical = observations[..., self.frame_stack:]
+        numerical = numerical.permute(0, 3, 1, 2)  # (batch, 8, 84, 84)
+
+        # Process visual path
+        visual_features = self.cnn(visual)
+
+        # Process numerical path
+        numerical_features = self.numerical_net(numerical)
 
         # Combine features
         combined = torch.cat([visual_features, numerical_features], dim=1)
@@ -184,7 +262,7 @@ def train_a2c_agent(env, total_timesteps=1000000):
 
     # Setup callback for monitoring
     callback = TrainingCallback(
-        check_freq=1000,    # Check every 1000 steps
+        check_freq=50,    # Check every 50 steps
         log_dir=log_dir
     )
 
@@ -311,6 +389,7 @@ def start_training(game_value_fetcher, game_controller):
     try:
         # Create environment
         env = NPlusPlus(game_value_fetcher, game_controller)
+        env.reset()
 
         print("Starting A2C training...")
         model = train_a2c_agent(env, total_timesteps=1000000)

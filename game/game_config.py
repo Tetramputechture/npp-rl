@@ -3,6 +3,10 @@
 # - Set training to ON or OFF
 #   - Must be in the level_playing state
 
+import json
+import os
+
+
 def valid_address(address: int) -> bool:
     """Check if the address is valid."""
     return address != 0x00
@@ -11,6 +15,9 @@ def valid_address(address: int) -> bool:
 def increment_address(address: int, byte_offset: int) -> int:
     """Increment the address by a byte offset."""
     return address + byte_offset
+
+
+CONFIG_PATH = 'game_config.json'
 
 
 class GameConfig:
@@ -26,6 +33,47 @@ class GameConfig:
         self.exit_door_y_address = 0x00
         self.switch_x_address = 0x00
         self.switch_y_address = 0x00
+
+    def _serialize_config(self) -> dict:
+        """Serialize the configuration."""
+        return {
+            'training': self.training,
+            'automate_init_screen': self.automate_init_screen,
+            'player_x_address': self.player_x_address,
+            'player_y_address': self.player_y_address,
+            'time_remaining_address': self.time_remaining_address,
+            'switch_activated_address': self.switch_activated_address,
+            'player_dead_address': self.player_dead_address,
+            'exit_door_x_address': self.exit_door_x_address,
+            'exit_door_y_address': self.exit_door_y_address,
+            'switch_x_address': self.switch_x_address,
+            'switch_y_address': self.switch_y_address
+        }
+
+    def save_config(self) -> None:
+        """Save the configuration."""
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(self._serialize_config(), f)
+
+    def load_config(self) -> None:
+        """Load the configuration."""
+        # return if the file does not exist
+        if not os.path.exists(CONFIG_PATH):
+            return
+
+        with open(CONFIG_PATH, 'r') as f:
+            config = json.load(f)
+            self.training = config['training']
+            self.automate_init_screen = config['automate_init_screen']
+            self.player_x_address = config['player_x_address']
+            self.player_y_address = config['player_y_address']
+            self.time_remaining_address = config['time_remaining_address']
+            self.switch_activated_address = config['switch_activated_address']
+            self.player_dead_address = config['player_dead_address']
+            self.exit_door_x_address = config['exit_door_x_address']
+            self.exit_door_y_address = config['exit_door_y_address']
+            self.switch_x_address = config['switch_x_address']
+            self.switch_y_address = config['switch_y_address']
 
     def set_training(self, training: bool) -> None:
         """Set the training mode."""

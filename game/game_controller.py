@@ -84,19 +84,15 @@ class GameController:
     def press_reset_key(self):
         self._press(MOVEMENT_KEYS['reset'], pause=True)
 
-    def press_space_key(self):
-        self._press(MOVEMENT_KEYS['space'])
+    def press_space_key(self, pause=True):
+        self._press(MOVEMENT_KEYS['space'], pause=pause)
 
     def press_pause_key(self):
         self._press(MOVEMENT_KEYS['pause'])
 
     def reset_level(self):
-        print("Resetting level.")
+        time.sleep(0.5)
 
-        # Press reset key to restart level
-        self.press_reset_key()
-
-        # Press space twice to start level
+        # Press space to start level
         self.press_space_key()
-        time.sleep(0.01)  # Small delay to ensure game registers input
         self.press_space_key()

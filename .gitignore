@@ -28,3 +28,12 @@ env/
 
 # Data directory
 data/
+
+# Log files
+training_logs/
+
+# Eval data
+agent_eval_data/
+
+# Game config
+game_config.json

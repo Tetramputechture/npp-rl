@@ -120,11 +120,7 @@ class GameProcess:
     def check_process_running(self) -> bool:
         """Check if the game process is running."""
         # Use win32gui to check if the game window is still open
-        if not self.window_handle:
-            return False
-        if not win32gui.IsWindow(self.window_handle):
-            return False
-        if not self.process:
+        if not get_game_window_handle():
             return False
         return True
 
