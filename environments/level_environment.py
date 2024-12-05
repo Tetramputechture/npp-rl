@@ -158,7 +158,7 @@ Additional Info:
 8. We can assume the env is instantiated when the game is in a level_playing state.
    In this state, we can either be waiting to start the level, or waiting to retry the level after failing or succeeding.
    In these cases, no episode is running, and we should start a new episode by pressing the space key to start the level.
-   
+
 9. We keep a frame stack of 4 frames to provide the agent with temporal information.
 
 10. When taking an action that includes the same key or keys as the previous action, we don't want to release the keys
@@ -184,7 +184,25 @@ class NPlusPlus(gym.Env):
     management, reward calculation, and action execution while maintaining proper
     timing and synchronization with the game.
     """
-    metadata = {'render.modes': ['human']}
+    metadata = {'render.modes': ['human']}\
+
+    # Constants for reward scaling
+    BASE_TIME_PENALTY = -0.01  # Small constant penalty per timestep
+    GOLD_COLLECTION_REWARD = 1.0  # Reward for collecting gold (time increase)
+    SWITCH_ACTIVATION_REWARD = 10.0  # One-time reward for activating switch
+    TERMINAL_REWARD = 20.0  # Reward for completing level
+    DEATH_PENALTY = -10.0  # Penalty for dying
+    TIMEOUT_PENALTY = -10.0  # Penalty for time running out
+
+    # Constants for distance-based rewards
+    DISTANCE_SCALE = 0.1  # Scale factor for distance-based rewards
+    APPROACH_REWARD_SCALE = 0.5  # Scale factor for approaching objectives
+    RETREAT_PENALTY_SCALE = 0.2  # Scale factor for moving away from objectives
+
+    # Movement assessment constants
+    MIN_MOVEMENT_THRESHOLD = 0.1  # Minimum movement to avoid penalty
+    MOVEMENT_PENALTY = -0.01  # Penalty for being too static
+    MAX_MOVEMENT_REWARD = 0.05  # Cap on movement reward
 
     # We speed up the game from 60fps to 1200fps (factor of 20)
     TIMESTEP = 1/1200.0
@@ -206,29 +224,26 @@ class NPlusPlus(gym.Env):
 
         # Initialize frame stacking
         self.frames = deque(maxlen=frame_stack)
-        self.features = deque(maxlen=frame_stack)
 
-        # Initialize movement tracking
+        # Initialize movement and velocity tracking
         self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
+        self.velocity_history = deque(maxlen=10)
 
         # Track previous state for reward calculation
         self.prev_distance_to_switch = None
         self.prev_distance_to_exit = None
         self.prev_time_remaining = None
+        self.prev_position = None
 
-        # Track previous action so we don't release keys unnecessarily
+        # Track previous action
         self.prev_action = None
 
-        # Action space remains the same
+        # Initialize spaces
         self.action_space = discrete.Discrete(6)
-        # Modified observation space for A2C compatibility
-        # Combines preprocessed frames with numerical features
-
-        # Define observation space shape correctly
         self.observation_space = box.Box(
             low=0,
             high=1,
-            shape=(84, 84, frame_stack + 8),  # 4 frames + 8 features
+            shape=(84, 84, frame_stack + 8),
             dtype=np.float32
         )
 
@@ -339,26 +354,90 @@ class NPlusPlus(gym.Env):
         """
         return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
+    def _shaped_distance_reward(self, current_distance: float, previous_distance: float,
+                                is_primary_objective: bool = True) -> float:
+        """Calculate shaped reward based on distance to objective.
+
+        Args:
+            current_distance: Current distance to objective
+            previous_distance: Previous distance to objective
+            is_primary_objective: Whether this is the current primary objective
+
+        Returns:
+            float: Shaped reward value
+        """
+        # Calculate basic progress reward
+        distance_progress = previous_distance - current_distance
+
+        # Scale factors based on objective priority
+        approach_scale = self.APPROACH_REWARD_SCALE * \
+            (1.5 if is_primary_objective else 1.0)
+        retreat_scale = self.RETREAT_PENALTY_SCALE * \
+            (1.5 if is_primary_objective else 1.0)
+
+        # Calculate progressive reward
+        if distance_progress > 0:  # Moving closer
+            progress_reward = distance_progress * approach_scale
+        else:  # Moving away
+            progress_reward = distance_progress * retreat_scale
+
+        # Add inverse distance component for continuous guidance
+        inverse_distance = 1.0 / (1.0 + current_distance)
+
+        return progress_reward + (inverse_distance * self.DISTANCE_SCALE)
+
+    def _movement_quality_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
+        """Calculate reward based on movement quality.
+
+        Evaluates movement based on:
+        - Magnitude of movement
+        - Consistency of movement
+        - Progress toward objectives
+        """
+        current_pos = np.array([obs['player_x'], obs['player_y']])
+
+        if self.prev_position is None:
+            self.prev_position = current_pos
+            return 0.0
+
+        # Calculate velocity
+        velocity = current_pos - self.prev_position
+        velocity_magnitude = np.linalg.norm(velocity)
+
+        # Update velocity history
+        self.velocity_history.append(velocity)
+
+        # Calculate movement reward
+        if velocity_magnitude < self.MIN_MOVEMENT_THRESHOLD:
+            movement_reward = self.MOVEMENT_PENALTY
+        else:
+            # Reward smooth, purposeful movement
+            movement_reward = min(velocity_magnitude * 0.1,
+                                  self.MAX_MOVEMENT_REWARD)
+
+            # Add bonus for consistent movement direction if we have enough history
+            if len(self.velocity_history) >= 2:
+                prev_velocity = self.velocity_history[-2]
+                direction_consistency = np.dot(velocity, prev_velocity) / (
+                    np.linalg.norm(velocity) * np.linalg.norm(prev_velocity))
+                movement_reward *= (1.0 + direction_consistency * 0.5)
+
+        self.prev_position = current_pos
+        return movement_reward
+
     def _calculate_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
         """Calculate reward based on current and previous observations.
 
-        Implements a structured reward system that encourages:
-        1. Efficient movement toward objectives
-        2. Switch activation as a primary goal
-        3. Exit reaching as a secondary goal
-        4. Time management and gold collection
-        5. Smooth movement and exploration
-
-        Args:
-            obs: Current observation dictionary
-            prev_obs: Previous observation dictionary
-
-        Returns:
-            float: Calculated reward value
+        Implements an improved reward structure with:
+        1. Shaped distance-based rewards
+        2. Normalized reward scales
+        3. Movement quality assessment
+        4. Continuous time penalties
+        5. Balanced terminal rewards
         """
         reward = 0.0
 
-        # Calculate current positions and distances
+        # Calculate current distances
         curr_distance_to_switch = self._calculate_distance(
             obs['player_x'], obs['player_y'],
             obs['switch_x'], obs['switch_y']
@@ -368,72 +447,51 @@ class NPlusPlus(gym.Env):
             obs['exit_door_x'], obs['exit_door_y']
         )
 
-        # Time management rewards
+        # Base time penalty to encourage efficiency
+        reward += self.BASE_TIME_PENALTY
+
+        # Time and gold collection rewards
         time_diff = obs['time_remaining'] - prev_obs['time_remaining']
-        base_time_penalty = -0.05  # Small constant penalty to encourage speed
-
         if time_diff > 0:  # Collected gold
-            reward += 100 * time_diff  # Significant reward for collecting gold
-        else:
-            reward += base_time_penalty  # Small penalty for time passing
+            reward += self.GOLD_COLLECTION_REWARD * time_diff
 
-        # Movement and objective-based rewards
+        # Objective-based rewards
         if not obs['switch_activated']:
-            # Primary objective: Get to the switch
-            switch_distance_diff = self.prev_distance_to_switch - curr_distance_to_switch
-
-            # Progressive reward for moving toward switch
-            if switch_distance_diff > 0:  # Moving closer to switch
-                reward += switch_distance_diff * 20  # Strong reward for progress
-            else:  # Moving away from switch
-                # Smaller penalty for moving away - allows for necessary detours
-                reward += switch_distance_diff * 5
-
-            # Global distance component - weighted less to allow for indirect paths
-            # Subtle guidance toward switch
-            reward -= (curr_distance_to_switch / 100.0)
-
+            # Primary objective: Switch activation
+            reward += self._shaped_distance_reward(
+                curr_distance_to_switch,
+                self.prev_distance_to_switch,
+                is_primary_objective=True
+            )
         else:
-            # Switch is activated - focus on reaching exit
+            # Switch activation reward (one-time)
             if not prev_obs['switch_activated']:
-                reward += 5000  # One-time reward for activating switch
+                reward += self.SWITCH_ACTIVATION_REWARD
 
-            exit_distance_diff = self.prev_distance_to_exit - curr_distance_to_exit
+            # Secondary objective: Reach exit
+            reward += self._shaped_distance_reward(
+                curr_distance_to_exit,
+                self.prev_distance_to_exit,
+                is_primary_objective=True
+            )
 
-            # Progressive reward for moving toward exit
-            if exit_distance_diff > 0:  # Moving closer to exit
-                reward += exit_distance_diff * 20  # Strong reward for progress
-            else:  # Moving away from exit
-                # Smaller penalty for moving away - allows for necessary detours
-                reward += exit_distance_diff * 5
-
-            # Global distance component
-            # Subtle guidance toward exit
-            reward -= (curr_distance_to_exit / 100.0)
-
-        # Movement and exploration incentives
-        player_movement = abs(obs['player_x'] - prev_obs['player_x']) + \
-            abs(obs['player_y'] - prev_obs['player_y'])
-        if player_movement < 0.1:  # Almost no movement
-            reward -= 0.5  # Small penalty for being stationary
-        else:
-            # Small reward for movement, capped
-            reward += min(player_movement * 0.1, 1.0)
+        # Movement quality reward
+        reward += self._movement_quality_reward(obs, prev_obs)
 
         # Terminal state rewards
         if obs['time_remaining'] <= 0:
-            reward -= 10000  # Major penalty for running out of time
+            reward += self.TIMEOUT_PENALTY
 
         if self.gvf.read_player_dead():
-            reward -= 10000  # Major penalty for dying
+            reward += self.DEATH_PENALTY
 
-        # Success reward - reaching exit with switch activated
+        # Success reward
         if (obs['switch_activated'] and
             abs(obs['player_x'] - obs['exit_door_x']) < 5 and
                 abs(obs['player_y'] - obs['exit_door_y']) < 5):
-            reward += 20000  # Major reward for successful completion
+            reward += self.TERMINAL_REWARD
 
-        # Update previous distances for next calculation
+        # Update previous distances
         self.prev_distance_to_switch = curr_distance_to_switch
         self.prev_distance_to_exit = curr_distance_to_exit
 
@@ -568,7 +626,6 @@ class NPlusPlus(gym.Env):
 
         # Calculate reward
         reward = self._calculate_reward(observation, prev_obs)
-        reward = reward / 1000.0
 
         info = {
             'raw_reward': reward,
