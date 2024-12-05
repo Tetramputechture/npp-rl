@@ -5,8 +5,10 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 from game.game_process import GameProcess
 from game.game_config import game_config
+from environments.level_environment import NPlusPlus
 import numpy as np
 import time
+import threading
 
 
 @dataclass
@@ -227,7 +229,7 @@ class NinjAI:
 
     def _player_reset(self):
         """Reset the player's position."""
-        self.game.controller.set_window_focused(False)
+        self.game.controller.focus_window()
         self.game.controller.press_reset_key()
 
     def _manual_env_reset(self):
@@ -236,12 +238,20 @@ class NinjAI:
         self.ui_components['reset_button'].config(state=tk.DISABLED)
         # Unfocus the button
         self.ui_components['frame'].focus_set()
-        self.game.controller.set_window_focused(False)
-        while not self.game.game_value_fetcher.read_player_dead():
-            self.game.controller.press_reset_key()
-            time.sleep(0.1)
-        self.game.controller.reset_level()
+
+        def reset_environment():
+            self.game.controller.focus_window()
+            test_env = NPlusPlus(
+                self.game.game_value_fetcher, self.game.controller)
+            test_env.reset()
+            # Focus the window again
+            self.ui_components['frame'].focus_set()
+
+        reset_thread = threading.Thread(target=reset_environment)
+        reset_thread.start()
         self.ui_components['reset_button'].config(state=tk.NORMAL)
+        # Focus back to the window
+        self.ui_components['frame'].focus_set()
 
     def _init_memory_addresses(self):
         """
@@ -408,7 +418,7 @@ class NinjAI:
 
     def _on_training_changed(self):
         """Handle training mode changes."""
-        self.game.controller.set_window_focused(False)
+        self.game.controller.focus_window()
         game_config.set_training(self.training.get())
 
     def _on_automate_init_changed(self):
