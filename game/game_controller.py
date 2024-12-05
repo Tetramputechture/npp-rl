@@ -22,42 +22,40 @@ class GameController:
         self.held_keys = []
 
     def focus_window(self):
+        """Focus the game window."""
+        print('Focusing game window')
+        win32gui.SetForegroundWindow(self.window_handle)
+        # game_window = gw.getWindowsWithTitle("NPP")[0]
+        # game_window.activate()
+        self.window_focused = True
+        time.sleep(1)
+
+    def maybe_focus_window(self):
         """Focus the game window, if it's not already focused."""
         if self.window_focused:
             return
 
-        print("Focusing window.")
-
-        win32gui.SetForegroundWindow(self.window_handle)
-
-        game_window = gw.getWindowsWithTitle("NPP")[0]
-        game_window.activate()
-        self.window_focused = True
-        # Sometimes, taking focus can take a moment
-        time.sleep(1)
-
-    def set_window_focused(self, focused):
-        self.window_focused = focused
+        self.focus_window()
 
     def _press(self, key, pause=False):
-        self.focus_window()
+        self.maybe_focus_window()
 
         pydirectinput.press([key], _pause=pause)
 
     def _key_down(self, key):
-        self.focus_window()
+        self.maybe_focus_window()
 
         pydirectinput.keyDown(key, _pause=False)
         self.held_keys.append(key)
 
     def _key_up(self, key):
-        self.focus_window()
+        self.maybe_focus_window()
 
         pydirectinput.keyUp(key, _pause=False)
         self.held_keys.remove(key)
 
     def release_all_keys(self):
-        self.focus_window()
+        self.maybe_focus_window()
 
         for key in self.held_keys:
             pydirectinput.keyUp(key, _pause=False)
@@ -82,7 +80,7 @@ class GameController:
         self._key_up(MOVEMENT_KEYS['jump'])
 
     def press_reset_key(self):
-        self._press(MOVEMENT_KEYS['reset'], pause=True)
+        self._press(MOVEMENT_KEYS['reset'])
 
     def press_space_key(self, pause=True):
         self._press(MOVEMENT_KEYS['space'], pause=pause)

@@ -186,10 +186,11 @@ class NPlusPlus(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    TIMESTEP = 1/60
+    # We speed up the game from 60fps to 1200fps (factor of 20)
+    TIMESTEP = 1/1200.0
     MOVEMENT_THRESHOLD = 1.0
     MOVEMENT_CHECK_DURATION = 20.0
-    MOVEMENT_CHECK_FRAMES = int(MOVEMENT_CHECK_DURATION / (1/60))
+    MOVEMENT_CHECK_FRAMES = int(MOVEMENT_CHECK_DURATION / (1/1200.0))
 
     def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
         """Initialize the N++ environment.
@@ -341,6 +342,13 @@ class NPlusPlus(gym.Env):
     def _calculate_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
         """Calculate reward based on current and previous observations.
 
+        Implements a structured reward system that encourages:
+        1. Efficient movement toward objectives
+        2. Switch activation as a primary goal
+        3. Exit reaching as a secondary goal
+        4. Time management and gold collection
+        5. Smooth movement and exploration
+
         Args:
             obs: Current observation dictionary
             prev_obs: Previous observation dictionary
@@ -350,18 +358,7 @@ class NPlusPlus(gym.Env):
         """
         reward = 0.0
 
-        # Time-based rewards
-
-        time_diff = obs['time_remaining'] - prev_obs['time_remaining']
-        if time_diff > 0:  # Collected gold (gained time)
-            reward += 100 * time_diff
-        else:  # Normal time decrease
-            reward += time_diff
-
-        # Lower reward each step to encourage faster completion
-        reward -= 0.1
-
-        # Calculate distances
+        # Calculate current positions and distances
         curr_distance_to_switch = self._calculate_distance(
             obs['player_x'], obs['player_y'],
             obs['switch_x'], obs['switch_y']
@@ -371,33 +368,74 @@ class NPlusPlus(gym.Env):
             obs['exit_door_x'], obs['exit_door_y']
         )
 
-        # Switch-related rewards
-        if not obs['switch_activated']:
-            # Reward for moving closer to switch
-            distance_diff = self.prev_distance_to_switch - curr_distance_to_switch
-            reward += distance_diff * 10
+        # Time management rewards
+        time_diff = obs['time_remaining'] - prev_obs['time_remaining']
+        base_time_penalty = -0.05  # Small constant penalty to encourage speed
 
-            # Subtract distance to switch to encourage movement
-            reward -= curr_distance_to_switch * 0.1
+        if time_diff > 0:  # Collected gold
+            reward += 100 * time_diff  # Significant reward for collecting gold
         else:
-            # One-time reward for activating switch
+            reward += base_time_penalty  # Small penalty for time passing
+
+        # Movement and objective-based rewards
+        if not obs['switch_activated']:
+            # Primary objective: Get to the switch
+            switch_distance_diff = self.prev_distance_to_switch - curr_distance_to_switch
+
+            # Progressive reward for moving toward switch
+            if switch_distance_diff > 0:  # Moving closer to switch
+                reward += switch_distance_diff * 20  # Strong reward for progress
+            else:  # Moving away from switch
+                # Smaller penalty for moving away - allows for necessary detours
+                reward += switch_distance_diff * 5
+
+            # Global distance component - weighted less to allow for indirect paths
+            # Subtle guidance toward switch
+            reward -= (curr_distance_to_switch / 100.0)
+
+        else:
+            # Switch is activated - focus on reaching exit
             if not prev_obs['switch_activated']:
-                reward += 10000
+                reward += 5000  # One-time reward for activating switch
 
-            # Reward for moving closer to exit
-            distance_diff = self.prev_distance_to_exit - curr_distance_to_exit
-            reward += distance_diff * 10
+            exit_distance_diff = self.prev_distance_to_exit - curr_distance_to_exit
 
-            # Subtract distance to exit to encourage movement
-            reward -= curr_distance_to_exit * 0.1
+            # Progressive reward for moving toward exit
+            if exit_distance_diff > 0:  # Moving closer to exit
+                reward += exit_distance_diff * 20  # Strong reward for progress
+            else:  # Moving away from exit
+                # Smaller penalty for moving away - allows for necessary detours
+                reward += exit_distance_diff * 5
 
-        # Update previous distances
+            # Global distance component
+            # Subtle guidance toward exit
+            reward -= (curr_distance_to_exit / 100.0)
+
+        # Movement and exploration incentives
+        player_movement = abs(obs['player_x'] - prev_obs['player_x']) + \
+            abs(obs['player_y'] - prev_obs['player_y'])
+        if player_movement < 0.1:  # Almost no movement
+            reward -= 0.5  # Small penalty for being stationary
+        else:
+            # Small reward for movement, capped
+            reward += min(player_movement * 0.1, 1.0)
+
+        # Terminal state rewards
+        if obs['time_remaining'] <= 0:
+            reward -= 10000  # Major penalty for running out of time
+
+        if self.gvf.read_player_dead():
+            reward -= 10000  # Major penalty for dying
+
+        # Success reward - reaching exit with switch activated
+        if (obs['switch_activated'] and
+            abs(obs['player_x'] - obs['exit_door_x']) < 5 and
+                abs(obs['player_y'] - obs['exit_door_y']) < 5):
+            reward += 20000  # Major reward for successful completion
+
+        # Update previous distances for next calculation
         self.prev_distance_to_switch = curr_distance_to_switch
         self.prev_distance_to_exit = curr_distance_to_exit
-
-        # Small penalty for no movement (encourage exploration)
-        if obs['player_x'] == prev_obs['player_x'] and obs['player_y'] == prev_obs['player_y']:
-            reward -= 1
 
         return reward
 
@@ -482,10 +520,16 @@ class NPlusPlus(gym.Env):
                       abs(observation['player_x'] - observation['exit_door_x']) < 5 and
                       abs(observation['player_y'] - observation['exit_door_y']) < 5))
 
+        if terminated:
+            print("Episode terminated")
+
         truncated = self._check_movement_truncation(
             observation['player_x'],
             observation['player_y']
         )
+
+        if truncated:
+            print("Episode truncated due to lack of movement")
 
         return terminated, truncated
 
@@ -510,9 +554,14 @@ class NPlusPlus(gym.Env):
         # Get the new observation
         observation = self._get_observation()
 
-        # If the player is not dead, pause the game
-        if not self.gvf.read_player_dead():
+        # Check if episode should be ended
+        terminated, truncated = self._check_termination(observation)
+
+        # If the episode has not been terminated, pause the game
+        if not terminated or truncated:
             self.gc.press_pause_key()
+        else:
+            print("Episode done. Not pausing. The environment reset should handle this.")
 
         # Process the observation
         processed_obs = self._get_stacked_observation(observation)
@@ -521,13 +570,11 @@ class NPlusPlus(gym.Env):
         reward = self._calculate_reward(observation, prev_obs)
         reward = reward / 1000.0
 
-        # Check if episode should be ended
-        terminated, truncated = self._check_termination(observation)
-
         info = {
             'raw_reward': reward,
             'time_remaining': observation['time_remaining'],
-            'switch_activated': observation['switch_activated']
+            'switch_activated': observation['switch_activated'],
+            'player_dead': self.gvf.read_player_dead(),
         }
 
         return processed_obs, reward, terminated, truncated, info
@@ -556,21 +603,35 @@ class NPlusPlus(gym.Env):
 
         # If the player is not dead, kill them
         while not self.gvf.read_player_dead():
+            print("Killing player...")
             self.gc.press_reset_key()
-            time.sleep(0.2)
+            time.sleep(0.5)
 
         # We are at the 'level start / level retry' screen, press space to go to the
         # 'press space to begin' screen
-        self.gc.press_space_key()
-        time.sleep(0.2)
+        print("Pressing space to start level...")
+        while self.gvf.read_player_dead():
+            self.gc.press_space_key(pause=False)
+            time.sleep(0.5)
 
-        # Press space again to start the level
+        print("Pressing space again to start level (first try)...")
         self.gc.press_space_key(pause=False)
 
         # Get initial observation
         observation = self._get_observation()
 
+        # The game is playing, at this point we want to make sure our time remaining
+        # is less than exactly 90 seconds, or else we didn't properly reset the game.
+        # If the game is still exactly at 90 seconds, we should press the space key again
+        # to start the level. We use a float comparison with a tolerance of 0.1 seconds.
+        while observation['time_remaining'] >= 89.99:
+            print("Pressing space again to start level...")
+            self.gc.press_space_key(pause=False)
+            time.sleep(0.1)
+            observation = self._get_observation()
+
         # Pause the game
+        print("Pausing game...")
         self.gc.press_pause_key()
 
         # Initialize previous distances
