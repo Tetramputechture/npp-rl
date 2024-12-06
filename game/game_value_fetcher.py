@@ -35,6 +35,16 @@ def safe_read_byte(pm: Pymem, address: int) -> bool:
         return False
 
 
+def safe_read_string(pm: Pymem, address: int) -> str:
+    if address == 0:
+        return ""
+
+    try:
+        return pm.read_string(address)
+    except Exception as e:
+        return ""
+
+
 class GameValueFetcher:
     """Class to fetch game values from memory."""
 
@@ -81,3 +91,11 @@ class GameValueFetcher:
     def read_switch_y(self) -> float:
         """Read the switch's y position from memory."""
         return safe_read_float(self.pm, game_config.switch_y_address)
+
+    def read_begin_retry_text(self) -> str:
+        """Read the begin retry label from memory."""
+        return safe_read_string(self.pm, game_config.begin_retry_text_address)
+
+    def read_solo_text(self) -> str:
+        """Read the solo label from memory."""
+        return safe_read_string(self.pm, game_config.solo_text_address)

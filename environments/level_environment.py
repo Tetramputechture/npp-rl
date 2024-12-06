@@ -168,7 +168,8 @@ import gym
 from gymnasium.spaces import discrete, box
 import numpy as np
 from game.game_controller import GameController
-from game.game_window import get_game_window_frame
+from game.game_window import get_game_window_frame, get_center_frame
+from game.frame_text import extract_text
 from game.game_value_fetcher import GameValueFetcher
 import time
 from typing import Tuple, Dict, Any
@@ -177,7 +178,7 @@ import cv2
 
 
 class NPlusPlus(gym.Env):
-    """Custom Environment that follows gym interface for N++ game.
+    """Custom Gym envjr onment for the game N++.
 
     This environment provides a Gym interface for the N++ game, allowing reinforcement
     learning agents to learn to play levels. The environment handles game state
@@ -204,11 +205,11 @@ class NPlusPlus(gym.Env):
     MOVEMENT_PENALTY = -0.01  # Penalty for being too static
     MAX_MOVEMENT_REWARD = 0.05  # Cap on movement reward
 
-    # We speed up the game from 60fps to 1200fps (factor of 20)
-    TIMESTEP = 1/1200.0
+    # We dont speed up for now since this causes instability between resets
+    TIMESTEP = 1/120.0
     MOVEMENT_THRESHOLD = 1.0
     MOVEMENT_CHECK_DURATION = 20.0
-    MOVEMENT_CHECK_FRAMES = int(MOVEMENT_CHECK_DURATION / (1/1200.0))
+    MOVEMENT_CHECK_FRAMES = int(MOVEMENT_CHECK_DURATION / (1/60.0))
 
     def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
         """Initialize the N++ environment.
@@ -418,9 +419,10 @@ class NPlusPlus(gym.Env):
             # Add bonus for consistent movement direction if we have enough history
             if len(self.velocity_history) >= 2:
                 prev_velocity = self.velocity_history[-2]
-                direction_consistency = np.dot(velocity, prev_velocity) / (
-                    np.linalg.norm(velocity) * np.linalg.norm(prev_velocity))
-                movement_reward *= (1.0 + direction_consistency * 0.5)
+                if np.linalg.norm(prev_velocity) != 0:
+                    direction_consistency = np.dot(velocity, prev_velocity) / (
+                        np.linalg.norm(velocity) * np.linalg.norm(prev_velocity))
+                    movement_reward *= (1.0 + direction_consistency * 0.5)
 
         self.prev_position = current_pos
         return movement_reward
@@ -530,8 +532,23 @@ class NPlusPlus(gym.Env):
             self.gc.jump_key_down()
             self.gc.move_right_key_down()
 
+    def _action_to_string(self, action: int) -> str:
+        """Convert action index to human-readable string."""
+        action_names = {
+            0: 'NOOP',
+            1: 'Left',
+            2: 'Right',
+            3: 'Jump',
+            4: 'Jump + Left',
+            5: 'Jump + Right'
+        }
+        return action_names.get(action, 'Unknown')
+
     def _check_movement_truncation(self, curr_x: float, curr_y: float) -> bool:
         """Check if the episode should be truncated due to lack of movement.
+        Lack of movement is defined as the player not having an absolute 
+        distance traveled (sum of all movements, positive or negative) greater
+        than a threshold over a fixed time window.
 
         Args:
             curr_x: Current x position of the player
@@ -547,15 +564,20 @@ class NPlusPlus(gym.Env):
         if len(self.position_history) < self.MOVEMENT_CHECK_FRAMES:
             return False
 
-        # Get the oldest position in our history (20 seconds ago)
-        old_x, old_y = self.position_history[0]
+        # Calculate total distance traveled over the window
+        # We want to check the sum of all movements, so we calculate the
+        # distance between each pair of consecutive positions
+        total_distance = 0.0
 
-        # Calculate total movement distance over the time window
-        movement_distance = self._calculate_distance(
-            old_x, old_y, curr_x, curr_y)
+        for i in range(1, len(self.position_history)):
+            prev_x, prev_y = self.position_history[i - 1]
+            curr_x, curr_y = self.position_history[i]
+            total_distance += self._calculate_distance(
+                prev_x, prev_y, curr_x, curr_y)
 
-        # If movement is below threshold, truncate the episode
-        return movement_distance < self.MOVEMENT_THRESHOLD
+        print(
+            f'Total distance traveled in last {self.MOVEMENT_CHECK_DURATION} seconds: {total_distance}')
+        return total_distance < self.MOVEMENT_THRESHOLD
 
     def _store_prev_action(self, action: int):
         """Store the previous action taken."""
@@ -572,8 +594,7 @@ class NPlusPlus(gym.Env):
             - terminated: True if episode should be terminated, False otherwise
             - truncated: True if episode should be truncated, False otherwise
         """
-        terminated = (observation['time_remaining'] <= 0 or
-                      self.gvf.read_player_dead() or
+        terminated = (self.gvf.read_player_dead() or
                       (observation['switch_activated'] and
                       abs(observation['player_x'] - observation['exit_door_x']) < 5 and
                       abs(observation['player_y'] - observation['exit_door_y']) < 5))
@@ -588,17 +609,20 @@ class NPlusPlus(gym.Env):
 
         if truncated:
             print("Episode truncated due to lack of movement")
+            # Manually hit  the reset key to reset the level
+            self.gc.press_reset_key()
 
         return terminated, truncated
 
     def step(self, action):
         """Execute action and return new state."""
+        print(f"Taking action: {self._action_to_string(action)}")
         # Get previous observation
         prev_obs = self._get_observation()
 
         # Our reset method ensures the game is paused, and the end of our step method
         # also pauses the game. So, we press the pause key to unpause the game.
-        self.gc.press_pause_key()
+        # self.gc.press_pause_key()
 
         # Now we are in the 'level playing' state, we can execute the action
         self._execute_action(action)
@@ -616,10 +640,10 @@ class NPlusPlus(gym.Env):
         terminated, truncated = self._check_termination(observation)
 
         # If the episode has not been terminated, pause the game
-        if not terminated or truncated:
-            self.gc.press_pause_key()
-        else:
-            print("Episode done. Not pausing. The environment reset should handle this.")
+        # if not terminated or truncated:
+        #     # self.gc.press_pause_key()
+        # else:
+        #     print("Episode done. Not pausing. The environment reset should handle this.")
 
         # Process the observation
         processed_obs = self._get_stacked_observation(observation)
@@ -656,40 +680,118 @@ class NPlusPlus(gym.Env):
         # Reset frame stack
         self.frames.clear()
 
+        # Release all keys
+        self.gc.release_all_keys()
+
         print("Resetting environment...")
 
-        # If the player is not dead, kill them
-        while not self.gvf.read_player_dead():
-            print("Killing player...")
-            self.gc.press_reset_key()
-            time.sleep(0.5)
+        center_frame = get_center_frame(get_game_window_frame())
+        center_text = extract_text(center_frame)
 
-        # We are at the 'level start / level retry' screen, press space to go to the
-        # 'press space to begin' screen
-        print("Pressing space to start level...")
-        while self.gvf.read_player_dead():
-            self.gc.press_space_key(pause=False)
-            time.sleep(0.5)
+        print(center_text)
 
-        print("Pressing space again to start level (first try)...")
-        self.gc.press_space_key(pause=False)
+        retry_max = 5
+        retries = 0
+
+        # Edge case: We are in the game begin state, because the last key before our reset
+        # was 'jump' and it automatically bypassed the 'retry' screen and went straight to
+        # the 'begin' screen. in this case, we can bypass the next few lines
+        if 'begi' not in center_text.lower():
+            # While the screen does not say 'retry' and the player is still alive, kill the player
+            while 'ret' not in center_text.lower() and not self.gvf.read_player_dead():
+                print("Killing player...")
+                self.gc.press_reset_key()
+                time.sleep(0.2)
+                center_frame = get_center_frame(get_game_window_frame())
+                center_text = extract_text(center_frame)
+                retries += 1
+                if retries >= retry_max:
+                    # Edge case: we are in the game paused state. We want to press
+                    # the pause key here to go back to play mode.
+                    # Then, we want to wait and hit the reset key again to go back to the
+                    # 'level start / level retry' screen.
+                    print(
+                        "Edge case: Pausing game to go back to play mode")
+                    self.gc.press_pause_key()
+                    time.sleep(0.2)
+                    # Game should be unpaused now. Lets press reset again
+                    self.gc.press_reset_key()
+                    retries = 0
+
+            center_frame = get_center_frame(get_game_window_frame())
+            center_text = extract_text(center_frame)
+
+            print(center_text)
+
+            # Edge case: We are still paused and at the 'retry' screen.
+            # In this case, we want to unpause the game to go back to the neural 'level retry' screen
+            # In this case, we can detect if the game is paused by detecting if 'quit' is in the center text
+            if 'quit' in center_text.lower():
+                print(
+                    "Edge case: Game is paused at the 'retry' screen. Unpausing game...")
+                self.gc.press_pause_key()
+                time.sleep(0.2)
+                center_frame = get_center_frame(get_game_window_frame())
+                center_text = extract_text(center_frame)
+
+            # We are at the 'level start / level retry' screen, press space to go to the
+            # 'press space to begin' screen
+            # Only continue when the read_begin_retry_text is 'Begin'
+            while 'begi' not in center_text.lower():
+                print("Pressing space to go to 'press space to begin' screen...")
+                # if this loops, 'pause' and 'retry' are shown at the same time
+                self.gc.press_space_key()
+                time.sleep(0.2)
+                center_frame = get_center_frame(get_game_window_frame())
+                center_text = extract_text(center_frame)
+        else:
+            print("EDGE CASE: We are at the 'press space to begin' screen early")
+
+        # Get initial player position in level
+        initial_obs = self._get_observation()
+
+        print(
+            f"Initial player position: ({initial_obs['player_x']}, {initial_obs['player_y']})")
+
+        # We are sure the player is not dead, and we are at the 'press space to begin' screen
+        # To assure this, we want to get the text from the center of the screen
+        # and check if it is 'begin'
+        center_frame = get_center_frame(get_game_window_frame())
+        center_text = extract_text(center_frame)
+
+        observation = self._get_observation()
+
+        # While either begin is in the center text, OR the player is not moving, press space
+        position_diff_x = initial_obs['player_x'] - observation['player_x']
+        position_diff_y = initial_obs['player_y'] - observation['player_y']
+
+        while 'begi' in center_text.lower() or \
+              (abs(position_diff_x) < 1.0 and abs(position_diff_y) < 1.0):
+            print("Pressing space to go to the 'level playing' state...")
+            self.gc.press_space_key()
+            center_frame = get_center_frame(get_game_window_frame())
+            center_text = extract_text(center_frame)
+
+            # Get the new observation
+            observation = self._get_observation()
+
+            # Calculate the difference in player position
+            position_diff_x = initial_obs['player_x'] - observation['player_x']
+            position_diff_y = initial_obs['player_y'] - observation['player_y']
 
         # Get initial observation
         observation = self._get_observation()
 
-        # The game is playing, at this point we want to make sure our time remaining
-        # is less than exactly 90 seconds, or else we didn't properly reset the game.
-        # If the game is still exactly at 90 seconds, we should press the space key again
-        # to start the level. We use a float comparison with a tolerance of 0.1 seconds.
-        while observation['time_remaining'] >= 89.99:
-            print("Pressing space again to start level...")
-            self.gc.press_space_key(pause=False)
-            time.sleep(0.1)
-            observation = self._get_observation()
+        # Press pause key to pause the game. We are sure we are in the 'level playing' state,
+        # since we verified the player has moved.
+        print(f'Center text before pause: {center_text}')
+        # Print player position before pause
+        print(
+            f"Player position before pause: ({observation['player_x']}, {observation['player_y']})")
+        # pause_key_success = self.gc.press_pause_key()
+        # print("Pause key press success:", pause_key_success)
 
-        # Pause the game
-        print("Pausing game...")
-        self.gc.press_pause_key()
+        print('Game started')
 
         # Initialize previous distances
         self.prev_distance_to_switch = self._calculate_distance(

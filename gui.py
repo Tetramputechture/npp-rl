@@ -5,6 +5,8 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 from game.game_process import GameProcess
 from game.game_config import game_config
+from game.frame_text import extract_text
+from game.game_window import get_center_frame
 from environments.level_environment import NPlusPlus
 import numpy as np
 import time
@@ -80,10 +82,14 @@ class NinjAI:
     def _init_ui_components(self) -> Dict[str, Any]:
         """Initialize all UI component references."""
         return {
-            'frame': ttk.Frame(self.root, padding="10"),
+            'main_frame': ttk.Frame(self.root, padding="10"),
+            'left_frame': ttk.Frame(self.root),
+            'right_frame': ttk.Frame(self.root),
+            'frame_text': None,
             'start_button': None,
             'state_label': None,
             'canvas': None,
+            'img_center_canvas': None,
             'save_frame_button': None,
             'save_frame_entry': None,
             'training_button': None,
@@ -92,204 +98,234 @@ class NinjAI:
         }
 
     def _init_gui(self):
-        """Set up the main GUI layout."""
-        frame = self.ui_components['frame']
-        frame.grid(row=0, column=0, sticky="nsew")
+        """Set up the main GUI layout with horizontal grouping."""
+        # Create main container frames
+        main_frame = self.ui_components['main_frame']
+        main_frame.grid(row=0, column=0, sticky="nsew")
 
-        # Build UI sections sequentially
-        current_row = 0
-        builders = [
-            self._create_game_controls,
-            self._create_debug_view,
-            self._create_state_override_controls,
-            self._create_save_controls,
-            self._create_training_controls,
-        ]
+        # Create left and right frames for better organization
+        left_frame = ttk.Frame(main_frame, padding="5")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
-        for builder in builders:
-            current_row = builder(current_row)
+        right_frame = ttk.Frame(main_frame, padding="5")
+        right_frame.grid(row=0, column=1, sticky="nsew")
 
-    def _create_game_controls(self, row: int) -> int:
-        """Create game control widgets."""
+        # Store frames for later use
+        self.ui_components['left_frame'] = left_frame
+        self.ui_components['right_frame'] = right_frame
+
+        # Create left column components
+        self._create_game_controls(left_frame)
+        self._create_debug_view(left_frame)
+
+        # Create right column components
+        self._create_control_panel(right_frame)
+        self._create_center_canvas_display(right_frame)
+
+    def _create_game_controls(self, parent: ttk.Frame):
+        """Create game control widgets in a horizontal layout."""
+        controls_frame = ttk.Frame(parent)
+        controls_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+
+        # Start button and state label side by side
         self.ui_components['start_button'] = ttk.Button(
-            self.ui_components['frame'],
+            controls_frame,
             text="Start Game",
             command=self.game.start
         )
         self.ui_components['start_button'].grid(
-            row=row, column=0, pady=5, sticky="w")
+            row=0, column=0, padx=(0, 10), sticky="w")
 
         self.ui_components['state_label'] = ttk.Label(
-            self.ui_components['frame'],
+            controls_frame,
             text=f"State: {self.game.state_manager.state}"
         )
         self.ui_components['state_label'].grid(
-            row=row + 1, column=0, sticky="w", pady=5)
+            row=0, column=1, sticky="w")
 
-        return row + 2
-
-    def _create_debug_view(self, row: int) -> int:
+    def _create_debug_view(self, parent: ttk.Frame):
         """Create the game frame display canvas."""
-        ttk.Label(self.ui_components['frame'], text="Game Debug View").grid(
-            row=row, column=0, sticky="w", pady=5
-        )
+        ttk.Label(parent, text="Game Debug View").grid(
+            row=1, column=0, sticky="w", pady=(5, 0))
 
         self.ui_components['canvas'] = tk.Canvas(
-            self.ui_components['frame'],
+            parent,
             width=self.CANVAS_SIZE[0],
             height=self.CANVAS_SIZE[1]
         )
         self.ui_components['canvas'].grid(
-            row=row + 1, column=0, columnspan=2, pady=5, sticky="w"
-        )
+            row=2, column=0, sticky="w", pady=5)
 
-        return row + 2
+    def _create_control_panel(self, parent: ttk.Frame):
+        """Create a consolidated control panel with all controls grouped logically."""
+        current_row = 0
 
-    def _create_state_override_controls(self, row: int) -> int:
-        """Create state override controls. Just a button and a label."""
+        # State override controls
+        override_frame = ttk.LabelFrame(
+            parent, text="State Control", padding=5)
+        override_frame.grid(row=current_row, column=0,
+                            sticky="ew", pady=(0, 10))
+
         self.ui_components['state_override_button'] = ttk.Button(
-            self.ui_components['frame'],
+            override_frame,
             text="Override State",
             command=self._override_state
         )
         self.ui_components['state_override_button'].grid(
-            row=row, column=0, sticky="w", pady=5)
+            row=0, column=0, sticky="w", padx=(0, 5))
 
         self.ui_components['state_override_entry'] = ttk.Entry(
-            self.ui_components['frame'], width=30)
+            override_frame, width=30)
         self.ui_components['state_override_entry'].grid(
-            row=row, column=1, sticky="w", padx=(5, 0), pady=5)
+            row=0, column=1, sticky="ew")
 
-        return row + 1
+        current_row += 1
 
-    def _create_save_controls(self, row: int) -> int:
-        """Create frame saving controls using grid layout."""
+        # Save controls group
+        save_frame = ttk.LabelFrame(parent, text="Save Options", padding=5)
+        save_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
+
+        # Frame saving controls
         self.ui_components['save_frame_button'] = ttk.Button(
-            self.ui_components['frame'],
+            save_frame,
             text="Save Frame",
             command=self._save_current_frame
         )
         self.ui_components['save_frame_button'].grid(
-            row=row, column=0, sticky="w", pady=5)
+            row=0, column=0, sticky="w", padx=(0, 5))
 
         self.ui_components['save_frame_entry'] = ttk.Entry(
-            self.ui_components['frame'], width=30)
+            save_frame, width=30)
         self.ui_components['save_frame_entry'].grid(
-            row=row, column=1, sticky="w", padx=(5, 0), pady=5)
+            row=0, column=1, sticky="ew")
 
         self.ui_components['save_config_button'] = ttk.Button(
-            self.ui_components['frame'],
+            save_frame,
             text="Save Config",
             command=game_config.save_config
         )
         self.ui_components['save_config_button'].grid(
-            row=row + 1, column=0, sticky="w", pady=5)
+            row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
-        return row + 2
+        current_row += 1
 
-    def _create_training_controls(self, row: int) -> int:
-        """Create training-related controls."""
+        # Training controls group
+        training_frame = ttk.LabelFrame(
+            parent, text="Training Controls", padding=5)
+        training_frame.grid(row=current_row, column=0,
+                            sticky="ew", pady=(0, 10))
+
         self.ui_components['training_button'] = ttk.Checkbutton(
-            self.ui_components['frame'],
+            training_frame,
             text="Training Mode",
             variable=self.training,
             command=self._on_training_changed
         )
         self.ui_components['training_button'].grid(
-            row=row, column=0, pady=5, sticky="w")
+            row=0, column=0, sticky="w")
 
         self.ui_components['automate_init'] = ttk.Checkbutton(
-            self.ui_components['frame'],
-            text="Automate Init Screen 'Press Any Key'",
+            training_frame,
+            text="Automate Init Screen",
             variable=self.automate_init_screen,
             command=self._on_automate_init_changed
         )
         self.ui_components['automate_init'].grid(
-            row=row + 1, column=0, pady=5, sticky="w")
+            row=1, column=0, sticky="w")
 
-        # Button to manually reset environment
+        # Reset controls in a horizontal layout
+        reset_frame = ttk.Frame(training_frame)
+        reset_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+
         self.ui_components['reset_button'] = ttk.Button(
-            self.ui_components['frame'],
+            reset_frame,
             text="Reset Environment",
             command=self._manual_env_reset
         )
         self.ui_components['reset_button'].grid(
-            row=row + 2, column=0, pady=5, sticky="w")
+            row=0, column=0, padx=(0, 5))
 
-        # Button to reset player position inline with reset environment button
         self.ui_components['player_reset_button'] = ttk.Button(
-            self.ui_components['frame'],
+            reset_frame,
             text="Reset Player",
             command=self._player_reset
         )
         self.ui_components['player_reset_button'].grid(
-            row=row + 2, column=1, pady=5, sticky="w")
+            row=0, column=1)
 
-        return row + 3
+        current_row += 1  # Increment after the last control panel
 
-    def _player_reset(self):
-        """Reset the player's position."""
-        self.game.controller.focus_window()
-        self.game.controller.press_reset_key()
+        # Create frame text display
+        frame_text_frame = ttk.LabelFrame(parent, text="Frame Text", padding=5)
+        frame_text_frame.grid(row=current_row, column=0,
+                              sticky="ew", pady=(0, 10))
 
-    def _manual_env_reset(self):
-        """Manually reset the game environment."""
-        print("Resetting environment...")
-        self.ui_components['reset_button'].config(state=tk.DISABLED)
-        # Unfocus the button
-        self.ui_components['frame'].focus_set()
+        # Create a read-only text display using Label
+        # Using a label with relief gives it a text-area appearance while being read-only
+        self.ui_components['frame_text'] = ttk.Label(
+            frame_text_frame,
+            text="No text available",
+            background='white',  # Give it a white background to look like a text area
+            relief="sunken",     # Add a sunken relief to make it look like a text field
+            anchor="w",          # Left-align the text
+            padding=5            # Add some internal padding
+        )
+        self.ui_components['frame_text'].grid(
+            row=0, column=0, sticky="ew", padx=5, pady=5
+        )
 
-        def reset_environment():
-            self.game.controller.focus_window()
-            test_env = NPlusPlus(
-                self.game.game_value_fetcher, self.game.controller)
-            test_env.reset()
-            # Focus the window again
-            self.ui_components['frame'].focus_set()
-
-        reset_thread = threading.Thread(target=reset_environment)
-        reset_thread.start()
-        self.ui_components['reset_button'].config(state=tk.NORMAL)
-        # Focus back to the window
-        self.ui_components['frame'].focus_set()
+        # Configure the frame to expand horizontally
+        frame_text_frame.columnconfigure(0, weight=1)
 
     def _init_memory_addresses(self):
-        """
-        Initialize and configure all memory address fields using grid layout.
-        """
+        """Initialize memory address fields in a grid layout with multiple columns."""
         self.memory_addresses = {}
-        frame = self.ui_components['frame']
-        # Start after other components
-        current_row = len(self.ui_components) + 1
 
-        # Define all memory addresses
+        # Create a new frame specifically for memory addresses
+        memory_frame = ttk.LabelFrame(self.ui_components['right_frame'],
+                                      text="Memory Addresses",
+                                      padding=5)
+        memory_frame.grid(row=4, column=0, sticky="nsew", pady=(0, 10))
+
+        # Define all memory addresses (same as before)
         memory_configs = [
-            ("player_x", self.game.game_value_fetcher.read_player_x,
-                game_config.set_player_x_address, None),
-            ("player_y", self.game.game_value_fetcher.read_player_y,
-                None, lambda: game_config.player_y_address),
             ("time_remaining", self.game.game_value_fetcher.read_time_remaining,
                 game_config.set_time_remaining_address, None),
             ("switch_activated", self.game.game_value_fetcher.read_switch_activated,
                 game_config.set_switch_activated_address, None),
             ("player_dead", self.game.game_value_fetcher.read_player_dead,
                 game_config.set_player_dead_address, None),
-            ("exit_door_x", self.game.game_value_fetcher.read_exit_door_x,
-                game_config.set_exit_door_x_address, None),
-            ("exit_door_y", self.game.game_value_fetcher.read_exit_door_y,
-                None, lambda: game_config.exit_door_y_address),
+            ("solo_text", self.game.game_value_fetcher.read_solo_text,
+                game_config.set_solo_text_address, None),
             ("switch_x", self.game.game_value_fetcher.read_switch_x,
                 game_config.set_switch_x_address, None),
             ("switch_y", self.game.game_value_fetcher.read_switch_y,
-                None, lambda: game_config.switch_y_address)
+                None, lambda: game_config.switch_y_address),
+            ("player_x", self.game.game_value_fetcher.read_player_x,
+                None, lambda: game_config.player_x_address),
+            ("player_y", self.game.game_value_fetcher.read_player_y,
+                None, lambda: game_config.player_y_address),
+            ("exit_door_x", self.game.game_value_fetcher.read_exit_door_x,
+                None, lambda: game_config.player_y_address),
+            ("exit_door_y", self.game.game_value_fetcher.read_exit_door_y,
+                None, lambda: game_config.exit_door_y_address),
+            ("begin_retry_text", self.game.game_value_fetcher.read_begin_retry_text,
+                game_config.set_begin_retry_text_address, None),
         ]
 
-        for name, getter, setter, override in memory_configs:
-            address_entry = ttk.Entry(frame, width=10)
-            value_label = ttk.Label(frame, text="0.0")
+        # Organize memory addresses in a 2-column grid
+        for idx, (name, getter, setter, override) in enumerate(memory_configs):
+            row = idx // 2  # Integer division to determine row
+            col = idx % 2   # Remainder to determine column
 
-            # If we have an override, set the entry field to the override value
-            # and disable the entry field
+            # Create a frame for each memory address pair
+            addr_frame = ttk.Frame(memory_frame)
+            addr_frame.grid(row=row, column=col, padx=5, pady=2, sticky="nw")
+
+            # Create the memory address components
+            address_entry = ttk.Entry(addr_frame, width=10)
+            value_label = ttk.Label(addr_frame, text="0.0")
+
             if override is not None:
                 address_entry.insert(0, hex(override()))
                 address_entry.config(state='disabled')
@@ -303,9 +339,17 @@ class NinjAI:
                 override=override
             )
 
-            current_row = self._create_memory_address_field(
-                frame, current_row, self.memory_addresses[name]
-            )
+            # Create the layout for each memory address
+            ttk.Label(addr_frame, text=f"{name.replace('_', ' ').title()}:").grid(
+                row=0, column=0, sticky="w")
+            address_entry.grid(row=0, column=1, padx=2)
+            value_label.grid(row=0, column=2, padx=2)
+
+            # Configure the setter if available
+            if setter is not None:
+                address_entry.bind("<FocusOut>",
+                                   lambda e, addr=self.memory_addresses[name]:
+                                   self._on_address_changed(addr))
 
     def _create_memory_address_field(self, parent: ttk.Frame, row: int,
                                      memory_address: MemoryAddress) -> int:
@@ -344,11 +388,17 @@ class NinjAI:
 
         return row + 2
 
+    def _create_center_canvas_display(self, parent: ttk.Frame):
+        """Initializes a small 320x240 canvas to display the center of the screen."""
+        center_canvas = tk.Canvas(parent, width=320, height=240)
+        center_canvas.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
+        self.ui_components['img_center_canvas'] = center_canvas
+
     def _update_frame_display(self):
         """Update the game frame display."""
         if self.game.current_frame is not None:
             rgb_frame = np.array(self.game.current_frame)
-            img = Image.fromarray(rgb_frame, mode='L')
+            img = Image.fromarray(rgb_frame, mode='RGB')
             self.photo = ImageTk.PhotoImage(img.resize(self.CANVAS_SIZE))
             self.ui_components['canvas'].delete("all")
             self.ui_components['canvas'].create_image(
@@ -395,6 +445,56 @@ class NinjAI:
             except (AttributeError, ValueError):
                 addr.value_label.config(text="N/A")
 
+    def _update_frame_text(self):
+        """Update the frame text display with the current window center text."""
+        if self.game.started:
+            try:
+                # center_frame = get_center_frame(self.game.current_frame)
+                # center_text = extract_text(center_frame)
+                # If we got valid text, update the display
+                center_text = None  # This is debug-only. Lags the UI otherwise
+                if center_text:
+                    self.ui_components['frame_text'].config(text=center_text)
+                else:
+                    self.ui_components['frame_text'].config(
+                        text="No text available")
+            except (AttributeError, ValueError):
+                self.ui_components['frame_text'].config(
+                    text="Error reading text")
+        else:
+            self.ui_components['frame_text'].config(text="Game not started")
+
+    def _update_center_canvas_display(self):
+        """Update the center canvas display with the current frame."""
+        if self.game.current_frame is not None:
+            center_frame = get_center_frame(self.game.current_frame)
+            img = Image.fromarray(center_frame, mode='RGB')
+            photo = ImageTk.PhotoImage(img.resize((320, 240)))
+            self.ui_components['img_center_canvas'].delete("all")
+            self.ui_components['img_center_canvas'].create_image(
+                0, 0, anchor=tk.NW, image=photo)
+            self.ui_components['img_center_canvas'].image = photo
+
+    def _player_reset(self):
+        """Reset the player's position."""
+        self.game.controller.focus_window()
+        self.game.controller.press_reset_key()
+
+    def _manual_env_reset(self):
+        """Manually reset the game environment."""
+        print("Resetting environment...")
+        self.ui_components['reset_button'].config(state=tk.DISABLED)
+
+        def reset_environment():
+            self.game.controller.focus_window()
+            test_env = NPlusPlus(
+                self.game.game_value_fetcher, self.game.controller)
+            test_env.reset()
+
+        reset_thread = threading.Thread(target=reset_environment)
+        reset_thread.start()
+        self.ui_components['reset_button'].config(state=tk.NORMAL)
+
     def _on_address_changed(self, memory_address: MemoryAddress):
         """Handle changes to memory address entry fields."""
         address = memory_address.address_entry.get()
@@ -430,6 +530,8 @@ class NinjAI:
         self._update_frame_display()
         self._update_game_controls()
         self._update_memory_address_values()
+        self._update_frame_text()
+        self._update_center_canvas_display()
 
     def _start_update_loop(self):
         """Start the main update loop."""

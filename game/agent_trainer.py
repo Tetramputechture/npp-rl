@@ -10,7 +10,7 @@ import pydirectinput
 import time
 from agents.npp_agent_ppo import start_training
 
-pydirectinput.PAUSE = 0.001
+pydirectinput.PAUSE = 0.01
 
 
 class AgentTrainer:

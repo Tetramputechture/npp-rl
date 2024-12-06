@@ -3,7 +3,7 @@ import numpy as np
 from typing import Callable, Dict, List, Optional, Set
 from game.strategies.level_strategy import LevelStrategy
 from game.strategies.game_initialized_strategy import GameInitializedStrategy
-from game.frame_text import all_frame_text, level_playing_center_text, main_menu_text
+from game.frame_text import all_frame_text, main_menu_text
 from game.game_controller import GameController
 from game.game_value_fetcher import GameValueFetcher
 
@@ -38,7 +38,7 @@ class StateManager:
         """Initialize all state configurations with their frame processors and transition rules."""
         return {
             "game_loading": StateConfig(
-                frame_processor=all_frame_text,
+                frame_processor=None,
                 strategy=None,
                 transitions={
                     "game_initialized": TransitionRule(
@@ -48,7 +48,7 @@ class StateManager:
                 }
             ),
             "game_initialized": StateConfig(
-                frame_processor=main_menu_text,
+                frame_processor=None,
                 strategy=GameInitializedStrategy(),
                 transitions={
                     "main_menu": TransitionRule(
@@ -58,7 +58,7 @@ class StateManager:
                 }
             ),
             "main_menu": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=None,
                 strategy=None,
                 transitions={
                     "level_start": TransitionRule(
@@ -68,7 +68,7 @@ class StateManager:
                 }
             ),
             "level_playing": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=None,
                 strategy=LevelStrategy(),
                 transitions={
                     "level_fail": TransitionRule(
@@ -82,7 +82,7 @@ class StateManager:
                 }
             ),
             "level_start": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=None,
                 strategy=None,
                 transitions={
                     "level_playing": TransitionRule(
@@ -96,7 +96,7 @@ class StateManager:
                 }
             ),
             "level_fail": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=None,
                 strategy=None,
                 transitions={
                     "level_playing": TransitionRule(
@@ -110,7 +110,7 @@ class StateManager:
                 }
             ),
             "level_complete": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=all_frame_text,
                 strategy=None,
                 transitions={
                     "level_playing": TransitionRule(
@@ -124,7 +124,7 @@ class StateManager:
                 }
             ),
             "intermediate_select": StateConfig(
-                frame_processor=level_playing_center_text,
+                frame_processor=all_frame_text,
                 strategy=None,
                 transitions={
                     "level_start": TransitionRule(
@@ -138,14 +138,14 @@ class StateManager:
     def _process_frame(self, frame: np.ndarray) -> str:
         """Process the current frame using the current state's frame processor."""
         config = self.state_configs[self.state]
-        text = config.frame_processor(frame)
+        text = config.frame_processor(frame) if config.frame_processor else ""
         return text.lower().replace("\n", " ")
 
     def transition(self, frame: np.ndarray) -> str:
         """Update the game state based on the current frame.
 
         Returns:
-            str: The new state after processing transitions.
+            str: The new state after processing transitions.da
         """
         self.current_frame = frame
         self.current_frame_text = self._process_frame(frame)

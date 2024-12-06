@@ -33,6 +33,8 @@ class GameConfig:
         self.exit_door_y_address = 0x00
         self.switch_x_address = 0x00
         self.switch_y_address = 0x00
+        self.begin_retry_text_address = 0x00
+        self.solo_text_address = 0x00
 
     def _serialize_config(self) -> dict:
         """Serialize the configuration."""
@@ -47,7 +49,9 @@ class GameConfig:
             'exit_door_x_address': self.exit_door_x_address,
             'exit_door_y_address': self.exit_door_y_address,
             'switch_x_address': self.switch_x_address,
-            'switch_y_address': self.switch_y_address
+            'switch_y_address': self.switch_y_address,
+            'begin_retry_text_address': self.begin_retry_text_address,
+            'solo_text_address': self.solo_text_address,
         }
 
     def save_config(self) -> None:
@@ -74,22 +78,36 @@ class GameConfig:
             self.exit_door_y_address = config['exit_door_y_address']
             self.switch_x_address = config['switch_x_address']
             self.switch_y_address = config['switch_y_address']
+            self.begin_retry_text_address = config['begin_retry_text_address']
+            self.solo_text_address = config['solo_text_address']
 
     def set_training(self, training: bool) -> None:
         """Set the training mode."""
         self.training = training
         return self.training
 
+    def set_switch_x_address(self, switch_x_address: int) -> None:
+        """Set the switch_x_address."""
+        self.switch_x_address = switch_x_address
+        self.switch_y_address = increment_address(switch_x_address, 4)
+
+        # If we know the switch X address, we can infer the player X address
+        # and the exit door X address
+        # The player X address is the switch X address - 208
+        # The exit door X address is the switch X address - 64
+        self.player_x_address = switch_x_address - 208
+        self.player_y_address = increment_address(self.player_x_address, 4)
+
+        self.exit_door_x_address = switch_x_address - 64
+        self.exit_door_y_address = increment_address(
+            self.exit_door_x_address, 4)
+
+        return self.switch_x_address
+
     def set_automate_init_screen(self, automate_init_screen: bool) -> None:
         """Set the automate_init_screen mode."""
         self.automate_init_screen = automate_init_screen
         return self.automate_init_screen
-
-    def set_player_x_address(self, player_x_address: int) -> None:
-        """Set the player_x_address."""
-        self.player_x_address = player_x_address
-        self.player_y_address = increment_address(player_x_address, 4)
-        return self.player_x_address
 
     def set_time_remaining_address(self, time_remaining_address: int) -> None:
         """Set the time_remaining_address."""
@@ -106,17 +124,15 @@ class GameConfig:
         self.player_dead_address = player_dead_address
         return self.player_dead_address
 
-    def set_exit_door_x_address(self, exit_door_x_address: int) -> None:
-        """Set the exit_door_x_address."""
-        self.exit_door_x_address = exit_door_x_address
-        self.exit_door_y_address = increment_address(exit_door_x_address, 4)
-        return self.exit_door_x_address
+    def set_solo_text_address(self, solo_text_address: int) -> None:
+        """Set the solo_text_address."""
+        self.solo_text_address = solo_text_address
+        return self.solo_text_address
 
-    def set_switch_x_address(self, switch_x_address: int) -> None:
-        """Set the switch_x_address."""
-        self.switch_x_address = switch_x_address
-        self.switch_y_address = increment_address(switch_x_address, 4)
-        return self.switch_x_address
+    def set_begin_retry_text_address(self, begin_retry_text_address: int) -> None:
+        """Set the begin_retry_text_address."""
+        self.begin_retry_text_address = begin_retry_text_address
+        return self.begin_retry_text_address
 
     def all_addresses_defined(self) -> bool:
         """Check if all addresses are defined."""
@@ -129,7 +145,9 @@ class GameConfig:
             valid_address(self.exit_door_x_address),
             valid_address(self.exit_door_y_address),
             valid_address(self.switch_x_address),
-            valid_address(self.switch_y_address)
+            valid_address(self.switch_y_address),
+            valid_address(self.begin_retry_text_address),
+            valid_address(self.solo_text_address),
         ])
 
 

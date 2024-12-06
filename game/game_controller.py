@@ -40,19 +40,26 @@ class GameController:
     def _press(self, key, pause=False):
         self.maybe_focus_window()
 
-        pydirectinput.press([key], _pause=pause)
+        return pydirectinput.press([key], _pause=pause)
+
+    def space_with_hold(self):
+        self.maybe_focus_window()
+
+        pydirectinput.keyDown('space', _pause=False)
+        time.sleep(0.01)
+        pydirectinput.keyUp('space', _pause=False)
 
     def _key_down(self, key):
         self.maybe_focus_window()
 
         pydirectinput.keyDown(key, _pause=False)
-        self.held_keys.append(key)
+        self.held_keys.append(key) if key not in self.held_keys else None
 
     def _key_up(self, key):
         self.maybe_focus_window()
 
         pydirectinput.keyUp(key, _pause=False)
-        self.held_keys.remove(key)
+        self.held_keys.remove(key) if key in self.held_keys else None
 
     def release_all_keys(self):
         self.maybe_focus_window()
@@ -83,10 +90,13 @@ class GameController:
         self._press(MOVEMENT_KEYS['reset'])
 
     def press_space_key(self, pause=True):
-        self._press(MOVEMENT_KEYS['space'], pause=pause)
+        return self._press(MOVEMENT_KEYS['space'], pause=pause)
+
+    def space_key_up(self):
+        self._key_up(MOVEMENT_KEYS['space'])
 
     def press_pause_key(self):
-        self._press(MOVEMENT_KEYS['pause'])
+        return self._press(MOVEMENT_KEYS['pause'], pause=True)
 
     def reset_level(self):
         time.sleep(0.5)

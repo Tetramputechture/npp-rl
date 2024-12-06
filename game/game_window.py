@@ -31,8 +31,10 @@ def get_game_window_frame() -> Optional[np.ndarray]:
     # Crop to only the level playing view
     frame = screen.crop((48, 180, 1230, 830))
 
-    # Convert to grayscale
-    frame = frame.convert('L')
-
     frame = np.array(frame)
     return frame
+
+
+def get_center_frame(frame) -> Optional[np.ndarray]:
+    """Returns the center of the game frame"""
+    return frame[333:480, 350:930]

@@ -413,7 +413,7 @@ def start_training(game_value_fetcher, game_controller):
         # env.reset()
 
         print("Starting PPO training...")
-        model = train_ppo_agent(env, total_timesteps=100000)
+        model = train_ppo_agent(env, total_timesteps=25000)
 
         # Save final model
         model.save("npp_ppo_final")
