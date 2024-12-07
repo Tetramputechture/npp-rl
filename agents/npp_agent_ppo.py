@@ -3,6 +3,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.monitor import Monitor
+from game.game_controller import GameController
 import torch
 from torch import nn
 import numpy as np
@@ -215,7 +216,7 @@ class CustomLevelCNN(BaseFeaturesExtractor):
 def setup_training_env(env):
     """Prepare environment for training with proper monitoring."""
     # Create logging directory
-    log_dir = Path('./training_logs_ppo')
+    log_dir = Path('./training_logs/ppo_training_log')
     log_dir.mkdir(exist_ok=True)
 
     # Wrap environment with Monitor for logging
@@ -316,7 +317,7 @@ def train_ppo_agent(env, total_timesteps=1000000):
     return model
 
 
-def evaluate_agent(env, policy, n_episodes):
+def evaluate_agent(env: NPlusPlus, policy: PPO, n_episodes):
     """Evaluate the agent without computing gradients."""
     scores = []
 
@@ -327,9 +328,12 @@ def evaluate_agent(env, policy, n_episodes):
 
         while not done:
             # Use evaluation mode to disable gradient tracking
-            action, _ = policy.act(state, evaluation=True)
+            action, _ = policy.predict(state)
+            # convert action from 0d tensor to int
+            action = action.item()
             state, reward, terminated, truncated, _ = env.step(action)
             episode_reward += reward
+
             done = terminated or truncated
 
         scores.append(episode_reward)
@@ -337,28 +341,26 @@ def evaluate_agent(env, policy, n_episodes):
     return np.mean(scores), np.std(scores)
 
 
-def record_video(env, model, video_path, num_episodes=1):
+def record_video(env: NPlusPlus, policy: PPO, video_path, num_episodes=1):
     """Record a video of the trained agent playing."""
     images = []
-    for episode in range(num_episodes):
-        obs = env.reset()[0]
+    for _ in range(num_episodes):
+        state = env.reset()[0]
         done = False
 
         while not done:
             images.append(env.render())
-            action, _ = model.predict(obs, deterministic=True)
-            obs, _, terminated, truncated, _ = env.step(action)
+            action, _ = policy.predict(state, deterministic=True)
+            action = action.item()
+            state, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
     # Save video
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
 
 
-def record_agent_training(env, model,
-                          hyperparameters,
-                          eval_env,
-                          video_fps=30
-                          ):
+def record_agent_training(env: NPlusPlus, model: PPO,
+                          hyperparameters):
     """
     Evaluate, Generate a video and save the model locally
     This method does the complete pipeline:
@@ -373,10 +375,11 @@ def record_agent_training(env, model,
     :param video_fps: how many frame per seconds to record our video replay
     """
     # save to the directory agent_eval_data_ppo
-    local_directory = Path('./agent_eval_data_ppo')
+    local_directory = Path('./agent_eval_data/ppo')
+    local_directory.mkdir(exist_ok=True)
 
     # Step 2: Save the model
-    torch.save(model, local_directory / "model.pt")
+    model.save(local_directory / "model")
 
     # Step 3: Save the hyperparameters to JSON
     with open(local_directory / "hyperparameters.json", "w") as outfile:
@@ -399,28 +402,48 @@ def record_agent_training(env, model,
 
     print("Evaluation results:", evaluate_data)
 
+    print("Recording video...")
+
     # Step 6: Record a video
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, video_fps)
+    record_video(env, model, video_path)
 
     return local_directory
 
 
-def start_training(game_value_fetcher, game_controller):
-    """Initialize environment and start training process."""
+def start_training(game_value_fetcher, game_controller: GameController):
+    """Initialize environment and start training process. Assumes the player is already in the game
+    and playing the level, as this method will attempt to press the reset key so training can start
+    from a fresh level."""
+
     try:
         env = NPlusPlus(game_value_fetcher, game_controller)
-        # env.reset()
+        game_controller.press_reset_key()
+
+        s_size = env.observation_space.shape[0]
+        a_size = env.action_space.n
+
+        print("_____OBSERVATION SPACE_____ \n")
+        print("The State Space is: ", s_size)
+        print("\n _____ACTION SPACE_____ \n")
+        print("The Action Space is: ", a_size)
 
         print("Starting PPO training...")
         model = train_ppo_agent(env, total_timesteps=25000)
 
         # Save final model
-        model.save("npp_ppo_final")
+        model.save("npp_ppo")
 
         # Record gameplay video
-        video_path = Path('./training_logs_ppo/gameplay.mp4')
-        record_video(env, model, video_path)
+        # First, press the reset key to start a new episode
+        game_controller.press_reset_key()
+
+        hyperparameters = {
+            "env_id": "N++",
+            "n_episodes": 5,
+            "n_evaluation_episodes": 5
+        }
+        record_agent_training(env, model, hyperparameters)
 
         print("Training completed successfully!")
         return model

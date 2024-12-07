@@ -443,7 +443,7 @@ class NinjAI:
                 value = addr.get_safe()
                 addr.value_label.config(text=addr.format(value))
             except (AttributeError, ValueError):
-                addr.value_label.config(text="N/A")
+                addr.value_label.config(text=str(value))
 
     def _update_frame_text(self):
         """Update the frame text display with the current window center text."""

@@ -119,9 +119,10 @@ def train_ppo_agent(env: VecEnv, total_timesteps):
 
 
 def evaluate_agent(env: VecEnv, max_steps, n_eval_episodes, policy: PPO):
-    """Evaluate the agent for n_eval_episodes episodes."""
+    """Evaluate the agent for n_eval_episodes episodes without computing gradients."""
     episode_rewards = []
-    for episode in range(n_eval_episodes):
+
+    for _ in range(n_eval_episodes):
         state = env.reset()
         step = 0
         done = False
@@ -222,7 +223,7 @@ def start_cartpole_training():
     print("Action Space Sample", env.action_space.sample())
 
     # Train the PPO agent
-    model = train_ppo_agent(vec_env, total_timesteps=250000)
+    model = train_ppo_agent(vec_env, total_timesteps=1000)
 
     # Save the final model
     model.save("cartpole_ppo")

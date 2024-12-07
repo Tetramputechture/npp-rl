@@ -37,10 +37,10 @@ class GameController:
 
         self.focus_window()
 
-    def _press(self, key, pause=False):
+    def _press(self, keys, pause=False):
         self.maybe_focus_window()
 
-        return pydirectinput.press([key], _pause=pause)
+        return pydirectinput.press(keys, _pause=pause)
 
     def space_with_hold(self):
         self.maybe_focus_window()
@@ -87,16 +87,24 @@ class GameController:
         self._key_up(MOVEMENT_KEYS['jump'])
 
     def press_reset_key(self):
-        self._press(MOVEMENT_KEYS['reset'])
+        self._press([MOVEMENT_KEYS['reset']])
 
     def press_space_key(self, pause=True):
-        return self._press(MOVEMENT_KEYS['space'], pause=pause)
+        return self._press([MOVEMENT_KEYS['space']], pause=pause)
 
     def space_key_up(self):
         self._key_up(MOVEMENT_KEYS['space'])
 
     def press_pause_key(self):
-        return self._press(MOVEMENT_KEYS['pause'], pause=True)
+        return self._press([MOVEMENT_KEYS['pause']], pause=True)
+
+    def press_success_reset_key_combo(self):
+        # We press ctrl+k to reset the level after succeeding
+        self._key_down('ctrl')
+        self._key_down('k')
+        time.sleep(0.1)
+        self._key_up('k')
+        self._key_up('ctrl')
 
     def reset_level(self):
         time.sleep(0.5)
