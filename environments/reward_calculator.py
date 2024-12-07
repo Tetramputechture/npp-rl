@@ -18,13 +18,13 @@ class RewardCalculator:
     automatically adjusting based on the agent's demonstrated competence.
     """
 
-    def __init__(self):
+    def __init__(self, timestep: float):
         # Base reward/penalty constants
         self.BASE_TIME_PENALTY = -0.01
         self.GOLD_COLLECTION_REWARD = 1.0
         self.SWITCH_ACTIVATION_REWARD = 10.0
         self.TERMINAL_REWARD = 20.0
-        self.DEATH_PENALTY = -10.0
+        self.DEATH_PENALTY = -15.0
         self.TIMEOUT_PENALTY = -10.0
 
         # Movement assessment constants
@@ -35,7 +35,7 @@ class RewardCalculator:
 
         # Distance-based reward scales
         self.DISTANCE_SCALE = 0.1
-        self.APPROACH_REWARD_SCALE = 0.5
+        self.APPROACH_REWARD_SCALE = 3
         self.RETREAT_PENALTY_SCALE = 0.2
 
         # Curriculum learning parameters
@@ -65,7 +65,7 @@ class RewardCalculator:
         }
 
         # Movement evaluator
-        self.movement_evaluator = MovementEvaluator()
+        self.movement_evaluator = MovementEvaluator(timestep)
 
     def _calculate_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
         """Calculate Euclidean distance between two points."""
@@ -108,8 +108,7 @@ class RewardCalculator:
 
     def _evaluate_navigation_quality(self,
                                      curr_distance: float,
-                                     prev_distance: float,
-                                     is_primary_objective: bool) -> float:
+                                     prev_distance: float) -> float:
         """
         Evaluate the quality of navigation towards objectives.
         Returns a scaled reward based on approach efficiency.
@@ -117,11 +116,8 @@ class RewardCalculator:
         reward = 0.0
         distance_progress = prev_distance - curr_distance
 
-        # Scale based on objective priority
-        scale = 1.5 if is_primary_objective else 1.0
-
         if distance_progress > 0:  # Moving closer
-            reward += distance_progress * self.APPROACH_REWARD_SCALE * scale
+            reward += distance_progress * self.APPROACH_REWARD_SCALE
             if curr_distance < self.FINE_DISTANCE_THRESHOLD:
                 reward += 0.5
         else:  # Moving away
@@ -189,24 +185,26 @@ class RewardCalculator:
         reward += movement_success['metrics']['landing'] * 0.5
 
         # Stage 2: Navigation
+        navigation_reward = 0.0
         if self.demonstrated_skills['precise_movement'] and self.demonstrated_skills['platform_landing']:
             if not obs['switch_activated']:
                 navigation_reward = self._evaluate_navigation_quality(
                     curr_distance_to_switch,
-                    self.prev_distance_to_switch,
-                    True
+                    self.prev_distance_to_switch
                 )
+                print(f"Navigation Reward: {navigation_reward:.2f}")
                 reward += navigation_reward
             else:
                 if not prev_obs['switch_activated']:
                     reward += self.SWITCH_ACTIVATION_REWARD
+                    print("Switch Activated!")
                     self.demonstrated_skills['switch_activation'] = True
 
                 navigation_reward = self._evaluate_navigation_quality(
                     curr_distance_to_exit,
-                    self.prev_distance_to_exit,
-                    True
+                    self.prev_distance_to_exit
                 )
+                print(f"Navigation Reward: {navigation_reward:.2f}")
                 reward += navigation_reward
 
         # Stage 3: Optimization (after demonstrating basic competence)
@@ -217,6 +215,7 @@ class RewardCalculator:
         if obs['time_remaining'] <= 0:
             reward += self.TIMEOUT_PENALTY
         if obs.get('player_dead', False):
+            print("Player Died!")
             reward += self.DEATH_PENALTY
         if 'retry level' in obs.get('begin_retry_text', '').lower():
             reward += self.TERMINAL_REWARD
@@ -226,6 +225,10 @@ class RewardCalculator:
         self.velocity_history.append(movement_vector)
         self.prev_distance_to_switch = curr_distance_to_switch
         self.prev_distance_to_exit = curr_distance_to_exit
+
+        # Log our reward
+        print(
+            f"Total Reward: {reward:.2f} | Movement: {movement_reward:.2f} | Navigation: {navigation_reward:.2f}")
 
         return reward
 

@@ -185,25 +185,6 @@ class NPlusPlus(gymnasium.Env):
     # Game speed after speed increase
     GAME_SPEED_FRAMES_PER_SECOND = GAME_DEFAULT_SPEED_FRAMES_PER_SECOND * GAME_SPEED_FACTOR
 
-    # Constants for reward scaling
-    BASE_TIME_PENALTY = -0.01  # Small constant penalty per timestep
-    GOLD_COLLECTION_REWARD = 1.0  # Reward for collecting gold (time increase)
-    SWITCH_ACTIVATION_REWARD = 10.0  # One-time reward for activating switch
-    TERMINAL_REWARD = 20.0  # Reward for completing level
-    DEATH_PENALTY = -10.0  # Penalty for dying
-    TIMEOUT_PENALTY = -10.0  # Penalty for time running out
-
-    # Constants for distance-based rewards
-    DISTANCE_SCALE = 0.1  # Scale factor for distance-based rewards
-    APPROACH_REWARD_SCALE = 0.5  # Scale factor for approaching objectives
-    RETREAT_PENALTY_SCALE = 0.2  # Scale factor for moving away from objectives
-
-    # Movement assessment constants
-    MIN_MOVEMENT_THRESHOLD = 0.1  # Minimum movement to avoid penalty
-    MOVEMENT_PENALTY = -0.01  # Penalty for being too static
-    MAX_MOVEMENT_REWARD = 0.05  # Cap on movement reward
-    FINE_DISTANCE_THRESHOLD = 5.0  # Threshold for fine movement detection
-
     # We take our observations at the game speed * 5
     # this way our observations are more accurate
     TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * 5)
@@ -231,16 +212,6 @@ class NPlusPlus(gymnasium.Env):
 
         # Initialize movement and velocity tracking
         self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
-        self.velocity_history = deque(maxlen=10)
-
-        # Track previous state for reward calculation
-        self.prev_distance_to_switch = None
-        self.prev_distance_to_exit = None
-        self.prev_time_remaining = None
-        self.prev_position = None
-
-        # Track previous action
-        self.prev_action = None
 
         # Initialize spaces
         self.action_space = discrete.Discrete(6)
@@ -269,7 +240,7 @@ class NPlusPlus(gymnasium.Env):
         self.episode_counter = 0
 
         # Initialize reward calculator
-        self.reward_calculator = RewardCalculator()
+        self.reward_calculator = RewardCalculator(timestep=self.TIMESTEP)
 
     def _preprocess_frame(self, frame):
         """Preprocess raw frame for CNN input.
@@ -320,7 +291,9 @@ class NPlusPlus(gymnasium.Env):
         max_time = 600.0
 
         max_velocity = 100.0
-        vx, vy = self._calculate_velocity(self.prev_position, obs)
+        vx, vy = self._calculate_velocity(prev_obs, obs)
+
+        print(f'Velocity: {vx}, {vy}')
 
         # velocity can be positve or negative but we want to transform it to [0, 1]
         vx = (vx + max_velocity) / (2 * max_velocity)
@@ -404,7 +377,7 @@ class NPlusPlus(gymnasium.Env):
             'exit_door_y': self.gvf.read_exit_door_y(),
             'switch_x': self.gvf.read_switch_x(),
             'switch_y': self.gvf.read_switch_y(),
-            'in_air': self.gvf.read_in_air()
+            'in_air': self.gvf.read_in_air(),
         }
 
     def _calculate_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
@@ -519,10 +492,6 @@ class NPlusPlus(gymnasium.Env):
             f'Total distance traveled in last {self.MOVEMENT_CHECK_DURATION} seconds: {total_distance}')
         return total_distance < self.MOVEMENT_THRESHOLD
 
-    def _store_prev_action(self, action: int):
-        """Store the previous action taken."""
-        self.prev_action = action
-
     def _check_termination(self, observation: Dict[str, Any]) -> Tuple[bool, bool]:
         """Check if the episode should be terminated.
 
@@ -570,9 +539,6 @@ class NPlusPlus(gymnasium.Env):
         # Now we are in the 'level playing' state, we can execute the action
         self._execute_action(action)
 
-        # Store this action for the next step
-        self._store_prev_action(action)
-
         # Wait our timestep for the action to take effect and the game state to update
         time.sleep(self.TIMESTEP)
 
@@ -594,8 +560,6 @@ class NPlusPlus(gymnasium.Env):
         # Calculate reward
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
-
-        print(f'Total Reward: {reward}')
 
         info = {
             'raw_reward': reward,
@@ -630,13 +594,6 @@ class NPlusPlus(gymnasium.Env):
 
         # Reset position and velocity history
         self.position_history.clear()
-        self.velocity_history.clear()
-
-        # Reset previous state values
-        self.prev_distance_to_switch = None
-        self.prev_distance_to_exit = None
-        self.prev_time_remaining = None
-        self.prev_position = None
 
         # Reset previous action
         self.prev_action = None
@@ -739,19 +696,8 @@ class NPlusPlus(gymnasium.Env):
 
         print('Game started')
 
-        # Initialize previous distances
-        self.prev_distance_to_switch = self._calculate_distance(
-            observation['player_x'], observation['player_y'],
-            observation['switch_x'], observation['switch_y']
-        )
-        self.prev_distance_to_exit = self._calculate_distance(
-            observation['player_x'], observation['player_y'],
-            observation['exit_door_x'], observation['exit_door_y']
-        )
-        self.prev_time_remaining = observation['time_remaining']
-
         # Process observation for A2C
-        processed_obs = self._get_stacked_observation(observation)
+        processed_obs = self._get_stacked_observation(observation, observation)
 
         return processed_obs, {}
 

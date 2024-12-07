@@ -81,73 +81,126 @@ class PPOTrainingCallback(BaseCallback):
         }
 
     def _init_callback(self) -> None:
-        """
-        Initialize callback-specific variables at the start of training.
-        """
-        # Create log directory if it doesn't exist
+        """Initialize callback and store original network parameters."""
         if self.log_dir is not None:
             self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize the policy's entropy coefficient
-        if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'optimizer'):
-            self._update_policy_entropy(self.current_ent_coef)
-
-    def _update_policy_entropy(self, new_ent_coef: float) -> None:
-        """
-        Update the policy's entropy coefficient through direct parameter modification.
-
-        Since we can't modify SB3's entropy coefficient directly, we modify the 
-        policy's parameters to achieve similar effects.
-        """
-        if hasattr(self.model, 'policy'):
-            # Store the new entropy coefficient
-            self.current_ent_coef = new_ent_coef
-
-            # Modify policy parameters to affect entropy
-            with torch.no_grad():
-                # Scale the policy's logits to affect action distribution entropy
-                if hasattr(self.model.policy, 'action_net'):
-                    # Scale the last layer's weights to affect entropy
-                    scale_factor = np.sqrt(new_ent_coef / self.max_ent_coef)
-                    self.model.policy.action_net[-1].weight.data *= scale_factor
+        # Store original network parameters
+        if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'action_net'):
+            # Store the original parameters of the action network
+            self.original_action_weights = self.model.policy.action_net.weight.data.clone()
+            if hasattr(self.model.policy.action_net, 'bias'):
+                self.original_action_bias = self.model.policy.action_net.bias.data.clone()
 
     def _adjust_entropy_coefficient(self) -> None:
         """
-        Adjust entropy coefficient based on training progress and performance.
+        Dynamically adjusts the entropy coefficient based on training performance metrics.
+
+        This method implements an adaptive exploration strategy by modifying the entropy
+        coefficient based on several factors:
+        1. Recent reward trends
+        2. Learning stability (loss values)
+        3. Success rate
+        4. Training progress
+
+        The adjustment aims to:
+        - Maintain high exploration when performance is poor or unstable
+        - Gradually reduce exploration as the agent improves
+        - Prevent premature convergence to suboptimal policies
+        - Increase exploration if performance degrades
         """
-        if len(self.moving_avg_rewards) < 2:
+        # We need enough history to make informed adjustments
+        if len(self.moving_avg_rewards) < 2 or len(self.loss_values) < 2:
             return
 
-        current_avg = np.mean(list(self.moving_avg_rewards))
-        prev_avg = np.mean(list(self.moving_avg_rewards)[:-1])
+        # Calculate performance metrics
+        current_reward_avg = np.mean(list(self.moving_avg_rewards))
+        previous_reward_avg = np.mean(list(self.moving_avg_rewards)[:-1])
+        current_success_rate = np.mean(
+            list(self.success_rate)) if self.success_rate else 0.0
 
-        # Calculate success rate
-        if self.success_rate:
-            current_success = np.mean(list(self.success_rate))
-        else:
-            current_success = 0.0
+        # Calculate recent loss trend
+        recent_loss_increase = (
+            self.loss_values[-1] / self.loss_values[-2]) if self.loss_values else 1.0
 
-        # Adjust entropy based on multiple factors
-        if current_success > 0.8:
-            # Reduce entropy when consistently successful
-            target_entropy = max(self.min_ent_coef,
-                                 self.current_ent_coef * 0.95)
-        elif current_avg < prev_avg * 0.9:
-            # Increase entropy when performance drops
-            target_entropy = min(self.max_ent_coef,
-                                 self.current_ent_coef * 1.1)
-        elif len(self.loss_values) > 1 and self.loss_values[-1] > self.loss_values[-2] * 1.5:
-            # Increase entropy when loss spikes
-            target_entropy = min(self.max_ent_coef,
-                                 self.current_ent_coef * 1.2)
-        else:
-            # Gradually reduce entropy over time
-            target_entropy = max(self.min_ent_coef,
-                                 self.current_ent_coef * 0.999)
+        # Initialize adjustment factor
+        adjustment_factor = 1.0
 
-        # Update policy if entropy changed significantly
-        if abs(target_entropy - self.current_ent_coef) > 0.001:
-            self._update_policy_entropy(target_entropy)
+        # 1. Adjust based on reward trend
+        reward_improvement = (
+            current_reward_avg - previous_reward_avg) / abs(previous_reward_avg + 1e-8)
+        if reward_improvement < -0.1:  # Significant performance drop
+            # Increase exploration when performance drops
+            adjustment_factor *= 1.2
+        elif reward_improvement > 0.1:  # Significant improvement
+            # Gradually reduce exploration when performing well
+            adjustment_factor *= 0.95
+
+        # 2. Adjust based on learning stability
+        if recent_loss_increase > 1.5:  # Unstable learning
+            # Increase exploration when learning is unstable
+            adjustment_factor *= 1.1
+        elif recent_loss_increase < 0.8:  # Stable improvement
+            # Reduce exploration when learning is stable
+            adjustment_factor *= 0.98
+
+        # 3. Adjust based on success rate
+        if current_success_rate > 0.8:  # High success rate
+            # Reduce exploration to fine-tune the policy
+            adjustment_factor *= 0.9
+        elif current_success_rate < 0.2:  # Low success rate
+            # Increase exploration to find better strategies
+            adjustment_factor *= 1.15
+
+        # Calculate new entropy coefficient
+        new_ent_coef = self.current_ent_coef * adjustment_factor
+
+        # Clip to valid range
+        new_ent_coef = np.clip(
+            new_ent_coef, self.min_ent_coef, self.max_ent_coef)
+
+        # Apply the new entropy coefficient if it's significantly different
+        if abs(new_ent_coef - self.current_ent_coef) > 0.001:
+            self._update_policy_entropy(new_ent_coef)
+
+            # Log the adjustment if verbose
+            if self.verbose > 0:
+                print(f"\nAdjusting entropy coefficient:")
+                print(f"Previous: {self.current_ent_coef:.4f}")
+                print(f"New: {new_ent_coef:.4f}")
+                print(f"Adjustment factors:")
+                print(f"- Reward trend: {reward_improvement:.2f}")
+                print(f"- Loss stability: {recent_loss_increase:.2f}")
+                print(f"- Success rate: {current_success_rate:.2f}")
+
+    def _update_policy_entropy(self, new_ent_coef: float) -> None:
+        """
+        Update the policy's entropy by scaling the action network parameters.
+
+        Args:
+            new_ent_coef: New entropy coefficient to apply
+        """
+        if not hasattr(self.model, 'policy') or not hasattr(self.model.policy, 'action_net'):
+            return
+
+        if self.original_action_weights is None:
+            # Store original parameters if not already stored
+            self.original_action_weights = self.model.policy.action_net.weight.data.clone()
+            if hasattr(self.model.policy.action_net, 'bias'):
+                self.original_action_bias = self.model.policy.action_net.bias.data.clone()
+
+        # Calculate scale factor based on entropy coefficient
+        scale_factor = np.sqrt(new_ent_coef / self.max_ent_coef)
+
+        with torch.no_grad():
+            # Scale the weights based on original values
+            self.model.policy.action_net.weight.data = self.original_action_weights * scale_factor
+
+            # Scale the bias if it exists
+            if hasattr(self.model.policy.action_net, 'bias') and self.original_action_bias is not None:
+                self.model.policy.action_net.bias.data = self.original_action_bias * scale_factor
+
+        self.current_ent_coef = new_ent_coef
 
     def _on_step(self) -> bool:
         """
