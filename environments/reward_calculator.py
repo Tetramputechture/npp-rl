@@ -95,7 +95,7 @@ class RewardCalculator:
         # Movement consistency reward
         if len(self.velocity_history) >= 2:
             prev_velocity = self.velocity_history[-1]
-            if np.linalg.norm(prev_velocity) > 0:
+            if np.linalg.norm(prev_velocity) > 0 and np.linalg.norm(movement_vector) > 0:
                 direction_consistency = np.dot(movement_vector, prev_velocity) / (
                     np.linalg.norm(movement_vector) *
                     np.linalg.norm(prev_velocity)
@@ -192,7 +192,6 @@ class RewardCalculator:
                     curr_distance_to_switch,
                     self.prev_distance_to_switch
                 )
-                print(f"Navigation Reward: {navigation_reward:.2f}")
                 reward += navigation_reward
             else:
                 if not prev_obs['switch_activated']:
@@ -204,7 +203,6 @@ class RewardCalculator:
                     curr_distance_to_exit,
                     self.prev_distance_to_exit
                 )
-                print(f"Navigation Reward: {navigation_reward:.2f}")
                 reward += navigation_reward
 
         # Stage 3: Optimization (after demonstrating basic competence)

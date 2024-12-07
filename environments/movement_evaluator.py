@@ -444,19 +444,21 @@ class MovementEvaluator:
 
             progress = (previous_distance_to_switch -
                         current_distance_to_switch)
+            print(f"Progress to switch: {progress}")
             return np.clip(progress + 1.0, 0.0, 1.0)
         else:
             # Calculate progress toward exit
             current_distance_to_exit = np.linalg.norm(np.array([
-                current_state['player_x'] - current_state['exit_x'],
-                current_state['player_y'] - current_state['exit_y']
+                current_state['player_x'] - current_state['exit_door_x'],
+                current_state['player_y'] - current_state['exit_door_y']
             ]))
             previous_distance_to_exit = np.linalg.norm(np.array([
-                previous_state['player_x'] - previous_state['exit_x'],
-                previous_state['player_y'] - previous_state['exit_y']
+                previous_state['player_x'] - previous_state['exit_door_x'],
+                previous_state['player_y'] - previous_state['exit_door_y']
             ]))
 
             progress = (previous_distance_to_exit - current_distance_to_exit)
+            print(f"Progress to exit: {progress}")
             return np.clip(progress + 1.0, 0.0, 1.0)
 
     def _evaluate_movement_segment(self) -> float:

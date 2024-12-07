@@ -179,21 +179,24 @@ class NPlusPlus(gymnasium.Env):
     metadata = {'render.modes': ['human']}
 
     # Constants for game time speed increase
-    GAME_SPEED_FACTOR = 2.0  # Speed factor for game time
+    GAME_SPEED_FACTOR = 0.5  # Speed factor for game time
     # Default game speed in frames per second
     GAME_DEFAULT_SPEED_FRAMES_PER_SECOND = 60.0
     # Game speed after speed increase
     GAME_SPEED_FRAMES_PER_SECOND = GAME_DEFAULT_SPEED_FRAMES_PER_SECOND * GAME_SPEED_FACTOR
 
-    # We take our observations at the game speed * 5
+    # We take our observations at the game speed * 10
     # this way our observations are more accurate
-    TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * 5)
+    TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * 10)
 
     # Movement truncation constants
     MOVEMENT_THRESHOLD = 1.0
     MOVEMENT_CHECK_DURATION = 20.0
     MOVEMENT_CHECK_FRAMES = int(
         MOVEMENT_CHECK_DURATION / (1/GAME_SPEED_FRAMES_PER_SECOND))
+
+    # The max absolute velocity of the player
+    MAX_VELOCITY = 20000.0
 
     def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
         """Initialize the N++ environment.
@@ -290,14 +293,9 @@ class NPlusPlus(gymnasium.Env):
         max_level_height = 802 - 158
         max_time = 600.0
 
-        max_velocity = 100.0
         vx, vy = self._calculate_velocity(prev_obs, obs)
-
-        print(f'Velocity: {vx}, {vy}')
-
-        # velocity can be positve or negative but we want to transform it to [0, 1]
-        vx = (vx + max_velocity) / (2 * max_velocity)
-        vy = (vy + max_velocity) / (2 * max_velocity)
+        normalized_vx = (vx + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
+        normalized_vy = (vy + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
 
         features = np.array([
             (obs['player_x'] - 63) / (1217 - 63),
@@ -309,8 +307,8 @@ class NPlusPlus(gymnasium.Env):
             (switch_dist_x) / max_level_width,
             (switch_dist_y) / max_level_height,
             float(obs['in_air']),
-            vx,
-            vy
+            normalized_vx,
+            normalized_vy
         ], dtype=np.float32)
 
         # Assert that the features are within the correct range, print a warning if not
