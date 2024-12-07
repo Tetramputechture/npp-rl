@@ -131,85 +131,77 @@ class CustomLevelCNN(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=512):
         super().__init__(observation_space, features_dim)
 
-        n_input_channels = observation_space.shape[2]  # frame_stack + 8
-        self.frame_stack = n_input_channels - 8  # Subtract feature channels
+        n_input_channels = observation_space.shape[2]
+        self.frame_stack = n_input_channels - 8
 
-        # Visual processing network for the stacked frames
+        # Visual processing network
         self.cnn = nn.Sequential(
-            # Reshape and process frame stack
-            # Input: (batch, 84, 84, frame_stack)
-            # Convert to: (batch, frame_stack, 84, 84)
-
             # Layer 1: 84x84 -> 20x20
             nn.Conv2d(self.frame_stack, 32, kernel_size=8, stride=4),
             nn.ReLU(),
+            nn.BatchNorm2d(32),
 
             # Layer 2: 20x20 -> 9x9
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
+            nn.BatchNorm2d(64),
 
             # Layer 3: 9x9 -> 7x7
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1),
             nn.ReLU(),
+            nn.BatchNorm2d(128),
+
+            # Added residual connection
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
 
             nn.Flatten()
         )
 
-        # Calculate CNN output dimension
-        # 64 channels * 7 * 7 = 3136
-        self.cnn_output_dim = 64 * 7 * 7
+        # Calculate CNN output dimension: 128 channels * 7 * 7 = 6272
+        self.cnn_output_dim = 128 * 7 * 7
 
-        # Network for processing numerical features
-        # Input: Flattened 84x84x8 numerical features
+        # Numerical feature processing
         self.numerical_net = nn.Sequential(
-            # First reduce spatial dimensions with a small CNN
-            nn.Conv2d(8, 16, kernel_size=8, stride=4),  # 84x84 -> 20x20
+            nn.Conv2d(8, 16, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=4, stride=2),  # 20x20 -> 9x9
+            nn.BatchNorm2d(16),
+            nn.Conv2d(16, 32, kernel_size=4, stride=2),
             nn.ReLU(),
+            nn.BatchNorm2d(32),
             nn.Flatten(),
-            # Process resulting features
-            nn.Linear(32 * 9 * 9, 256),
-            nn.ReLU()
+            nn.Linear(32 * 9 * 9, 512),
+            nn.ReLU(),
+            nn.Dropout(0.2)
         )
 
-        # Combined network to merge visual and numerical features
+        # Combined network
         self.combined_net = nn.Sequential(
-            nn.Linear(self.cnn_output_dim + 256, 1024),
+            nn.Linear(self.cnn_output_dim + 512, 2048),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(2048, 1024),
             nn.ReLU(),
             nn.Linear(1024, features_dim),
             nn.ReLU()
         )
 
-    def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        """Process the combined observation tensor.
+    def forward(self, observations):
+        # Split and process visual input
+        visual = observations[..., :self.frame_stack]
+        visual = visual.permute(0, 3, 1, 2)
 
-        Args:
-            observations: Tensor of shape (batch_size, 84, 84, frame_stack + 8)
-                        Contains stacked frames and numerical features
-
-        Returns:
-            torch.Tensor: Feature vector of shape (batch_size, 512)
-        """
-        # Split observation into visual and numerical components
-        # Move channel dimension to proper position for CNNs
-        visual = observations[..., :self.frame_stack]  # Get stacked frames
-        visual = visual.permute(0, 3, 1, 2)  # (batch, frame_stack, 84, 84)
-
-        # Get numerical features
+        # Process numerical features
         numerical = observations[..., self.frame_stack:]
-        numerical = numerical.permute(0, 3, 1, 2)  # (batch, 8, 84, 84)
+        numerical = numerical.permute(0, 3, 1, 2)
 
-        # Process visual path
+        # Extract features through respective pathways
         visual_features = self.cnn(visual)
-
-        # Process numerical path
         numerical_features = self.numerical_net(numerical)
 
-        # Combine features
+        # Combine and process features
         combined = torch.cat([visual_features, numerical_features], dim=1)
-
-        # Generate final feature vector
         return self.combined_net(combined)
 
 

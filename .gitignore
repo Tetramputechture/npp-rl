@@ -37,3 +37,6 @@ agent_eval_data/
 
 # Game config
 game_config.json
+
+# Model zip files
+*.zip
