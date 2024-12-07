@@ -96,6 +96,6 @@ class GameValueFetcher:
         """Read the begin retry label from memory."""
         return safe_read_string(self.pm, game_config.begin_retry_text_address)
 
-    def read_solo_text(self) -> str:
-        """Read the solo label from memory."""
-        return safe_read_string(self.pm, game_config.solo_text_address)
+    def read_in_air(self) -> bool:
+        """Read the in air status from memory."""
+        return safe_read_byte(self.pm, game_config.in_air_address)

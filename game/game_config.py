@@ -34,7 +34,7 @@ class GameConfig:
         self.switch_x_address = 0x00
         self.switch_y_address = 0x00
         self.begin_retry_text_address = 0x00
-        self.solo_text_address = 0x00
+        self.in_air_address = 0x00
 
     def _serialize_config(self) -> dict:
         """Serialize the configuration."""
@@ -51,7 +51,7 @@ class GameConfig:
             'switch_x_address': self.switch_x_address,
             'switch_y_address': self.switch_y_address,
             'begin_retry_text_address': self.begin_retry_text_address,
-            'solo_text_address': self.solo_text_address,
+            'in_air_address': self.in_air_address,
         }
 
     def save_config(self) -> None:
@@ -79,7 +79,7 @@ class GameConfig:
             self.switch_x_address = config['switch_x_address']
             self.switch_y_address = config['switch_y_address']
             self.begin_retry_text_address = config['begin_retry_text_address']
-            self.solo_text_address = config['solo_text_address']
+            self.in_air_address = config['in_air_address']
 
     def set_training(self, training: bool) -> None:
         """Set the training mode."""
@@ -124,15 +124,15 @@ class GameConfig:
         self.player_dead_address = player_dead_address
         return self.player_dead_address
 
-    def set_solo_text_address(self, solo_text_address: int) -> None:
-        """Set the solo_text_address."""
-        self.solo_text_address = solo_text_address
-        return self.solo_text_address
-
     def set_begin_retry_text_address(self, begin_retry_text_address: int) -> None:
         """Set the begin_retry_text_address."""
         self.begin_retry_text_address = begin_retry_text_address
         return self.begin_retry_text_address
+
+    def set_in_air_address(self, in_air_address: int) -> None:
+        """Set the in_air_address."""
+        self.in_air_address = in_air_address
+        return self.in_air_address
 
     def all_addresses_defined(self) -> bool:
         """Check if all addresses are defined."""
@@ -147,7 +147,7 @@ class GameConfig:
             valid_address(self.switch_x_address),
             valid_address(self.switch_y_address),
             valid_address(self.begin_retry_text_address),
-            valid_address(self.solo_text_address),
+            valid_address(self.in_air_address),
         ])
 
 

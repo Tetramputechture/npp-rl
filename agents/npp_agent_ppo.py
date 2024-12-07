@@ -1,8 +1,10 @@
 from stable_baselines3 import PPO
+from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from game.game_controller import GameController
 import torch
 from torch import nn
@@ -116,13 +118,16 @@ class TrainingCallback(BaseCallback):
         }
 
 
+NUM_NUMERICAL_FEATURES = 9
+
+
 class CustomLevelCNN(BaseFeaturesExtractor):
     """Custom CNN feature extractor for N++ environment.
 
     Architecture designed to process observations from our N++ environment where:
-    Input: Single tensor of shape (84, 84, frame_stack + 8) containing:
+    Input: Single tensor of shape (84, 84, frame_stack + 9) containing:
         - First frame_stack channels: Stacked grayscale frames
-        - Last 8 channels: Numerical features broadcast to 84x84 spatial dimensions
+        - Last 9 channels: Numerical features broadcast to 84x84 spatial dimensions
 
     The network separates and processes visual and numerical data through appropriate 
     pathways before combining them into a final feature representation.
@@ -132,7 +137,7 @@ class CustomLevelCNN(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
 
         n_input_channels = observation_space.shape[2]
-        self.frame_stack = n_input_channels - 8
+        self.frame_stack = n_input_channels - NUM_NUMERICAL_FEATURES
 
         # Visual processing network
         self.cnn = nn.Sequential(
@@ -216,90 +221,122 @@ def setup_training_env(env):
 
     return env, log_dir
 
-# Learning rate decay function
 
-
-def linear_schedule(initial_value: float):
-    def func(progress_remaining: float) -> float:
-        return progress_remaining * initial_value
-    return func
-
-
-def train_ppo_agent(env, total_timesteps=1000000):
-    """Train a PPO agent using stable-baselines3.
-
-    PPO hyperparameters are tuned for:
-    - Long episodes (high n_steps)
-    - Complex visual inputs (larger batch_size)
-    - Continuous control tasks (clip_range, learning_rate decay)
+def create_ppo_agent(env: NPlusPlus) -> PPO:
     """
-    env, log_dir = setup_training_env(env)
+    Creates a PPO agent with optimized hyperparameters for the N++ environment.
 
-    # Custom feature extractor configuration
+    The hyperparameters are specifically tuned for:
+    - Complex visual inputs (frame stacks + numerical features)
+    - Long episode horizons
+    - Sparse but shaped rewards
+    - Precise movement requirements
+
+    Args:
+        env: The N++ environment instance
+        total_timesteps: Total number of timesteps to train for
+
+    Returns:
+        PPO: Configured PPO model instance
+    """
+
+    # Learning rate schedule: Start higher for faster initial learning,
+    # then decay to allow fine-tuning of policies
+    learning_rate = get_linear_fn(
+        start=3e-4,  # Higher initial rate for faster early learning
+        end=5e-5,    # Lower final rate for stability
+        end_fraction=0.85  # Decay over most of training
+    )
+
+    # Entropy coefficient schedule: Start high for exploration,
+    # then decay to encourage exploitation of learned policies
+    ent_coef = get_linear_fn(
+        start=0.01,  # Initial entropy for exploration
+        end=0.001,   # Final entropy for exploitation
+        end_fraction=0.7  # Decay more quickly than learning rate
+    )
+
+    # Configure policy network architecture
     policy_kwargs = dict(
+        # Features extractor configuration
         features_extractor_class=CustomLevelCNN,
         features_extractor_kwargs=dict(features_dim=512),
-        # Separate policy and value networks
-        net_arch=dict(pi=[256, 256], vf=[256, 256])
+
+        # Separate network architectures for policy and value functions
+        # Larger networks to handle complex state space
+        net_arch=dict(
+            pi=[512, 256, 128],  # Policy network
+            vf=[512, 256, 128]   # Value network
+        ),
+
+        # Use ReLU for faster training
+        activation_fn=nn.ReLU
     )
 
+    # Setup exploration noise
+    n_actions = env.action_space.n
+    action_noise = OrnsteinUhlenbeckActionNoise(
+        mean=np.zeros(n_actions),
+        sigma=0.1 * np.ones(n_actions),  # Moderate noise magnitude
+        theta=0.15,  # Rate of mean reversion
+        dt=1/60  # Match game's frame rate
+    )
+
+    # Initialize PPO with optimized parameters
     model = PPO(
         policy="CnnPolicy",
-        policy_kwargs=policy_kwargs,
         env=env,
-        # Learning rate now starts higher since our rewards are larger and we want
-        # faster initial learning. We'll decay it over time.
-        learning_rate=linear_schedule(1e-3),
 
-        # Increased n_steps to capture more of the episode context, since completing
-        # objectives requires understanding longer-term dependencies
-        n_steps=4096,
+        # Learning parameters
+        learning_rate=learning_rate,
+        n_steps=2048,        # Reduced for more frequent updates
+        batch_size=64,       # Smaller batches for more stable gradients
+        n_epochs=10,         # More epochs per update for better learning
 
-        # Increased batch size to help with learning stability given our shaped rewards
-        batch_size=128,
+        # GAE and discount parameters
+        gamma=0.99,          # Standard discount factor
+        gae_lambda=0.95,     # Slightly higher for better advantage estimation
 
-        # Reduced epochs since we're processing more data per update
-        n_epochs=5,
+        # PPO-specific parameters
+        clip_range=0.2,      # Standard PPO clipping
+        clip_range_vf=0.2,   # Match policy clipping
+        ent_coef=ent_coef,  # Dynamic entropy coefficient
+        vf_coef=0.8,        # Increased value function importance
 
-        # Slightly increased gamma to account for longer-term rewards in our shaped
-        # reward function
-        gamma=0.995,
+        # Training stability parameters
+        max_grad_norm=0.5,   # Prevent explosive gradients
+        target_kl=0.015,     # Conservative policy updates
 
-        # Increased GAE lambda to give more weight to actual returns vs estimated values,
-        # helping with our shaped rewards
-        gae_lambda=0.97,
-
-        # Reduced clip range since our rewards are more stable and normalized
-        clip_range=0.1,
-        clip_range_vf=0.1,
-
-        # Increased entropy coefficient to encourage more exploration, since our
-        # shaped rewards might make the agent too conservative
-        ent_coef=0.02,
-
-        # Increased value function coefficient since accurate value estimation is
-        # more important with shaped rewards
-        vf_coef=0.75,
-
-        # Kept max_grad_norm the same as it's working well
-        max_grad_norm=0.5,
-
-        # Reduced target KL since we want more conservative policy updates with
-        # our shaped rewards
-        target_kl=0.01,
-
-        normalize_advantage=True,
+        # Additional settings
+        policy_kwargs=policy_kwargs,
+        action_noise=action_noise,
+        normalize_advantage=True,  # Important for stable training
         verbose=1,
-        device=device
+        device='cuda:0' if torch.cuda.is_available() else 'cpu'
     )
 
-    # Setup callback for monitoring
+    return model
+
+
+def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
+    """
+    Trains the PPO agent
+
+    Args:
+        env: The N++ environment instance
+        log_dir: Directory for saving logs and models
+        total_timesteps: Total training timesteps
+    """
+    # Create and set up the model
+    model = create_ppo_agent(env, total_timesteps)
+
+    # Configure callback for monitoring and saving
     callback = TrainingCallback(
         check_freq=50,
         log_dir=log_dir
     )
 
-    # Train the agent
+    # Train the model
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
@@ -396,9 +433,9 @@ def record_agent_training(env: NPlusPlus, model: PPO,
 
     print("Recording video...")
 
-    # Step 6: Record a video
+    # Step 6: Record videos for 5 episodes
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path)
+    record_video(env, model, video_path, num_episodes=5)
 
     return local_directory
 
@@ -424,12 +461,15 @@ def start_training(game_value_fetcher, game_controller: GameController):
         model = train_ppo_agent(env, total_timesteps=25000)
 
         # Save final model
+        print("Training completed. Saving model...")
         model.save("npp_ppo")
 
         # Record gameplay video
         # First, press the reset key to start a new episode
+        print("Resetting environment to record video...")
         game_controller.press_reset_key()
 
+        print("Recording video...")
         hyperparameters = {
             "env_id": "N++",
             "n_episodes": 5,

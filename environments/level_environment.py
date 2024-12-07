@@ -47,6 +47,7 @@ is a dictionary containing the following elements:
 - 'exit_door_y': Y-coordinate of the exit door (float, pixels)
 - 'switch_x': X-coordinate of the switch (float, pixels)
 - 'switch_y': Y-coordinate of the switch (float, pixels)
+- 'in_air': Whether the player is in the air (bool)
 
 When processing, the observation space is preprocessed as follows:
 - The screen is resized to 84x84 pixels and normalized to [0, 1]
@@ -54,31 +55,17 @@ When processing, the observation space is preprocessed as follows:
 - Time remaining is normalized to [0, 1]
 - Switch activated status is converted to a float (0 or 1)
 - Exit door and switch coordinates are normalized to the level dimensions
+- In-air status is converted to a float (0 or 1)
 
 When building the input tensor for the agent, the observation space is stacked
 with the last 4 frames to provide temporal information. We have 84x84 resolution
-gray-scale images, so the final observation space is (84, 84, 4 + 8) where 4 is the
-frame stack and 8 is the numerical features.
+gray-scale images, so the final observation space is (84, 84, 4 + 9) where 4 is the
+frame stack and 9 is the numerical features.
 
 
 Rewards:
 -------
-Each frame, the agent receives a reward based on the following conditions:
-- If time remaining increases since the past frame, reward += 10 * seconds gained
-- If time remaining decreases, reward -= 10 * seconds lost
-- If switch is not activated, reward += the change in distance to the switch from the previous frame (encourage movement)
-    - More positive reward for moving closer to the switch
-        - Calculation: reward += (distance_to_switch_prev - distance_to_switch_curr)
-    - We also subtract the distance to the switch overall to encourage the agent to move towards the switch
-- If switch is activated, reward += 10000
-- If switch is activated, reward += the change in distance to the exit from the previous frame
-    - Reward for moving closer to the exit after switch is activated
-    - Calculation: reward += (distance_to_exit_prev - distance_to_exit_curr)
-    - We also subtract the distance to the exit overall to encourage the agent to move towards the exit
-- If no movement is detected, reward -= 1
-    - This encourages the agent to explore the level, but we make it low because sometimes the agent should stay still.
-- If player reaches exit, reward += 20000 and episode ends
-- If player dies, reward -= 10000 and episode ends
+See _calculate_reward method for detailed reward structure.
 
 The episode ends when:
 - The player reaches the exit after activating the switch (success)
@@ -177,6 +164,8 @@ from collections import deque
 import cv2
 import os
 
+NUM_NUMERICAL_FEATURES = 9
+
 
 class NPlusPlus(gym.Env):
     """Custom Gym envjr onment for the game N++.
@@ -212,6 +201,7 @@ class NPlusPlus(gym.Env):
     MIN_MOVEMENT_THRESHOLD = 0.1  # Minimum movement to avoid penalty
     MOVEMENT_PENALTY = -0.01  # Penalty for being too static
     MAX_MOVEMENT_REWARD = 0.05  # Cap on movement reward
+    FINE_DISTANCE_THRESHOLD = 5.0  # Threshold for fine movement detection
 
     # We take our observations at the game speed * 5
     # this way our observations are more accurate
@@ -256,7 +246,7 @@ class NPlusPlus(gym.Env):
         self.observation_space = box.Box(
             low=0,
             high=1,
-            shape=(84, 84, frame_stack + 8),
+            shape=(84, 84, frame_stack + NUM_NUMERICAL_FEATURES),
             dtype=np.float32
         )
 
@@ -306,20 +296,42 @@ class NPlusPlus(gym.Env):
             numpy.ndarray: Feature array of shape (84, 84, 8)
         """
         # Create normalized feature vector
+        # Instead of absolute values for exit door x and y, provide
+        # relative position to player
+        exit_door_dist_x = obs['exit_door_x'] - obs['player_x']
+        exit_door_dist_y = obs['exit_door_y'] - obs['player_y']
+
+        switch_dist_x = obs['switch_x'] - obs['player_x']
+        switch_dist_y = obs['switch_y'] - obs['player_y']
+
+        max_level_width = 1258 - 52
+        max_level_height = 802 - 158
+        max_time = 600.0
+
         features = np.array([
             (obs['player_x'] - 63) / (1217 - 63),
             (obs['player_y'] - 171) / (791 - 171),
-            obs['time_remaining'] / 999.0,
+            obs['time_remaining'] / max_time,
             float(obs['switch_activated']),
-            (obs['exit_door_x'] - 52) / (1258 - 52),
-            (obs['exit_door_y'] - 158) / (802 - 158),
-            (obs['switch_x'] - 52) / (1258 - 52),
-            (obs['switch_y'] - 158) / (802 - 158)
+            exit_door_dist_x / max_level_width,
+            exit_door_dist_y / max_level_height,
+            switch_dist_x / max_level_width,
+            switch_dist_y / max_level_height,
+            float(obs['in_air'])
         ], dtype=np.float32)
 
-        # Reshape to (1, 1, 8) then broadcast to (84, 84, 8)
-        features = features.reshape((1, 1, 8))
-        features = np.broadcast_to(features, (84, 84, 8))
+        # Assert that the features are within the correct range, print a warning if not
+        for feature in features:
+            if feature < 0 or feature > 1:
+                print(
+                    f'Feature value {feature} is not within the correct range [0, 1]')
+
+        # Assert our features are NUM_NUMERICAL_FEATURES long
+        assert len(features) == NUM_NUMERICAL_FEATURES
+
+        # Reshape to (1, 1, 8) then broadcast to (84, 84, NUM_NUMERICAL_FEATURES)
+        features = features.reshape((1, 1, NUM_NUMERICAL_FEATURES))
+        features = np.broadcast_to(features, (84, 84, NUM_NUMERICAL_FEATURES))
 
         return features
 
@@ -344,7 +356,8 @@ class NPlusPlus(gym.Env):
         stacked_frames = np.concatenate(list(self.frames), axis=2)
 
         # Get and process numerical features
-        features = self._get_numerical_features(obs)  # Shape: (84, 84, 8)
+        # Shape: (84, 84, NUM_NUMERICAL_FEATURES)
+        features = self._get_numerical_features(obs)
 
         # Combine frames and features
         final_observation = np.concatenate([stacked_frames, features], axis=2)
@@ -369,7 +382,8 @@ class NPlusPlus(gym.Env):
             'exit_door_x': self.gvf.read_exit_door_x(),
             'exit_door_y': self.gvf.read_exit_door_y(),
             'switch_x': self.gvf.read_switch_x(),
-            'switch_y': self.gvf.read_switch_y()
+            'switch_y': self.gvf.read_switch_y(),
+            'in_air': self.gvf.read_in_air()
         }
 
     def _calculate_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
@@ -384,87 +398,22 @@ class NPlusPlus(gym.Env):
         """
         return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def _shaped_distance_reward(self, current_distance: float, previous_distance: float,
-                                is_primary_objective: bool = True) -> float:
-        """Calculate shaped reward based on distance to objective.
-
-        Args:
-            current_distance: Current distance to objective
-            previous_distance: Previous distance to objective
-            is_primary_objective: Whether this is the current primary objective
-
-        Returns:
-            float: Shaped reward value
-        """
-        # Calculate basic progress reward
-        distance_progress = previous_distance - current_distance
-
-        # Scale factors based on objective priority
-        approach_scale = self.APPROACH_REWARD_SCALE * \
-            (1.5 if is_primary_objective else 1.0)
-        retreat_scale = self.RETREAT_PENALTY_SCALE * \
-            (1.5 if is_primary_objective else 1.0)
-
-        # Calculate progressive reward
-        if distance_progress > 0:  # Moving closer
-            progress_reward = distance_progress * approach_scale
-        else:  # Moving away
-            progress_reward = distance_progress * retreat_scale
-
-        # Add inverse distance component for continuous guidance
-        inverse_distance = 1.0 / (1.0 + current_distance)
-
-        return progress_reward + (inverse_distance * self.DISTANCE_SCALE)
-
-    def _movement_quality_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
-        """Calculate reward based on movement quality.
-
-        Evaluates movement based on:
-        - Magnitude of movement
-        - Consistency of movement
-        - Progress toward objectives
-        """
-        current_pos = np.array([obs['player_x'], obs['player_y']])
-
-        if self.prev_position is None:
-            self.prev_position = current_pos
-            return 0.0
-
-        # Calculate velocity
-        velocity = current_pos - self.prev_position
-        velocity_magnitude = np.linalg.norm(velocity)
-
-        # Update velocity history
-        self.velocity_history.append(velocity)
-
-        # Calculate movement reward
-        if velocity_magnitude < self.MIN_MOVEMENT_THRESHOLD:
-            movement_reward = self.MOVEMENT_PENALTY
-        else:
-            # Reward smooth, purposeful movement
-            movement_reward = min(velocity_magnitude * 0.1,
-                                  self.MAX_MOVEMENT_REWARD)
-
-            # Add bonus for consistent movement direction if we have enough history
-            if len(self.velocity_history) >= 2:
-                prev_velocity = self.velocity_history[-2]
-                if np.linalg.norm(prev_velocity) != 0:
-                    direction_consistency = np.dot(velocity, prev_velocity) / (
-                        np.linalg.norm(velocity) * np.linalg.norm(prev_velocity))
-                    movement_reward *= (1.0 + direction_consistency * 0.5)
-
-        self.prev_position = current_pos
-        return movement_reward
-
     def _calculate_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
         """Calculate reward based on current and previous observations.
 
-        Implements an improved reward structure with:
-        1. Shaped distance-based rewards
-        2. Normalized reward scales
-        3. Movement quality assessment
-        4. Continuous time penalties
-        5. Balanced terminal rewards
+        Implements an reward structure with:
+        1. Granular distance-based rewards with fine movement detection
+        2. Platform landing rewards and movement quality assessment
+        3. Dynamic time penalty scaling
+        4. Balanced terminal rewards with proper scaling
+        5. Progressive objective-based rewards
+
+        Args:
+            obs: Current observation dictionary
+            prev_obs: Previous observation dictionary
+
+        Returns:
+            float: Calculated reward value
         """
         reward = 0.0
 
@@ -478,49 +427,106 @@ class NPlusPlus(gym.Env):
             obs['exit_door_x'], obs['exit_door_y']
         )
 
-        # Base time penalty to encourage efficiency
-        reward += self.BASE_TIME_PENALTY
+        # Dynamic time penalty scaling based on remaining time
+        time_penalty_scale = 1.0 / max(obs['time_remaining'], 1.0)
+        reward += self.BASE_TIME_PENALTY * \
+            min(time_penalty_scale, 5.0)  # Cap the penalty
 
-        # Time and gold collection rewards
+        # Time bonus and gold collection rewards with proper scaling
         time_diff = obs['time_remaining'] - prev_obs['time_remaining']
-        if time_diff > 0:  # Collected gold
+        if time_diff > 0:  # Collected gold or time bonus
             reward += self.GOLD_COLLECTION_REWARD * time_diff
 
-        # Objective-based rewards
+        # Calculate movement vector for quality assessment
+        movement_vector = np.array([
+            obs['player_x'] - prev_obs['player_x'],
+            obs['player_y'] - prev_obs['player_y']
+        ])
+        movement_magnitude = np.linalg.norm(movement_vector)
+
+        # Fine movement detection and reward
+        if 0 < movement_magnitude < self.FINE_DISTANCE_THRESHOLD:
+            reward += 0.1  # Small reward for precise movements
+
+        # Platform landing reward
+        if prev_obs['in_air'] and not obs['in_air']:
+            reward += 0.5  # Reward for landing
+
+        # Objective-based rewards with priority scaling
         if not obs['switch_activated']:
             # Primary objective: Switch activation
-            reward += self._shaped_distance_reward(
-                curr_distance_to_switch,
-                self.prev_distance_to_switch,
-                is_primary_objective=True
-            )
+            distance_progress = self.prev_distance_to_switch - curr_distance_to_switch
+
+            # Scale rewards based on approach or retreat
+            if distance_progress > 0:  # Moving closer to switch
+                reward += distance_progress * self.APPROACH_REWARD_SCALE * 1.5
+
+                # Extra reward for very close approach
+                if curr_distance_to_switch < self.FINE_DISTANCE_THRESHOLD:
+                    reward += 0.5
+            else:  # Moving away from switch
+                reward += distance_progress * self.RETREAT_PENALTY_SCALE
+
+            # Add inverse distance component for continuous guidance
+            reward += 1.0 / (1.0 + curr_distance_to_switch) * \
+                self.DISTANCE_SCALE
+
         else:
             # Switch activation reward (one-time)
             if not prev_obs['switch_activated']:
                 reward += self.SWITCH_ACTIVATION_REWARD
 
             # Secondary objective: Reach exit
-            reward += self._shaped_distance_reward(
-                curr_distance_to_exit,
-                self.prev_distance_to_exit,
-                is_primary_objective=True
-            )
+            distance_progress = self.prev_distance_to_exit - curr_distance_to_exit
 
-        # Movement quality reward
-        reward += self._movement_quality_reward(obs, prev_obs)
+            if distance_progress > 0:  # Moving closer to exit
+                reward += distance_progress * self.APPROACH_REWARD_SCALE * 1.5
 
-        # Terminal state rewards
+                # Extra reward for very close approach
+                if curr_distance_to_exit < self.FINE_DISTANCE_THRESHOLD:
+                    reward += 0.5
+            else:  # Moving away from exit
+                reward += distance_progress * self.RETREAT_PENALTY_SCALE
+
+            # Add inverse distance component for continuous guidance
+            reward += 1.0 / (1.0 + curr_distance_to_exit) * self.DISTANCE_SCALE
+
+        # Movement quality assessment
+        if movement_magnitude < self.MIN_MOVEMENT_THRESHOLD:
+            reward += self.MOVEMENT_PENALTY
+        else:
+            # Cap movement reward to prevent exploitation
+            movement_reward = min(movement_magnitude * 0.1,
+                                  self.MAX_MOVEMENT_REWARD)
+
+            # Check movement consistency with velocity history
+            if len(self.velocity_history) >= 2:
+                prev_velocity = self.velocity_history[-1]
+                if np.linalg.norm(prev_velocity) > 0:
+                    # Calculate direction consistency
+                    direction_consistency = np.dot(movement_vector, prev_velocity) / (
+                        np.linalg.norm(movement_vector) *
+                        np.linalg.norm(prev_velocity)
+                    )
+                    movement_reward *= (1.0 + direction_consistency * 0.5)
+
+            reward += movement_reward
+
+        # Update velocity history
+        self.velocity_history.append(movement_vector)
+
+        # Terminal state rewards with proper scaling
         if obs['time_remaining'] <= 0:
             reward += self.TIMEOUT_PENALTY
 
         if self.gvf.read_player_dead():
             reward += self.DEATH_PENALTY
 
-        # Success reward
+        # Success reward with completion verification
         if 'retry level' in self.gvf.read_begin_retry_text().lower():
             reward += self.TERMINAL_REWARD
 
-        # Update previous distances
+        # Update previous distances for next calculation
         self.prev_distance_to_switch = curr_distance_to_switch
         self.prev_distance_to_exit = curr_distance_to_exit
 
