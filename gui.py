@@ -7,7 +7,7 @@ from game.game_process import GameProcess
 from game.game_config import game_config
 from game.frame_text import extract_text
 from game.game_window import get_center_frame
-from environments.level_environment import NPlusPlus
+from environments.nplusplus import NPlusPlus
 import numpy as np
 import time
 import threading

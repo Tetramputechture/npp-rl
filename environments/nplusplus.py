@@ -151,23 +151,24 @@ Additional Info:
 10. When taking an action that includes the same key or keys as the previous action, we don't want to release the keys
     before pressing them again. This is because the agent may want to continue holding the key(s) for the next action.
 """
-import gym
+import gymnasium
 from gymnasium.spaces import discrete, box
 import numpy as np
 from game.game_controller import GameController
 from game.game_window import get_game_window_frame, get_center_frame
 from game.frame_text import extract_text
 from game.game_value_fetcher import GameValueFetcher
+from environments.reward_calculator import RewardCalculator
 import time
 from typing import Tuple, Dict, Any
 from collections import deque
 import cv2
 import os
 
-NUM_NUMERICAL_FEATURES = 9
+NUM_NUMERICAL_FEATURES = 11
 
 
-class NPlusPlus(gym.Env):
+class NPlusPlus(gymnasium.Env):
     """Custom Gym envjr onment for the game N++.
 
     This environment provides a Gym interface for the N++ game, allowing reinforcement
@@ -267,6 +268,9 @@ class NPlusPlus(gym.Env):
         # Initialize episode counter
         self.episode_counter = 0
 
+        # Initialize reward calculator
+        self.reward_calculator = RewardCalculator()
+
     def _preprocess_frame(self, frame):
         """Preprocess raw frame for CNN input.
 
@@ -289,7 +293,7 @@ class NPlusPlus(gym.Env):
 
         return frame
 
-    def _get_numerical_features(self, obs):
+    def _get_numerical_features(self, obs, prev_obs):
         """Extract and normalize numerical features.
 
         Returns:
@@ -304,27 +308,44 @@ class NPlusPlus(gym.Env):
         switch_dist_x = obs['switch_x'] - obs['player_x']
         switch_dist_y = obs['switch_y'] - obs['player_y']
 
+        # Increase both distances so that their min is 0
+        exit_door_dist_x += 63
+        exit_door_dist_y += 171
+
+        switch_dist_x += 63
+        switch_dist_y += 171
+
         max_level_width = 1258 - 52
         max_level_height = 802 - 158
         max_time = 600.0
+
+        max_velocity = 100.0
+        vx, vy = self._calculate_velocity(self.prev_position, obs)
+
+        # velocity can be positve or negative but we want to transform it to [0, 1]
+        vx = (vx + max_velocity) / (2 * max_velocity)
+        vy = (vy + max_velocity) / (2 * max_velocity)
 
         features = np.array([
             (obs['player_x'] - 63) / (1217 - 63),
             (obs['player_y'] - 171) / (791 - 171),
             obs['time_remaining'] / max_time,
             float(obs['switch_activated']),
-            exit_door_dist_x / max_level_width,
-            exit_door_dist_y / max_level_height,
-            switch_dist_x / max_level_width,
-            switch_dist_y / max_level_height,
-            float(obs['in_air'])
+            (exit_door_dist_x) / max_level_width,
+            (exit_door_dist_y) / max_level_height,
+            (switch_dist_x) / max_level_width,
+            (switch_dist_y) / max_level_height,
+            float(obs['in_air']),
+            vx,
+            vy
         ], dtype=np.float32)
 
         # Assert that the features are within the correct range, print a warning if not
-        for feature in features:
+        for feature, feature_name in zip(features,
+                                         ['player_x', 'player_y', 'time_remaining', 'switch_activated', 'exit_door_x', 'exit_door_y', 'switch_x', 'switch_y', 'in_air', 'vx', 'vy']):
             if feature < 0 or feature > 1:
                 print(
-                    f'Feature value {feature} is not within the correct range [0, 1]')
+                    f'Feature {feature_name}: {feature} is not within the correct range [0, 1]')
 
         # Assert our features are NUM_NUMERICAL_FEATURES long
         assert len(features) == NUM_NUMERICAL_FEATURES
@@ -335,7 +356,7 @@ class NPlusPlus(gym.Env):
 
         return features
 
-    def _get_stacked_observation(self, obs):
+    def _get_stacked_observation(self, obs, prev_obs):
         """Combine frame stack with numerical features properly.
 
         Returns:
@@ -357,7 +378,7 @@ class NPlusPlus(gym.Env):
 
         # Get and process numerical features
         # Shape: (84, 84, NUM_NUMERICAL_FEATURES)
-        features = self._get_numerical_features(obs)
+        features = self._get_numerical_features(obs, prev_obs)
 
         # Combine frames and features
         final_observation = np.concatenate([stacked_frames, features], axis=2)
@@ -398,139 +419,25 @@ class NPlusPlus(gym.Env):
         """
         return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def _calculate_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any]) -> float:
-        """Calculate reward based on current and previous observations.
-
-        Implements an reward structure with:
-        1. Granular distance-based rewards with fine movement detection
-        2. Platform landing rewards and movement quality assessment
-        3. Dynamic time penalty scaling
-        4. Balanced terminal rewards with proper scaling
-        5. Progressive objective-based rewards
+    def _calculate_velocity(self, prev_obs: Dict[str, Any], curr_obs: Dict[str, Any]) -> Tuple[float, float]:
+        """Calculate player velocity based on previous and current observations.
 
         Args:
-            obs: Current observation dictionary
             prev_obs: Previous observation dictionary
-
-        Returns:
-            float: Calculated reward value
+            curr_obs: Current observation dictionary
         """
-        reward = 0.0
+        # Calculate time elapsed between observations
+        time_elapsed = self.TIMESTEP
 
-        # Calculate current distances
-        curr_distance_to_switch = self._calculate_distance(
-            obs['player_x'], obs['player_y'],
-            obs['switch_x'], obs['switch_y']
-        )
-        curr_distance_to_exit = self._calculate_distance(
-            obs['player_x'], obs['player_y'],
-            obs['exit_door_x'], obs['exit_door_y']
-        )
+        # Calculate distance traveled in x and y directions
+        dx = curr_obs['player_x'] - prev_obs['player_x']
+        dy = curr_obs['player_y'] - prev_obs['player_y']
 
-        # Dynamic time penalty scaling based on remaining time
-        time_penalty_scale = 1.0 / max(obs['time_remaining'], 1.0)
-        reward += self.BASE_TIME_PENALTY * \
-            min(time_penalty_scale, 5.0)  # Cap the penalty
+        # Calculate velocity components
+        vx = dx / time_elapsed
+        vy = dy / time_elapsed
 
-        # Time bonus and gold collection rewards with proper scaling
-        time_diff = obs['time_remaining'] - prev_obs['time_remaining']
-        if time_diff > 0:  # Collected gold or time bonus
-            reward += self.GOLD_COLLECTION_REWARD * time_diff
-
-        # Calculate movement vector for quality assessment
-        movement_vector = np.array([
-            obs['player_x'] - prev_obs['player_x'],
-            obs['player_y'] - prev_obs['player_y']
-        ])
-        movement_magnitude = np.linalg.norm(movement_vector)
-
-        # Fine movement detection and reward
-        if 0 < movement_magnitude < self.FINE_DISTANCE_THRESHOLD:
-            reward += 0.1  # Small reward for precise movements
-
-        # Platform landing reward
-        if prev_obs['in_air'] and not obs['in_air']:
-            reward += 0.5  # Reward for landing
-
-        # Objective-based rewards with priority scaling
-        if not obs['switch_activated']:
-            # Primary objective: Switch activation
-            distance_progress = self.prev_distance_to_switch - curr_distance_to_switch
-
-            # Scale rewards based on approach or retreat
-            if distance_progress > 0:  # Moving closer to switch
-                reward += distance_progress * self.APPROACH_REWARD_SCALE * 1.5
-
-                # Extra reward for very close approach
-                if curr_distance_to_switch < self.FINE_DISTANCE_THRESHOLD:
-                    reward += 0.5
-            else:  # Moving away from switch
-                reward += distance_progress * self.RETREAT_PENALTY_SCALE
-
-            # Add inverse distance component for continuous guidance
-            reward += 1.0 / (1.0 + curr_distance_to_switch) * \
-                self.DISTANCE_SCALE
-
-        else:
-            # Switch activation reward (one-time)
-            if not prev_obs['switch_activated']:
-                reward += self.SWITCH_ACTIVATION_REWARD
-
-            # Secondary objective: Reach exit
-            distance_progress = self.prev_distance_to_exit - curr_distance_to_exit
-
-            if distance_progress > 0:  # Moving closer to exit
-                reward += distance_progress * self.APPROACH_REWARD_SCALE * 1.5
-
-                # Extra reward for very close approach
-                if curr_distance_to_exit < self.FINE_DISTANCE_THRESHOLD:
-                    reward += 0.5
-            else:  # Moving away from exit
-                reward += distance_progress * self.RETREAT_PENALTY_SCALE
-
-            # Add inverse distance component for continuous guidance
-            reward += 1.0 / (1.0 + curr_distance_to_exit) * self.DISTANCE_SCALE
-
-        # Movement quality assessment
-        if movement_magnitude < self.MIN_MOVEMENT_THRESHOLD:
-            reward += self.MOVEMENT_PENALTY
-        else:
-            # Cap movement reward to prevent exploitation
-            movement_reward = min(movement_magnitude * 0.1,
-                                  self.MAX_MOVEMENT_REWARD)
-
-            # Check movement consistency with velocity history
-            if len(self.velocity_history) >= 2:
-                prev_velocity = self.velocity_history[-1]
-                if np.linalg.norm(prev_velocity) > 0:
-                    # Calculate direction consistency
-                    direction_consistency = np.dot(movement_vector, prev_velocity) / (
-                        np.linalg.norm(movement_vector) *
-                        np.linalg.norm(prev_velocity)
-                    )
-                    movement_reward *= (1.0 + direction_consistency * 0.5)
-
-            reward += movement_reward
-
-        # Update velocity history
-        self.velocity_history.append(movement_vector)
-
-        # Terminal state rewards with proper scaling
-        if obs['time_remaining'] <= 0:
-            reward += self.TIMEOUT_PENALTY
-
-        if self.gvf.read_player_dead():
-            reward += self.DEATH_PENALTY
-
-        # Success reward with completion verification
-        if 'retry level' in self.gvf.read_begin_retry_text().lower():
-            reward += self.TERMINAL_REWARD
-
-        # Update previous distances for next calculation
-        self.prev_distance_to_switch = curr_distance_to_switch
-        self.prev_distance_to_exit = curr_distance_to_exit
-
-        return reward
+        return vx, vy
 
     def _execute_action(self, action: int):
         """Execute the specified action using the game controller.
@@ -682,10 +589,13 @@ class NPlusPlus(gym.Env):
         #     print("Episode done. Not pausing. The environment reset should handle this.")
 
         # Process the observation
-        processed_obs = self._get_stacked_observation(observation)
+        processed_obs = self._get_stacked_observation(observation, prev_obs)
 
         # Calculate reward
-        reward = self._calculate_reward(observation, prev_obs)
+        reward = self.reward_calculator.calculate_reward(
+            observation, prev_obs, action)
+
+        print(f'Total Reward: {reward}')
 
         info = {
             'raw_reward': reward,

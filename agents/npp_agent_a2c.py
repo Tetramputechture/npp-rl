@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 import datetime
 import imageio
-from environments.level_environment import NPlusPlus
+from environments.nplusplus import NPlusPlus
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

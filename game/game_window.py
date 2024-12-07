@@ -4,6 +4,12 @@ from PIL import ImageGrab
 from typing import Optional
 GAME_WINDOW_TITLE = "NPP"
 
+MAIN_WINDOW_RESOLUTION = (1280, 720)
+LEVEL_FRAME = (48, 180, 1230, 830)
+
+LEVEL_WIDTH = LEVEL_FRAME[2] - LEVEL_FRAME[0]
+LEVEL_HEIGHT = LEVEL_FRAME[3] - LEVEL_FRAME[1]
+
 
 def get_game_window_handle() -> int:
     """Get the game window handle."""
@@ -19,7 +25,7 @@ def get_game_window_rect() -> Optional[tuple]:
 
 
 def get_game_window_frame() -> Optional[np.ndarray]:
-    """Capture current window frame and convert to 640x480 RGB.
+    """Capture current window frame.
     Assumes a 1280x720 input."""
     window_rect = get_game_window_rect()
     if not window_rect:
@@ -29,7 +35,7 @@ def get_game_window_frame() -> Optional[np.ndarray]:
     screen = ImageGrab.grab(window_rect)
 
     # Crop to only the level playing view
-    frame = screen.crop((48, 180, 1230, 830))
+    frame = screen.crop(LEVEL_FRAME)
 
     frame = np.array(frame)
     return frame

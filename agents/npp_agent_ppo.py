@@ -13,112 +13,12 @@ from pathlib import Path
 import json
 import datetime
 import imageio
-from environments.level_environment import NPlusPlus
+from environments.nplusplus import NPlusPlus
+from agents.ppo_training_callback import PPOTrainingCallback
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-
-class TrainingCallback(BaseCallback):
-    """Custom callback for monitoring ppo training progress.
-
-    This callback tracks episode rewards and lengths, calculating running averages
-    to monitor training progress. It saves the model when performance improves
-    and provides regular updates during training.
-
-    The callback processes the episode information buffer, which contains
-    dictionaries of episode statistics, to extract meaningful metrics about
-    the agent's learning progress.
-    """
-
-    def __init__(self, check_freq, log_dir, verbose=1):
-        super().__init__(verbose)
-        self.check_freq = check_freq
-        self.log_dir = log_dir
-        self.save_path = str(log_dir / 'best_model')
-        self.best_mean_reward = -np.inf
-
-        # Keep track of episode rewards for plotting
-        self.episode_rewards = []
-        self.episode_lengths = []
-        self.episode_timestamps = []
-
-    def _get_episode_statistics(self):
-        """Calculate statistics from the episode info buffer.
-
-        The episode info buffer contains dictionaries with 'r' (reward)
-        and 'l' (length) keys for each completed episode.
-
-        Returns:
-            tuple: (mean_reward, mean_length) - Average reward and length
-                  of recent episodes
-        """
-        # Extract rewards and lengths from episode info buffer
-        if len(self.model.ep_info_buffer) == 0:
-            return 0.0, 0.0
-
-        rewards = [ep_info['r'] for ep_info in self.model.ep_info_buffer]
-        lengths = [ep_info['l'] for ep_info in self.model.ep_info_buffer]
-
-        # Calculate means
-        mean_reward = np.mean(rewards)
-        mean_length = np.mean(lengths)
-
-        # Store for later analysis
-        self.episode_rewards.append(mean_reward)
-        self.episode_lengths.append(mean_length)
-        self.episode_timestamps.append(self.n_calls)
-
-        return mean_reward, mean_length
-
-    def _on_step(self):
-        """Called after every step during training.
-
-        This method:
-        1. Checks if it's time to evaluate (based on check_freq)
-        2. Calculates current performance metrics
-        3. Saves the model if performance has improved
-        4. Prints progress information
-
-        Returns:
-            bool: Whether to continue training
-        """
-        # Check if it's time to evaluate
-        if self.n_calls % self.check_freq == 0:
-            # Calculate current performance metrics
-            mean_reward, mean_length = self._get_episode_statistics()
-
-            # Print detailed training progress
-            print("\n" + "="*50)
-            print(f"Training Progress at Step {self.n_calls}")
-            print(f"Mean episode reward: {mean_reward:.2f}")
-            print(f"Mean episode length: {mean_length:.2f}")
-            print(f"Number of episodes: {len(self.model.ep_info_buffer)}")
-            print(f"Best mean reward: {self.best_mean_reward:.2f}")
-            print("="*50 + "\n")
-
-            # Save best model
-            if mean_reward > self.best_mean_reward:
-                print(
-                    f"New best mean reward: {mean_reward:.2f} -> Saving model")
-                self.best_mean_reward = mean_reward
-                self.model.save(self.save_path)
-
-        return True
-
-    def get_training_history(self):
-        """Get the training history for plotting or analysis.
-
-        Returns:
-            dict: Training history containing rewards, lengths, and timestamps
-        """
-        return {
-            'rewards': self.episode_rewards,
-            'lengths': self.episode_lengths,
-            'timestamps': self.episode_timestamps
-        }
-
-
-NUM_NUMERICAL_FEATURES = 9
+NUM_NUMERICAL_FEATURES = 11
 
 
 class CustomLevelCNN(BaseFeaturesExtractor):
@@ -169,7 +69,7 @@ class CustomLevelCNN(BaseFeaturesExtractor):
 
         # Numerical feature processing
         self.numerical_net = nn.Sequential(
-            nn.Conv2d(8, 16, kernel_size=8, stride=4),
+            nn.Conv2d(NUM_NUMERICAL_FEATURES, 16, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.BatchNorm2d(16),
             nn.Conv2d(16, 32, kernel_size=4, stride=2),
@@ -256,6 +156,8 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         end_fraction=0.7  # Decay more quickly than learning rate
     )
 
+    seed = 42
+
     # Configure policy network architecture
     policy_kwargs = dict(
         # Features extractor configuration
@@ -275,6 +177,10 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
     # Setup exploration noise
     n_actions = env.action_space.n
+
+    # Unused for now, but can be added for exploration
+    # Note, the PPO constructor in stable-baselines3 does not support action noise,
+    # so we will have to add this manually if needed via a wrapper around the PPO model
     action_noise = OrnsteinUhlenbeckActionNoise(
         mean=np.zeros(n_actions),
         sigma=0.1 * np.ones(n_actions),  # Moderate noise magnitude
@@ -300,7 +206,10 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         # PPO-specific parameters
         clip_range=0.2,      # Standard PPO clipping
         clip_range_vf=0.2,   # Match policy clipping
-        ent_coef=ent_coef,  # Dynamic entropy coefficient
+        # Entropy coefficient for exploration. Note: we alter this using our PPOTrainingCallback
+        # We set this to the max value to encourage exploration, but our callback will adjust it
+        # to maintain a target KL divergence
+        ent_coef=0.02,
         vf_coef=0.8,        # Increased value function importance
 
         # Training stability parameters
@@ -309,10 +218,11 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
         # Additional settings
         policy_kwargs=policy_kwargs,
-        action_noise=action_noise,
+        # action_noise=action_noise,
         normalize_advantage=True,  # Important for stable training
         verbose=1,
-        device='cuda:0' if torch.cuda.is_available() else 'cpu'
+        device='cuda:0' if torch.cuda.is_available() else 'cpu',
+        seed=seed
     )
 
     return model
@@ -328,12 +238,14 @@ def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
         total_timesteps: Total training timesteps
     """
     # Create and set up the model
-    model = create_ppo_agent(env, total_timesteps)
+    model = create_ppo_agent(env)
 
     # Configure callback for monitoring and saving
-    callback = TrainingCallback(
+    callback = PPOTrainingCallback(
         check_freq=50,
-        log_dir=log_dir
+        log_dir=log_dir,
+        min_ent_coef=0.005,
+        max_ent_coef=0.02
     )
 
     # Train the model
@@ -458,7 +370,8 @@ def start_training(game_value_fetcher, game_controller: GameController):
         print("The Action Space is: ", a_size)
 
         print("Starting PPO training...")
-        model = train_ppo_agent(env, total_timesteps=25000)
+        log_dir = Path('./training_logs/ppo_training_log')
+        model = train_ppo_agent(env, log_dir, total_timesteps=25000)
 
         # Save final model
         print("Training completed. Saving model...")
