@@ -94,76 +94,103 @@ class PPOTrainingCallback(BaseCallback):
 
     def _adjust_entropy_coefficient(self) -> None:
         """
-        Dynamically adjusts the entropy coefficient based on training performance metrics.
+        Dynamically adjusts the entropy coefficient based on comprehensive success metrics.
 
-        This method implements an adaptive exploration strategy by modifying the entropy
-        coefficient based on several factors:
-        1. Recent reward trends
-        2. Learning stability (loss values)
-        3. Success rate
-        4. Training progress
+        In N++, success is hierarchical:
+        1. Basic Movement: Precision, landing, and momentum control
+        2. Navigation: Reaching and activating the switch
+        3. Completion: Reaching the exit after switch activation
 
-        The adjustment aims to:
-        - Maintain high exploration when performance is poor or unstable
-        - Gradually reduce exploration as the agent improves
-        - Prevent premature convergence to suboptimal policies
-        - Increase exploration if performance degrades
+        The entropy adjustment considers all these levels to maintain appropriate
+        exploration throughout the learning process.
         """
         print('Attempting to adjust entropy coefficient')
+
         # We need enough history to make informed adjustments
         if len(self.moving_avg_rewards) < 2 or len(self.loss_values) < 2:
             print('Not enough history to adjust entropy coefficient')
             return
 
-        # Calculate performance metrics
+        # Calculate base performance metrics
         current_reward_avg = np.mean(list(self.moving_avg_rewards))
         previous_reward_avg = np.mean(list(self.moving_avg_rewards)[:-1])
-        current_success_rate = np.mean(
-            list(self.success_rate)) if self.success_rate else 0.0
 
-        print(f'Current reward avg: {current_reward_avg}')
-        print(f'Previous reward avg: {previous_reward_avg}')
-        print(f'Current success rate: {current_success_rate}')
+        # Get the latest episode info for detailed success metrics
+        if len(self.model.ep_info_buffer) > 0:
+            last_info = self.model.ep_info_buffer[-1]
 
-        # Calculate recent loss trend
-        recent_loss_increase = (
-            self.loss_values[-1] / self.loss_values[-2]) if self.loss_values else 1.0
+            # Extract all success components
+            movement_success = last_info.get('movement_efficiency', 0.0)
+            landing_success = last_info.get('landing_quality', 0.0)
+            momentum_success = last_info.get('momentum_efficiency', 0.0)
+            switch_progress = last_info.get('switch_activated', 0.0)
+            objective_progress = last_info.get('objective_progress', 0.0)
+            level_success = last_info.get('success', 0.0)
+
+            # Calculate composite success rates
+            movement_mastery = np.mean(
+                [movement_success, landing_success, momentum_success])
+            navigation_success = np.mean([switch_progress, objective_progress])
+        else:
+            movement_mastery = 0.0
+            navigation_success = 0.0
+            level_success = 0.0
+
+        print(f'Movement Mastery: {movement_mastery:.3f}')
+        print(f'Navigation Success: {navigation_success:.3f}')
+        print(f'Level Success: {level_success:.3f}')
 
         # Initialize adjustment factor
         adjustment_factor = 1.0
 
-        # 1. Adjust based on reward trend
-        reward_improvement = (
-            current_reward_avg - previous_reward_avg) / abs(previous_reward_avg + 1e-8)
-        if reward_improvement < -0.1:  # Significant performance drop
-            # Increase exploration when performance drops
-            adjustment_factor *= 1.2
-        elif reward_improvement > 0.1:  # Significant improvement
-            # Gradually reduce exploration when performing well
+        # 1. Adjust based on movement mastery
+        if movement_mastery < 0.3:  # Poor movement control
+            # Keep high exploration to learn basic movements
+            adjustment_factor *= 1.1
+        elif movement_mastery > 0.7:  # Good movement control
+            # Slightly reduce exploration to refine movements
             adjustment_factor *= 0.95
 
-        # 2. Adjust based on learning stability
-        if recent_loss_increase > 1.5:  # Unstable learning
-            # Increase exploration when learning is unstable
+        # 2. Adjust based on navigation success
+        if navigation_success < 0.2:  # Struggling to reach objectives
+            # Increase exploration to find paths
+            adjustment_factor *= 1.05
+        elif navigation_success > 0.6:  # Good at reaching objectives
+            # Reduce exploration to optimize paths
+            adjustment_factor *= 0.97
+
+        # 3. Adjust based on reward trend
+        reward_improvement = (
+            current_reward_avg - previous_reward_avg) / (abs(previous_reward_avg) + 1e-8)
+        if reward_improvement < -0.1:  # Significant performance drop
+            # Increase exploration to escape local optimum
             adjustment_factor *= 1.1
-        elif recent_loss_increase < 0.8:  # Stable improvement
-            # Reduce exploration when learning is stable
+        elif reward_improvement > 0.1:  # Significant improvement
+            # Gradually reduce exploration
             adjustment_factor *= 0.98
 
-        # 3. Adjust based on success rate
-        if current_success_rate > 0.8:  # High success rate
-            # Reduce exploration to fine-tune the policy
-            adjustment_factor *= 0.9
-        elif current_success_rate < 0.2:  # Low success rate
-            # Increase exploration to find better strategies
-            adjustment_factor *= 1.15
+        # 4. Adjust based on learning stability
+        recent_loss_increase = self.loss_values[-1] / \
+            (self.loss_values[-2] + 1e-8)
+        if recent_loss_increase > 1.5:  # Unstable learning
+            # Stabilize by increasing exploration
+            adjustment_factor *= 1.05
+        elif recent_loss_increase < 0.8:  # Stable learning
+            # Allow for more exploitation
+            adjustment_factor *= 0.98
 
-        # Calculate new entropy coefficient
+        # Calculate new entropy coefficient with smoother adjustment
         new_ent_coef = self.current_ent_coef * adjustment_factor
 
-        # Clip to valid range
-        new_ent_coef = np.clip(
-            new_ent_coef, self.min_ent_coef, self.max_ent_coef)
+        # Clip to valid range with wider bounds during early learning
+        if movement_mastery < 0.5:  # Early learning phase
+            min_ent = self.min_ent_coef * 1.5  # Higher minimum during early learning
+            max_ent = self.max_ent_coef * 1.2  # Higher maximum during early learning
+        else:
+            min_ent = self.min_ent_coef
+            max_ent = self.max_ent_coef
+
+        new_ent_coef = np.clip(new_ent_coef, min_ent, max_ent)
 
         # Apply the new entropy coefficient if it's significantly different
         if abs(new_ent_coef - self.current_ent_coef) > 0.001:
@@ -175,9 +202,10 @@ class PPOTrainingCallback(BaseCallback):
                 print(f"Previous: {self.current_ent_coef:.4f}")
                 print(f"New: {new_ent_coef:.4f}")
                 print(f"Adjustment factors:")
-                print(f"- Reward trend: {reward_improvement:.2f}")
-                print(f"- Loss stability: {recent_loss_increase:.2f}")
-                print(f"- Success rate: {current_success_rate:.2f}")
+                print(f"- Movement mastery: {movement_mastery:.3f}")
+                print(f"- Navigation success: {navigation_success:.3f}")
+                print(f"- Reward trend: {reward_improvement:.3f}")
+                print(f"- Learning stability: {recent_loss_increase:.3f}")
 
     def _update_policy_entropy(self, new_ent_coef: float) -> None:
         """
