@@ -142,10 +142,13 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
     # Learning rate schedule: Start higher for faster initial learning,
     # then decay to allow fine-tuning of policies
+    # Learning rate schedule with warmup and slower decay
+    # Start lower to build good fundamentals, then increase for faster learning,
+    # and finally decay for fine-tuning
     learning_rate = get_linear_fn(
-        start=3e-4,  # Higher initial rate for faster early learning
-        end=5e-5,    # Lower final rate for stability
-        end_fraction=0.85  # Decay over most of training
+        start=1e-4,    # Lower initial rate for better early learning
+        end=1e-5,      # Very low final rate for precise policy refinement
+        end_fraction=0.9  # Longer decay period
     )
 
     # Entropy coefficient schedule: Start high for exploration,
@@ -160,19 +163,17 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
     # Configure policy network architecture
     policy_kwargs = dict(
-        # Features extractor configuration
         features_extractor_class=CustomLevelCNN,
-        features_extractor_kwargs=dict(features_dim=512),
-
-        # Separate network architectures for policy and value functions
-        # Larger networks to handle complex state space
-        net_arch=dict(
-            pi=[512, 256, 128],  # Policy network
-            vf=[512, 256, 128]   # Value network
+        features_extractor_kwargs=dict(
+            features_dim=512,
         ),
-
-        # Use ReLU for faster training
-        activation_fn=nn.ReLU
+        net_arch=dict(
+            pi=[512, 512, 256, 128],  # Policy network
+            vf=[512, 512, 256, 128]   # Matched value network
+        ),
+        # Layer normalization helps with varying episode lengths
+        normalize_images=True,
+        activation_fn=nn.ReLU,
     )
 
     # Setup exploration noise
@@ -195,22 +196,19 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
         # Learning parameters
         learning_rate=learning_rate,
-        n_steps=2048,        # Reduced for more frequent updates
-        batch_size=64,       # Smaller batches for more stable gradients
-        n_epochs=10,         # More epochs per update for better learning
+        n_steps=4096,
+        batch_size=256,
+        n_epochs=5,
 
-        # GAE and discount parameters
-        gamma=0.99,          # Standard discount factor
-        gae_lambda=0.95,     # Slightly higher for better advantage estimation
+        # GAE parameters tuned for long-term credit assignment
+        gamma=0.995,         # Higher discount for better long-term planning
+        gae_lambda=0.98,     # Higher lambda for better advantage estimation
 
         # PPO-specific parameters
-        clip_range=0.2,      # Standard PPO clipping
-        clip_range_vf=0.2,   # Match policy clipping
-        # Entropy coefficient for exploration. Note: we alter this using our PPOTrainingCallback
-        # We set this to the max value to encourage exploration, but our callback will adjust it
-        # to maintain a target KL divergence
-        ent_coef=0.02,
-        vf_coef=0.8,        # Increased value function importance
+        clip_range=0.1,      # Reduced clipping for more conservative updates
+        clip_range_vf=None,  # Let value function learn more freely
+        ent_coef=0.02,      # Start with higher entropy
+        vf_coef=1.0,        # Increased value function importance
 
         # Training stability parameters
         max_grad_norm=0.5,   # Prevent explosive gradients

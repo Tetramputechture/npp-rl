@@ -280,6 +280,7 @@ class PPOTrainingCallback(BaseCallback):
         if self.verbose > 0:
             print("\n" + "="*50)
             print(f"Training Progress at Step {self.n_calls}")
+            print(f'Number of episodes: {len(self.episode_rewards)}')
             print(f"Mean reward: {current_reward:.2f}")
             print(f"Mean episode length: {current_length:.2f}")
             print(f"Current entropy coefficient: {self.current_ent_coef:.4f}")

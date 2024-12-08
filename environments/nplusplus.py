@@ -282,18 +282,13 @@ class NPlusPlus(gymnasium.Env):
         switch_dist_x = obs['switch_x'] - obs['player_x']
         switch_dist_y = obs['switch_y'] - obs['player_y']
 
-        # Increase both distances so that their min is 0
-        exit_door_dist_x += 63
-        exit_door_dist_y += 171
+        vx, vy = self._calculate_velocity(prev_obs, obs)
 
-        switch_dist_x += 63
-        switch_dist_y += 171
-
-        max_level_width = 1258 - 52
-        max_level_height = 802 - 158
+        # Normalize features
+        max_level_width = 1258
+        max_level_height = 802
         max_time = 600.0
 
-        vx, vy = self._calculate_velocity(prev_obs, obs)
         normalized_vx = (vx + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
         normalized_vy = (vy + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
 
@@ -302,10 +297,10 @@ class NPlusPlus(gymnasium.Env):
             (obs['player_y'] - 171) / (791 - 171),
             obs['time_remaining'] / max_time,
             float(obs['switch_activated']),
-            (exit_door_dist_x) / max_level_width,
-            (exit_door_dist_y) / max_level_height,
-            (switch_dist_x) / max_level_width,
-            (switch_dist_y) / max_level_height,
+            (exit_door_dist_x + max_level_width) / (2 * max_level_width),
+            (exit_door_dist_y + max_level_height) / (2 * max_level_height),
+            (switch_dist_x + max_level_width) / (2 * max_level_width),
+            (switch_dist_y + max_level_height) / (2 * max_level_height),
             float(obs['in_air']),
             normalized_vx,
             normalized_vy
@@ -559,6 +554,9 @@ class NPlusPlus(gymnasium.Env):
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 
+        # Update reward calculator
+        self.reward_calculator.update_progression_metrics()
+
         info = {
             'raw_reward': reward,
             'time_remaining': observation['time_remaining'],
@@ -592,6 +590,9 @@ class NPlusPlus(gymnasium.Env):
 
         # Reset position and velocity history
         self.position_history.clear()
+
+        # Reset reward calculator
+        self.reward_calculator.reset()
 
         # Reset previous action
         self.prev_action = None

@@ -444,7 +444,6 @@ class MovementEvaluator:
 
             progress = (previous_distance_to_switch -
                         current_distance_to_switch)
-            print(f"Progress to switch: {progress}")
             return np.clip(progress + 1.0, 0.0, 1.0)
         else:
             # Calculate progress toward exit
@@ -458,7 +457,6 @@ class MovementEvaluator:
             ]))
 
             progress = (previous_distance_to_exit - current_distance_to_exit)
-            print(f"Progress to exit: {progress}")
             return np.clip(progress + 1.0, 0.0, 1.0)
 
     def _evaluate_movement_segment(self) -> float:
