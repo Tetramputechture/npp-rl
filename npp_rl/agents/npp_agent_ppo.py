@@ -13,99 +13,9 @@ import imageio
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 from npp_rl.game.game_controller import GameController
+from npp_rl.agents.npp_feature_extractor import NppFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-NUM_NUMERICAL_FEATURES = 11
-
-
-class CustomLevelCNN(BaseFeaturesExtractor):
-    """Custom CNN feature extractor for N++ environment.
-
-    Architecture designed to process observations from our N++ environment where:
-    Input: Single tensor of shape (84, 84, frame_stack + 9) containing:
-        - First frame_stack channels: Stacked grayscale frames
-        - Last 9 channels: Numerical features broadcast to 84x84 spatial dimensions
-
-    The network separates and processes visual and numerical data through appropriate 
-    pathways before combining them into a final feature representation.
-    """
-
-    def __init__(self, observation_space, features_dim=512):
-        super().__init__(observation_space, features_dim)
-
-        n_input_channels = observation_space.shape[2]
-        self.frame_stack = n_input_channels - NUM_NUMERICAL_FEATURES
-
-        # Visual processing network
-        self.cnn = nn.Sequential(
-            # Layer 1: 84x84 -> 20x20
-            nn.Conv2d(self.frame_stack, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.BatchNorm2d(32),
-
-            # Layer 2: 20x20 -> 9x9
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.BatchNorm2d(64),
-
-            # Layer 3: 9x9 -> 7x7
-            nn.Conv2d(64, 128, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(128),
-
-            # Added residual connection
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(128),
-
-            nn.Flatten()
-        )
-
-        # Calculate CNN output dimension: 128 channels * 7 * 7 = 6272
-        self.cnn_output_dim = 128 * 7 * 7
-
-        # Numerical feature processing
-        self.numerical_net = nn.Sequential(
-            nn.Conv2d(NUM_NUMERICAL_FEATURES, 16, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.BatchNorm2d(16),
-            nn.Conv2d(16, 32, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.BatchNorm2d(32),
-            nn.Flatten(),
-            nn.Linear(32 * 9 * 9, 512),
-            nn.ReLU(),
-            nn.Dropout(0.2)
-        )
-
-        # Combined network
-        self.combined_net = nn.Sequential(
-            nn.Linear(self.cnn_output_dim + 512, 2048),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(2048, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, features_dim),
-            nn.ReLU()
-        )
-
-    def forward(self, observations):
-        # Split and process visual input
-        visual = observations[..., :self.frame_stack]
-        visual = visual.permute(0, 3, 1, 2)
-
-        # Process numerical features
-        numerical = observations[..., self.frame_stack:]
-        numerical = numerical.permute(0, 3, 1, 2)
-
-        # Extract features through respective pathways
-        visual_features = self.cnn(visual)
-        numerical_features = self.numerical_net(numerical)
-
-        # Combine and process features
-        combined = torch.cat([visual_features, numerical_features], dim=1)
-        return self.combined_net(combined)
 
 
 def setup_training_env(env):
@@ -161,7 +71,7 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
     # Configure policy network architecture
     policy_kwargs = dict(
-        features_extractor_class=CustomLevelCNN,
+        features_extractor_class=NppFeatureExtractor,
         features_extractor_kwargs=dict(
             features_dim=512,
         ),

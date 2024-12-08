@@ -300,59 +300,74 @@ class NPlusPlus(gymnasium.Env):
         return frame
 
     def _get_numerical_features(self, obs, prev_obs):
-        """Extract and normalize numerical features.
-
-        Returns:
-            numpy.ndarray: Feature array of shape (84, 84, NUM_NUMERICAL_FEATURES)
         """
-        # Create normalized feature vector
-        # Instead of absolute values for exit door x and y, provide
-        # relative position to player
-        exit_door_dist_x = obs['exit_door_x'] - obs['player_x']
-        exit_door_dist_y = obs['exit_door_y'] - obs['player_y']
+        Process numerical features into grouped format for our enhanced network architecture.
 
-        switch_dist_x = obs['switch_x'] - obs['player_x']
-        switch_dist_y = obs['switch_y'] - obs['player_y']
-
-        vx, vy = self._calculate_velocity(prev_obs, obs)
-
-        # Normalize features
+        The features are organized into three logical groups:
+        1. Position features: Current position and velocity (4 features)
+        2. Objective features: Distances to goals (4 features)
+        3. State features: Game state information (3 features)
+        """
+        # Calculate normalized positions and distances first
         max_level_width = 1258
         max_level_height = 802
         max_time = 600.0
 
+        # Calculate relative distances to objectives
+        exit_door_dist_x = obs['exit_door_x'] - obs['player_x']
+        exit_door_dist_y = obs['exit_door_y'] - obs['player_y']
+        switch_dist_x = obs['switch_x'] - obs['player_x']
+        switch_dist_y = obs['switch_y'] - obs['player_y']
+
+        # Calculate normalized velocities
+        vx, vy = self._calculate_velocity(prev_obs, obs)
         normalized_vx = (vx + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
         normalized_vy = (vy + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
 
-        features = np.array([
+        # Group 1: Position features (player position and velocity)
+        position_features = np.array([
+            # Normalized x position
             (obs['player_x'] - 63) / (1217 - 63),
+            # Normalized y position
             (obs['player_y'] - 171) / (791 - 171),
-            obs['time_remaining'] / max_time,
-            float(obs['switch_activated']),
-            (exit_door_dist_x + max_level_width) / (2 * max_level_width),
-            (exit_door_dist_y + max_level_height) / (2 * max_level_height),
-            (switch_dist_x + max_level_width) / (2 * max_level_width),
-            (switch_dist_y + max_level_height) / (2 * max_level_height),
-            float(obs['in_air']),
-            normalized_vx,
-            normalized_vy
+            normalized_vx,                                 # Normalized x velocity
+            normalized_vy                                  # Normalized y velocity
         ], dtype=np.float32)
 
-        # Assert that the features are within the correct range, print a warning if not
-        for feature, feature_name in zip(features,
-                                         ['player_x', 'player_y', 'time_remaining', 'switch_activated', 'exit_door_x', 'exit_door_y', 'switch_x', 'switch_y', 'in_air', 'vx', 'vy']):
-            if feature < 0 or feature > 1:
-                print(
-                    f'Feature {feature_name}: {feature} is not within the correct range [0, 1]')
+        # Group 2: Objective features (distances to goals)
+        objective_features = np.array([
+            (exit_door_dist_x + max_level_width) /
+            (2 * max_level_width),   # Exit x distance
+            (exit_door_dist_y + max_level_height) / \
+            (2 * max_level_height),  # Exit y distance
+            (switch_dist_x + max_level_width) / \
+            (2 * max_level_width),      # Switch x distance
+            (switch_dist_y + max_level_height) / \
+            (2 * max_level_height)     # Switch y distance
+        ], dtype=np.float32)
+
+        # Group 3: State features (game state information)
+        state_features = np.array([
+            obs['time_remaining'] / max_time,              # Normalized time
+            float(obs['switch_activated']),                # Switch status
+            float(obs['in_air'])                          # Air status
+        ], dtype=np.float32)
+
+        # Combine all features in the correct order
+        features = np.concatenate([
+            position_features,    # First 4 features
+            objective_features,   # Next 4 features
+            state_features       # Last 3 features
+        ])
 
         # Assert our features are NUM_NUMERICAL_FEATURES long
         assert len(features) == NUM_NUMERICAL_FEATURES
 
-        # Reshape to (1, 1, 8) then broadcast to (84, 84, NUM_NUMERICAL_FEATURES)
+        # Reshape to match network expectations
         features = features.reshape((1, 1, NUM_NUMERICAL_FEATURES))
         features = np.broadcast_to(features, (84, 84, NUM_NUMERICAL_FEATURES))
 
-        return features
+        return features.astype(np.float32)
 
     def _get_stacked_observation(self, obs, prev_obs):
         """Combine frame stack with numerical features properly.
