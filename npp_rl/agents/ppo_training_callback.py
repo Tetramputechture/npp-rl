@@ -109,8 +109,10 @@ class PPOTrainingCallback(BaseCallback):
         - Prevent premature convergence to suboptimal policies
         - Increase exploration if performance degrades
         """
+        print('Attempting to adjust entropy coefficient')
         # We need enough history to make informed adjustments
         if len(self.moving_avg_rewards) < 2 or len(self.loss_values) < 2:
+            print('Not enough history to adjust entropy coefficient')
             return
 
         # Calculate performance metrics
@@ -118,6 +120,10 @@ class PPOTrainingCallback(BaseCallback):
         previous_reward_avg = np.mean(list(self.moving_avg_rewards)[:-1])
         current_success_rate = np.mean(
             list(self.success_rate)) if self.success_rate else 0.0
+
+        print(f'Current reward avg: {current_reward_avg}')
+        print(f'Previous reward avg: {previous_reward_avg}')
+        print(f'Current success rate: {current_success_rate}')
 
         # Calculate recent loss trend
         recent_loss_increase = (
@@ -181,6 +187,8 @@ class PPOTrainingCallback(BaseCallback):
             new_ent_coef: New entropy coefficient to apply
         """
         if not hasattr(self.model, 'policy') or not hasattr(self.model.policy, 'action_net'):
+            print(
+                'WARNING: Policy does not have an action network. Cannot adjust entropy.')
             return
 
         if self.original_action_weights is None:
@@ -280,7 +288,6 @@ class PPOTrainingCallback(BaseCallback):
         if self.verbose > 0:
             print("\n" + "="*50)
             print(f"Training Progress at Step {self.n_calls}")
-            print(f'Number of episodes: {len(self.episode_rewards)}')
             print(f"Mean reward: {current_reward:.2f}")
             print(f"Mean episode length: {current_length:.2f}")
             print(f"Current entropy coefficient: {self.current_ent_coef:.4f}")

@@ -154,11 +154,13 @@ Additional Info:
 import gymnasium
 from gymnasium.spaces import discrete, box
 import numpy as np
-from game.game_controller import GameController
-from game.game_window import get_game_window_frame, get_center_frame
-from game.frame_text import extract_text
-from game.game_value_fetcher import GameValueFetcher
-from environments.reward_calculator import RewardCalculator
+from npp_rl.game.game_controller import GameController
+from npp_rl.game.game_window import get_game_window_frame
+from npp_rl.game.game_value_fetcher import GameValueFetcher
+from npp_rl.environments.reward_calculator import RewardCalculator
+from npp_rl.util.util import calculate_distance
+from npp_rl.environments.movement_evaluator import MovementEvaluator
+from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND
 import time
 from typing import Tuple, Dict, Any
 from collections import deque
@@ -169,25 +171,26 @@ NUM_NUMERICAL_FEATURES = 11
 
 
 class NPlusPlus(gymnasium.Env):
-    """Custom Gym envjr onment for the game N++.
+    """Custom Gym environment for the game N++.
 
     This environment provides a Gym interface for the N++ game, allowing reinforcement
     learning agents to learn to play levels. The environment handles game state
     management, reward calculation, and action execution while maintaining proper
-    timing and synchronization with the game.
+    timing and synchronization with the game. The environment also tracks
+    overall success in the level and progress towards sub-goals in the level,
+    such as activating the switch or reaching the exit door, to help the agent
+    learn efficient sub-paths through the level.
+
+    Success metrics include:
+    1. Overall level completion
+    2. Progress towards switch
+    3. Progress towards exit
+    4. Gold collection efficiency
+    5. Time management
+    6. Movement efficiency
+
     """
     metadata = {'render.modes': ['human']}
-
-    # Constants for game time speed increase
-    GAME_SPEED_FACTOR = 0.5  # Speed factor for game time
-    # Default game speed in frames per second
-    GAME_DEFAULT_SPEED_FRAMES_PER_SECOND = 60.0
-    # Game speed after speed increase
-    GAME_SPEED_FRAMES_PER_SECOND = GAME_DEFAULT_SPEED_FRAMES_PER_SECOND * GAME_SPEED_FACTOR
-
-    # We take our observations at the game speed * 10
-    # this way our observations are more accurate
-    TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * 10)
 
     # Movement truncation constants
     MOVEMENT_THRESHOLD = 1.0
@@ -195,10 +198,15 @@ class NPlusPlus(gymnasium.Env):
     MOVEMENT_CHECK_FRAMES = int(
         MOVEMENT_CHECK_DURATION / (1/GAME_SPEED_FRAMES_PER_SECOND))
 
+    # Progress thresholds for sub-goals
+    MOVEMENT_SUCCESS_THRESHOLD = 0.85
+    PROGRESS_SUCCESS_THRESHOLD = 0.7
+    TIME_GAIN_THRESHOLD = 0.5
+
     # The max absolute velocity of the player
     MAX_VELOCITY = 20000.0
 
-    def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
+    def __init__(self, gvf: GameValueFetcher, gc: GameController, movement_evaluator: MovementEvaluator, frame_stack: int = 4):
         """Initialize the N++ environment.
 
         Args:
@@ -242,8 +250,32 @@ class NPlusPlus(gymnasium.Env):
         # Initialize episode counter
         self.episode_counter = 0
 
+        # Initialize movement evaluator to determine movement success rates
+        # (not directly related to reward calculation)
+        self.movement_evaluator = movement_evaluator
+
         # Initialize reward calculator
-        self.reward_calculator = RewardCalculator(timestep=self.TIMESTEP)
+        self.reward_calculator = RewardCalculator(movement_evaluator)
+
+        # Success tracking
+        # Basic success flags
+        self.current_episode_success = False
+        self.switch_activated = False
+        self.died = False
+        self.time_expired = False
+        self.completed_level = False
+
+        # Progressive success tracking
+        self.initial_time = None
+        self.max_time_gained = 0
+        self.previous_time = None
+        self.best_switch_distance = float('inf')
+        self.best_exit_distance = float('inf')
+
+        # Movement tracking for success
+        # 1 second of positions at (GAME_SPEED_FRAMES_PER_SECOND) frames per second
+        self.position_history = deque(maxlen=GAME_SPEED_FRAMES_PER_SECOND)
+        self.previous_position = None
 
     def _preprocess_frame(self, frame):
         """Preprocess raw frame for CNN input.
@@ -271,7 +303,7 @@ class NPlusPlus(gymnasium.Env):
         """Extract and normalize numerical features.
 
         Returns:
-            numpy.ndarray: Feature array of shape (84, 84, 8)
+            numpy.ndarray: Feature array of shape (84, 84, NUM_NUMERICAL_FEATURES)
         """
         # Create normalized feature vector
         # Instead of absolute values for exit door x and y, provide
@@ -326,7 +358,7 @@ class NPlusPlus(gymnasium.Env):
         """Combine frame stack with numerical features properly.
 
         Returns:
-            numpy.ndarray: Combined observation of shape (84, 84, frame_stack + 8)
+            numpy.ndarray: Combined observation of shape (84, 84, frame_stack + NUM_NUMERICAL_FEATURES)
         """
         # Preprocess current frame
         frame = self._preprocess_frame(obs['screen'])  # Shape: (84, 84, 1)
@@ -371,19 +403,9 @@ class NPlusPlus(gymnasium.Env):
             'switch_x': self.gvf.read_switch_x(),
             'switch_y': self.gvf.read_switch_y(),
             'in_air': self.gvf.read_in_air(),
+            # Note: velocity values are calculated indirectly in _get_numerical_features
+            # because we don't current have direct access to velocity
         }
-
-    def _calculate_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
-        """Calculate Euclidean distance between two points.
-
-        Args:
-            x1, y1: Coordinates of first point
-            x2, y2: Coordinates of second point
-
-        Returns:
-            float: Euclidean distance between the points
-        """
-        return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
     def _calculate_velocity(self, prev_obs: Dict[str, Any], curr_obs: Dict[str, Any]) -> Tuple[float, float]:
         """Calculate player velocity based on previous and current observations.
@@ -393,15 +415,14 @@ class NPlusPlus(gymnasium.Env):
             curr_obs: Current observation dictionary
         """
         # Calculate time elapsed between observations
-        time_elapsed = self.TIMESTEP
 
         # Calculate distance traveled in x and y directions
         dx = curr_obs['player_x'] - prev_obs['player_x']
         dy = curr_obs['player_y'] - prev_obs['player_y']
 
         # Calculate velocity components
-        vx = dx / time_elapsed
-        vy = dy / time_elapsed
+        vx = dx / TIMESTEP
+        vy = dy / TIMESTEP
 
         return vx, vy
 
@@ -478,7 +499,7 @@ class NPlusPlus(gymnasium.Env):
         for i in range(1, len(self.position_history)):
             prev_x, prev_y = self.position_history[i - 1]
             curr_x, curr_y = self.position_history[i]
-            total_distance += self._calculate_distance(
+            total_distance += calculate_distance(
                 prev_x, prev_y, curr_x, curr_y)
 
         print(
@@ -514,8 +535,147 @@ class NPlusPlus(gymnasium.Env):
 
         return terminated, truncated
 
+    def _calculate_movement_efficiency(self, curr_state, prev_state, action):
+        """
+        Calculate movement efficiency using the MovementEvaluator's comprehensive analysis.
+
+        This method leverages the MovementEvaluator's deep understanding of platforming
+        mechanics to evaluate movement quality across multiple dimensions.
+        """
+        # Get full movement evaluation
+        movement_results = self.movement_evaluator.evaluate_movement_success(
+            current_state=curr_state,
+            previous_state=prev_state,
+            action_taken=action
+        )
+
+        # Extract metrics
+        metrics = movement_results['metrics']
+
+        # Calculate weighted efficiency score
+        movement_efficiency = (
+            metrics['precision'] * 0.3 +      # Control precision
+            metrics['landing'] * 0.25 +       # Landing quality
+            metrics['momentum'] * 0.25 +      # Momentum management
+            metrics['progress'] * 0.2         # Progress toward objectives
+        )
+
+        return {
+            'efficiency': movement_efficiency,
+            'has_meaningful_movement': movement_results['has_meaningful_movement'],
+            'precision': metrics['precision'],
+            'landing': metrics['landing'],
+            'momentum': metrics['momentum'],
+            'progress_score': metrics['progress'],
+            'segment_success': metrics['segment_success']
+        }
+
+    def _calculate_objective_progress(self, curr_state, prev_state):
+        """Calculate progress toward level objectives with enhanced metrics."""
+        # Track progress toward primary objectives
+        if not curr_state['switch_activated']:
+            # Calculate progress toward switch
+            current_distance = np.sqrt(
+                (curr_state['player_x'] - curr_state['switch_x'])**2 +
+                (curr_state['player_y'] - curr_state['switch_y'])**2
+            )
+            self.best_switch_distance = min(
+                self.best_switch_distance, current_distance)
+
+            switch_progress = 1.0 - \
+                (current_distance / (self.best_switch_distance + 1e-6))
+            progress_score = max(0, switch_progress)
+        else:
+            # Calculate progress toward exit
+            current_distance = np.sqrt(
+                (curr_state['player_x'] - curr_state['exit_door_x'])**2 +
+                (curr_state['player_y'] - curr_state['exit_door_y'])**2
+            )
+            self.best_exit_distance = min(
+                self.best_exit_distance, current_distance)
+
+            exit_progress = 1.0 - (current_distance /
+                                   (self.best_exit_distance + 1e-6))
+            progress_score = max(0, exit_progress)
+
+        # Calculate time management success
+        current_time = curr_state['time_remaining']
+        time_gained = current_time - \
+            self.previous_time if self.previous_time is not None else 0
+        self.max_time_gained = max(self.max_time_gained, time_gained)
+        self.previous_time = current_time
+
+        time_efficiency = current_time / (self.initial_time + 1e-6)
+        time_efficiency = np.clip(time_efficiency, 0, 1)
+
+        return {
+            'objective_progress': progress_score,
+            'time_efficiency': time_efficiency,
+            'time_gained': float(time_gained > self.TIME_GAIN_THRESHOLD)
+        }
+
+    def _get_success_metrics(self, curr_state, prev_state, action):
+        """Compile comprehensive success metrics combining movement and objectives."""
+        # Get movement efficiency metrics
+        movement_metrics = self._calculate_movement_efficiency(
+            curr_state, prev_state, action)
+
+        # Get objective progress metrics
+        progress_metrics = self._calculate_objective_progress(
+            curr_state, prev_state)
+
+        # Update success tracking
+        self.switch_activated = curr_state.get('switch_activated', False)
+        self.died = self.gvf.read_player_dead()
+        self.time_expired = curr_state.get('time_remaining', 0) <= 0
+        self.completed_level = 'retry level' in self.gvf.read_begin_retry_text().lower()
+
+        # Calculate overall success conditions
+        movement_success = movement_metrics['efficiency'] > self.MOVEMENT_SUCCESS_THRESHOLD
+        progress_success = progress_metrics['objective_progress'] > self.PROGRESS_SUCCESS_THRESHOLD
+
+        self.current_episode_success = (
+            self.completed_level and
+            self.switch_activated and
+            not self.died and
+            not self.time_expired and
+            movement_success and
+            progress_success
+        )
+
+        return {
+            # Overall success metrics
+            'success': float(self.current_episode_success),
+            'switch_activated': float(self.switch_activated),
+            'died': float(self.died),
+            'time_expired': float(self.time_expired),
+            'completed_level': float(self.completed_level),
+
+            # Movement quality metrics
+            'movement_efficiency': movement_metrics['efficiency'],
+            'movement_precision': movement_metrics['precision'],
+            'landing_quality': movement_metrics['landing'],
+            'momentum_efficiency': movement_metrics['momentum'],
+            'movement_progress': movement_metrics['progress_score'],
+            'segment_success': movement_metrics['segment_success'],
+            'meaningful_movement': float(movement_metrics['has_meaningful_movement']),
+
+            # Objective progress metrics
+            'objective_progress': progress_metrics['objective_progress'],
+            'time_efficiency': progress_metrics['time_efficiency'],
+            'time_gained': progress_metrics['time_gained']
+        }
+
     def step(self, action):
-        """Execute action and return new state."""
+        """
+        Execute one environment step with tracking and evaluation.
+
+        Provides:
+        1. Success tracking
+        2. Movement evaluation
+        3. Progressive reward calculation
+        4. Detailed metrics and monitoring
+        """
         # Get previous observation
         prev_obs = self._get_observation()
 
@@ -533,7 +693,7 @@ class NPlusPlus(gymnasium.Env):
         self._execute_action(action)
 
         # Wait our timestep for the action to take effect and the game state to update
-        time.sleep(self.TIMESTEP)
+        time.sleep(TIMESTEP)
 
         # Get the new observation
         observation = self._get_observation()
@@ -554,17 +714,103 @@ class NPlusPlus(gymnasium.Env):
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 
-        # Update reward calculator
-        self.reward_calculator.update_progression_metrics()
-
+        # Prepare info
         info = {
             'raw_reward': reward,
             'time_remaining': observation['time_remaining'],
             'switch_activated': observation['switch_activated'],
             'player_dead': self.gvf.read_player_dead(),
+            'begin_retry_text': self.gvf.read_begin_retry_text()
         }
 
-        # Log new position to file training_logs.txt
+        # Calculate movement success metrics
+        movement_results = self.movement_evaluator.evaluate_movement_success(
+            current_state=observation,
+            previous_state=prev_obs,
+            action_taken=action
+        )
+
+        # Add movement metrics to info
+        info.update({
+            'movement_efficiency': movement_results['metrics']['precision'],
+            'landing_quality': movement_results['metrics']['landing'],
+            'momentum_efficiency': movement_results['metrics']['momentum'],
+            'movement_progress': movement_results['metrics']['progress'],
+            'segment_success': movement_results['metrics']['segment_success'],
+            'has_meaningful_movement': movement_results['has_meaningful_movement']
+        })
+
+        # Calculate distance-based metrics
+        curr_switch_dist = calculate_distance(
+            observation['player_x'], observation['player_y'],
+            observation['switch_x'], observation['switch_y']
+        )
+
+        curr_exit_dist = calculate_distance(
+            observation['player_x'], observation['player_y'],
+            observation['exit_door_x'], observation['exit_door_y']
+        )
+
+        # Add progress metrics
+        if not observation['switch_activated']:
+            progress = max(0, 1 - (curr_switch_dist /
+                           (self.best_switch_distance + 1e-6)))
+        else:
+            progress = max(
+                0, 1 - (curr_exit_dist / (self.best_exit_distance + 1e-6)))
+
+        info.update({
+            'objective_progress': progress,
+            'time_efficiency': observation['time_remaining'] / self.initial_time if self.initial_time > 0 else 0,
+            'time_gained': float(observation['time_remaining'] > prev_obs['time_remaining'])
+        })
+
+        # Update best distances
+        if not observation['switch_activated']:
+            self.best_switch_distance = min(
+                self.best_switch_distance, curr_switch_dist)
+        else:
+            self.best_exit_distance = min(
+                self.best_exit_distance, curr_exit_dist)
+
+        # Calculate overall success metrics
+        success_metrics = {
+            'success': float(
+                not terminated and
+                not truncated and
+                observation['switch_activated'] and
+                'retry level' in self.gvf.read_begin_retry_text().lower()
+            ),
+            'switch_activated': float(observation['switch_activated']),
+            'died': float(self.gvf.read_player_dead()),
+            'time_expired': float(observation['time_remaining'] <= 0),
+            'completed_level': float('retry level' in self.gvf.read_begin_retry_text().lower())
+        }
+
+        # Add success metrics to info
+        info.update(success_metrics)
+
+        if terminated or truncated:
+            print("\nEpisode finished!")
+            print(f"Success: {success_metrics['success']}")
+            print(f"Switch Activated: {success_metrics['switch_activated']}")
+            print(f"Died: {success_metrics['died']}")
+            print(f"Time Expired: {success_metrics['time_expired']}")
+            print(f"Time Gained: {info['time_gained']}")
+            print(f"Objective Progress: {info['objective_progress']}")
+            print(f"Level Completed: {success_metrics['completed_level']}\n")
+
+            # Update progression metrics for reward scaling
+            print("Updating progression metrics...")
+            self.reward_calculator.update_progression_metrics()
+
+            # Log final positions and actions
+            print("Logging final positions and actions...")
+            with open(f'{self.position_log_folder_name}/position_log_{self.episode_counter}.csv', 'w') as f:
+                f.write(self.position_log_file_string)
+
+            with open(f'{self.action_log_folder_name}/action_log_{self.episode_counter}.csv', 'w') as f:
+                f.write(self.action_log_file_string)
 
         return processed_obs, reward, terminated, truncated, info
 
@@ -585,25 +831,30 @@ class NPlusPlus(gymnasium.Env):
         if seed is not None:
             np.random.seed(seed)
 
+        # Reset success flags
+        self.current_episode_success = False
+        self.switch_activated = False
+        self.died = False
+        self.time_expired = False
+        self.completed_level = False
+
+        # Reset progress tracking
+        self.initial_time = None
+        self.max_time_gained = 0
+        self.previous_time = None
+        self.best_switch_distance = float('inf')
+        self.best_exit_distance = float('inf')
+        self.position_history.clear()
+        self.previous_position = None
+
         # Reset frame stack
         self.frames.clear()
 
         # Reset position and velocity history
         self.position_history.clear()
 
-        # Reset reward calculator
-        self.reward_calculator.reset()
-
-        # Reset previous action
-        self.prev_action = None
-
-        # Write the position log file to our position log folder with the episode number
-        with open(f'{self.position_log_folder_name}/position_log_{self.episode_counter}.csv', 'w') as f:
-            f.write(self.position_log_file_string)
-
-        # Write the action log file to our action log folder with the episode number
-        with open(f'{self.action_log_folder_name}/action_log_{self.episode_counter}.csv', 'w') as f:
-            f.write(self.action_log_file_string)
+        # Reset movement evaluator
+        self.movement_evaluator.reset()
 
         # Reset position log file string
         self.position_log_file_string = 'PlayerX,PlayerY\n'
@@ -684,6 +935,34 @@ class NPlusPlus(gymnasium.Env):
         # Get initial observation
         observation = self._get_observation()
 
+        # Initialize time tracking
+        self.initial_time = observation.get('time_remaining', 0)
+        self.previous_time = self.initial_time
+
+        # For initial success metrics, we should:
+        # 1. Only include metrics that make sense at episode start
+        # 2. Use appropriate default values for comparative metrics
+        initial_metrics = {
+            'success': 0.0,
+            'switch_activated': 0.0,
+            'died': 0.0,
+            'time_expired': 0.0,
+            'completed_level': 0.0,
+            'movement_efficiency': 1.0,  # Start with perfect efficiency
+            'movement_precision': 1.0,   # Start with perfect precision
+            'landing_quality': 1.0,      # Start with perfect landing
+            'momentum_efficiency': 1.0,  # Start with perfect momentum
+            'movement_progress': 0.0,    # No progress yet
+            'segment_success': 0.0,      # No segments yet
+            'meaningful_movement': 0.0,  # No movement yet
+            'objective_progress': 0.0,   # No progress yet
+            'time_efficiency': 1.0,      # Start with full time
+            'time_gained': 0.0          # No time gained yet
+        }
+
+        # Update info with initial metrics
+        info = initial_metrics
+
         # # Press pause key to pause the game. We are sure we are in the 'level playing' state,
         # # since we verified the player has moved.
         # print(f'Center text before pause: {center_text}')
@@ -698,7 +977,7 @@ class NPlusPlus(gymnasium.Env):
         # Process observation for A2C
         processed_obs = self._get_stacked_observation(observation, observation)
 
-        return processed_obs, {}
+        return processed_obs, info
 
     def render(self):
         """Render the environment.

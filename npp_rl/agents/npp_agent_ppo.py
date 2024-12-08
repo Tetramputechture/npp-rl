@@ -1,11 +1,8 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
-from game.game_controller import GameController
 import torch
 from torch import nn
 import numpy as np
@@ -13,8 +10,9 @@ from pathlib import Path
 import json
 import datetime
 import imageio
-from environments.nplusplus import NPlusPlus
-from agents.ppo_training_callback import PPOTrainingCallback
+from npp_rl.environments.nplusplus import NPlusPlus
+from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
+from npp_rl.game.game_controller import GameController
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

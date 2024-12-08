@@ -1,7 +1,8 @@
 import numpy as np
 from typing import Dict, Any, List, Deque
 from collections import deque
-from environments.movement_evaluator import MovementEvaluator
+from npp_rl.environments.movement_evaluator import MovementEvaluator
+from npp_rl.util.util import calculate_distance
 
 
 class RewardCalculator:
@@ -17,34 +18,44 @@ class RewardCalculator:
     Each stage builds upon the skills learned in previous stages, with rewards
     automatically adjusting based on the agent's demonstrated competence.
     """
+    # Base reward/penalty constants
+    BASE_TIME_PENALTY = -0.01
+    GOLD_COLLECTION_REWARD = 1.0
+    SWITCH_ACTIVATION_REWARD = 10.0
+    TERMINAL_REWARD = 20.0
+    DEATH_PENALTY = -15.0
+    TIMEOUT_PENALTY = -10.0
 
-    def __init__(self, timestep: float):
-        # Base reward/penalty constants
-        self.BASE_TIME_PENALTY = -0.01
-        self.GOLD_COLLECTION_REWARD = 1.0
-        self.SWITCH_ACTIVATION_REWARD = 10.0
-        self.TERMINAL_REWARD = 20.0
-        self.DEATH_PENALTY = -15.0
-        self.TIMEOUT_PENALTY = -10.0
+    # Movement assessment constants
+    FINE_DISTANCE_THRESHOLD = 5.0
+    MIN_MOVEMENT_THRESHOLD = 0.1
+    MOVEMENT_PENALTY = -0.01
+    MAX_MOVEMENT_REWARD = 0.05
 
-        # Movement assessment constants
-        self.FINE_DISTANCE_THRESHOLD = 5.0
-        self.MIN_MOVEMENT_THRESHOLD = 0.1
-        self.MOVEMENT_PENALTY = -0.01
-        self.MAX_MOVEMENT_REWARD = 0.05
+    # Distance-based reward scales
+    DISTANCE_SCALE = 0.1
+    APPROACH_REWARD_SCALE = 5.0
+    RETREAT_PENALTY_SCALE = 0.15
 
-        # Distance-based reward scales
-        self.DISTANCE_SCALE = 0.1
-        self.APPROACH_REWARD_SCALE = 5.0
-        self.RETREAT_PENALTY_SCALE = 0.15
+    # Curriculum learning constants
+    MOVEMENT_MASTERY_THRESHOLD = 0.7
+    NAVIGATION_MASTERY_THRESHOLD = 0.8
 
+    # Maximum scale limits to prevent explosion
+    MAX_MOVEMENT_SCALE = 1.5
+    MAX_NAVIGATION_SCALE = 1.0
+    MAX_COMPLETION_SCALE = 0.5
+
+    # Minimum scale limits to maintain learning
+    MIN_MOVEMENT_SCALE = 0.5
+    MIN_NAVIGATION_SCALE = 0.2
+    MIN_COMPLETION_SCALE = 0.1
+
+    def __init__(self, movement_evaluator: MovementEvaluator):
         # Curriculum learning parameters
         self.movement_success_rate = 0.0
         self.navigation_success_rate = 0.0
         self.level_completion_rate = 0.0
-        self.MOVEMENT_MASTERY_THRESHOLD = 0.7
-        self.NAVIGATION_MASTERY_THRESHOLD = 0.8
-
         # Stage-specific reward scaling
         self.movement_scale = 1.0
         self.navigation_scale = 0.5
@@ -65,7 +76,7 @@ class RewardCalculator:
         }
 
         # Movement evaluator
-        self.movement_evaluator = MovementEvaluator(timestep)
+        self.movement_evaluator = movement_evaluator
 
         # Potential-based shaping parameters
         self.gamma = 0.99  # Discount factor for potential-based shaping
@@ -77,10 +88,6 @@ class RewardCalculator:
         self.prev_potential = None
 
         self.first_switch_distance_update = True
-
-    def _calculate_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
-        """Calculate Euclidean distance between two points."""
-        return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
     def _evaluate_movement_quality(self,
                                    movement_vector: np.ndarray,
@@ -141,7 +148,7 @@ class RewardCalculator:
         # Calculate distance-based potential
         if not state['switch_activated']:
             # Distance to switch
-            distance_to_switch = self._calculate_distance(
+            distance_to_switch = calculate_distance(
                 state['player_x'], state['player_y'],
                 state['switch_x'], state['switch_y']
             )
@@ -163,7 +170,7 @@ class RewardCalculator:
 
         else:
             # Similar logic for exit distance
-            distance_to_exit = self._calculate_distance(
+            distance_to_exit = calculate_distance(
                 state['player_x'], state['player_y'],
                 state['exit_door_x'], state['exit_door_y']
             )
@@ -261,11 +268,11 @@ class RewardCalculator:
             reward += self.movement_scale * 1.0
 
         # Level 3: Navigation and objective completion
-        curr_distance_to_switch = self._calculate_distance(
+        curr_distance_to_switch = calculate_distance(
             obs['player_x'], obs['player_y'],
             obs['switch_x'], obs['switch_y']
         )
-        curr_distance_to_exit = self._calculate_distance(
+        curr_distance_to_exit = calculate_distance(
             obs['player_x'], obs['player_y'],
             obs['exit_door_x'], obs['exit_door_y']
         )
@@ -345,52 +352,93 @@ class RewardCalculator:
     def update_progression_metrics(self):
         """
         Update the agent's progression metrics after each episode.
-        This affects the scaling of different reward components for curriculum learning.
+        This method carefully adjusts reward scaling based on demonstrated skills
+        while preventing explosive reward growth.
+
+        The progression system works in stages:
+        1. Movement mastery (precise control and landing)
+        2. Navigation efficiency (reaching objectives efficiently)
+        3. Level completion optimization
+
+        Each stage's rewards are adjusted based on demonstrated competence,
+        with careful limits to prevent runaway scaling.
         """
-        # alpha = 0.1  # Exponential moving average factor
+        print("\nUpdating Progression Metrics...")
 
-        # # Update success rates
-        # self.movement_success_rate = (1 - alpha) * self.movement_success_rate + \
-        #     alpha * float(self.demonstrated_skills['precise_movement'] and
-        #                   self.demonstrated_skills['platform_landing'])
+        # Use a very small alpha for stable progression
+        alpha = 0.05  # Slower EMA factor
 
-        # self.navigation_success_rate = (1 - alpha) * self.navigation_success_rate + \
-        #     alpha * float(self.demonstrated_skills['switch_activation'])
+        # Calculate skill demonstration rates with decay
+        movement_success = float(
+            self.demonstrated_skills['precise_movement'] and
+            self.demonstrated_skills['platform_landing']
+        )
 
-        # self.level_completion_rate = (1 - alpha) * self.level_completion_rate + \
-        #     alpha * float(self.demonstrated_skills['exit_reaching'])
+        navigation_success = float(
+            self.demonstrated_skills['switch_activation']
+        )
 
-        # # Adjust reward scales based on progression
-        # if self.movement_success_rate > self.MOVEMENT_MASTERY_THRESHOLD:
-        #     self.movement_scale *= 0.95
-        #     self.navigation_scale *= 1.05
+        completion_success = float(
+            self.demonstrated_skills['exit_reaching']
+        )
 
-        # if self.navigation_success_rate > self.NAVIGATION_MASTERY_THRESHOLD:
-        #     self.navigation_scale *= 0.95
-        #     self.completion_scale *= 1.05
-        # Noop: this is causing very large navigation forwards,
-        # noop for now
+        # Update success rates with bounded EMA
+        self.movement_success_rate = np.clip(
+            (1 - alpha) * self.movement_success_rate + alpha * movement_success,
+            0.0, 1.0
+        )
 
-    def reset(self):
-        """Reset the reward calculator's progression metrics."""
-        self.movement_success_rate = 0.0
-        self.navigation_success_rate = 0.0
-        self.level_completion_rate = 0.0
-        self.movement_scale = 1.0
-        self.navigation_scale = 0.5
-        self.completion_scale = 0.2
-        self.demonstrated_skills = {
-            'precise_movement': False,
-            'platform_landing': False,
-            'momentum_control': False,
-            'switch_activation': False,
-            'exit_reaching': False
-        }
-        self.velocity_history.clear()
-        self.prev_distance_to_switch = float('inf')
-        self.prev_distance_to_exit = float('inf')
-        self.prev_improvement = None
-        self.min_distance_to_switch = float('inf')
-        self.min_distance_to_exit = float('inf')
-        self.prev_potential = None
-        self.first_switch_distance_update = True
+        self.navigation_success_rate = np.clip(
+            (1 - alpha) * self.navigation_success_rate +
+            alpha * navigation_success,
+            0.0, 1.0
+        )
+
+        self.level_completion_rate = np.clip(
+            (1 - alpha) * self.level_completion_rate + alpha * completion_success,
+            0.0, 1.0
+        )
+
+        # Adjust scales based on mastery, with careful bounds
+        if self.movement_success_rate > self.MOVEMENT_MASTERY_THRESHOLD:
+            # Gradually reduce movement rewards as mastery increases
+            movement_reduction = 0.98  # Slight reduction
+            navigation_increase = 1.02  # Slight increase
+
+            self.movement_scale = np.clip(
+                self.movement_scale * movement_reduction,
+                self.MIN_MOVEMENT_SCALE,
+                self.MAX_MOVEMENT_SCALE
+            )
+
+            self.navigation_scale = np.clip(
+                self.navigation_scale * navigation_increase,
+                self.MIN_NAVIGATION_SCALE,
+                self.MAX_NAVIGATION_SCALE
+            )
+
+        if self.navigation_success_rate > self.NAVIGATION_MASTERY_THRESHOLD:
+            # Similarly adjust navigation and completion scales
+            navigation_reduction = 0.98
+            completion_increase = 1.02
+
+            self.navigation_scale = np.clip(
+                self.navigation_scale * navigation_reduction,
+                self.MIN_NAVIGATION_SCALE,
+                self.MAX_NAVIGATION_SCALE
+            )
+
+            self.completion_scale = np.clip(
+                self.completion_scale * completion_increase,
+                self.MIN_COMPLETION_SCALE,
+                self.MAX_COMPLETION_SCALE
+            )
+
+        # Log progression metrics for monitoring
+        print(f"\nProgression Metrics:")
+        print(f"Movement Success Rate: {self.movement_success_rate:.3f}")
+        print(f"Navigation Success Rate: {self.navigation_success_rate:.3f}")
+        print(f"Completion Success Rate: {self.level_completion_rate:.3f}")
+        print(f"Current Scales - Movement: {self.movement_scale:.3f}, "
+              f"Navigation: {self.navigation_scale:.3f}, "
+              f"Completion: {self.completion_scale:.3f}\n")

@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Dict, Any
 from collections import deque
+from npp_rl.environments.constants import TIMESTEP
 
 
 def calculate_velocity(x, y, prev_x, prev_y, timestep):
@@ -25,26 +26,44 @@ class MovementEvaluator:
     4. Objective Progress: Whether movements contribute to game goals
     """
 
-    def __init__(self, timestep: float):
-        self.timestep = timestep
+    # Constants for movement evaluation
+    STABLE_VELOCITY_THRESHOLD = 0.1  # Threshold for controlled movement
+    SAFE_LANDING_VELOCITY = 15.0     # Maximum safe landing speed
+    MIN_MOVEMENT_THRESHOLD = 0.05     # Minimum meaningful movement
+    TRAJECTORY_HISTORY_SIZE = 30      # Frames to track for trajectory analysis
 
-        # Constants for movement evaluation
-        self.STABLE_VELOCITY_THRESHOLD = 0.1  # Threshold for controlled movement
-        self.SAFE_LANDING_VELOCITY = 15.0     # Maximum safe landing speed
-        self.MIN_MOVEMENT_THRESHOLD = 0.05     # Minimum meaningful movement
-        self.TRAJECTORY_HISTORY_SIZE = 30      # Frames to track for trajectory analysis
+    # Movement quality thresholds
+    PRECISION_THRESHOLD = 0.85        # Required precision for success
+    LANDING_SUCCESS_THRESHOLD = 0.7   # Required landing success rate
+    MOMENTUM_EFFICIENCY_THRESHOLD = 0.8  # Required momentum efficiency
 
-        # Movement quality thresholds
-        self.PRECISION_THRESHOLD = 0.85        # Required precision for success
-        self.LANDING_SUCCESS_THRESHOLD = 0.7   # Required landing success rate
-        self.MOMENTUM_EFFICIENCY_THRESHOLD = 0.8  # Required momentum efficiency
+    # Movement vectors
+    LEFT = np.array([-1.0, 0.0])
+    RIGHT = np.array([1.0, 0.0])
 
+    # Y axis origin is the top left corner, so up is negative
+    UP = np.array([0.0, -1.0])
+
+    # Map actions to intended directions
+    ACTION_TO_DIRECTION_VECTOR = {
+        0: np.zeros(2),  # NOOP
+        1: LEFT,
+        2: RIGHT,
+        3: UP,
+        # Divide by sqrt(2) to normalize diagonal vectors
+        4: (LEFT + UP) / np.sqrt(2),
+        5: (RIGHT + UP) / np.sqrt(2)
+    }
+
+    def __init__(self):
         # Historical tracking
         self.trajectory_history = deque(maxlen=self.TRAJECTORY_HISTORY_SIZE)
 
         # Track recent landing success
         self.landing_attempts = deque(maxlen=10)
-        self.movement_segments = deque(maxlen=20)  # Track movement segments
+
+        # Track movement segments
+        self.movement_segments = deque(maxlen=20)
 
     def evaluate_movement_success(self,
                                   current_state: Dict[str, float],
@@ -69,7 +88,7 @@ class MovementEvaluator:
         vx, vy = calculate_velocity(
             current_state['player_x'], current_state['player_y'],
             previous_state['player_x'], previous_state['player_y'],
-            self.timestep
+            TIMESTEP
         )
         velocity_vector = np.array([vx, vy])
         movement_magnitude = np.linalg.norm(movement_vector)
@@ -136,30 +155,8 @@ class MovementEvaluator:
         Returns:
             np.ndarray: 2D unit vector representing intended direction
         """
-        # Define basic movement vectors
-        LEFT = np.array([-1.0, 0.0])
-        RIGHT = np.array([1.0, 0.0])
 
-        # Y axis origin is the top left corner, so up is negative
-        UP = np.array([0.0, -1.0])
-
-        # Map actions to intended directions
-        if action_taken == 0:  # NOOP
-            return np.zeros(2)
-        elif action_taken == 1:  # Left
-            return LEFT
-        elif action_taken == 2:  # Right
-            return RIGHT
-        elif action_taken == 3:  # Jump
-            return UP
-        elif action_taken == 4:  # Jump Left
-            # Normalize diagonal movement vector
-            return (LEFT + UP) / np.sqrt(2)
-        elif action_taken == 5:  # Jump Right
-            # Normalize diagonal movement vector
-            return (RIGHT + UP) / np.sqrt(2)
-        else:
-            return np.zeros(2)
+        return self.ACTION_TO_DIRECTION_VECTOR.get(action_taken, np.zeros(2))
 
     def _calculate_oscillation_penalty(self) -> float:
         """
@@ -374,7 +371,7 @@ class MovementEvaluator:
             _, vy = calculate_velocity(
                 current_state['player_x'], current_state['player_y'],
                 previous_state['player_x'], previous_state['player_y'],
-                self.timestep
+                TIMESTEP
             )
             landing_velocity = abs(vy)
 
@@ -562,3 +559,9 @@ class MovementEvaluator:
 
         # Movement is considered successful if it exceeds our threshold
         return weighted_sum > 0.85
+
+    def reset(self):
+        """Resets the evaluator for a new episode."""
+        self.trajectory_history.clear()
+        self.landing_attempts.clear()
+        self.movement_segments.clear()
