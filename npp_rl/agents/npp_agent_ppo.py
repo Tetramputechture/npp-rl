@@ -1,6 +1,5 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 import torch
@@ -14,6 +13,7 @@ from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 from npp_rl.game.game_controller import GameController
 from npp_rl.agents.npp_feature_extractor import NppFeatureExtractor
+from npp_rl.environments.movement_evaluator import MovementEvaluator
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -115,7 +115,7 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         # PPO-specific parameters
         clip_range=0.1,      # Reduced clipping for more conservative updates
         clip_range_vf=None,  # Let value function learn more freely
-        ent_coef=0.02,      # Start with higher entropy
+        ent_coef=0.025,      # Start with higher entropy
         vf_coef=1.0,        # Increased value function importance
 
         # Training stability parameters
@@ -151,7 +151,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
         check_freq=50,
         log_dir=log_dir,
         min_ent_coef=0.005,
-        max_ent_coef=0.02
+        max_ent_coef=0.025
     )
 
     # Train the model

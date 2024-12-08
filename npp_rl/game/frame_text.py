@@ -3,8 +3,7 @@
 
 from typing import Optional
 import numpy as np
-from doctr.models import ocr_predictor, recognition_predictor
-from doctr.io import Document, DocumentFile
+from doctr.models import ocr_predictor
 import torch
 import os
 

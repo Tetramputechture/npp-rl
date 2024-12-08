@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import numpy as np
-from typing import Callable, Dict, List, Optional, Set
-from game.strategies.level_strategy import LevelStrategy
-from game.strategies.game_initialized_strategy import GameInitializedStrategy
-from game.frame_text import all_frame_text, main_menu_text
-from game.game_controller import GameController
-from game.game_value_fetcher import GameValueFetcher
+from typing import Callable, Dict, Optional
+from npp_rl.game.strategies.level_strategy import LevelStrategy
+from npp_rl.game.strategies.game_initialized_strategy import GameInitializedStrategy
+from npp_rl.game.frame_text import all_frame_text
+from npp_rl.game.game_controller import GameController
+from npp_rl.game.game_value_fetcher import GameValueFetcher
 
 
 @dataclass

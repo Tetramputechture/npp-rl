@@ -1,7 +1,7 @@
-from game.strategies.base_state_strategy import BaseStateStrategy
-from game.game_config import game_config
+from npp_rl.game.strategies.base_state_strategy import BaseStateStrategy
+from npp_rl.game.game_config import game_config
 import numpy as np
-from game.game_controller import GameController
+from npp_rl.game.game_controller import GameController
 
 
 class GameInitializedStrategy(BaseStateStrategy):

@@ -1,6 +1,6 @@
-from game.strategies.base_state_strategy import BaseStateStrategy
-from game.game_config import game_config
-from game.agent_trainer import AgentTrainer
+from npp_rl.game.strategies.base_state_strategy import BaseStateStrategy
+from npp_rl.game.game_config import game_config
+from npp_rl.game.agent_trainer import AgentTrainer
 # Our controls:
 # 1: Move Left (A key)
 # 2: Move Right (D key)

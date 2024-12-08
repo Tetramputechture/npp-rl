@@ -1,14 +1,11 @@
-from game.game_window import get_game_window_handle
-from game.game_value_fetcher import GameValueFetcher
-from game.game_controller import GameController
-import win32gui
+from npp_rl.game.game_value_fetcher import GameValueFetcher
+from npp_rl.game.game_controller import GameController
 import threading
 
-from game.game_config import game_config
+from npp_rl.game.game_config import game_config
 
 import pydirectinput
-import time
-from agents.npp_agent_ppo import start_training
+from npp_rl.agents.npp_agent_ppo import start_training
 
 pydirectinput.PAUSE = 0.01
 

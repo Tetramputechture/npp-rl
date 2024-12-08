@@ -24,7 +24,7 @@ class RewardCalculator:
     SWITCH_ACTIVATION_REWARD = 10.0
     TERMINAL_REWARD = 20.0
     DEATH_PENALTY = -15.0
-    TIMEOUT_PENALTY = -10.0
+    TIMEOUT_PENALTY = -15.0
 
     # Movement assessment constants
     FINE_DISTANCE_THRESHOLD = 5.0
@@ -51,11 +51,21 @@ class RewardCalculator:
     MIN_NAVIGATION_SCALE = 0.2
     MIN_COMPLETION_SCALE = 0.1
 
+    # Exploration-based rewards
+    EXPLORATION_REWARD = 0.5
+    STUCK_PENALTY = -0.1
+
+    AREA_EXPLORATION_REWARD = 2.0
+    NEW_TRANSITION_REWARD = 5.0
+    BACKTRACK_PENALTY = -0.5
+    AREA_REVISIT_DECAY = 0.7  # Decay factor for revisiting areas
+
     def __init__(self, movement_evaluator: MovementEvaluator):
         # Curriculum learning parameters
         self.movement_success_rate = 0.0
         self.navigation_success_rate = 0.0
         self.level_completion_rate = 0.0
+
         # Stage-specific reward scaling
         self.movement_scale = 1.0
         self.navigation_scale = 0.5
@@ -88,6 +98,226 @@ class RewardCalculator:
         self.prev_potential = None
 
         self.first_switch_distance_update = True
+        self.first_exit_distance_update = True
+
+        # Exploration tracking
+        self.exploration_memory = 1000  # Number of recent positions to remember
+        self.stuck_threshold = 50  # Number of steps to consider being "stuck"
+        self.local_minima_counter = 0
+        self.position_grid_size = 10
+        self.area_grid_size = 50  # Larger grid for area analysis
+        self.visited_positions = set()
+        self.visited_areas = set()
+        self.area_visit_counts = {}  # Track how often we visit each area
+        self.area_exit_attempts = {}  # Track attempted exits from areas
+
+        # Path analyis
+        self.current_area = None
+        self.area_entry_points = {}  # Track where we enter areas
+        self.area_progress = {}  # Track progress made from each entry point
+        # Longer history for path analysis
+        self.path_history = deque(maxlen=1000)
+
+        # Path tracking
+        self.position_history = deque(maxlen=100)  # Track recent positions
+
+        # Track recent distances to goal
+        self.distance_history = deque(maxlen=100)
+
+        # Area transition detection
+        self.prev_area = None
+        self.area_transition_points = set()  # Points where we move between areas
+
+    def _discretize_position(self, x: float, y: float) -> tuple:
+        """Convert continuous position to discrete grid position."""
+        return (int(x / self.position_grid_size),
+                int(y / self.position_grid_size))
+
+    def _get_area_id(self, x: float, y: float) -> tuple:
+        """Convert position to larger area grid position."""
+        return (int(x / self.area_grid_size),
+                int(y / self.area_grid_size))
+
+    def _analyze_area_structure(self, current_pos: tuple,
+                                current_area: tuple,
+                                goal_pos: tuple) -> Dict[str, float]:
+        """
+        Analyze the structure of the current area and potential exit paths.
+        Returns metrics about area exploration and promising directions.
+        """
+        # Track this position in the current area
+        if current_area not in self.area_progress:
+            self.area_progress[current_area] = {
+                'min_distance_to_goal': float('inf'),
+                'explored_edges': set(),
+                'promising_directions': set()
+            }
+
+        # Update area progress metrics
+        progress = self.area_progress[current_area]
+
+        # Calculate distance from current position to goal
+        distance_to_goal = np.linalg.norm(
+            np.array(current_pos) - np.array(goal_pos))
+
+        # Update minimum distance achieved in this area
+        if distance_to_goal < progress['min_distance_to_goal']:
+            progress['min_distance_to_goal'] = distance_to_goal
+
+        # Check if we're near the edge of the current area
+        x, y = current_pos
+        area_x, area_y = current_area
+        relative_x = x - (area_x * self.area_grid_size)
+        relative_y = y - (area_y * self.area_grid_size)
+
+        # Identify edges we're exploring
+        edges = set()
+        if relative_x < 10:
+            edges.add('left')
+        elif relative_x > self.area_grid_size - 10:
+            edges.add('right')
+        if relative_y < 10:
+            edges.add('top')
+        elif relative_y > self.area_grid_size - 10:
+            edges.add('bottom')
+
+        # Add newly explored edges
+        new_edges = edges - progress['explored_edges']
+        progress['explored_edges'].update(edges)
+
+        # Identify promising directions based on goal position
+        goal_area = self._get_area_id(goal_pos[0], goal_pos[1])
+        area_dx = goal_area[0] - current_area[0]
+        area_dy = goal_area[1] - current_area[1]
+
+        if area_dx > 0:
+            progress['promising_directions'].add('right')
+        elif area_dx < 0:
+            progress['promising_directions'].add('left')
+        if area_dy > 0:
+            progress['promising_directions'].add('bottom')
+        elif area_dy < 0:
+            progress['promising_directions'].add('top')
+
+        return {
+            'new_edges': len(new_edges),
+            'promising_edges': len(edges & progress['promising_directions']),
+            'total_edges_explored': len(progress['explored_edges']),
+            'distance_improvement': progress['min_distance_to_goal'] - distance_to_goal
+        }
+
+    def _calculate_area_rewards(self, x: float, y: float,
+                                goal_x: float, goal_y: float) -> float:
+        """Calculate rewards for area exploration and navigation."""
+        current_pos = (x, y)
+        current_area = self._get_area_id(x, y)
+        goal_pos = (goal_x, goal_y)
+
+        reward = 0.0
+
+        # Analyze current area and progress
+        analysis = self._analyze_area_structure(
+            current_pos, current_area, goal_pos)
+
+        # Reward for exploring new edges of the area
+        reward += self.AREA_EXPLORATION_REWARD * analysis['new_edges']
+
+        # Extra reward for exploring edges in promising directions
+        reward += self.AREA_EXPLORATION_REWARD * analysis['promising_edges']
+
+        # Handle area transitions
+        if self.prev_area != current_area:
+            # We've moved to a new area
+            if current_area not in self.visited_areas:
+                # First time visiting this area
+                reward += self.AREA_EXPLORATION_REWARD
+                self.visited_areas.add(current_area)
+            else:
+                # Revisiting an area
+                visit_count = self.area_visit_counts.get(current_area, 0)
+                # Decay reward for revisits
+                reward += self.AREA_EXPLORATION_REWARD * \
+                    (self.AREA_REVISIT_DECAY ** visit_count)
+
+            # Record transition point
+            transition_point = (self.prev_area, current_area)
+            if transition_point not in self.area_transition_points:
+                reward += self.NEW_TRANSITION_REWARD
+                self.area_transition_points.add(transition_point)
+
+            self.area_visit_counts[current_area] = \
+                self.area_visit_counts.get(current_area, 0) + 1
+
+        # Penalize excessive backtracking
+        if len(self.path_history) > 100:
+            recent_areas = list(self.path_history)[-100:]
+            area_count = len(set(recent_areas))
+            if area_count < 3 and current_area in recent_areas[:-20]:
+                reward += self.BACKTRACK_PENALTY
+
+        # Update history
+        self.path_history.append(current_area)
+        self.prev_area = current_area
+
+        return reward
+
+    def _check_stuck_in_local_minima(self, curr_pos: tuple,
+                                     current_distance: float) -> bool:
+        """
+        Detect if agent is stuck in a local minimum by analyzing:
+        1. Position variety
+        2. Distance progress
+        3. Movement patterns
+        """
+        # Add current position to history
+        self.position_history.append(curr_pos)
+        self.distance_history.append(current_distance)
+
+        if len(self.position_history) < self.stuck_threshold:
+            return False
+
+        # Check position variety
+        recent_positions = set(list(self.position_history)
+                               [-self.stuck_threshold:])
+        position_variety = len(recent_positions)
+
+        # Check distance progress
+        recent_distances = list(self.distance_history)[-self.stuck_threshold:]
+        min_distance = min(recent_distances)
+        max_distance = max(recent_distances)
+        distance_progress = max_distance - min_distance
+
+        # Agent is stuck if:
+        # 1. Moving between very few positions
+        # 2. Not making significant progress in distance
+        # 3. Has been in this state for some time
+        is_stuck = (position_variety < 5 and
+                    abs(distance_progress) < 50 and
+                    len(recent_positions) >= self.stuck_threshold)
+
+        if is_stuck:
+            self.local_minima_counter += 1
+        else:
+            self.local_minima_counter = max(0, self.local_minima_counter - 1)
+
+        return is_stuck
+
+    def _calculate_exploration_reward(self, x: float, y: float) -> float:
+        """Calculate reward for exploring new areas."""
+        grid_pos = self._discretize_position(x, y)
+
+        # Reward for visiting new positions
+        reward = 0.0
+        if grid_pos not in self.visited_positions:
+            reward += self.EXPLORATION_REWARD
+            self.visited_positions.add(grid_pos)
+
+            # Limit memory size
+            if len(self.visited_positions) > self.exploration_memory:
+                self.visited_positions.remove(
+                    next(iter(self.visited_positions)))
+
+        return reward
 
     def _evaluate_movement_quality(self,
                                    movement_vector: np.ndarray,
@@ -138,54 +368,40 @@ class RewardCalculator:
         2. Gets closer to current objective (switch or exit)
         3. Activates the switch (major milestone)
         """
-        # Scale time component to a 0-10 range
-        # Using 999 as max time, so divide by 100 to get 0-10 scale
-        time_potential = (state['time_remaining'] / 100)
+        # Base time potential
+        # Start with base time potential
+        potential = (state['time_remaining'] / 100)
 
-        # Initialize base potential with normalized time
-        potential = time_potential
-
-        # Calculate distance-based potential
         if not state['switch_activated']:
-            # Distance to switch
+            # Calculate distance and area rewards for switch
+            area_reward = self._calculate_area_rewards(
+                state['player_x'], state['player_y'],
+                state['switch_x'], state['switch_y']
+            )
+
             distance_to_switch = calculate_distance(
                 state['player_x'], state['player_y'],
                 state['switch_x'], state['switch_y']
             )
 
-            # Convert distance to a potential that peaks at 20 when very close
-            # and approaches 0 at maximum distance
-            # Using exponential decay to emphasize closer positions
+            # Combine regular potential with area rewards
             switch_potential = 20.0 * np.exp(-distance_to_switch / 250.0)
-
-            # Add moderate bonus for improvement
-            if hasattr(self, 'prev_distance_to_switch') and self.prev_distance_to_switch is not None:
-                # Scale improvement bonus based on the size of improvement
-                # Capped at ±2 to avoid overwhelming base potential
-                improvement = self.prev_distance_to_switch - distance_to_switch
-                improvement_bonus = 2.0 * np.tanh(improvement / 100.0)
-                switch_potential += improvement_bonus
-
-            potential += switch_potential
-
+            potential += switch_potential + area_reward
         else:
-            # Similar logic for exit distance
+            # Calculate distance and area rewards for exit
+            area_reward = self._calculate_area_rewards(
+                state['player_x'], state['player_y'],
+                state['exit_door_x'], state['exit_door_y']
+            )
+
             distance_to_exit = calculate_distance(
                 state['player_x'], state['player_y'],
                 state['exit_door_x'], state['exit_door_y']
             )
 
-            # Higher base potential for exit phase (peaks at 25)
-            # Plus fixed bonus for having activated switch
-            exit_potential = 25.0 * np.exp(-distance_to_exit / 250.0) + 20.0
-
-            # Add improvement bonus for exit approach
-            if hasattr(self, 'prev_distance_to_exit') and self.prev_distance_to_exit is not None:
-                improvement = self.prev_distance_to_exit - distance_to_exit
-                improvement_bonus = 2.0 * np.tanh(improvement / 100.0)
-                exit_potential += improvement_bonus
-
-            potential += exit_potential
+            # Combine regular potential with area rewards
+            exit_potential = 25.0 * np.exp(-distance_to_exit / 250.0) + 10.0
+            potential += exit_potential + area_reward
 
         return potential
 
@@ -340,12 +556,34 @@ class RewardCalculator:
         self.prev_distance_to_switch = curr_distance_to_switch
         self.prev_distance_to_exit = curr_distance_to_exit
 
+        # Add exploration reward
+        exploration_reward = self._calculate_exploration_reward(
+            obs['player_x'], obs['player_y'])
+        reward += exploration_reward
+
+        # Apply stuck penalty if needed
+        current_pos = self._discretize_position(
+            obs['player_x'], obs['player_y'])
+        if not obs['switch_activated']:
+            current_distance = calculate_distance(
+                obs['player_x'], obs['player_y'],
+                obs['switch_x'], obs['switch_y']
+            )
+        else:
+            current_distance = calculate_distance(
+                obs['player_x'], obs['player_y'],
+                obs['exit_door_x'], obs['exit_door_y']
+            )
+
+        if self._check_stuck_in_local_minima(current_pos, current_distance):
+            print("Stuck in Local Minima!")
+            reward += self.STUCK_PENALTY
+
         # Log reward components on one line
         print(f"Reward: {reward:.2f} | "
               f"Movement: {movement_reward:.2f} | "
               f"Navigation: {navigation_reward:.2f} | "
               f"Shaping: {shaping_reward:.2f} | "
-              f"Potential: {current_potential:.2f} | "
               f"Time: {time_diff:.2f}")
         return reward
 

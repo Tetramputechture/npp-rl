@@ -62,6 +62,13 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         # Calculate CNN output dimension: 128 channels * 7 * 7 = 6272
         self.cnn_output_dim = 128 * 7 * 7
 
+        # Scale down visual features to 512 dimensions
+        self.visual_reduction = nn.Sequential(
+            nn.Linear(self.cnn_output_dim, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512)
+        )
+
         # Separate networks for different types of numerical features
         self.position_net = nn.Sequential(
             nn.Linear(4, 128),  # player_x, player_y, vx, vy
@@ -90,16 +97,13 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
 
         # Gated fusion mechanism
         self.fusion_gate = nn.Sequential(
-            nn.Linear(self.cnn_output_dim + 512, 512),
+            nn.Linear(512 + 512, 512),
             nn.Sigmoid()
         )
 
-        # Final processing with skip connections
+        # Final processing
         self.final_net = nn.Sequential(
-            nn.Linear(512, 1024),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(1024, features_dim),
+            nn.Linear(512, features_dim),
             nn.ReLU()
         )
 
@@ -115,6 +119,9 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         visual = observations[..., :self.frame_stack]
         visual = visual.permute(0, 3, 1, 2)
         visual_features = self.cnn(visual)
+
+        # Reduce visual features to 512 dimensions
+        visual_features = self.visual_reduction(visual_features)
 
         # Get numerical features (they're already in the correct order from preprocessing)
         numerical = observations[..., self.frame_stack:]
@@ -141,11 +148,10 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         ], dim=1)
         numerical_features = self.numerical_attention(numerical_combined)
 
-        # Apply gated fusion
+        # Apply gating fusion to combine visual and numerical features
         combined = torch.cat([visual_features, numerical_features], dim=1)
         gate = self.fusion_gate(combined)
-
-        # Final processing
         fused_features = gate * numerical_features + \
             (1 - gate) * visual_features
+
         return self.final_net(fused_features)

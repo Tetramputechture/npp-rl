@@ -206,7 +206,7 @@ class NPlusPlus(gymnasium.Env):
     # The max absolute velocity of the player
     MAX_VELOCITY = 20000.0
 
-    def __init__(self, gvf: GameValueFetcher, gc: GameController, movement_evaluator: MovementEvaluator, frame_stack: int = 4):
+    def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
         """Initialize the N++ environment.
 
         Args:
@@ -221,7 +221,7 @@ class NPlusPlus(gymnasium.Env):
         # Initialize frame stacking
         self.frames = deque(maxlen=frame_stack)
 
-        # Initialize movement and velocity tracking
+        # Initialize movement and velocity tracking for truncation
         self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
 
         # Initialize spaces
@@ -252,10 +252,10 @@ class NPlusPlus(gymnasium.Env):
 
         # Initialize movement evaluator to determine movement success rates
         # (not directly related to reward calculation)
-        self.movement_evaluator = movement_evaluator
+        self.movement_evaluator = MovementEvaluator()
 
         # Initialize reward calculator
-        self.reward_calculator = RewardCalculator(movement_evaluator)
+        self.reward_calculator = RewardCalculator(self.movement_evaluator)
 
         # Success tracking
         # Basic success flags
@@ -271,11 +271,6 @@ class NPlusPlus(gymnasium.Env):
         self.previous_time = None
         self.best_switch_distance = float('inf')
         self.best_exit_distance = float('inf')
-
-        # Movement tracking for success
-        # 1 second of positions at (GAME_SPEED_FRAMES_PER_SECOND) frames per second
-        self.position_history = deque(maxlen=GAME_SPEED_FRAMES_PER_SECOND)
-        self.previous_position = None
 
     def _preprocess_frame(self, frame):
         """Preprocess raw frame for CNN input.
@@ -402,7 +397,7 @@ class NPlusPlus(gymnasium.Env):
         return final_observation.astype(np.float32)
 
     def _get_observation(self) -> Dict[str, Any]:
-        """Get current observation from game state.
+        """Get current observation from npp_rl.game state.
 
         Returns:
             Dict containing the current observation space values
@@ -859,14 +854,12 @@ class NPlusPlus(gymnasium.Env):
         self.previous_time = None
         self.best_switch_distance = float('inf')
         self.best_exit_distance = float('inf')
+
+        # Reset position history
         self.position_history.clear()
-        self.previous_position = None
 
         # Reset frame stack
         self.frames.clear()
-
-        # Reset position and velocity history
-        self.position_history.clear()
 
         # Reset movement evaluator
         self.movement_evaluator.reset()

@@ -10,16 +10,14 @@
 
 
 from PIL import Image
-import win32gui
 import subprocess
 import time
-import numpy as np
 import os
 from typing import Optional
-from game.state_manager import StateManager
-from game.game_controller import GameController
-from game.game_value_fetcher import GameValueFetcher
-from game.game_window import get_game_window_handle, get_game_window_rect, get_game_window_frame
+from npp_rl.game.state_manager import StateManager
+from npp_rl.game.game_controller import GameController
+from npp_rl.game.game_value_fetcher import GameValueFetcher
+from npp_rl.game.game_window import get_game_window_handle, get_game_window_rect, get_game_window_frame
 
 import pymem
 

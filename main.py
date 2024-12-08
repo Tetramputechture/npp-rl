@@ -1,5 +1,5 @@
 import tkinter as tk
-from game.game_process import GameProcess
+from npp_rl.game.game_process import GameProcess
 from gui import NinjAI
 
 

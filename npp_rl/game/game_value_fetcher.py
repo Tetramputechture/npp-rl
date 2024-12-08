@@ -1,4 +1,4 @@
-from game.game_config import game_config
+from npp_rl.game.game_config import game_config
 from pymem import Pymem
 
 

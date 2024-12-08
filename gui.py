@@ -3,13 +3,11 @@ from typing import Optional, Callable, Dict, Any
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-from game.game_process import GameProcess
-from game.game_config import game_config
-from game.frame_text import extract_text
-from game.game_window import get_center_frame
-from environments.nplusplus import NPlusPlus
+from npp_rl.game.game_process import GameProcess
+from npp_rl.game.game_config import game_config
+from npp_rl.game.game_window import get_center_frame
+from npp_rl.environments.nplusplus import NPlusPlus
 import numpy as np
-import time
 import threading
 
 

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from game.game_controller import GameController
-from game.game_value_fetcher import GameValueFetcher
+from npp_rl.game.game_controller import GameController
+from npp_rl.game.game_value_fetcher import GameValueFetcher
 
 
 class BaseStateStrategy(ABC):
