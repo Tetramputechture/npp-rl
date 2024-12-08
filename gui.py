@@ -5,8 +5,9 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 from npp_rl.game.game_process import GameProcess
 from npp_rl.game.game_config import game_config
-from npp_rl.game.game_window import get_center_frame
+from npp_rl.game.game_window import get_game_window_frame
 from npp_rl.environments.nplusplus import NPlusPlus
+from npp_rl.game.level_parser import get_playable_space_coordinates
 import numpy as np
 import threading
 
@@ -65,7 +66,8 @@ class NinjAI:
         # Control variables
         self.training = tk.BooleanVar()
         self.automate_init_screen = tk.BooleanVar()
-        self.photo: Optional[ImageTk.PhotoImage] = None
+        self.game_image: Optional[ImageTk.PhotoImage] = None
+        self.current_level_coordinates = None
 
         # Load config from file
         game_config.load_config()
@@ -87,12 +89,13 @@ class NinjAI:
             'start_button': None,
             'state_label': None,
             'canvas': None,
-            'img_center_canvas': None,
+            'level_canvas': None,
             'save_frame_button': None,
             'save_frame_entry': None,
             'training_button': None,
             'automate_init': None,
             'reset_button': None,
+            'set_current_level_space_button': None,
         }
 
     def _init_gui(self):
@@ -118,7 +121,7 @@ class NinjAI:
 
         # Create right column components
         self._create_control_panel(right_frame)
-        self._create_center_canvas_display(right_frame)
+        self._create_level_canvas_display(right_frame)
 
     def _create_game_controls(self, parent: ttk.Frame):
         """Create game control widgets in a horizontal layout."""
@@ -251,7 +254,16 @@ class NinjAI:
         self.ui_components['player_reset_button'].grid(
             row=0, column=1)
 
-        current_row += 1  # Increment after the last control panel
+        # Set current level frame button
+        self.ui_components['set_current_level_frame_button'] = ttk.Button(
+            reset_frame,
+            text="Set Current Level Frame",
+            command=self._set_current_level_coordinates
+        )
+        self.ui_components['set_current_level_frame_button'].grid(
+            row=0, column=0, sticky="w")
+
+        current_row += 1
 
         # Create frame text display
         frame_text_frame = ttk.LabelFrame(parent, text="Frame Text", padding=5)
@@ -386,21 +398,21 @@ class NinjAI:
 
         return row + 2
 
-    def _create_center_canvas_display(self, parent: ttk.Frame):
-        """Initializes a small 320x240 canvas to display the center of the screen."""
+    def _create_level_canvas_display(self, parent: ttk.Frame):
+        """Initializes a small 320x240 canvas to display the current level."""
         center_canvas = tk.Canvas(parent, width=320, height=240)
         center_canvas.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
-        self.ui_components['img_center_canvas'] = center_canvas
+        self.ui_components['level_canvas'] = center_canvas
 
     def _update_frame_display(self):
         """Update the game frame display."""
         if self.game.current_frame is not None:
             rgb_frame = np.array(self.game.current_frame)
             img = Image.fromarray(rgb_frame, mode='RGB')
-            self.photo = ImageTk.PhotoImage(img.resize(self.CANVAS_SIZE))
+            self.game_image = ImageTk.PhotoImage(img.resize(self.CANVAS_SIZE))
             self.ui_components['canvas'].delete("all")
             self.ui_components['canvas'].create_image(
-                0, 0, anchor=tk.NW, image=self.photo)
+                0, 0, anchor=tk.NW, image=self.game_image)
 
     def _update_game_controls(self):
         """Update game control states."""
@@ -411,7 +423,7 @@ class NinjAI:
             self.ui_components['start_button'].config(
                 text="Start Game", state=tk.NORMAL)
             self.ui_components['canvas'].delete("all")
-            self.photo = None
+            self.game_image = None
 
         if self.game.state_manager.state != self.last_game_state:
             self.last_game_state = self.game.state_manager.state
@@ -462,16 +474,16 @@ class NinjAI:
         else:
             self.ui_components['frame_text'].config(text="Game not started")
 
-    def _update_center_canvas_display(self):
+    def _update_level_canvas_display(self):
         """Update the center canvas display with the current frame."""
         if self.game.current_frame is not None:
-            center_frame = get_center_frame(self.game.current_frame)
-            img = Image.fromarray(center_frame, mode='RGB')
-            photo = ImageTk.PhotoImage(img.resize((320, 240)))
-            self.ui_components['img_center_canvas'].delete("all")
-            self.ui_components['img_center_canvas'].create_image(
-                0, 0, anchor=tk.NW, image=photo)
-            self.ui_components['img_center_canvas'].image = photo
+            level_frame = get_game_window_frame(self.current_level_coordinates)
+            img = Image.fromarray(level_frame, mode='RGB')
+            game_image = ImageTk.PhotoImage(img.resize((320, 240)))
+            self.ui_components['level_canvas'].delete("all")
+            self.ui_components['level_canvas'].create_image(
+                0, 0, anchor=tk.NW, image=game_image)
+            self.ui_components['level_canvas'].image = game_image
 
     def _player_reset(self):
         """Reset the player's position."""
@@ -492,6 +504,10 @@ class NinjAI:
         reset_thread = threading.Thread(target=reset_environment)
         reset_thread.start()
         self.ui_components['reset_button'].config(state=tk.NORMAL)
+
+    def _set_current_level_coordinates(self):
+        self.current_level_coordinates = get_playable_space_coordinates()
+        print(f"Current level coordinates: {self.current_level_coordinates}")
 
     def _on_address_changed(self, memory_address: MemoryAddress):
         """Handle changes to memory address entry fields."""
@@ -529,7 +545,7 @@ class NinjAI:
         self._update_game_controls()
         self._update_memory_address_values()
         self._update_frame_text()
-        self._update_center_canvas_display()
+        self._update_level_canvas_display()
 
     def _start_update_loop(self):
         """Start the main update loop."""

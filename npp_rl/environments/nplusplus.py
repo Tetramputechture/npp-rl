@@ -161,6 +161,7 @@ from npp_rl.environments.reward_calculator import RewardCalculator
 from npp_rl.util.util import calculate_distance
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND
+from npp_rl.game.level_parser import get_playable_space_coordinates
 import time
 from typing import Tuple, Dict, Any
 from collections import deque
@@ -249,6 +250,9 @@ class NPlusPlus(gymnasium.Env):
 
         # Initialize episode counter
         self.episode_counter = 0
+
+        # Initialize current level playable space (x1, y1, x2, y2)
+        self.current_playable_space_coordinates = None
 
         # Initialize movement evaluator to determine movement success rates
         # (not directly related to reward calculation)
@@ -403,7 +407,7 @@ class NPlusPlus(gymnasium.Env):
             Dict containing the current observation space values
         """
         return {
-            'screen': get_game_window_frame(),
+            'screen': get_game_window_frame(self.current_playable_space_coordinates),
             'player_x': self.gvf.read_player_x(),
             'player_y': self.gvf.read_player_y(),
             'time_remaining': self.gvf.read_time_remaining(),
@@ -981,6 +985,9 @@ class NPlusPlus(gymnasium.Env):
         # # print("Pause key press success:", pause_key_success)
 
         print('Game started')
+
+        # Get our current level playable space coordinates
+        self.current_playable_space_coordinates = get_playable_space_coordinates()
 
         # Process observation for A2C
         processed_obs = self._get_stacked_observation(observation, observation)

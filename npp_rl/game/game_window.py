@@ -5,7 +5,7 @@ from typing import Optional
 GAME_WINDOW_TITLE = "NPP"
 
 MAIN_WINDOW_RESOLUTION = (1280, 720)
-LEVEL_FRAME = (48, 180, 1230, 830)
+LEVEL_FRAME = (51, 182, 1233, 835)
 
 LEVEL_WIDTH = LEVEL_FRAME[2] - LEVEL_FRAME[0]
 LEVEL_HEIGHT = LEVEL_FRAME[3] - LEVEL_FRAME[1]
@@ -24,7 +24,7 @@ def get_game_window_rect() -> Optional[tuple]:
     return win32gui.GetWindowRect(window_handle)
 
 
-def get_game_window_frame() -> Optional[np.ndarray]:
+def get_game_window_frame(detailed_level_crop: Optional[tuple] = None) -> Optional[np.ndarray]:
     """Capture current window frame.
     Assumes a 1280x720 input."""
     window_rect = get_game_window_rect()
@@ -36,6 +36,10 @@ def get_game_window_frame() -> Optional[np.ndarray]:
 
     # Crop to only the level playing view
     frame = screen.crop(LEVEL_FRAME)
+
+    # If a detailed crop is requested, apply it
+    if detailed_level_crop:
+        frame = frame.crop(detailed_level_crop)
 
     frame = np.array(frame)
     return frame
