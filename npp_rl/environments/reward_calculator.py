@@ -21,16 +21,13 @@ class RewardCalculator:
     # Base reward/penalty constants
     BASE_TIME_PENALTY = -0.01
     GOLD_COLLECTION_REWARD = 1.0
-    SWITCH_ACTIVATION_REWARD = 10.0
-    TERMINAL_REWARD = 20.0
-    DEATH_PENALTY = -15.0
+    SWITCH_ACTIVATION_REWARD = 20.0
+    TERMINAL_REWARD = 50.0
+    DEATH_PENALTY = -10.0
     TIMEOUT_PENALTY = -15.0
 
     # Movement assessment constants
     FINE_DISTANCE_THRESHOLD = 5.0
-    MIN_MOVEMENT_THRESHOLD = 0.1
-    MOVEMENT_PENALTY = -0.01
-    MAX_MOVEMENT_REWARD = 0.05
 
     # Distance-based reward scales
     DISTANCE_SCALE = 0.1
@@ -53,11 +50,13 @@ class RewardCalculator:
 
     # Exploration-based rewards
     EXPLORATION_REWARD = 0.5
-    STUCK_PENALTY = -0.1
-
+    STUCK_PENALTY = -0.5
+    BASE_MOVEMENT_REWARD = 0.1
+    OBJECTIVE_PROGRESS_REWARD = 0.5
     AREA_EXPLORATION_REWARD = 2.0
     NEW_TRANSITION_REWARD = 5.0
     BACKTRACK_PENALTY = -0.5
+    LOCAL_MINIMA_PENALTY = -0.5
     AREA_REVISIT_DECAY = 0.7  # Decay factor for revisiting areas
 
     def __init__(self, movement_evaluator: MovementEvaluator):
@@ -88,6 +87,13 @@ class RewardCalculator:
         # Movement evaluator
         self.movement_evaluator = movement_evaluator
 
+        # Skill progression tracking
+        self.movement_skills = {
+            'precise_landing': 0.0,
+            'momentum_control': 0.0,
+            'obstacle_avoidance': 0.0
+        }
+
         # Potential-based shaping parameters
         self.gamma = 0.99  # Discount factor for potential-based shaping
         self.prev_improvement = None  # For TD learning
@@ -104,8 +110,11 @@ class RewardCalculator:
         self.exploration_memory = 1000  # Number of recent positions to remember
         self.stuck_threshold = 50  # Number of steps to consider being "stuck"
         self.local_minima_counter = 0
+        self.best_distances = {'switch': float('inf'), 'exit': float('inf')}
+
         self.position_grid_size = 10
         self.area_grid_size = 50  # Larger grid for area analysis
+
         self.visited_positions = set()
         self.visited_areas = set()
         self.area_visit_counts = {}  # Track how often we visit each area
@@ -115,11 +124,12 @@ class RewardCalculator:
         self.current_area = None
         self.area_entry_points = {}  # Track where we enter areas
         self.area_progress = {}  # Track progress made from each entry point
-        # Longer history for path analysis
+
+        # Path history for area analysis and backtracking detection
         self.path_history = deque(maxlen=1000)
 
-        # Path tracking
-        self.position_history = deque(maxlen=100)  # Track recent positions
+        # Position history for local minima detection
+        self.position_history = deque(maxlen=100)
 
         # Track recent distances to goal
         self.distance_history = deque(maxlen=100)
@@ -128,7 +138,7 @@ class RewardCalculator:
         self.prev_area = None
         self.area_transition_points = set()  # Points where we move between areas
 
-    def _discretize_position(self, x: float, y: float) -> tuple:
+    def _get_grid_id(self, x: float, y: float) -> tuple:
         """Convert continuous position to discrete grid position."""
         return (int(x / self.position_grid_size),
                 int(y / self.position_grid_size))
@@ -137,6 +147,115 @@ class RewardCalculator:
         """Convert position to larger area grid position."""
         return (int(x / self.area_grid_size),
                 int(y / self.area_grid_size))
+
+    def _evaluate_movement(self, curr_state: Dict[str, Any], prev_state: Dict[str, Any], action: int) -> float:
+        """Evaluate movement quality with more granular rewards."""
+        reward = 0.0
+
+        # Get movement evaluation from the movement evaluator
+        movement_results = self.movement_evaluator.evaluate_movement_success(
+            current_state=curr_state,
+            previous_state=prev_state,
+            action_taken=action
+        )
+
+        # Reward precision movement
+        if movement_results['metrics']['precision'] > 0.8:
+            reward += 0.3
+            self.movement_skills['precise_landing'] += 0.1
+
+        # Reward efficient momentum use
+        if movement_results['metrics']['momentum'] > 0.7:
+            reward += 0.2
+            self.movement_skills['momentum_control'] += 0.1
+
+        # Reward successful landings
+        if prev_state['in_air'] and not curr_state['in_air']:
+            reward += 0.5
+            self.movement_skills['precise_landing'] += 0.2
+
+        return reward
+
+    def _evaluate_objective_progress(self, curr_state: Dict[str, Any], prev_state: Dict[str, Any]) -> float:
+        """Evaluate progress toward objectives with dynamic scaling."""
+        reward = 0.0
+
+        # Calculate distances
+        if not curr_state['switch_activated']:
+            curr_dist = np.linalg.norm([
+                curr_state['player_x'] - curr_state['switch_x'],
+                curr_state['player_y'] - curr_state['switch_y']
+            ])
+            prev_dist = np.linalg.norm([
+                prev_state['player_x'] - curr_state['switch_x'],
+                prev_state['player_y'] - curr_state['switch_y']
+            ])
+            best_dist = self.best_distances['switch']
+        else:
+            curr_dist = np.linalg.norm([
+                curr_state['player_x'] - curr_state['exit_door_x'],
+                curr_state['player_y'] - curr_state['exit_door_y']
+            ])
+            prev_dist = np.linalg.norm([
+                prev_state['player_x'] - curr_state['exit_door_x'],
+                prev_state['player_y'] - curr_state['exit_door_y']
+            ])
+            best_dist = self.best_distances['exit']
+
+        # Update best distances
+        if curr_dist < best_dist:
+            reward += self.OBJECTIVE_PROGRESS_REWARD
+            if not curr_state['switch_activated']:
+                self.best_distances['switch'] = curr_dist
+            else:
+                self.best_distances['exit'] = curr_dist
+
+        # Penalize backtracking
+        if curr_dist > prev_dist * 1.1:  # 10% threshold
+            reward += self.BACKTRACK_PENALTY
+
+        return reward
+
+    def _evaluate_exploration(self, curr_state: Dict[str, Any]) -> float:
+        """Evaluate and reward exploration behavior."""
+        reward = 0.0
+
+        # Discretize position for grid-based exploration tracking
+        pos = (int(curr_state['player_x'] / 10),
+               int(curr_state['player_y'] / 10))
+
+        # Reward visiting new positions
+        if pos not in self.visited_positions:
+            reward += 0.3
+            self.visited_positions.add(pos)
+
+        # Handle local minima
+        if self._check_local_minima(pos):
+            reward += self.LOCAL_MINIMA_PENALTY
+            self.local_minima_counter += 1
+        else:
+            self.local_minima_counter = max(0, self.local_minima_counter - 1)
+
+        return reward
+
+    def _check_local_minima(self, pos: tuple) -> bool:
+        """Enhanced local minima detection."""
+        self.path_history.append(pos)
+
+        if len(self.path_history) < 50:
+            return False
+
+        # Check if we're revisiting the same small area
+        recent_positions = set(list(self.path_history)[-50:])
+        return len(recent_positions) < 10
+
+    def _get_movement_scale(self) -> float:
+        """Calculate movement reward scale based on demonstrated skills."""
+        return min(2.0, 1.0 + sum(self.movement_skills.values()) / len(self.movement_skills))
+
+    def _get_progress_scale(self) -> float:
+        """Calculate progress reward scale based on exploration success."""
+        return min(1.5, 1.0 + len(self.visited_positions) / 1000)
 
     def _analyze_area_structure(self, current_pos: tuple,
                                 current_area: tuple,
@@ -230,10 +349,12 @@ class RewardCalculator:
             # We've moved to a new area
             if current_area not in self.visited_areas:
                 # First time visiting this area
+                print(f"New Area Visited: {current_area}")
                 reward += self.AREA_EXPLORATION_REWARD
                 self.visited_areas.add(current_area)
             else:
                 # Revisiting an area
+                print(f"Revisiting Area: {current_area}")
                 visit_count = self.area_visit_counts.get(current_area, 0)
                 # Decay reward for revisits
                 reward += self.AREA_EXPLORATION_REWARD * \
@@ -253,6 +374,7 @@ class RewardCalculator:
             recent_areas = list(self.path_history)[-100:]
             area_count = len(set(recent_areas))
             if area_count < 3 and current_area in recent_areas[:-20]:
+                print("Excessive Backtracking Detected!")
                 reward += self.BACKTRACK_PENALTY
 
         # Update history
@@ -296,6 +418,7 @@ class RewardCalculator:
                     len(recent_positions) >= self.stuck_threshold)
 
         if is_stuck:
+            print("Stuck in Local Minima!")
             self.local_minima_counter += 1
         else:
             self.local_minima_counter = max(0, self.local_minima_counter - 1)
@@ -304,7 +427,7 @@ class RewardCalculator:
 
     def _calculate_exploration_reward(self, x: float, y: float) -> float:
         """Calculate reward for exploring new areas."""
-        grid_pos = self._discretize_position(x, y)
+        grid_pos = self._get_grid_id(x, y)
 
         # Reward for visiting new positions
         reward = 0.0
@@ -480,6 +603,58 @@ class RewardCalculator:
             previous_state=prev_obs,
             action_taken=action_taken
         )
+        # Calculate movement magnitude
+        movement_delta = np.array([
+            obs['player_x'] - prev_obs['player_x'],
+            obs['player_y'] - prev_obs['player_y']
+        ])
+        movement_magnitude = np.linalg.norm(movement_delta)
+
+        # 1. Base Movement Reward
+        # Only give base reward if movement is meaningful and controlled
+        if movement_magnitude > 0.1 and movement_success['metrics']['precision'] > 0.5:
+            reward += self.BASE_MOVEMENT_REWARD
+
+        # 2. Precision Movement Rewards
+        precision_score = movement_success['metrics']['precision']
+        if precision_score > 0.8:
+            # Bonus for highly precise movement
+            reward += self.BASE_MOVEMENT_REWARD * 2.0
+            self.movement_skills['precise_landing'] = min(1.0,
+                                                          self.movement_skills['precise_landing'] + 0.1)
+        elif precision_score > 0.6:
+            # Smaller bonus for moderately precise movement
+            reward += self.BASE_MOVEMENT_REWARD * 1.5
+
+        # 3. Landing Rewards
+        if prev_obs['in_air'] and not prev_obs['in_air']:
+            landing_quality = movement_success['metrics']['landing']
+            if landing_quality > 0.8:
+                # Excellent landing
+                reward += self.BASE_MOVEMENT_REWARD * 3.0
+                self.movement_skills['precise_landing'] = min(1.0,
+                                                              self.movement_skills['precise_landing'] + 0.2)
+            elif landing_quality > 0.5:
+                # Acceptable landing
+                reward += self.BASE_MOVEMENT_REWARD * 2.0
+
+        # 4. Momentum Rewards
+        momentum_score = prev_obs['metrics']['momentum']
+        if momentum_score > 0.7:
+            # Efficient use of momentum
+            reward += self.BASE_MOVEMENT_REWARD * 1.5
+            self.movement_skills['momentum_control'] = min(1.0,
+                                                           self.movement_skills['momentum_control'] + 0.1)
+
+        # 5. Progressive Scaling
+        # Scale rewards based on demonstrated skill level
+        skill_multiplier = 1.0 + (
+            self.movement_skills['precise_landing'] +
+            self.movement_skills['momentum_control']
+        ) / 2.0
+
+        # Apply final scaling
+        reward *= skill_multiplier
         if movement_success['overall_success']:
             reward += self.movement_scale * 1.0
 
@@ -562,7 +737,7 @@ class RewardCalculator:
         reward += exploration_reward
 
         # Apply stuck penalty if needed
-        current_pos = self._discretize_position(
+        current_pos = self._get_grid_id(
             obs['player_x'], obs['player_y'])
         if not obs['switch_activated']:
             current_distance = calculate_distance(
@@ -576,7 +751,6 @@ class RewardCalculator:
             )
 
         if self._check_stuck_in_local_minima(current_pos, current_distance):
-            print("Stuck in Local Minima!")
             reward += self.STUCK_PENALTY
 
         # Log reward components on one line

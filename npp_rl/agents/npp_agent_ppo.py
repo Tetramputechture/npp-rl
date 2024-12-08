@@ -48,87 +48,67 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         PPO: Configured PPO model instance
     """
 
-    # Learning rate schedule: Start higher for faster initial learning,
-    # then decay to allow fine-tuning of policies
-    # Learning rate schedule with warmup and slower decay
-    # Start lower to build good fundamentals, then increase for faster learning,
-    # and finally decay for fine-tuning
     learning_rate = get_linear_fn(
-        start=1e-4,    # Lower initial rate for better early learning
-        end=1e-5,      # Very low final rate for precise policy refinement
-        end_fraction=0.9  # Longer decay period
+        start=3e-4,    # Higher initial rate
+        end=5e-5,      # Lower final rate for fine-tuning
+        end_fraction=0.8  # Longer learning period
     )
 
-    # Entropy coefficient schedule: Start high for exploration,
-    # then decay to encourage exploitation of learned policies
-    ent_coef = get_linear_fn(
-        start=0.01,  # Initial entropy for exploration
-        end=0.001,   # Final entropy for exploitation
-        end_fraction=0.7  # Decay more quickly than learning rate
-    )
-
-    seed = 42
-
-    # Configure policy network architecture
     policy_kwargs = dict(
         features_extractor_class=NppFeatureExtractor,
         features_extractor_kwargs=dict(
             features_dim=512,
         ),
         net_arch=dict(
-            pi=[512, 512, 256, 128],  # Policy network
-            vf=[512, 512, 256, 128]   # Matched value network
+            # Separate networks for movement and planning
+            pi=[
+                dict(
+                    vf=[512, 512, 256],  # Value stream
+                    pi=[512, 256]        # Policy stream
+                ),
+                # Attention mechanism for objective focus
+                dict(
+                    vf=[256, 128],       # Value refinement
+                    pi=[256, 128]        # Policy refinement
+                )
+            ],
+            # Deeper value network for better state evaluation
+            vf=[512, 512, 256, 256, 128]
         ),
-        # Layer normalization helps with varying episode lengths
         normalize_images=True,
         activation_fn=nn.ReLU,
     )
 
-    # Setup exploration noise
-    n_actions = env.action_space.n
-
-    # Unused for now, but can be added for exploration
-    # Note, the PPO constructor in stable-baselines3 does not support action noise,
-    # so we will have to add this manually if needed via a wrapper around the PPO model
-    action_noise = OrnsteinUhlenbeckActionNoise(
-        mean=np.zeros(n_actions),
-        sigma=0.1 * np.ones(n_actions),  # Moderate noise magnitude
-        theta=0.15,  # Rate of mean reversion
-        dt=1/60  # Match game's frame rate
-    )
-
-    # Initialize PPO with optimized parameters
     model = PPO(
         policy="CnnPolicy",
         env=env,
 
         # Learning parameters
         learning_rate=learning_rate,
-        n_steps=4096,
-        batch_size=256,
-        n_epochs=5,
+        n_steps=2048,          # Shorter trajectories for better exploration
+        batch_size=128,        # Smaller batches for better generalization
+        n_epochs=10,           # More epochs per update
 
-        # GAE parameters tuned for long-term credit assignment
-        gamma=0.995,         # Higher discount for better long-term planning
-        gae_lambda=0.98,     # Higher lambda for better advantage estimation
+        # Modified GAE parameters
+        gamma=0.99,            # Higher discount for better long-term planning
+        gae_lambda=0.95,       # Lower lambda for more emphasis on immediate rewards
 
         # PPO-specific parameters
-        clip_range=0.1,      # Reduced clipping for more conservative updates
-        clip_range_vf=None,  # Let value function learn more freely
-        ent_coef=0.025,      # Start with higher entropy
-        vf_coef=1.0,        # Increased value function importance
+        clip_range=0.2,        # More aggressive clipping
+        clip_range_vf=0.2,     # Matched value function clipping
+        ent_coef=0.01,        # Higher entropy for better exploration
+        vf_coef=0.7,          # Lower value coefficient
 
-        # Training stability parameters
-        max_grad_norm=0.5,   # Prevent explosive gradients
-        target_kl=0.015,     # Conservative policy updates
+        # Stability parameters
+        max_grad_norm=0.7,     # Higher grad norm for faster learning
+        target_kl=0.02,        # Higher KL target for more aggressive updates
 
         # Additional settings
         policy_kwargs=policy_kwargs,
-        # action_noise=action_noise,
-        normalize_advantage=True,  # Important for stable training
+        normalize_advantage=True,
         verbose=1,
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
-        seed=seed
+        seed=42
     )
 
     return model
