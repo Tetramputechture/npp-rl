@@ -1,5 +1,4 @@
 from collections import deque
-from typing import List, Dict
 from npp_rl.environments.constants import TIMESTEP
 import numpy as np
 
@@ -53,8 +52,8 @@ class ActionTracker:
         # 6 possible actions (0-5)
         action_features = np.array(list(self.action_history)) / 5.0
 
-        # Normalize durations to [0, 1] assuming max duration of 2 seconds
-        duration_features = np.array(list(self.action_duration)) / 2.0
+        # Normalize durations to [0, 1] assuming max duration of 10 seconds
+        duration_features = np.array(list(self.action_duration)) / 10.0
         duration_features = np.clip(duration_features, 0, 1)
 
         return np.concatenate([action_features, duration_features])

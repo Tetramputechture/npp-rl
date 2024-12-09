@@ -668,7 +668,7 @@ class NPlusPlus(gymnasium.Env):
 
         info.update({
             'objective_progress': progress,
-            'time_efficiency': observation['time_remaining'] / self.initial_time if self.initial_time > 0 else 0,
+            'time_efficiency': observation['time_remaining'] / self.initial_time if self.initial_time is not None else 0,
             'time_gained': float(observation['time_remaining'] > prev_obs['time_remaining'])
         })
 
@@ -786,6 +786,8 @@ class NPlusPlus(gymnasium.Env):
 
         # Get initial observation
         initial_obs = self._get_observation()
+
+        self.initial_time = initial_obs['time_remaining']
 
         # Set current playable space coordinates
         self.current_playable_space_coordinates = get_playable_space_coordinates()

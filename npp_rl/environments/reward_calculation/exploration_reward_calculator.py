@@ -8,13 +8,13 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of exploration and area-based rewards."""
 
     # Exploration-based rewards
-    EXPLORATION_REWARD = 0.5
-    STUCK_PENALTY = -0.5
-    AREA_EXPLORATION_REWARD = 2.0
-    NEW_TRANSITION_REWARD = 5.0
-    BACKTRACK_PENALTY = -0.5
-    LOCAL_MINIMA_PENALTY = -0.5
-    AREA_REVISIT_DECAY = 0.7
+    EXPLORATION_REWARD = 0.25
+    STUCK_PENALTY = -0.25
+    AREA_EXPLORATION_REWARD = 1.0
+    NEW_TRANSITION_REWARD = 2.5
+    BACKTRACK_PENALTY = -0.25
+    LOCAL_MINIMA_PENALTY = -0.25
+    AREA_REVISIT_DECAY = 0.8
 
     def __init__(self):
         """Initialize exploration reward calculator."""

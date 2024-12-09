@@ -87,7 +87,7 @@ class ObservationProcessor:
             np.mean(exploration_maps['transitions'][40:44, 40:44])
         ], dtype=np.float32)
 
-        # Get action history features
+        # Get action history features (8 in total)
         action_features = self.action_tracker.get_features()
 
         # Combine all features

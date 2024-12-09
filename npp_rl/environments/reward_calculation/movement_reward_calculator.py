@@ -9,7 +9,7 @@ from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRe
 class MovementRewardCalculator(BaseRewardCalculator):
     """Handles calculation of movement-related rewards."""
 
-    BASE_MOVEMENT_REWARD = 0.1
+    BASE_MOVEMENT_REWARD = 0.05
 
     def __init__(self, movement_evaluator: MovementEvaluator):
         """Initialize movement reward calculator.
@@ -48,11 +48,11 @@ class MovementRewardCalculator(BaseRewardCalculator):
 
         # Precise movement reward
         if 0 < movement_magnitude < self.FINE_DISTANCE_THRESHOLD:
-            reward += 0.1
+            reward += 0.05
 
         # Platform landing reward
         if was_in_air and is_grounded:
-            reward += 0.5
+            reward += 0.25
 
         # Movement consistency reward
         if len(self.velocity_history) >= 2:
@@ -62,7 +62,7 @@ class MovementRewardCalculator(BaseRewardCalculator):
                     np.linalg.norm(movement_vector) *
                     np.linalg.norm(prev_velocity)
                 )
-                reward += 0.3 * direction_consistency
+                reward += 0.15 * direction_consistency
 
         return reward * movement_scale
 
