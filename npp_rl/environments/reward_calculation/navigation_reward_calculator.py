@@ -1,5 +1,5 @@
 """Navigation reward calculator for evaluating objective-based movement and progress."""
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
 
@@ -20,17 +20,28 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.prev_potential = None
         self.consecutive_improvements = 0
         self.SWITCH_ACTIVATION_REWARD = 10.0  # Increased from default
+        self.mine_coords: List[Tuple[float, float]] = []
+
+    def set_mine_coordinates(self, mine_coords: List[Tuple[float, float]]):
+        """Set the mine coordinates for the current level.
+
+        Args:
+            mine_coords: List of (x, y) coordinates of mines
+        """
+        self.mine_coords = mine_coords
 
     def evaluate_navigation_quality(self,
                                     curr_distance: float,
                                     prev_distance: float,
-                                    navigation_scale: float) -> float:
+                                    navigation_scale: float,
+                                    curr_state: Dict[str, Any]) -> float:
         """Evaluate navigation quality using temporal difference learning.
 
         Args:
             curr_distance: Current distance to objective
             prev_distance: Previous distance to objective
             navigation_scale: Current navigation reward scale
+            curr_state: Current game state for mine avoidance
 
         Returns:
             float: Navigation quality reward
@@ -69,7 +80,14 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         # Store current improvement
         self.prev_improvement = relative_improvement
 
-        return (base_reward + momentum_bonus) * navigation_scale
+        # Calculate mine proximity penalty
+        mine_penalty = self.calculate_mine_proximity_penalty(
+            curr_state['player_x'],
+            curr_state['player_y'],
+            self.mine_coords
+        )
+
+        return (base_reward + momentum_bonus) * navigation_scale + mine_penalty
 
     def calculate_potential(self, state: Dict[str, Any]) -> float:
         """Calculate state potential for reward shaping.
@@ -85,6 +103,13 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             state['level_width']**2 + state['level_height']**2)
         distance_scale = level_diagonal / 4  # Adaptive scaling
 
+        # Calculate mine avoidance potential
+        mine_penalty = self.calculate_mine_proximity_penalty(
+            state['player_x'],
+            state['player_y'],
+            self.mine_coords
+        )
+
         if not state['switch_activated']:
             # Switch-focused potential with adaptive scaling
             distance_to_switch = self.calculate_distance_to_objective(
@@ -93,7 +118,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             )
             switch_potential = 25.0 * \
                 np.exp(-distance_to_switch / distance_scale)
-            return switch_potential
+            return switch_potential + mine_penalty
         else:
             # Exit-focused potential with adaptive scaling
             distance_to_exit = self.calculate_distance_to_objective(
@@ -102,7 +127,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             )
             exit_potential = 30.0 * \
                 np.exp(-distance_to_exit / distance_scale) + 15.0
-            return exit_potential
+            return exit_potential + mine_penalty
 
     def calculate_navigation_reward(self,
                                     curr_state: Dict[str, Any],
@@ -136,7 +161,8 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_switch,
                 self.prev_distance_to_switch,
-                navigation_scale * 1.2  # Increased focus on switch navigation
+                navigation_scale * 1.2,  # Increased focus on switch navigation
+                curr_state
             )
             reward += navigation_reward
 
@@ -162,7 +188,8 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_exit,
                 self.prev_distance_to_exit,
-                navigation_scale * 1.5  # Further increased focus on exit navigation
+                navigation_scale * 1.5,  # Further increased focus on exit navigation
+                curr_state
             )
             reward += navigation_reward
 
@@ -198,3 +225,4 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.first_exit_distance_update = True
         self.prev_potential = None
         self.consecutive_improvements = 0
+        # Don't reset mine_coords as they stay constant for the level

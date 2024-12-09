@@ -161,9 +161,9 @@ from npp_rl.environments.reward_calculation import RewardCalculator
 from npp_rl.util.util import calculate_distance
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, NUM_NUMERICAL_FEATURES
-from npp_rl.game.level_parser import get_playable_space_coordinates
+from npp_rl.game.level_parser import parse_level
 import time
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 import os
 from npp_rl.environments.observation_processor import ObservationProcessor
 from collections import deque
@@ -218,6 +218,8 @@ class NPlusPlus(gymnasium.Env):
         self.gvf = gvf
         self.gc = gc
         self.frame_stack = frame_stack
+        self.mine_coords: List[Tuple[float, float]] = []
+        self.level_data = None
 
         # Initialize observation processing
         self.observation_processor = ObservationProcessor(
@@ -277,49 +279,47 @@ class NPlusPlus(gymnasium.Env):
         self.best_exit_distance = float('inf')
 
     def _get_observation(self) -> Dict[str, Any]:
-        """Get current game state observation.
+        """Get the current observation from the game state.
 
         Returns:
-            Dict[str, Any]: Dictionary containing current game state:
-                - player_x: Player's x position
-                - player_y: Player's y position
-                - time_remaining: Time remaining in level
-                - switch_activated: Whether switch is activated
-                - player_dead: Whether player is dead
-                - exit_door_x: Exit door x position
-                - exit_door_y: Exit door y position
-                - switch_x: Switch x position
-                - switch_y: Switch y position
-                - in_air: Whether player is in air
-                - begin_retry_text: Text shown at level start/retry
-                - screen: Current game window frame
+            dict: Current observation including numerical features and processed frame
         """
-        # Get current frame and level size
-        frame = get_game_window_frame(self.current_playable_space_coordinates)
-        level_height = self.current_playable_space_coordinates[3] - \
-            self.current_playable_space_coordinates[1]
-        level_width = self.current_playable_space_coordinates[2] - \
-            self.current_playable_space_coordinates[0]
-
-        # Get game state values
-        observation = {
+        # Get game state
+        obs = {
             'player_x': self.gvf.read_player_x(),
             'player_y': self.gvf.read_player_y(),
             'time_remaining': self.gvf.read_time_remaining(),
             'switch_activated': self.gvf.read_switch_activated(),
-            'player_dead': self.gvf.read_player_dead(),
             'exit_door_x': self.gvf.read_exit_door_x(),
             'exit_door_y': self.gvf.read_exit_door_y(),
             'switch_x': self.gvf.read_switch_x(),
             'switch_y': self.gvf.read_switch_y(),
             'in_air': self.gvf.read_in_air(),
-            'begin_retry_text': self.gvf.read_begin_retry_text(),
-            'screen': frame,
-            'level_height': level_height,
-            'level_width': level_width
+            'level_width': self.gvf.read_level_width(),
+            'level_height': self.gvf.read_level_height()
         }
 
-        return observation
+        # Add nearest mine information if mines exist
+        if self.mine_coords:
+            # Find nearest mine
+            nearest_mine_dist = float('inf')
+            nearest_mine_coords = None
+
+            for mine_x, mine_y in self.mine_coords:
+                dist = calculate_distance(
+                    obs['player_x'], obs['player_y'], mine_x, mine_y)
+                if dist < nearest_mine_dist:
+                    nearest_mine_dist = dist
+                    nearest_mine_coords = (mine_x, mine_y)
+
+            if nearest_mine_coords:
+                obs['nearest_mine_x'], obs['nearest_mine_y'] = nearest_mine_coords
+            else:
+                obs['nearest_mine_x'] = obs['nearest_mine_y'] = -1.0
+        else:
+            obs['nearest_mine_x'] = obs['nearest_mine_y'] = -1.0
+
+        return obs
 
     def _get_stacked_observation(self, obs: Dict[str, Any], prev_obs: Dict[str, Any], action: int = None) -> np.ndarray:
         """Process and stack observations for the agent.
@@ -727,10 +727,18 @@ class NPlusPlus(gymnasium.Env):
 
         return processed_obs, reward, terminated, truncated, info
 
-    def reset(self, *, seed=None, options=None) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Reset the environment to start a new episode."""
-        super().reset(seed=seed)
+    def reset(self, seed=None, options=None):
+        """Reset the environment to start a new episode.
 
+        This method:
+        1. Resets game state with proper key presses
+        2. Gets initial observation
+        3. Updates mine coordinates for the new level
+        4. Returns initial observation
+
+        Returns:
+            tuple: Initial observation and info dict
+        """
         # Reset success tracking
         self.current_episode_success = False
         self.switch_activated = False
@@ -783,15 +791,23 @@ class NPlusPlus(gymnasium.Env):
 
         while 'begi' not in self.gvf.read_begin_retry_text().lower():
             print("Pressing space to go to 'press space to begin' screen...")
-            # # if this loops, 'pause' and 'retry' are shown at the same time
+            # if this loops, 'pause' and 'retry' are shown at the same time
             self.gc.press_space_key()
             time.sleep(0.1)
 
         print("Pressing space to go to the 'level playing' state...")
         self.gc.press_space_key()
 
-        # Set current playable space coordinates
-        self.current_playable_space_coordinates = get_playable_space_coordinates()
+        # Parse current level data after game state is reset
+        self.level_data = parse_level()
+
+        # Get mine coordinates from level data
+        self.mine_coords = [(mine['x'], mine['y'])
+                            for mine in self.level_data.get('mines', [])]
+
+        # Update reward calculator with mine coordinates
+        self.reward_calculator.navigation_calculator.set_mine_coordinates(
+            self.mine_coords)
 
         # Get initial observation
         initial_obs = self._get_observation()
@@ -805,7 +821,6 @@ class NPlusPlus(gymnasium.Env):
         # Get stacked observation (initial observation is used for both current and previous)
         processed_obs = self._get_stacked_observation(initial_obs, initial_obs)
 
-        # Return processed observation and empty info dict
         return processed_obs, {}
 
     def render(self):
