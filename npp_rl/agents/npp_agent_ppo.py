@@ -1,7 +1,6 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 import torch
 from torch import nn
 import numpy as np
@@ -13,7 +12,6 @@ from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 from npp_rl.game.game_controller import GameController
 from npp_rl.agents.npp_feature_extractor import NppFeatureExtractor
-from npp_rl.environments.movement_evaluator import MovementEvaluator
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
