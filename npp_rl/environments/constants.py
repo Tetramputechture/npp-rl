@@ -15,3 +15,6 @@ GAME_SPEED_TIMESTEP_FACTOR = 20
 
 # The time that should be taken between action and observation
 TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * GAME_SPEED_TIMESTEP_FACTOR)
+
+# 11 numerical features + 4 grid memory channels + 8 action history (4 actions, 4 durations)
+NUM_NUMERICAL_FEATURES = 23

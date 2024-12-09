@@ -1,8 +1,7 @@
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch
 from torch import nn
-
-NUM_NUMERICAL_FEATURES = 11
+from npp_rl.environments.constants import NUM_NUMERICAL_FEATURES
 
 
 class NppFeatureExtractor(BaseFeaturesExtractor):
@@ -13,7 +12,7 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         - First frame_stack channels: Stacked grayscale frames
         - Last NUM_NUMERICAL_FEATURES channels: Numerical features broadcast to 84x84 spatial dimensions
 
-    The network separates and processes visual and numerical data through appropriate 
+    The network separates and processes visual and numerical data through appropriate
     pathways before combining them into a final feature representation.
     """
 
@@ -71,26 +70,45 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
 
         # Separate networks for different types of numerical features
         self.position_net = nn.Sequential(
-            nn.Linear(4, 128),  # player_x, player_y, vx, vy
+            # player_x, player_y, vx, vy
+            nn.Linear(4, 128),
             nn.ReLU(),
             nn.BatchNorm1d(128)
         )
 
         self.objective_net = nn.Sequential(
-            nn.Linear(4, 128),  # exit_x, exit_y, switch_x, switch_y
+            # exit_x, exit_y, switch_x, switch_y
+            nn.Linear(4, 128),
             nn.ReLU(),
             nn.BatchNorm1d(128)
         )
 
         self.state_net = nn.Sequential(
-            nn.Linear(3, 64),  # time, switch_activated, in_air
+            # time, switch_activated, in_air
+            nn.Linear(3, 64),
             nn.ReLU(),
             nn.BatchNorm1d(64)
         )
 
+        self.exploration_net = nn.Sequential(
+            # recent_visits, frequency, area_exploration, transitions
+            nn.Linear(4, 128),
+            nn.ReLU(),
+            nn.BatchNorm1d(128)
+        )
+
+        self.action_history_net = nn.Sequential(
+            # action_1, action_2, action_3, action_4, duration_1, duration_2, duration_3, duration_4
+            nn.Linear(8, 128),
+            nn.ReLU(),
+            nn.BatchNorm1d(128)
+        )
+
+        total_numerical_features = 128 + 128 + 64 + 128 + 128
+
         # Combine numerical features with attention
         self.numerical_attention = nn.Sequential(
-            nn.Linear(128 + 128 + 64, 512),
+            nn.Linear(total_numerical_features, 512),
             nn.ReLU(),
             nn.Dropout(0.2)
         )
@@ -113,7 +131,8 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
 
         Args:
             observations: Tensor containing stacked frames and numerical features
-                Shape: (batch_size, 84, 84, frame_stack + NUM_NUMERICAL_FEATURES)
+                Shape: (batch_size, 84, 84, frame_stack + \
+                        NUM_NUMERICAL_FEATURES)
         """
         # Process visual features
         visual = observations[..., :self.frame_stack]

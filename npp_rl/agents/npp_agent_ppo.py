@@ -59,22 +59,26 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         features_extractor_kwargs=dict(
             features_dim=512,
         ),
+        # net_arch=dict(
+        #     # Separate networks for movement and planning
+        #     pi=[
+        #         dict(
+        #             vf=[512, 512, 256],  # Value stream
+        #             pi=[512, 256]        # Policy stream
+        #         ),
+        #         # Attention mechanism for objective focus
+        #         dict(
+        #             vf=[256, 128],       # Value refinement
+        #             pi=[256, 128]        # Policy refinement
+        #         )
+        #     ],
+        #     # Deeper value network for better state evaluation
+        #     # vf=[512, 512, 256, 256, 128]
         net_arch=dict(
-            # Separate networks for movement and planning
-            pi=[
-                dict(
-                    vf=[512, 512, 256],  # Value stream
-                    pi=[512, 256]        # Policy stream
-                ),
-                # Attention mechanism for objective focus
-                dict(
-                    vf=[256, 128],       # Value refinement
-                    pi=[256, 128]        # Policy refinement
-                )
-            ],
-            # Deeper value network for better state evaluation
-            vf=[512, 512, 256, 256, 128]
+            pi=[512, 512, 256, 128],  # Policy network
+            vf=[512, 512, 256, 128]   # Matched value network
         ),
+        # Layer normalization helps with varying episode lengths
         normalize_images=True,
         activation_fn=nn.ReLU,
     )
@@ -96,7 +100,7 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         # PPO-specific parameters
         clip_range=0.2,        # More aggressive clipping
         clip_range_vf=0.2,     # Matched value function clipping
-        ent_coef=0.01,        # Higher entropy for better exploration
+        ent_coef=0.025,        # Higher entropy for better exploration
         vf_coef=0.7,          # Lower value coefficient
 
         # Stability parameters
@@ -131,7 +135,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
         check_freq=50,
         log_dir=log_dir,
         min_ent_coef=0.005,
-        max_ent_coef=0.025
+        max_ent_coef=0.03
     )
 
     # Train the model

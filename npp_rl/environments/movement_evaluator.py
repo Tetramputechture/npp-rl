@@ -1,18 +1,8 @@
 import numpy as np
 from typing import Dict, Any
 from collections import deque
+from npp_rl.util.util import calculate_velocity
 from npp_rl.environments.constants import TIMESTEP
-
-
-def calculate_velocity(x, y, prev_x, prev_y, timestep):
-    dx = x - prev_x
-    dy = y - prev_y
-
-    # Calculate velocity components
-    vx = dx / timestep
-    vy = dy / timestep
-
-    return vx, vy
 
 
 class MovementEvaluator:

@@ -148,115 +148,6 @@ class RewardCalculator:
         return (int(x / self.area_grid_size),
                 int(y / self.area_grid_size))
 
-    def _evaluate_movement(self, curr_state: Dict[str, Any], prev_state: Dict[str, Any], action: int) -> float:
-        """Evaluate movement quality with more granular rewards."""
-        reward = 0.0
-
-        # Get movement evaluation from the movement evaluator
-        movement_results = self.movement_evaluator.evaluate_movement_success(
-            current_state=curr_state,
-            previous_state=prev_state,
-            action_taken=action
-        )
-
-        # Reward precision movement
-        if movement_results['metrics']['precision'] > 0.8:
-            reward += 0.3
-            self.movement_skills['precise_landing'] += 0.1
-
-        # Reward efficient momentum use
-        if movement_results['metrics']['momentum'] > 0.7:
-            reward += 0.2
-            self.movement_skills['momentum_control'] += 0.1
-
-        # Reward successful landings
-        if prev_state['in_air'] and not curr_state['in_air']:
-            reward += 0.5
-            self.movement_skills['precise_landing'] += 0.2
-
-        return reward
-
-    def _evaluate_objective_progress(self, curr_state: Dict[str, Any], prev_state: Dict[str, Any]) -> float:
-        """Evaluate progress toward objectives with dynamic scaling."""
-        reward = 0.0
-
-        # Calculate distances
-        if not curr_state['switch_activated']:
-            curr_dist = np.linalg.norm([
-                curr_state['player_x'] - curr_state['switch_x'],
-                curr_state['player_y'] - curr_state['switch_y']
-            ])
-            prev_dist = np.linalg.norm([
-                prev_state['player_x'] - curr_state['switch_x'],
-                prev_state['player_y'] - curr_state['switch_y']
-            ])
-            best_dist = self.best_distances['switch']
-        else:
-            curr_dist = np.linalg.norm([
-                curr_state['player_x'] - curr_state['exit_door_x'],
-                curr_state['player_y'] - curr_state['exit_door_y']
-            ])
-            prev_dist = np.linalg.norm([
-                prev_state['player_x'] - curr_state['exit_door_x'],
-                prev_state['player_y'] - curr_state['exit_door_y']
-            ])
-            best_dist = self.best_distances['exit']
-
-        # Update best distances
-        if curr_dist < best_dist:
-            reward += self.OBJECTIVE_PROGRESS_REWARD
-            if not curr_state['switch_activated']:
-                self.best_distances['switch'] = curr_dist
-            else:
-                self.best_distances['exit'] = curr_dist
-
-        # Penalize backtracking
-        if curr_dist > prev_dist * 1.1:  # 10% threshold
-            reward += self.BACKTRACK_PENALTY
-
-        return reward
-
-    def _evaluate_exploration(self, curr_state: Dict[str, Any]) -> float:
-        """Evaluate and reward exploration behavior."""
-        reward = 0.0
-
-        # Discretize position for grid-based exploration tracking
-        pos = (int(curr_state['player_x'] / 10),
-               int(curr_state['player_y'] / 10))
-
-        # Reward visiting new positions
-        if pos not in self.visited_positions:
-            reward += 0.3
-            self.visited_positions.add(pos)
-
-        # Handle local minima
-        if self._check_local_minima(pos):
-            reward += self.LOCAL_MINIMA_PENALTY
-            self.local_minima_counter += 1
-        else:
-            self.local_minima_counter = max(0, self.local_minima_counter - 1)
-
-        return reward
-
-    def _check_local_minima(self, pos: tuple) -> bool:
-        """Enhanced local minima detection."""
-        self.path_history.append(pos)
-
-        if len(self.path_history) < 50:
-            return False
-
-        # Check if we're revisiting the same small area
-        recent_positions = set(list(self.path_history)[-50:])
-        return len(recent_positions) < 10
-
-    def _get_movement_scale(self) -> float:
-        """Calculate movement reward scale based on demonstrated skills."""
-        return min(2.0, 1.0 + sum(self.movement_skills.values()) / len(self.movement_skills))
-
-    def _get_progress_scale(self) -> float:
-        """Calculate progress reward scale based on exploration success."""
-        return min(1.5, 1.0 + len(self.visited_positions) / 1000)
-
     def _analyze_area_structure(self, current_pos: tuple,
                                 current_area: tuple,
                                 goal_pos: tuple) -> Dict[str, float]:
@@ -432,11 +323,13 @@ class RewardCalculator:
         # Reward for visiting new positions
         reward = 0.0
         if grid_pos not in self.visited_positions:
+            print(f"New Position Visited: {grid_pos}")
             reward += self.EXPLORATION_REWARD
             self.visited_positions.add(grid_pos)
 
             # Limit memory size
             if len(self.visited_positions) > self.exploration_memory:
+                print("Memory Limit Reached!")
                 self.visited_positions.remove(
                     next(iter(self.visited_positions)))
 
@@ -639,7 +532,7 @@ class RewardCalculator:
                 reward += self.BASE_MOVEMENT_REWARD * 2.0
 
         # 4. Momentum Rewards
-        momentum_score = prev_obs['metrics']['momentum']
+        momentum_score = movement_success['metrics']['momentum']
         if momentum_score > 0.7:
             # Efficient use of momentum
             reward += self.BASE_MOVEMENT_REWARD * 1.5
@@ -854,3 +747,47 @@ class RewardCalculator:
         print(f"Current Scales - Movement: {self.movement_scale:.3f}, "
               f"Navigation: {self.navigation_scale:.3f}, "
               f"Completion: {self.completion_scale:.3f}\n")
+
+    def reset(self):
+        """Reset all internal state variables for a new episode."""
+        self.movement_success_rate = 0.0
+        self.navigation_success_rate = 0.0
+        self.level_completion_rate = 0.0
+        self.movement_scale = 1.0
+        self.navigation_scale = 0.5
+        self.completion_scale = 0.2
+        self.movement_skills = {
+            'precise_landing': 0.0,
+            'momentum_control': 0.0,
+            'obstacle_avoidance': 0.0
+        }
+
+        self.velocity_history.clear()
+        self.prev_distance_to_switch = float('inf')
+        self.prev_distance_to_exit = float('inf')
+        self.prev_improvement = None
+        self.prev_potential = None
+        self.min_distance_to_switch = float('inf')
+        self.min_distance_to_exit = float('inf')
+        self.first_switch_distance_update = True
+        self.first_exit_distance_update = True
+        self.prev_area = None
+        self.area_transition_points.clear()
+        self.visited_positions.clear()
+        self.visited_areas.clear()
+        self.area_visit_counts.clear()
+        self.area_exit_attempts.clear()
+        self.area_entry_points.clear()
+        self.area_progress.clear()
+        self.path_history.clear()
+        self.position_history.clear()
+        self.distance_history.clear()
+        self.local_minima_counter = 0
+        self.best_distances = {'switch': float('inf'), 'exit': float('inf')}
+        self.demonstrated_skills = {
+            'precise_movement': False,
+            'platform_landing': False,
+            'momentum_control': False,
+            'switch_activation': False,
+            'exit_reaching': False
+        }

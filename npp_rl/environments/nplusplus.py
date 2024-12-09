@@ -158,17 +158,16 @@ from npp_rl.game.game_controller import GameController
 from npp_rl.game.game_window import get_game_window_frame
 from npp_rl.game.game_value_fetcher import GameValueFetcher
 from npp_rl.environments.reward_calculator import RewardCalculator
-from npp_rl.util.util import calculate_distance
+from npp_rl.util.util import calculate_distance, calculate_velocity
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND
 from npp_rl.game.level_parser import get_playable_space_coordinates
+from npp_rl.environments.constants import NUM_NUMERICAL_FEATURES
 import time
 from typing import Tuple, Dict, Any
 from collections import deque
 import cv2
 import os
-
-NUM_NUMERICAL_FEATURES = 11
 
 
 class NPlusPlus(gymnasium.Env):
@@ -225,6 +224,25 @@ class NPlusPlus(gymnasium.Env):
         # Initialize movement and velocity tracking for truncation
         self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
 
+        # Enhanced observation tracking
+        self.position_grid_size = 10
+        self.area_grid_size = 50
+        self.vision_radius = 8  # Number of grid cells visible in each direction
+        self.max_areas = 100    # Maximum number of areas to track
+
+        # Initialize spatial memory matrices
+        self.position_memory = np.zeros((84, 84), dtype=np.float32)
+        self.area_memory = np.zeros((16, 16), dtype=np.float32)
+        self.visit_frequency = np.zeros((84, 84), dtype=np.float32)
+
+        # Track area transitions
+        self.transition_memory = np.zeros((16, 16), dtype=np.float32)
+
+        # Action histories
+        self.action_history = deque(maxlen=4)  # Track last 4 actions
+        # Track how long each action was held
+        self.action_duration = deque(maxlen=4)
+
         # Initialize spaces
         self.action_space = discrete.Discrete(6)
         self.observation_space = box.Box(
@@ -276,6 +294,9 @@ class NPlusPlus(gymnasium.Env):
         self.best_switch_distance = float('inf')
         self.best_exit_distance = float('inf')
 
+        # Initialize previous area coordinates
+        self.prev_area_coords = None
+
     def _preprocess_frame(self, frame):
         """Preprocess raw frame for CNN input.
 
@@ -298,71 +319,166 @@ class NPlusPlus(gymnasium.Env):
 
         return frame
 
+    def _update_spatial_memory(self, x: float, y: float) -> None:
+        """Update spatial memory matrices with current position information."""
+        # Convert world coordinates to grid coordinates
+        grid_x = int(x / self.position_grid_size)
+        grid_y = int(y / self.position_grid_size)
+        area_x = int(x / self.area_grid_size)
+        area_y = int(y / self.area_grid_size)
+
+        # Update position memory (recent visits)
+        decay_factor = 0.95
+        self.position_memory *= decay_factor
+        self.position_memory[grid_y, grid_x] = 1.0
+
+        # Update visit frequency (long-term memory)
+        self.visit_frequency[grid_y, grid_x] += 1
+        # Normalize visit frequency to [0, 1]
+        self.visit_frequency = np.clip(self.visit_frequency / 10.0, 0, 1)
+
+        # Update area memory
+        self.area_memory[area_y, area_x] = 1.0
+
+        # Update transition memory if we've changed areas
+        if self.prev_area_coords is not None:
+            if (area_x, area_y) != self.prev_area_coords:
+                prev_x, prev_y = self.prev_area_coords
+                # Mark transition in both directions
+                self.transition_memory[prev_y, prev_x] = 1.0
+                self.transition_memory[area_y, area_x] = 1.0
+
+        self.prev_area_coords = (area_x, area_y)
+
+    def _create_centered_view(self, memory_matrix: np.ndarray,
+                              x: float, y: float,
+                              grid_size: float) -> np.ndarray:
+        """Create a view of the memory matrix centered on current position."""
+        # Convert world coordinates to grid coordinates
+        grid_x = int(x / grid_size)
+        grid_y = int(y / grid_size)
+
+        # Calculate view boundaries
+        view = np.zeros((84, 84), dtype=np.float32)
+        radius = self.vision_radius
+
+        # Extract relevant portion of memory matrix
+        for i in range(-radius, radius + 1):
+            for j in range(-radius, radius + 1):
+                mem_x = grid_x + j
+                mem_y = grid_y + i
+
+                if 0 <= mem_y < memory_matrix.shape[0] and \
+                   0 <= mem_x < memory_matrix.shape[1]:
+                    # Map to observation space coordinates
+                    obs_x = 42 + j  # Center of 84x84 grid
+                    obs_y = 42 + i
+                    if 0 <= obs_y < 84 and 0 <= obs_x < 84:
+                        view[obs_y, obs_x] = memory_matrix[mem_y, mem_x]
+
+        return view
+
+    def _create_exploration_maps(self, x: float, y: float) -> Tuple[np.ndarray]:
+        """Create exploration status maps centered on current position."""
+        # Recent visits map
+        recent_visits = self._create_centered_view(
+            self.position_memory, x, y, self.position_grid_size)
+
+        # Visit frequency map
+        frequency = self._create_centered_view(
+            self.visit_frequency, x, y, self.position_grid_size)
+
+        # Area exploration map
+        area_exploration = self._create_centered_view(
+            self.area_memory, x, y, self.area_grid_size)
+
+        # Transition points map
+        transitions = self._create_centered_view(
+            self.transition_memory, x, y, self.area_grid_size)
+
+        return recent_visits, frequency, area_exploration, transitions
+
     def _get_numerical_features(self, obs, prev_obs):
         """
-        Process numerical features into grouped format for our enhanced network architecture.
+        Process numerical features into grouped format with added exploration metrics.
 
-        The features are organized into three logical groups:
+        Features are organized into four logical groups:
         1. Position features: Current position and velocity (4 features)
         2. Objective features: Distances to goals (4 features)
         3. State features: Game state information (3 features)
+        4. Exploration features: Local and global exploration metrics (4 features)
         """
-        # Calculate normalized positions and distances first
+        # Calculate base features
         max_level_width = 1258
         max_level_height = 802
         max_time = 600.0
 
-        # Calculate relative distances to objectives
+        # Calculate distances and velocities
         exit_door_dist_x = obs['exit_door_x'] - obs['player_x']
         exit_door_dist_y = obs['exit_door_y'] - obs['player_y']
         switch_dist_x = obs['switch_x'] - obs['player_x']
         switch_dist_y = obs['switch_y'] - obs['player_y']
-
-        # Calculate normalized velocities
-        vx, vy = self._calculate_velocity(prev_obs, obs)
+        vx, vy = calculate_velocity(
+            obs['player_x'], obs['player_y'],
+            prev_obs['player_x'], prev_obs['player_y'],
+            TIMESTEP
+        )
         normalized_vx = (vx + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
         normalized_vy = (vy + self.MAX_VELOCITY) / (2 * self.MAX_VELOCITY)
 
-        # Group 1: Position features (player position and velocity)
+        # Update spatial memory with current position
+        self._update_spatial_memory(obs['player_x'], obs['player_y'])
+
+        # Get exploration maps
+        recent_visits, frequency, area_exploration, transitions = \
+            self._create_exploration_maps(obs['player_x'], obs['player_y'])
+
+        # Calculate local exploration score (based on recent visits)
+        local_exploration = 1.0 - recent_visits[42, 42]  # Center of the view
+
+        # Calculate area exploration progress
+        area_progress = area_exploration[42, 42]  # Center of the view
+
+        # 1. Position features
         position_features = np.array([
-            # Normalized x position
             (obs['player_x'] - 63) / (1217 - 63),
-            # Normalized y position
             (obs['player_y'] - 171) / (791 - 171),
-            normalized_vx,                                 # Normalized x velocity
-            normalized_vy                                  # Normalized y velocity
+            normalized_vx,
+            normalized_vy
         ], dtype=np.float32)
 
-        # Group 2: Objective features (distances to goals)
+        # 2. Objective features
         objective_features = np.array([
-            (exit_door_dist_x + max_level_width) /
-            (2 * max_level_width),   # Exit x distance
-            (exit_door_dist_y + max_level_height) / \
-            (2 * max_level_height),  # Exit y distance
-            (switch_dist_x + max_level_width) / \
-            (2 * max_level_width),      # Switch x distance
-            (switch_dist_y + max_level_height) / \
-            (2 * max_level_height)     # Switch y distance
+            (exit_door_dist_x + max_level_width) / (2 * max_level_width),
+            (exit_door_dist_y + max_level_height) / (2 * max_level_height),
+            (switch_dist_x + max_level_width) / (2 * max_level_width),
+            (switch_dist_y + max_level_height) / (2 * max_level_height)
         ], dtype=np.float32)
 
-        # Group 3: State features (game state information)
+        # 3. State features
         state_features = np.array([
-            obs['time_remaining'] / max_time,              # Normalized time
-            float(obs['switch_activated']),                # Switch status
-            float(obs['in_air'])                          # Air status
+            obs['time_remaining'] / max_time,
+            float(obs['switch_activated']),
+            float(obs['in_air'])
         ], dtype=np.float32)
 
-        # Combine all features in the correct order
+        # 4. Exploration features (normalized between 0 and 1)
+        exploration_features = np.array([
+            local_exploration,              # Recent visit status
+            np.mean(frequency[40:44, 40:44]),  # Local visit frequency
+            area_progress,                  # Area exploration status
+            np.mean(transitions[40:44, 40:44])  # Local transition density
+        ], dtype=np.float32)
+
+        # Combine all features
         features = np.concatenate([
             position_features,    # First 4 features
             objective_features,   # Next 4 features
-            state_features       # Last 3 features
+            state_features,      # Next 3 features
+            exploration_features  # Last 4 features
         ])
 
-        # Assert our features are NUM_NUMERICAL_FEATURES long
-        assert len(features) == NUM_NUMERICAL_FEATURES
-
-        # Reshape to match network expectations
+        # Reshape and broadcast
         features = features.reshape((1, 1, NUM_NUMERICAL_FEATURES))
         features = np.broadcast_to(features, (84, 84, NUM_NUMERICAL_FEATURES))
 
@@ -420,25 +536,6 @@ class NPlusPlus(gymnasium.Env):
             # Note: velocity values are calculated indirectly in _get_numerical_features
             # because we don't current have direct access to velocity
         }
-
-    def _calculate_velocity(self, prev_obs: Dict[str, Any], curr_obs: Dict[str, Any]) -> Tuple[float, float]:
-        """Calculate player velocity based on previous and current observations.
-
-        Args:
-            prev_obs: Previous observation dictionary
-            curr_obs: Current observation dictionary
-        """
-        # Calculate time elapsed between observations
-
-        # Calculate distance traveled in x and y directions
-        dx = curr_obs['player_x'] - prev_obs['player_x']
-        dy = curr_obs['player_y'] - prev_obs['player_y']
-
-        # Calculate velocity components
-        vx = dx / TIMESTEP
-        vy = dy / TIMESTEP
-
-        return vx, vy
 
     def _execute_action(self, action: int):
         """Execute the specified action using the game controller.
@@ -820,10 +917,10 @@ class NPlusPlus(gymnasium.Env):
 
             # Log final positions and actions
             print("Logging final positions and actions...")
-            with open(f'{self.position_log_folder_name}/position_log_{self.episode_counter}.csv', 'w') as f:
+            with open(f'{self.position_log_folder_name}/position_log_{self.episode_counter}.csv', 'w', encoding='utf-8') as f:
                 f.write(self.position_log_file_string)
 
-            with open(f'{self.action_log_folder_name}/action_log_{self.episode_counter}.csv', 'w') as f:
+            with open(f'{self.action_log_folder_name}/action_log_{self.episode_counter}.csv', 'w', encoding='utf-8') as f:
                 f.write(self.action_log_file_string)
 
         return processed_obs, reward, terminated, truncated, info
@@ -862,11 +959,27 @@ class NPlusPlus(gymnasium.Env):
         # Reset position history
         self.position_history.clear()
 
+        # Reset spatial memory
+        self.position_memory = np.zeros((84, 84), dtype=np.float32)
+        self.area_memory = np.zeros((16, 16), dtype=np.float32)
+        self.visit_frequency = np.zeros((84, 84), dtype=np.float32)
+
+        # Reset area transitions
+        self.transition_memory = np.zeros((16, 16), dtype=np.float32)
+        self.prev_area_coords = None
+
+        # Reset action histories and durations
+        self.action_history.clear()
+        self.action_duration.clear()
+
         # Reset frame stack
         self.frames.clear()
 
         # Reset movement evaluator
         self.movement_evaluator.reset()
+
+        # Reset reward calculator
+        self.reward_calculator.reset()
 
         # Reset position log file string
         self.position_log_file_string = 'PlayerX,PlayerY\n'
