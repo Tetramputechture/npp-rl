@@ -18,6 +18,8 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.first_switch_distance_update = True
         self.first_exit_distance_update = True
         self.prev_potential = None
+        self.consecutive_improvements = 0
+        self.SWITCH_ACTIVATION_REWARD = 10.0  # Increased from default
 
     def evaluate_navigation_quality(self,
                                     curr_distance: float,
@@ -36,26 +38,38 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         if prev_distance is None or prev_distance == float('inf'):
             return 0.0
 
-        # Calculate relative improvement
-        relative_improvement = (
-            prev_distance - curr_distance) / (prev_distance + 1e-6)
+        # Calculate absolute and relative improvement
+        absolute_improvement = prev_distance - curr_distance
+        relative_improvement = absolute_improvement / (prev_distance + 1e-6)
 
-        # Apply non-linear scaling
-        scaled_improvement = np.sign(
-            relative_improvement) * np.sqrt(abs(relative_improvement))
+        # Apply progressive scaling based on consecutive improvements
+        if absolute_improvement > 0:
+            self.consecutive_improvements += 1
+            progress_multiplier = min(
+                1.5, 1.0 + (self.consecutive_improvements * 0.1))
+        else:
+            self.consecutive_improvements = 0
+            progress_multiplier = 1.0
 
-        # Add momentum bonus for consistent progress
+        # Calculate base reward using both absolute and relative improvements
+        base_reward = (
+            0.7 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) +
+            0.3 * np.sign(relative_improvement) *
+            np.sqrt(abs(relative_improvement))
+        )
+
+        # Enhanced momentum bonus for consistent progress
         momentum_bonus = 0.0
         if self.prev_improvement is not None:
-            momentum_bonus = 0.5 * (
-                1.0 if np.sign(relative_improvement) == np.sign(self.prev_improvement)
-                else -0.2
-            )
+            if np.sign(relative_improvement) == np.sign(self.prev_improvement):
+                momentum_bonus = 1.0 * progress_multiplier
+            else:
+                momentum_bonus = -0.5  # Increased penalty for inconsistent progress
 
         # Store current improvement
         self.prev_improvement = relative_improvement
 
-        return (scaled_improvement + momentum_bonus) * navigation_scale
+        return (base_reward + momentum_bonus) * navigation_scale
 
     def calculate_potential(self, state: Dict[str, Any]) -> float:
         """Calculate state potential for reward shaping.
@@ -66,27 +80,29 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         Returns:
             float: State potential value
         """
-        # Base time potential
-        potential = (state['time_remaining'] / 100)
+        # Dynamic scaling based on level size
+        level_diagonal = np.sqrt(
+            state['level_width']**2 + state['level_height']**2)
+        distance_scale = level_diagonal / 4  # Adaptive scaling
 
         if not state['switch_activated']:
-            # Switch-focused potential
+            # Switch-focused potential with adaptive scaling
             distance_to_switch = self.calculate_distance_to_objective(
                 state['player_x'], state['player_y'],
                 state['switch_x'], state['switch_y']
             )
-            switch_potential = 20.0 * np.exp(-distance_to_switch / 250.0)
-            potential += switch_potential
+            switch_potential = 25.0 * \
+                np.exp(-distance_to_switch / distance_scale)
+            return switch_potential
         else:
-            # Exit-focused potential
+            # Exit-focused potential with adaptive scaling
             distance_to_exit = self.calculate_distance_to_objective(
                 state['player_x'], state['player_y'],
                 state['exit_door_x'], state['exit_door_y']
             )
-            exit_potential = 25.0 * np.exp(-distance_to_exit / 250.0) + 10.0
-            potential += exit_potential
-
-        return potential
+            exit_potential = 30.0 * \
+                np.exp(-distance_to_exit / distance_scale) + 15.0
+            return exit_potential
 
     def calculate_navigation_reward(self,
                                     curr_state: Dict[str, Any],
@@ -116,40 +132,47 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         )
 
         if not curr_state['switch_activated']:
-            # Navigation to switch
+            # Enhanced navigation to switch
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_switch,
                 self.prev_distance_to_switch,
-                navigation_scale
+                navigation_scale * 1.2  # Increased focus on switch navigation
             )
             reward += navigation_reward
 
-            # Track minimum distance to switch
-            if self.min_distance_to_switch is None:
-                self.min_distance_to_switch = curr_distance_to_switch
-            elif curr_distance_to_switch < self.min_distance_to_switch:
+            # Progressive rewards for new minimum distances to switch
+            if curr_distance_to_switch < self.min_distance_to_switch:
+                improvement = self.min_distance_to_switch - curr_distance_to_switch
                 if not self.first_switch_distance_update:
-                    reward += (self.min_distance_to_switch -
-                               curr_distance_to_switch) * 0.5
+                    reward += improvement * navigation_scale
                 self.min_distance_to_switch = curr_distance_to_switch
                 self.first_switch_distance_update = False
 
         else:
-            # Handle switch activation
+            # Enhanced switch activation reward
             if not prev_state['switch_activated']:
                 reward += self.SWITCH_ACTIVATION_REWARD
                 switch_activated = True
                 # Reset exit distance tracking
-                self.min_distance_to_exit = None
+                self.min_distance_to_exit = curr_distance_to_exit
                 self.first_exit_distance_update = True
+                self.consecutive_improvements = 0  # Reset for exit navigation
 
-            # Navigation to exit
+            # Enhanced navigation to exit
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_exit,
                 self.prev_distance_to_exit,
-                navigation_scale
+                navigation_scale * 1.5  # Further increased focus on exit navigation
             )
             reward += navigation_reward
+
+            # Progressive rewards for new minimum distances to exit
+            if curr_distance_to_exit < self.min_distance_to_exit:
+                improvement = self.min_distance_to_exit - curr_distance_to_exit
+                if not self.first_exit_distance_update:
+                    reward += improvement * navigation_scale * 1.2
+                self.min_distance_to_exit = curr_distance_to_exit
+                self.first_exit_distance_update = False
 
         # Calculate potential-based shaping reward
         current_potential = self.calculate_potential(curr_state)
@@ -174,3 +197,4 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.first_switch_distance_update = True
         self.first_exit_distance_update = True
         self.prev_potential = None
+        self.consecutive_improvements = 0

@@ -28,7 +28,7 @@ def setup_training_env(env):
     return env, log_dir
 
 
-def create_ppo_agent(env: NPlusPlus) -> PPO:
+def create_ppo_agent(env: NPlusPlus, n_steps: int) -> PPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
 
@@ -57,21 +57,6 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         features_extractor_kwargs=dict(
             features_dim=512,
         ),
-        # net_arch=dict(
-        #     # Separate networks for movement and planning
-        #     pi=[
-        #         dict(
-        #             vf=[512, 512, 256],  # Value stream
-        #             pi=[512, 256]        # Policy stream
-        #         ),
-        #         # Attention mechanism for objective focus
-        #         dict(
-        #             vf=[256, 128],       # Value refinement
-        #             pi=[256, 128]        # Policy refinement
-        #         )
-        #     ],
-        #     # Deeper value network for better state evaluation
-        #     # vf=[512, 512, 256, 256, 128]
         net_arch=dict(
             pi=[512, 512, 256, 128],  # Policy network
             vf=[512, 512, 256, 128]   # Matched value network
@@ -79,7 +64,10 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         # Layer normalization helps with varying episode lengths
         normalize_images=True,
         activation_fn=nn.ReLU,
+        # net_arch_kwargs is not a valid argument for PPO
     )
+
+    batch_size = n_steps // 16
 
     model = PPO(
         policy="CnnPolicy",
@@ -87,8 +75,8 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
 
         # Learning parameters
         learning_rate=learning_rate,
-        n_steps=2048,          # Shorter trajectories for better exploration
-        batch_size=128,        # Smaller batches for better generalization
+        n_steps=n_steps,              # Shorter trajectories for better exploration
+        batch_size=batch_size,        # Smaller batches for better generalization
         n_epochs=10,           # More epochs per update
 
         # Modified GAE parameters
@@ -105,6 +93,8 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
         max_grad_norm=0.7,     # Higher grad norm for faster learning
         target_kl=0.02,        # Higher KL target for more aggressive updates
 
+        # Action noise is not a valid argument for PPO
+
         # Additional settings
         policy_kwargs=policy_kwargs,
         normalize_advantage=True,
@@ -116,7 +106,7 @@ def create_ppo_agent(env: NPlusPlus) -> PPO:
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
+def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_steps=2048, total_timesteps=1000000) -> PPO:
     """
     Trains the PPO agent
 
@@ -126,12 +116,14 @@ def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000) -> PPO:
         total_timesteps: Total training timesteps
     """
     # Create and set up the model
-    model = create_ppo_agent(env)
+    model = create_ppo_agent(env, n_steps)
 
     # Configure callback for monitoring and saving
     callback = PPOTrainingCallback(
         check_freq=50,
         log_dir=log_dir,
+        game_controller=game_controller,
+        n_steps=n_steps,
         min_ent_coef=0.005,
         max_ent_coef=0.03
     )
@@ -259,7 +251,8 @@ def start_training(game_value_fetcher, game_controller: GameController):
 
         print("Starting PPO training...")
         log_dir = Path('./training_logs/ppo_training_log')
-        model = train_ppo_agent(env, log_dir, total_timesteps=25000)
+        model = train_ppo_agent(
+            env, log_dir, game_controller, total_timesteps=25000)
 
         # Save final model
         print("Training completed. Saving model...")

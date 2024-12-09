@@ -294,8 +294,12 @@ class NPlusPlus(gymnasium.Env):
                 - begin_retry_text: Text shown at level start/retry
                 - screen: Current game window frame
         """
-        # Get current frame
+        # Get current frame and level size
         frame = get_game_window_frame(self.current_playable_space_coordinates)
+        level_height = self.current_playable_space_coordinates[3] - \
+            self.current_playable_space_coordinates[1]
+        level_width = self.current_playable_space_coordinates[2] - \
+            self.current_playable_space_coordinates[0]
 
         # Get game state values
         observation = {
@@ -310,7 +314,9 @@ class NPlusPlus(gymnasium.Env):
             'switch_y': self.gvf.read_switch_y(),
             'in_air': self.gvf.read_in_air(),
             'begin_retry_text': self.gvf.read_begin_retry_text(),
-            'screen': frame
+            'screen': frame,
+            'level_height': level_height,
+            'level_width': level_width
         }
 
         return observation
@@ -784,13 +790,17 @@ class NPlusPlus(gymnasium.Env):
         print("Pressing space to go to the 'level playing' state...")
         self.gc.press_space_key()
 
+        # Set current playable space coordinates
+        self.current_playable_space_coordinates = get_playable_space_coordinates()
+
         # Get initial observation
         initial_obs = self._get_observation()
 
         self.initial_time = initial_obs['time_remaining']
 
-        # Set current playable space coordinates
-        self.current_playable_space_coordinates = get_playable_space_coordinates()
+        # Print level width, height
+        print(f"Level width: {initial_obs['level_width']}")
+        print(f"Level height: {initial_obs['level_height']}")
 
         # Get stacked observation (initial observation is used for both current and previous)
         processed_obs = self._get_stacked_observation(initial_obs, initial_obs)

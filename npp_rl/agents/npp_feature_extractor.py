@@ -97,14 +97,7 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
             nn.BatchNorm1d(128)
         )
 
-        self.action_history_net = nn.Sequential(
-            # action_1, action_2, action_3, action_4, duration_1, duration_2, duration_3, duration_4
-            nn.Linear(8, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128)
-        )
-
-        total_numerical_features = 128 + 128 + 64 + 128 + 128
+        total_numerical_features = 128 + 128 + 64 + 128
 
         # Combine numerical features with attention
         self.numerical_attention = nn.Sequential(
@@ -152,22 +145,19 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         objective_features = numerical[:, 4:8]             # Next 4 features
         state_features = numerical[:, 8:11]                # Next 3 features
         exploration_features = numerical[:, 11:15]         # Next 4 features
-        action_history_features = numerical[:, 15:23]      # Last 8 features
 
         # Process each group through its specialized network
         processed_position = self.position_net(position_features)
         processed_objectives = self.objective_net(objective_features)
         processed_state = self.state_net(state_features)
         processed_exploration = self.exploration_net(exploration_features)
-        processed_actions = self.action_history_net(action_history_features)
 
         # Combine numerical features with attention
         numerical_combined = torch.cat([
             processed_position,
             processed_objectives,
             processed_state,
-            processed_exploration,
-            processed_actions
+            processed_exploration
         ], dim=1)
         numerical_features = self.numerical_attention(numerical_combined)
 

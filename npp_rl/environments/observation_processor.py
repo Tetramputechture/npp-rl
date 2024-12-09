@@ -3,7 +3,6 @@ from collections import deque
 import cv2
 from typing import Dict, Any
 from npp_rl.environments.spatial_memory import SpatialMemoryTracker
-from npp_rl.environments.action_tracker import ActionTracker
 from npp_rl.util.util import calculate_velocity
 from npp_rl.environments.constants import TIMESTEP
 
@@ -16,7 +15,6 @@ class ObservationProcessor:
         self.frames = deque(maxlen=frame_stack)
         self.max_velocity = max_velocity
         self.spatial_memory = SpatialMemoryTracker()
-        self.action_tracker = ActionTracker(history_size=4)
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale, resize, and normalize"""
@@ -87,16 +85,12 @@ class ObservationProcessor:
             np.mean(exploration_maps['transitions'][40:44, 40:44])
         ], dtype=np.float32)
 
-        # Get action history features (8 in total)
-        action_features = self.action_tracker.get_features()
-
         # Combine all features
         features = np.concatenate([
             position_features,
             objective_features,
             state_features,
-            exploration_features,
-            action_features
+            exploration_features
         ])
 
         return np.broadcast_to(
@@ -108,10 +102,6 @@ class ObservationProcessor:
                             prev_obs: Dict[str, Any],
                             action: int = None) -> np.ndarray:
         """Process full observation including frame stack and numerical features"""
-        # Update action tracker if action is provided
-        if action is not None:
-            self.action_tracker.update(action)
-
         # Process current frame
         frame = self.preprocess_frame(obs['screen'])
         self.frames.append(frame)
@@ -134,5 +124,4 @@ class ObservationProcessor:
     def reset(self) -> None:
         """Reset processor state"""
         self.frames.clear()
-        self.action_tracker.reset()
         self.spatial_memory.reset()

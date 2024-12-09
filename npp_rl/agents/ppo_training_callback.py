@@ -22,6 +22,8 @@ class PPOTrainingCallback(BaseCallback):
     def __init__(self,
                  check_freq: int,
                  log_dir: Path,
+                 game_controller,
+                 n_steps: int,
                  verbose: int = 1,
                  save_freq: int = 10000,
                  min_ent_coef: float = 0.005,
@@ -33,6 +35,8 @@ class PPOTrainingCallback(BaseCallback):
         Args:
             check_freq: How often to check training metrics
             log_dir: Directory for saving logs and models
+            game_controller: GameController instance for pausing/unpausing the game
+            n_steps: Number of steps to take before training
             verbose: Verbosity level
             save_freq: How often to save model checkpoints
             min_ent_coef: Minimum entropy coefficient
@@ -40,6 +44,11 @@ class PPOTrainingCallback(BaseCallback):
             moving_average_window: Window size for calculating moving averages
         """
         super().__init__(verbose)
+
+        # Store game controller and n_steps
+        self.game_controller = game_controller
+        self.n_steps = n_steps
+        self.is_training = False
 
         # Basic configuration
         self.check_freq = check_freq
@@ -119,19 +128,32 @@ class PPOTrainingCallback(BaseCallback):
             movement_success = last_info.get('movement_efficiency', 0.0)
             landing_success = last_info.get('landing_quality', 0.0)
             momentum_success = last_info.get('momentum_efficiency', 0.0)
-            switch_progress = last_info.get('switch_activated', 0.0)
-            objective_progress = last_info.get('objective_progress', 0.0)
+
+            # Separate switch and exit progress
+            switch_progress = last_info.get(
+                'switch_progress', 0.0)  # Progress towards switch
+            # Binary switch activation
+            switch_activated = float(last_info.get('switch_activated', 0.0))
+            exit_progress = last_info.get(
+                'exit_progress', 0.0)  # Progress towards exit
             level_success = last_info.get('success', 0.0)
 
-            # Calculate composite success rates
+            # Calculate composite success rates with emphasis on navigation
             movement_mastery = np.mean(
                 [movement_success, landing_success, momentum_success])
-            navigation_success = np.mean([switch_progress, objective_progress])
 
-            # Calculate overall progress (weighted average)
-            overall_progress = (0.4 * movement_mastery +
-                                0.4 * navigation_success +
-                                0.2 * level_success)
+            # Consider both progress and achievements
+            switch_mastery = np.mean([switch_progress, switch_activated])
+            exit_mastery = exit_progress if switch_activated else 0.0
+            # More weight on switch mastery
+            navigation_success = np.mean([switch_mastery * 1.2, exit_mastery])
+
+            # Calculate overall progress (weighted average with more emphasis on navigation)
+            overall_progress = (
+                0.3 * movement_mastery +  # Reduced weight
+                0.5 * navigation_success +  # Increased weight
+                0.2 * level_success
+            )
 
             # Update success rate with granular progress
             self.success_rate.append(overall_progress)
@@ -146,23 +168,23 @@ class PPOTrainingCallback(BaseCallback):
         print(f'Level Success: {level_success:.3f}')
         print(f'Overall Progress: {overall_progress:.3f}')
 
-        # Base entropy adjustment on overall progress
-        if overall_progress < 0.3:
-            # Early learning - keep high exploration
+        # Adjust entropy based on navigation success specifically
+        if navigation_success < 0.2:
+            # Early navigation - high exploration
             target_entropy = self.max_ent_coef
-        elif overall_progress < 0.6:
-            # Mid learning - gradual reduction
-            progress_ratio = (overall_progress - 0.3) / 0.3
+        elif navigation_success < 0.5:
+            # Mid navigation - gradual reduction
+            progress_ratio = (navigation_success - 0.2) / 0.3
             target_entropy = self.max_ent_coef - \
-                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.5)
+                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.6)
         else:
-            # Late learning - low exploration
-            progress_ratio = (overall_progress - 0.6) / 0.4
+            # Late navigation - low exploration
+            progress_ratio = (navigation_success - 0.5) / 0.5
             target_entropy = self.max_ent_coef - \
-                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.8)
+                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.9)
 
         # Smooth the transition
-        adjustment_rate = 0.1
+        adjustment_rate = 0.15  # Slightly faster adjustment
         new_ent_coef = self.current_ent_coef * \
             (1 - adjustment_rate) + target_entropy * adjustment_rate
 
@@ -183,6 +205,8 @@ class PPOTrainingCallback(BaseCallback):
                 print(f"Progress metrics:")
                 print(f"- Movement mastery: {movement_mastery:.3f}")
                 print(f"- Navigation success: {navigation_success:.3f}")
+                print(f"  - Switch mastery: {switch_mastery:.3f}")
+                print(f"  - Exit mastery: {exit_mastery:.3f}")
                 print(f"- Level success: {level_success:.3f}")
                 print(f"- Overall progress: {overall_progress:.3f}")
 
@@ -221,6 +245,19 @@ class PPOTrainingCallback(BaseCallback):
         """
         Update callback statistics and adjust training parameters.
         """
+        # Check if we're at the end of a batch of steps
+        if self.n_calls % self.n_steps == 0 and not self.is_training:
+            # We're about to start training, pause the game
+            print("Model is learning after batch of steps, pausing game...")
+            self.game_controller.release_all_keys()
+            self.game_controller.press_pause_key()
+            self.is_training = True
+        elif self.n_calls % self.n_steps == 1 and self.is_training:
+            # We've just finished learning and are about to start the next batch of steps
+            print("Model has learned from batch of steps, resuming game...")
+            self.game_controller.press_pause_key()
+            self.is_training = False
+
         # Record episode statistics
         if len(self.model.ep_info_buffer) > 0:
             last_info = self.model.ep_info_buffer[-1]
