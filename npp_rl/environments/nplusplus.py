@@ -162,6 +162,7 @@ from npp_rl.util.util import calculate_distance
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, NUM_NUMERICAL_FEATURES
 from npp_rl.game.level_parser import parse_level
+from npp_rl.game.game_config import game_config
 import time
 from typing import Tuple, Dict, Any, List
 import os
@@ -219,7 +220,6 @@ class NPlusPlus(gymnasium.Env):
         self.gc = gc
         self.frame_stack = frame_stack
         self.mine_coords: List[Tuple[float, float]] = []
-        self.level_data = None
 
         # Initialize observation processing
         self.observation_processor = ObservationProcessor(
@@ -798,12 +798,14 @@ class NPlusPlus(gymnasium.Env):
         print("Pressing space to go to the 'level playing' state...")
         self.gc.press_space_key()
 
-        # Parse current level data after game state is reset
-        self.level_data = parse_level()
+        # Get level data from game config
+        self.level_data = game_config.level_data
+        if self.level_data is None:
+            raise ValueError(
+                "Level data not set in game config. Please set level data first.")
 
         # Get mine coordinates from level data
-        self.mine_coords = [(mine['x'], mine['y'])
-                            for mine in self.level_data.get('mines', [])]
+        self.mine_coords = self.level_data.get('mine_coords', [])
 
         # Update reward calculator with mine coordinates
         self.reward_calculator.navigation_calculator.set_mine_coordinates(

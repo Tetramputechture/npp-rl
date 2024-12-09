@@ -24,6 +24,7 @@ class GameConfig:
     def __init__(self):
         self.training = False
         self.automate_init_screen = False
+        self.level_data = None  # Store the current level data
         self.player_x_address = 0x00
         self.player_y_address = 0x00
         self.time_remaining_address = 0x00
@@ -41,6 +42,7 @@ class GameConfig:
         return {
             'training': self.training,
             'automate_init_screen': self.automate_init_screen,
+            'level_data': self.level_data,
             'player_x_address': self.player_x_address,
             'player_y_address': self.player_y_address,
             'time_remaining_address': self.time_remaining_address,
@@ -69,6 +71,8 @@ class GameConfig:
             config = json.load(f)
             self.training = config['training']
             self.automate_init_screen = config['automate_init_screen']
+            # Use get() to handle missing key
+            self.level_data = config.get('level_data')
             self.player_x_address = config['player_x_address']
             self.player_y_address = config['player_y_address']
             self.time_remaining_address = config['time_remaining_address']
@@ -133,6 +137,18 @@ class GameConfig:
         """Set the in_air_address."""
         self.in_air_address = in_air_address
         return self.in_air_address
+
+    def set_level_data(self, level_data: dict) -> dict:
+        """Set the current level data.
+
+        Args:
+            level_data (dict): The level data to store
+
+        Returns:
+            dict: The stored level data
+        """
+        self.level_data = level_data
+        return self.level_data
 
     def all_addresses_defined(self) -> bool:
         """Check if all addresses are defined."""

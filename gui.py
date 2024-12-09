@@ -5,9 +5,8 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 from npp_rl.game.game_process import GameProcess
 from npp_rl.game.game_config import game_config
-from npp_rl.game.game_window import get_game_window_frame
 from npp_rl.environments.nplusplus import NPlusPlus
-from npp_rl.game.level_parser import get_playable_space_coordinates
+from npp_rl.game.level_parser import parse_level
 import numpy as np
 import threading
 
@@ -55,13 +54,15 @@ class NinjAI:
 
     # Class-level constants
     UPDATE_INTERVAL = 32  # 32ms = ~30fps
-    CANVAS_SIZE = (640, 480)
+    CANVAS_SIZE = (1280, 720)
 
     def __init__(self, root: tk.Tk, game_process: GameProcess):
         """Initialize the NinjAI interface."""
         self.root = root
         self.game = game_process
         self.last_game_state = None
+        self.level_data = None
+        self.debug_overlay = None
 
         # Control variables
         self.training = tk.BooleanVar()
@@ -85,17 +86,12 @@ class NinjAI:
             'main_frame': ttk.Frame(self.root, padding="10"),
             'left_frame': ttk.Frame(self.root),
             'right_frame': ttk.Frame(self.root),
-            'frame_text': None,
             'start_button': None,
             'state_label': None,
             'canvas': None,
-            'level_canvas': None,
-            'save_frame_button': None,
-            'save_frame_entry': None,
             'training_button': None,
             'automate_init': None,
             'reset_button': None,
-            'set_current_level_space_button': None,
         }
 
     def _init_gui(self):
@@ -117,16 +113,15 @@ class NinjAI:
 
         # Create left column components
         self._create_game_controls(left_frame)
-        self._create_debug_view(left_frame)
+        self._create_game_display(left_frame)
 
         # Create right column components
         self._create_control_panel(right_frame)
-        self._create_level_canvas_display(right_frame)
 
     def _create_game_controls(self, parent: ttk.Frame):
         """Create game control widgets in a horizontal layout."""
         controls_frame = ttk.Frame(parent)
-        controls_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        controls_frame.grid(row=1, column=0, sticky="ew", pady=(5, 5))
 
         # Start button and state label side by side
         self.ui_components['start_button'] = ttk.Button(
@@ -144,18 +139,21 @@ class NinjAI:
         self.ui_components['state_label'].grid(
             row=0, column=1, sticky="w")
 
-    def _create_debug_view(self, parent: ttk.Frame):
-        """Create the game frame display canvas."""
-        ttk.Label(parent, text="Game Debug View").grid(
-            row=1, column=0, sticky="w", pady=(5, 0))
+    def _create_game_display(self, parent: ttk.Frame):
+        """Create the game display frame."""
+        # Create a frame for the game display
+        game_frame = ttk.Frame(parent)
+        game_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-        self.ui_components['canvas'] = tk.Canvas(
-            parent,
-            width=self.CANVAS_SIZE[0],
-            height=self.CANVAS_SIZE[1]
+        # Create the game canvas - initially with default size
+        # The actual size will be updated when we get the playable space
+        self.ui_components['game_canvas'] = tk.Canvas(
+            game_frame,
+            width=800,  # Default width
+            height=600,  # Default height
+            background='black'
         )
-        self.ui_components['canvas'].grid(
-            row=2, column=0, sticky="w", pady=5)
+        self.ui_components['game_canvas'].grid(row=0, column=0, sticky="nsew")
 
     def _create_control_panel(self, parent: ttk.Frame):
         """Create a consolidated control panel with all controls grouped logically."""
@@ -179,34 +177,6 @@ class NinjAI:
             override_frame, width=30)
         self.ui_components['state_override_entry'].grid(
             row=0, column=1, sticky="ew")
-
-        current_row += 1
-
-        # Save controls group
-        save_frame = ttk.LabelFrame(parent, text="Save Options", padding=5)
-        save_frame.grid(row=current_row, column=0, sticky="ew", pady=(0, 10))
-
-        # Frame saving controls
-        self.ui_components['save_frame_button'] = ttk.Button(
-            save_frame,
-            text="Save Frame",
-            command=self._save_current_frame
-        )
-        self.ui_components['save_frame_button'].grid(
-            row=0, column=0, sticky="w", padx=(0, 5))
-
-        self.ui_components['save_frame_entry'] = ttk.Entry(
-            save_frame, width=30)
-        self.ui_components['save_frame_entry'].grid(
-            row=0, column=1, sticky="ew")
-
-        self.ui_components['save_config_button'] = ttk.Button(
-            save_frame,
-            text="Save Config",
-            command=game_config.save_config
-        )
-        self.ui_components['save_config_button'].grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
         current_row += 1
 
@@ -234,9 +204,18 @@ class NinjAI:
         self.ui_components['automate_init'].grid(
             row=1, column=0, sticky="w")
 
+        # Add level data button
+        self.ui_components['set_level_data_button'] = ttk.Button(
+            training_frame,
+            text="Set Level Data",
+            command=self._set_level_data
+        )
+        self.ui_components['set_level_data_button'].grid(
+            row=2, column=0, sticky="w")
+
         # Reset controls in a horizontal layout
         reset_frame = ttk.Frame(training_frame)
-        reset_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        reset_frame.grid(row=3, column=0, sticky="ew", pady=(5, 0))
 
         self.ui_components['reset_button'] = ttk.Button(
             reset_frame,
@@ -254,38 +233,14 @@ class NinjAI:
         self.ui_components['player_reset_button'].grid(
             row=0, column=1)
 
-        # Set current level frame button
-        self.ui_components['set_current_level_frame_button'] = ttk.Button(
-            reset_frame,
-            text="Set Current Level Frame",
-            command=self._set_current_level_coordinates
+        # Save config button
+        self.ui_components['save_config_button'] = ttk.Button(
+            override_frame,
+            text="Save Config",
+            command=game_config.save_config
         )
-        self.ui_components['set_current_level_frame_button'].grid(
-            row=0, column=0, sticky="w")
-
-        current_row += 1
-
-        # Create frame text display
-        frame_text_frame = ttk.LabelFrame(parent, text="Frame Text", padding=5)
-        frame_text_frame.grid(row=current_row, column=0,
-                              sticky="ew", pady=(0, 10))
-
-        # Create a read-only text display using Label
-        # Using a label with relief gives it a text-area appearance while being read-only
-        self.ui_components['frame_text'] = ttk.Label(
-            frame_text_frame,
-            text="No text available",
-            background='white',  # Give it a white background to look like a text area
-            relief="sunken",     # Add a sunken relief to make it look like a text field
-            anchor="w",          # Left-align the text
-            padding=5            # Add some internal padding
-        )
-        self.ui_components['frame_text'].grid(
-            row=0, column=0, sticky="ew", padx=5, pady=5
-        )
-
-        # Configure the frame to expand horizontally
-        frame_text_frame.columnconfigure(0, weight=1)
+        self.ui_components['save_config_button'].grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
     def _init_memory_addresses(self):
         """Initialize memory address fields in a grid layout with multiple columns."""
@@ -398,21 +353,41 @@ class NinjAI:
 
         return row + 2
 
-    def _create_level_canvas_display(self, parent: ttk.Frame):
-        """Initializes a small 320x240 canvas to display the current level."""
-        center_canvas = tk.Canvas(parent, width=320, height=240)
-        center_canvas.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
-        self.ui_components['level_canvas'] = center_canvas
-
     def _update_frame_display(self):
         """Update the game frame display."""
         if self.game.current_frame is not None:
-            rgb_frame = np.array(self.game.current_frame)
-            img = Image.fromarray(rgb_frame, mode='RGB')
-            self.game_image = ImageTk.PhotoImage(img.resize(self.CANVAS_SIZE))
-            self.ui_components['canvas'].delete("all")
-            self.ui_components['canvas'].create_image(
-                0, 0, anchor=tk.NW, image=self.game_image)
+            # Get the full frame
+            full_frame = self.game.current_frame
+
+            # Get playable space coordinates from level data if available
+            if hasattr(self, 'current_level_data') and self.current_level_data:
+                min_x, min_y, max_x, max_y = self.current_level_data.playable_space
+                # Crop the frame to playable space
+                cropped_frame = full_frame[min_y:max_y, min_x:max_x]
+
+                # Update canvas size to match cropped frame
+                canvas = self.ui_components['game_canvas']
+                canvas.config(width=max_x-min_x, height=max_y-min_y)
+
+                # Convert cropped frame to image
+                img = Image.fromarray(cropped_frame)
+            else:
+                # Show full frame if no level data
+                img = Image.fromarray(full_frame)
+
+            self.game_image = ImageTk.PhotoImage(img)
+            canvas = self.ui_components['game_canvas']
+
+            if canvas:
+                # Clear previous frame and debug overlay
+                # This will also clear any previous debug overlay
+                canvas.delete("all")
+                # Draw new frame
+                canvas.create_image(0, 0, anchor=tk.NW, image=self.game_image)
+
+                # Draw debug overlay if we have level data
+                if hasattr(self, 'current_level_data') and self.current_level_data:
+                    self._draw_debug_overlay()
 
     def _update_game_controls(self):
         """Update game control states."""
@@ -422,7 +397,8 @@ class NinjAI:
         else:
             self.ui_components['start_button'].config(
                 text="Start Game", state=tk.NORMAL)
-            self.ui_components['canvas'].delete("all")
+            if self.ui_components['canvas'] is not None:
+                self.ui_components['canvas'].delete("all")
             self.game_image = None
 
         if self.game.state_manager.state != self.last_game_state:
@@ -455,36 +431,6 @@ class NinjAI:
             except (AttributeError, ValueError):
                 addr.value_label.config(text=str(value))
 
-    def _update_frame_text(self):
-        """Update the frame text display with the current window center text."""
-        if self.game.started:
-            try:
-                # center_frame = get_center_frame(self.game.current_frame)
-                # center_text = extract_text(center_frame)
-                # If we got valid text, update the display
-                center_text = None  # This is debug-only. Lags the UI otherwise
-                if center_text:
-                    self.ui_components['frame_text'].config(text=center_text)
-                else:
-                    self.ui_components['frame_text'].config(
-                        text="No text available")
-            except (AttributeError, ValueError):
-                self.ui_components['frame_text'].config(
-                    text="Error reading text")
-        else:
-            self.ui_components['frame_text'].config(text="Game not started")
-
-    def _update_level_canvas_display(self):
-        """Update the center canvas display with the current frame."""
-        if self.game.current_frame is not None:
-            level_frame = get_game_window_frame(self.current_level_coordinates)
-            img = Image.fromarray(level_frame, mode='RGB')
-            game_image = ImageTk.PhotoImage(img.resize((320, 240)))
-            self.ui_components['level_canvas'].delete("all")
-            self.ui_components['level_canvas'].create_image(
-                0, 0, anchor=tk.NW, image=game_image)
-            self.ui_components['level_canvas'].image = game_image
-
     def _player_reset(self):
         """Reset the player's position."""
         self.game.controller.focus_window()
@@ -505,10 +451,6 @@ class NinjAI:
         reset_thread.start()
         self.ui_components['reset_button'].config(state=tk.NORMAL)
 
-    def _set_current_level_coordinates(self):
-        self.current_level_coordinates = get_playable_space_coordinates()
-        print(f"Current level coordinates: {self.current_level_coordinates}")
-
     def _on_address_changed(self, memory_address: MemoryAddress):
         """Handle changes to memory address entry fields."""
         address = memory_address.address_entry.get()
@@ -525,10 +467,44 @@ class NinjAI:
         if state := self.ui_components['state_override_entry'].get():
             self.game.state_manager.force_set_state(state)
 
-    def _save_current_frame(self):
-        """Save the current game frame to a file."""
-        if filename := self.ui_components['save_frame_entry'].get():
-            self.game.save_current_frame(filename)
+    def _set_level_data(self):
+        """Parse and set the current level data."""
+        self.current_level_data = parse_level()
+        game_config.set_level_data(self.current_level_data)
+
+        # Debug print
+        print(f"Parsed level data:")
+        print(f"Playable space: {self.current_level_data.playable_space}")
+        print(
+            f"Number of mines: {len(self.current_level_data.mine_coordinates)}")
+        print(f"Mine coordinates: {self.current_level_data.mine_coordinates}")
+
+        # Force an update to draw debug information
+        self._update_frame_display()
+
+    def _draw_debug_overlay(self):
+        """Draw debug information on the game canvas."""
+        if not self.current_level_data or not self.current_level_data.mine_coordinates:
+            return
+
+        canvas = self.ui_components['game_canvas']
+        min_x, min_y, max_x, max_y = self.current_level_data.playable_space
+
+        # Draw mines as red squares
+        for mine_x, mine_y in self.current_level_data.mine_coordinates:
+            # Convert mine coordinates to canvas coordinates, accounting for cropping
+            canvas_x = mine_x - min_x
+            canvas_y = mine_y - min_y
+
+            # Draw a red square around each mine (10x10 pixels)
+            canvas.create_rectangle(
+                canvas_x - 5, canvas_y - 5,
+                canvas_x + 5, canvas_y + 5,
+                outline='red',
+                fill='',  # Add empty fill to make outline more visible
+                width=2,
+                tags="debug_overlay"
+            )
 
     def _on_training_changed(self):
         """Handle training mode changes."""
@@ -544,8 +520,6 @@ class NinjAI:
         self._update_frame_display()
         self._update_game_controls()
         self._update_memory_address_values()
-        self._update_frame_text()
-        self._update_level_canvas_display()
 
     def _start_update_loop(self):
         """Start the main update loop."""

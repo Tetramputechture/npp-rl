@@ -1,4 +1,6 @@
 import numpy as np
+import cv2
+import os
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from npp_rl.game.game_window import get_game_window_frame
@@ -9,7 +11,17 @@ GRID_ROWS = 23  # Number of rows in the grid
 GRID_COLS = 42  # Number of columns in the grid
 BACKGROUND_COLOR = np.array([79, 86, 77])  # RGB values for background
 COLOR_TOLERANCE = 5  # Tolerance for color matching
-MINE_COLOR = np.array([144, 31, 80])  # RGB values for mines
+
+# Load mine template
+MINE_TEMPLATE = cv2.imread(os.path.join(os.path.dirname(
+    os.path.dirname(os.path.dirname(__file__))), 'mine.png'))
+if MINE_TEMPLATE is None:
+    raise FileNotFoundError("Could not load mine template image")
+# Convert to RGB to match our game frame
+MINE_TEMPLATE = cv2.cvtColor(MINE_TEMPLATE, cv2.COLOR_BGR2RGB)
+
+# Template matching parameters
+MATCH_THRESHOLD = 0.8  # Confidence threshold for template matching
 
 
 @dataclass
@@ -130,28 +142,26 @@ def _get_playable_space_coordinates(frame: np.ndarray) -> Tuple[int, int, int, i
 
 
 def _get_mine_coordinates(frame: np.ndarray, bounds: Tuple[int, int, int, int]) -> List[Tuple[int, int]]:
-    """Get coordinates of all mines within the playable space."""
+    """Get coordinates of all mines within the playable space using template matching."""
     min_x, min_y, max_x, max_y = bounds
     mine_coords = []
 
-    # Only check cells within the playable space
-    start_row = min_y // CELL_SIZE
-    end_row = (max_y + CELL_SIZE - 1) // CELL_SIZE
-    start_col = min_x // CELL_SIZE
-    end_col = (max_x + CELL_SIZE - 1) // CELL_SIZE
+    # Crop frame to bounds
+    roi = frame[min_y:max_y, min_x:max_x]
 
-    for row in range(start_row, end_row):
-        for col in range(start_col, end_col):
-            y_start = row * CELL_SIZE
-            x_start = col * CELL_SIZE
+    # Perform template matching
+    result = cv2.matchTemplate(roi, MINE_TEMPLATE, cv2.TM_CCOEFF_NORMED)
 
-            # Get cell content
-            cell = frame[y_start:y_start + CELL_SIZE,
-                         x_start:x_start + CELL_SIZE]
+    # Find positions where match quality exceeds our threshold
+    locations = np.where(result >= MATCH_THRESHOLD)
 
-            if _is_mine_cell(cell):
-                mine_coords.append(
-                    (x_start + CELL_SIZE // 2, y_start + CELL_SIZE // 2))
+    # Convert the locations to x,y coordinates
+    # Reverse locations for x,y instead of row,col
+    for pt in zip(*locations[::-1]):
+        # Add the template center offset and the ROI offset
+        x = min_x + pt[0] + MINE_TEMPLATE.shape[1] // 2
+        y = min_y + pt[1] + MINE_TEMPLATE.shape[0] // 2
+        mine_coords.append((x, y))
 
     return mine_coords
 
@@ -161,11 +171,3 @@ def _is_background_cell(cell: np.ndarray) -> bool:
     color_diff = np.abs(cell - BACKGROUND_COLOR)
     is_background_pixel = np.all(color_diff <= COLOR_TOLERANCE, axis=2)
     return np.mean(is_background_pixel) > 0.95
-
-
-def _is_mine_cell(cell: np.ndarray) -> bool:
-    """Determine if a cell contains a mine."""
-    color_diff = np.abs(cell - MINE_COLOR)
-    is_mine_pixel = np.all(color_diff <= COLOR_TOLERANCE, axis=2)
-    # Lower threshold for mines since they're smaller
-    return np.mean(is_mine_pixel) > 0.3
