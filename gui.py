@@ -7,7 +7,7 @@ from npp_rl.game.game_process import GameProcess
 from npp_rl.game.game_config import game_config
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.game.level_parser import parse_level
-import numpy as np
+from npp_rl.game.training_session import training_session
 import threading
 
 
@@ -68,13 +68,14 @@ class NinjAI:
         self.training = tk.BooleanVar()
         self.automate_init_screen = tk.BooleanVar()
         self.game_image: Optional[ImageTk.PhotoImage] = None
-        self.current_level_coordinates = None
+        self.current_level_data = None
 
         # Load config from file
         game_config.load_config()
 
         # Initialize UI structure
         self.ui_components = self._init_ui_components()
+
         self._init_gui()
         self._init_memory_addresses()
 
@@ -117,6 +118,9 @@ class NinjAI:
 
         # Create right column components
         self._create_control_panel(right_frame)
+
+        # Set up training session info panel
+        self._setup_training_session_info()
 
     def _create_game_controls(self, parent: ttk.Frame):
         """Create game control widgets in a horizontal layout."""
@@ -484,27 +488,59 @@ class NinjAI:
 
     def _draw_debug_overlay(self):
         """Draw debug information on the game canvas."""
-        if not self.current_level_data or not self.current_level_data.mine_coordinates:
+        if not self.current_level_data:
             return
 
         canvas = self.ui_components['game_canvas']
         min_x, min_y, max_x, max_y = self.current_level_data.playable_space
 
-        # Draw mines as red squares
-        for mine_x, mine_y in self.current_level_data.mine_coordinates:
-            # Convert mine coordinates to canvas coordinates, accounting for cropping
-            canvas_x = mine_x - min_x
-            canvas_y = mine_y - min_y
+        # Draw mines as red squares if we have mine coordinates
+        if self.current_level_data.mine_coordinates:
+            for mine_x, mine_y in self.current_level_data.mine_coordinates:
+                # Convert mine coordinates to canvas coordinates
+                canvas_x = mine_x - min_x
+                canvas_y = mine_y - min_y
 
-            # Draw a red square around each mine (10x10 pixels)
+                # Draw a red square around each mine (12x12 pixels)
+                canvas.create_rectangle(
+                    canvas_x - 6, canvas_y - 6,
+                    canvas_x + 6, canvas_y + 6,
+                    outline='red',
+                    fill='',
+                    width=2,
+                    tags="debug_overlay"
+                )
+
+        # Draw player position and vector to nearest mine
+        if self.game and self.game.game_value_fetcher:
+            player_x = self.game.game_value_fetcher.read_player_x()
+            player_y = self.game.game_value_fetcher.read_player_y()
+
+            # Draw player bounding box
+            player_box = self.current_level_data.get_player_bounding_box(
+                player_x, player_y)
             canvas.create_rectangle(
-                canvas_x - 5, canvas_y - 5,
-                canvas_x + 5, canvas_y + 5,
-                outline='red',
-                fill='',  # Add empty fill to make outline more visible
+                player_box[0] - min_x, player_box[1] - min_y,
+                player_box[2] - min_x, player_box[3] - min_y,
+                outline='blue',
+                fill='',
                 width=2,
                 tags="debug_overlay"
             )
+
+            # Get and draw vector to nearest mine
+            vector = self.current_level_data.get_vector_to_nearest_mine(
+                player_x, player_y)
+            if vector:
+                # Convert vector coordinates to canvas coordinates
+                canvas.create_line(
+                    vector[0] - min_x, vector[1] - min_y,
+                    vector[2] - min_x, vector[3] - min_y,
+                    fill='yellow',
+                    width=2,
+                    tags="debug_overlay",
+                    arrow='last'  # Add an arrow to show direction
+                )
 
     def _on_training_changed(self):
         """Handle training mode changes."""
@@ -520,9 +556,55 @@ class NinjAI:
         self._update_frame_display()
         self._update_game_controls()
         self._update_memory_address_values()
+        self._update_training_session_info()
 
     def _start_update_loop(self):
         """Start the main update loop."""
         self.game.loop()
         self.update_display()
         self.root.after(self.UPDATE_INTERVAL, self._start_update_loop)
+
+    def _setup_training_session_info(self):
+        """Set up the training session information panel."""
+        # Create right panel for training session info
+        self.right_panel = ttk.LabelFrame(
+            self.ui_components['right_frame'], text="Current Training Session")
+        self.right_panel.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+
+        # Episode counter
+        ttk.Label(self.right_panel, text="Episodes:").pack(
+            anchor='w', padx=5, pady=2)
+        self.episode_count_var = tk.StringVar(value="0")
+        ttk.Label(self.right_panel, textvariable=self.episode_count_var).pack(
+            anchor='w', padx=5, pady=2)
+
+        # Current episode reward
+        ttk.Label(self.right_panel, text="Current Episode Reward:").pack(
+            anchor='w', padx=5, pady=2)
+        self.episode_reward_var = tk.StringVar(value="0.0")
+        ttk.Label(self.right_panel, textvariable=self.episode_reward_var).pack(
+            anchor='w', padx=5, pady=2)
+
+        # Best reward
+        ttk.Label(self.right_panel, text="Best Reward:").pack(
+            anchor='w', padx=5, pady=2)
+        self.best_reward_var = tk.StringVar(value="0.0")
+        ttk.Label(self.right_panel, textvariable=self.best_reward_var).pack(
+            anchor='w', padx=5, pady=2)
+
+        # Training status
+        ttk.Label(self.right_panel, text="Training Status:").pack(
+            anchor='w', padx=5, pady=2)
+        self.training_status_var = tk.StringVar(value="Not training")
+        ttk.Label(self.right_panel, textvariable=self.training_status_var).pack(
+            anchor='w', padx=5, pady=2)
+
+    def _update_training_session_info(self):
+        """Update the training session information display."""
+        self.episode_count_var.set(str(training_session.episode_count))
+        self.episode_reward_var.set(
+            f"{training_session.current_episode_reward:.2f}")
+        self.best_reward_var.set(
+            f"{training_session.best_reward:.2f}")
+        self.training_status_var.set(
+            "Training" if training_session.is_training else "Not training")

@@ -30,18 +30,65 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         """
         self.mine_coords = mine_coords
 
+    def calculate_mine_proximity_penalty(self,
+                                         curr_state: Dict[str, Any],
+                                         prev_state: Dict[str, Any]) -> float:
+        """Calculate penalty based on velocity towards nearest mine.
+
+        Args:
+            curr_state: Current game state
+            prev_state: Previous game state
+
+        Returns:
+            float: Penalty value (negative or zero)
+        """
+        # Convert player coordinates to level coordinates
+        player_x = curr_state['player_x']
+        player_y = curr_state['player_y']
+
+        # Get vector to nearest mine within danger radius
+        mine_vector = self.level_data.get_vector_to_nearest_mine(
+            player_x, player_y)
+        if mine_vector is None:
+            return 0.0
+
+        # Calculate distance to nearest mine
+        mine_dx = mine_vector[2] - mine_vector[0]
+        mine_dy = mine_vector[3] - mine_vector[1]
+        mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
+
+        # Only apply penalty within danger radius
+        if mine_dist > self.MINE_DANGER_RADIUS:
+            return 0.0
+
+        # Calculate velocity component towards mine
+        velocity_towards_mine = self.calculate_velocity_towards_mine(
+            curr_state, prev_state, mine_vector)
+
+        # Only penalize positive velocity towards mine
+        if velocity_towards_mine <= 0:
+            return 0.0
+
+        # Calculate penalty based on velocity and proximity
+        proximity_factor = 1.0 - (mine_dist / self.MINE_DANGER_RADIUS)
+        penalty = -self.MINE_PENALTY_SCALE * velocity_towards_mine * proximity_factor
+
+        return penalty
+
     def evaluate_navigation_quality(self,
                                     curr_distance: float,
                                     prev_distance: float,
                                     navigation_scale: float,
-                                    curr_state: Dict[str, Any]) -> float:
+                                    curr_state: Dict[str, Any],
+                                    prev_state: Dict[str, Any]) -> float:
         """Evaluate navigation quality using temporal difference learning.
 
         Args:
             curr_distance: Current distance to objective
-            prev_distance: Previous distance to objective
+            prev_distance: Previous distance to objective 
             navigation_scale: Current navigation reward scale
-            curr_state: Current game state for mine avoidance
+            curr_state: Current game state
+            prev_state: Previous game state
 
         Returns:
             float: Navigation quality reward
@@ -80,12 +127,9 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         # Store current improvement
         self.prev_improvement = relative_improvement
 
-        # Calculate mine proximity penalty
+        # Calculate mine proximity penalty based on velocity
         mine_penalty = self.calculate_mine_proximity_penalty(
-            curr_state['player_x'],
-            curr_state['player_y'],
-            self.mine_coords
-        )
+            curr_state, prev_state)
 
         return (base_reward + momentum_bonus) * navigation_scale + mine_penalty
 
@@ -162,7 +206,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 curr_distance_to_switch,
                 self.prev_distance_to_switch,
                 navigation_scale * 1.2,  # Increased focus on switch navigation
-                curr_state
+                curr_state, prev_state
             )
             reward += navigation_reward
 
@@ -189,7 +233,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 curr_distance_to_exit,
                 self.prev_distance_to_exit,
                 navigation_scale * 1.5,  # Further increased focus on exit navigation
-                curr_state
+                curr_state, prev_state
             )
             reward += navigation_reward
 

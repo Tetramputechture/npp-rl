@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 import datetime
 import imageio
+import subprocess
+import threading
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 from npp_rl.game.game_controller import GameController
@@ -28,28 +30,35 @@ def setup_training_env(env):
     return env, log_dir
 
 
-def create_ppo_agent(env: NPlusPlus, n_steps: int) -> PPO:
+def start_tensorboard(logdir):
+    """Start Tensorboard in a separate thread."""
+    def run_tensorboard():
+        subprocess.Popen(['tensorboard', '--logdir',
+                         str(logdir), '--port', '6006'])
+
+    tensorboard_thread = threading.Thread(target=run_tensorboard)
+    tensorboard_thread.daemon = True  # Thread will close when main program exits
+    tensorboard_thread.start()
+    print("Tensorboard started. View at http://localhost:6006")
+
+
+def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
 
-    The hyperparameters are specifically tuned for:
-    - Complex visual inputs (frame stacks + numerical features)
-    - Long episode horizons
-    - Sparse but shaped rewards
-    - Precise movement requirements
-
     Args:
         env: The N++ environment instance
-        total_timesteps: Total number of timesteps to train for
+        n_steps: Number of steps to run for each environment per update
+        tensorboard_log: Directory for Tensorboard logs
 
     Returns:
         PPO: Configured PPO model instance
     """
 
     learning_rate = get_linear_fn(
-        start=3e-4,    # Higher initial rate
-        end=5e-5,      # Lower final rate for fine-tuning
-        end_fraction=0.8  # Longer learning period
+        start=3e-4,
+        end=5e-5,
+        end_fraction=0.8
     )
 
     policy_kwargs = dict(
@@ -58,13 +67,11 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int) -> PPO:
             features_dim=512,
         ),
         net_arch=dict(
-            pi=[512, 512, 256, 128],  # Policy network
-            vf=[512, 512, 256, 128]   # Matched value network
+            pi=[512, 512, 256, 128],
+            vf=[512, 512, 256, 128]
         ),
-        # Layer normalization helps with varying episode lengths
         normalize_images=True,
         activation_fn=nn.ReLU,
-        # net_arch_kwargs is not a valid argument for PPO
     )
 
     batch_size = n_steps // 16
@@ -72,33 +79,22 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int) -> PPO:
     model = PPO(
         policy="CnnPolicy",
         env=env,
-
-        # Learning parameters
         learning_rate=learning_rate,
-        n_steps=n_steps,              # Shorter trajectories for better exploration
-        batch_size=batch_size,        # Smaller batches for better generalization
-        n_epochs=10,           # More epochs per update
-
-        # Modified GAE parameters
-        gamma=0.99,            # Higher discount for better long-term planning
-        gae_lambda=0.95,       # Lower lambda for more emphasis on immediate rewards
-
-        # PPO-specific parameters
-        clip_range=0.2,        # More aggressive clipping
-        clip_range_vf=0.2,     # Matched value function clipping
-        ent_coef=0.025,        # Higher entropy for better exploration
-        vf_coef=0.7,          # Lower value coefficient
-
-        # Stability parameters
-        max_grad_norm=0.7,     # Higher grad norm for faster learning
-        target_kl=0.02,        # Higher KL target for more aggressive updates
-
-        # Action noise is not a valid argument for PPO
-
-        # Additional settings
+        n_steps=n_steps,
+        batch_size=batch_size,
+        n_epochs=10,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        clip_range_vf=0.2,
+        ent_coef=0.025,
+        vf_coef=0.7,
+        max_grad_norm=0.7,
+        target_kl=0.02,
         policy_kwargs=policy_kwargs,
         normalize_advantage=True,
         verbose=1,
+        tensorboard_log=tensorboard_log,  # Add Tensorboard logging
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
         seed=42
     )
@@ -108,15 +104,24 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int) -> PPO:
 
 def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_steps=2048, total_timesteps=1000000) -> PPO:
     """
-    Trains the PPO agent
+    Trains the PPO agent with Tensorboard integration
 
     Args:
         env: The N++ environment instance
         log_dir: Directory for saving logs and models
+        game_controller: Game controller instance
+        n_steps: Number of steps per update
         total_timesteps: Total training timesteps
     """
+    # Set up Tensorboard log directory
+    tensorboard_log = log_dir / "tensorboard"
+    tensorboard_log.mkdir(exist_ok=True)
+
+    # Start Tensorboard
+    start_tensorboard(tensorboard_log)
+
     # Create and set up the model
-    model = create_ppo_agent(env, n_steps)
+    model = create_ppo_agent(env, n_steps, str(tensorboard_log))
 
     # Configure callback for monitoring and saving
     callback = PPOTrainingCallback(
@@ -125,7 +130,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_
         game_controller=game_controller,
         n_steps=n_steps,
         min_ent_coef=0.005,
-        max_ent_coef=0.03
+        max_ent_coef=0.025
     )
 
     # Train the model

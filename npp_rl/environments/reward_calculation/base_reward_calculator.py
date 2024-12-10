@@ -1,7 +1,8 @@
 """Base reward calculator with constants and common utilities."""
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
-from npp_rl.util.util import calculate_distance
+from npp_rl.util.util import calculate_distance, calculate_velocity
+from npp_rl.environments.constants import TIMESTEP
 
 
 class BaseRewardCalculator:
@@ -24,9 +25,9 @@ class BaseRewardCalculator:
     RETREAT_PENALTY_SCALE = 0.1
 
     # Mine avoidance constants
-    MINE_DANGER_RADIUS = 50.0  # Distance at which mines start affecting rewards
-    MINE_PENALTY_SCALE = 0.15  # Scale factor for mine proximity penalties
-    MINE_MIN_DISTANCE = 15.0  # Minimum safe distance from mines
+    MINE_DANGER_RADIUS = 10.0  # Reduced to 10px radius
+    MINE_PENALTY_SCALE = 0.3   # Increased penalty scale for velocity-based penalties
+    MAX_VELOCITY = 20000.0     # Maximum velocity magnitude for normalization
 
     def __init__(self):
         """Initialize base reward calculator."""
@@ -97,3 +98,48 @@ class BaseRewardCalculator:
             penalty *= (1.0 + close_factor * 2.0)
 
         return penalty
+
+    def calculate_velocity_towards_mine(self,
+                                        curr_state: Dict[str, Any],
+                                        prev_state: Dict[str, Any],
+                                        mine_vector: Optional[Tuple[int, int, int, int]]) -> float:
+        """Calculate the velocity component towards the nearest mine.
+
+        Args:
+            curr_state: Current game state
+            prev_state: Previous game state
+            mine_vector: Vector to nearest mine as (start_x, start_y, end_x, end_y)
+
+        Returns:
+            float: Normalized velocity component towards mine (-1 to 1)
+                  Positive means moving towards mine, negative means moving away
+        """
+        if mine_vector is None:
+            return 0.0
+
+        # Calculate player velocity using utility function
+        velocity_x, velocity_y = calculate_velocity(
+            curr_state['player_x'],
+            curr_state['player_y'],
+            prev_state['player_x'],
+            prev_state['player_y'],
+            TIMESTEP
+        )
+
+        # Get vector to mine
+        mine_dx = mine_vector[2] - mine_vector[0]
+        mine_dy = mine_vector[3] - mine_vector[1]
+
+        # Normalize mine direction vector
+        mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
+        if mine_dist == 0:
+            return 0.0
+
+        mine_dx /= mine_dist
+        mine_dy /= mine_dist
+
+        # Calculate dot product to get velocity component in mine direction
+        velocity_towards_mine = (velocity_x * mine_dx + velocity_y * mine_dy)
+
+        # Normalize by max velocity
+        return velocity_towards_mine / self.MAX_VELOCITY

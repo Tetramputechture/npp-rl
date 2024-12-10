@@ -168,6 +168,7 @@ from typing import Tuple, Dict, Any, List
 import os
 from npp_rl.environments.observation_processor import ObservationProcessor
 from collections import deque
+from npp_rl.game.training_session import training_session
 
 
 class NPlusPlus(gymnasium.Env):
@@ -207,17 +208,22 @@ class NPlusPlus(gymnasium.Env):
     MAX_VELOCITY = 20000.0
 
     def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
-        """Initialize the N++ environment.
+        """Initialize the environment.
 
         Args:
-            gvf (GameValueFetcher): Instance of GameValueFetcher to read game state
-            gc (GameController): Instance of GameController to control the game
+            gvf (GameValueFetcher): Game value fetcher instance
+            gc (GameController): Game controller instance
             frame_stack (int, optional): Number of frames to stack. Defaults to 4.
         """
         super().__init__()
 
+        # Game interfaces
         self.gvf = gvf
         self.gc = gc
+
+        # Use global training session
+        self.training_session = training_session
+
         self.frame_stack = frame_stack
         self.mine_coords: List[Tuple[float, float]] = []
 
@@ -278,13 +284,18 @@ class NPlusPlus(gymnasium.Env):
         self.best_switch_distance = float('inf')
         self.best_exit_distance = float('inf')
 
-    def _get_observation(self) -> Dict[str, Any]:
-        """Get the current observation from the game state.
+        self.level_data = None
 
-        Returns:
-            dict: Current observation including numerical features and processed frame
-        """
-        # Get game state
+    def _get_observation(self) -> Dict[str, Any]:
+        """Get the current observation from the game state."""
+        # Get current player position
+        player_x = self.gvf.read_player_x()
+        player_y = self.gvf.read_player_y()
+
+        # Convert to level coordinates for mine calculations
+        level_x, level_y = self.level_data.convert_game_to_level_coordinates(
+            player_x, player_y)
+
         obs = {
             'player_x': self.gvf.read_player_x(),
             'player_y': self.gvf.read_player_y(),
@@ -296,30 +307,60 @@ class NPlusPlus(gymnasium.Env):
             'switch_y': self.gvf.read_switch_y(),
             'in_air': self.gvf.read_in_air(),
             'level_width': self.gvf.read_level_width(),
-            'level_height': self.gvf.read_level_height()
+            'level_height': self.gvf.read_level_height(),
+
+            # Use ParsedLevel utility functions for mine information
+            'closest_mine_vector': self._get_closest_mine_vector(level_x, level_y),
+            'closest_mine_distance': self._get_closest_mine_distance(level_x, level_y),
         }
-
-        # Add nearest mine information if mines exist
-        if self.mine_coords:
-            # Find nearest mine
-            nearest_mine_dist = float('inf')
-            nearest_mine_coords = None
-
-            for mine_x, mine_y in self.mine_coords:
-                dist = calculate_distance(
-                    obs['player_x'], obs['player_y'], mine_x, mine_y)
-                if dist < nearest_mine_dist:
-                    nearest_mine_dist = dist
-                    nearest_mine_coords = (mine_x, mine_y)
-
-            if nearest_mine_coords:
-                obs['nearest_mine_x'], obs['nearest_mine_y'] = nearest_mine_coords
-            else:
-                obs['nearest_mine_x'] = obs['nearest_mine_y'] = -1.0
-        else:
-            obs['nearest_mine_x'] = obs['nearest_mine_y'] = -1.0
-
         return obs
+
+    def _get_closest_mine_vector(self, level_x: float, level_y: float) -> Tuple[float, float]:
+        """Calculate vector to closest mine using ParsedLevel utility.
+
+        Args:
+            level_x: Player x position in level coordinates
+            level_y: Player y position in level coordinates
+
+        Returns:
+            Tuple[float, float]: Vector from player to closest mine
+        """
+        nearest_mine = self.level_data.get_nearest_mine(level_x, level_y)
+        if nearest_mine is None:
+            return (0.0, 0.0)
+
+        return (nearest_mine[0] - level_x, nearest_mine[1] - level_y)
+
+    def _get_closest_mine_distance(self, level_x: float, level_y: float) -> float:
+        """Calculate distance to closest mine using ParsedLevel utility.
+
+        Args:
+            level_x: Player x position in level coordinates
+            level_y: Player y position in level coordinates
+
+        Returns:
+            float: Distance to nearest mine, or infinity if no mines
+        """
+        nearest_mine = self.level_data.get_nearest_mine(level_x, level_y)
+        if nearest_mine is None:
+            return float('inf')
+
+        mine_x, mine_y = nearest_mine
+        return np.sqrt((mine_x - level_x)**2 + (mine_y - level_y)**2)
+
+    def _count_mines_in_radius(self, level_x: float, level_y: float, radius: float) -> int:
+        """Count mines within radius using ParsedLevel utility.
+
+        Args:
+            level_x: Player x position in level coordinates
+            level_y: Player y position in level coordinates
+            radius: Radius to check for mines
+
+        Returns:
+            int: Number of mines within radius
+        """
+        mines = self.level_data.get_mines_in_radius(level_x, level_y, radius)
+        return len(mines)
 
     def _get_stacked_observation(self, obs: Dict[str, Any], prev_obs: Dict[str, Any], action: int = None) -> np.ndarray:
         """Process and stack observations for the agent.
@@ -591,141 +632,33 @@ class NPlusPlus(gymnasium.Env):
         # Get previous observation
         prev_obs = self._get_observation()
 
-        # Track position
+        # Track position and action
         self.position_log_file_string += f'{prev_obs["player_x"]},{prev_obs["player_y"]}\n'
-
-        # Track action
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
-        # Our reset method ensures the game is paused, and the end of our step method
-        # also pauses the game. So, we press the pause key to unpause the game.
-        # self.gc.press_pause_key()
-
-        # Now we are in the 'level playing' state, we can execute the action
+        # Execute action and get new observation
         self._execute_action(action)
-
-        # Wait our timestep for the action to take effect and the game state to update
         time.sleep(TIMESTEP)
-
-        # Get the new observation
         observation = self._get_observation()
 
-        # Check if episode should be ended
+        # Check termination
         terminated, truncated = self._check_termination(observation)
 
-        # If the episode has not been terminated, pause the game
-        # if not terminated or truncated:
-        #     # self.gc.press_pause_key()
-        # else:
-        #     print("Episode done. Not pausing. The environment reset should handle this.")
-
-        # Process the observation
+        # Process observation and calculate reward
         processed_obs = self._get_stacked_observation(
             observation, prev_obs, action)
-
-        # Calculate reward
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 
-        # Prepare info
-        info = {
-            'raw_reward': reward,
-            'time_remaining': observation['time_remaining'],
-            'switch_activated': observation['switch_activated'],
-            'player_dead': self.gvf.read_player_dead(),
-            'begin_retry_text': self.gvf.read_begin_retry_text()
-        }
+        # Update training session reward and best reward
+        self.training_session.add_reward(reward)
 
-        # Calculate movement success metrics
-        movement_results = self.movement_evaluator.evaluate_movement_success(
-            current_state=observation,
-            previous_state=prev_obs,
-            action_taken=action
-        )
-
-        # Add movement metrics to info
-        info.update({
-            'movement_efficiency': movement_results['metrics']['precision'],
-            'landing_quality': movement_results['metrics']['landing'],
-            'momentum_efficiency': movement_results['metrics']['momentum'],
-            'movement_progress': movement_results['metrics']['progress'],
-            'segment_success': movement_results['metrics']['segment_success'],
-            'has_meaningful_movement': movement_results['has_meaningful_movement']
-        })
-
-        # Calculate distance-based metrics
-        curr_switch_dist = calculate_distance(
-            observation['player_x'], observation['player_y'],
-            observation['switch_x'], observation['switch_y']
-        )
-
-        curr_exit_dist = calculate_distance(
-            observation['player_x'], observation['player_y'],
-            observation['exit_door_x'], observation['exit_door_y']
-        )
-
-        # Add progress metrics
-        if not observation['switch_activated']:
-            progress = max(0, 1 - (curr_switch_dist /
-                           (self.best_switch_distance + 1e-6)))
-        else:
-            progress = max(
-                0, 1 - (curr_exit_dist / (self.best_exit_distance + 1e-6)))
-
-        info.update({
-            'objective_progress': progress,
-            'time_efficiency': observation['time_remaining'] / self.initial_time if self.initial_time is not None else 0,
-            'time_gained': float(observation['time_remaining'] > prev_obs['time_remaining'])
-        })
-
-        # Update best distances
-        if not observation['switch_activated']:
-            self.best_switch_distance = min(
-                self.best_switch_distance, curr_switch_dist)
-        else:
-            self.best_exit_distance = min(
-                self.best_exit_distance, curr_exit_dist)
-
-        # Calculate overall success metrics
-        success_metrics = {
-            'success': float(
-                not terminated and
-                not truncated and
-                observation['switch_activated'] and
-                'retry level' in self.gvf.read_begin_retry_text().lower()
-            ),
-            'switch_activated': float(observation['switch_activated']),
-            'died': float(self.gvf.read_player_dead()),
-            'time_expired': float(observation['time_remaining'] <= 0),
-            'completed_level': float('retry level' in self.gvf.read_begin_retry_text().lower())
-        }
-
-        # Add success metrics to info
-        info.update(success_metrics)
-
+        # Update best reward at episode end
         if terminated or truncated:
-            print("\nEpisode finished!")
-            print(f"Success: {success_metrics['success']}")
-            print(f"Switch Activated: {success_metrics['switch_activated']}")
-            print(f"Died: {success_metrics['died']}")
-            print(f"Time Expired: {success_metrics['time_expired']}")
-            print(f"Time Gained: {info['time_gained']}")
-            print(f"Objective Progress: {info['objective_progress']}")
-            print(f"Level Completed: {success_metrics['completed_level']}\n")
+            self.training_session.update_best_reward(
+                self.training_session.current_episode_reward)
 
-            # Update progression metrics for reward scaling
-            print("Updating progression metrics...")
-            self.reward_calculator.update_progression_metrics()
-
-            # Log final positions and actions
-            print("Logging final positions and actions...")
-            with open(f'{self.position_log_folder_name}/position_log_{self.episode_counter}.csv', 'w', encoding='utf-8') as f:
-                f.write(self.position_log_file_string)
-
-            with open(f'{self.action_log_folder_name}/action_log_{self.episode_counter}.csv', 'w', encoding='utf-8') as f:
-                f.write(self.action_log_file_string)
-
-        return processed_obs, reward, terminated, truncated, info
+        return processed_obs, reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
         """Reset the environment to start a new episode.
@@ -739,6 +672,9 @@ class NPlusPlus(gymnasium.Env):
         Returns:
             tuple: Initial observation and info dict
         """
+        # Update training session episode counter
+        self.training_session.increment_episode()
+
         # Reset success tracking
         self.current_episode_success = False
         self.switch_activated = False
@@ -815,10 +751,6 @@ class NPlusPlus(gymnasium.Env):
         initial_obs = self._get_observation()
 
         self.initial_time = initial_obs['time_remaining']
-
-        # Print level width, height
-        print(f"Level width: {initial_obs['level_width']}")
-        print(f"Level height: {initial_obs['level_height']}")
 
         # Get stacked observation (initial observation is used for both current and previous)
         processed_obs = self._get_stacked_observation(initial_obs, initial_obs)

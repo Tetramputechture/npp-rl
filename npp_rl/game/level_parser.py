@@ -3,7 +3,7 @@ import cv2
 import os
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
-from npp_rl.game.game_window import get_game_window_frame
+from npp_rl.game.game_window import get_game_window_frame, LEVEL_FRAME
 
 # Constants for the game's visual layout
 CELL_SIZE = 28  # Size of each grid cell in pixels
@@ -14,7 +14,7 @@ COLOR_TOLERANCE = 5  # Tolerance for color matching
 
 # Load mine template
 MINE_TEMPLATE = cv2.imread(os.path.join(os.path.dirname(
-    os.path.dirname(os.path.dirname(__file__))), 'mine.png'))
+    os.path.dirname(os.path.dirname(__file__))), 'npp_rl/entity_images/mine.png'))
 if MINE_TEMPLATE is None:
     raise FileNotFoundError("Could not load mine template image")
 # Convert to RGB to match our game frame
@@ -41,12 +41,30 @@ class ParsedLevel:
         """Check if there is a mine at the given coordinates."""
         return (x, y) in self.mine_coordinates
 
+    def convert_game_to_level_coordinates(self, x: int, y: int) -> Tuple[int, int]:
+        """Convert game coordinates to level coordinates by adjusting for playable space offset.
+
+        Args:
+            x: X coordinate in game space (0,0 at top-left)
+            y: Y coordinate in game space (0,0 at top-left)
+
+        Returns:
+            Tuple[int, int]: (x, y) coordinates adjusted for level space
+        """
+        min_x, min_y, _, _ = self.playable_space
+        # Offset by both min x / min y and also the level frame offset
+        return (x - min_x - LEVEL_FRAME[0], y - min_y - LEVEL_FRAME[1])
+
+    def get_mines_in_radius(self, x: int, y: int, radius: float) -> List[Tuple[int, int]]:
+        """Get all mines within a certain radius of the given coordinates."""
+        return [mine for mine in self.mine_coordinates if np.linalg.norm(np.array(mine) - np.array((x, y))) <= radius]
+
     def get_nearest_mine(self, x: int, y: int, max_distance: float = float('inf')) -> Optional[Tuple[int, int]]:
         """Find the coordinates of the mine nearest to the given position within max_distance.
 
         Args:
-            x: X coordinate of the position
-            y: Y coordinate of the position
+            x: X coordinate of the position (in level coordinates)
+            y: Y coordinate of the position (in level coordinates)
             max_distance: Maximum distance to consider mines (in pixels). Defaults to infinity.
 
         Returns:
@@ -72,6 +90,128 @@ class ParsedLevel:
 
         # Return coordinates of the mine with minimum distance
         return min(valid_mines, key=lambda x: x[0])[1]
+
+    def get_player_bounding_box(self, raw_player_x: float, raw_player_y: float) -> Tuple[int, int, int, int]:
+        """Get the bounding box of the player at the given coordinates.
+
+        Args:
+            raw_player_x: Player x coordinate in game space (relative to game window)
+            raw_player_y: Player y coordinate in game space (relative to game window)
+
+        Returns:
+            Tuple[int, int, int, int]: (x1, y1, x2, y2) coordinates of player bounding box in level space
+        """
+        # First convert raw coordinates to level space
+        level_x, level_y = self.convert_game_to_level_coordinates(
+            raw_player_x, raw_player_y)
+
+        # Apply hitbox offsets
+        level_x -= 2  # Shift left by 2px
+        level_y += 15  # Shift down by 15px
+
+        # Add playable space min x and y
+        min_x, min_y, _, _ = self.playable_space
+        level_x += min_x
+        level_y += min_y
+
+        # Return the player bounding box coordinates (11x23 pixels)
+
+        return (level_x, level_y, level_x + 11, level_y + 23)
+
+    def get_mine_bounding_box(self, mine_x: int, mine_y: int) -> Tuple[int, int, int, int]:
+        """Get the bounding box of a mine at the given coordinates.
+
+        Args:
+            mine_x: X coordinate of the mine center
+            mine_y: Y coordinate of the mine center
+
+        Returns:
+            Tuple[int, int, int, int]: (x1, y1, x2, y2) coordinates of mine bounding box
+        """
+        # Mine is 12x12 pixels centered on the coordinate
+        return (mine_x - 6, mine_y - 6, mine_x + 6, mine_y + 6)
+
+    def get_vector_between_rectangles(self, rect1: Tuple[int, int, int, int],
+                                      rect2: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """Get the vector representing shortest distance between two rectangles.
+
+        Args:
+            rect1: First rectangle as (x1, y1, x2, y2)
+            rect2: Second rectangle as (x1, y1, x2, y2)
+
+        Returns:
+            Tuple[int, int, int, int]: Vector as (start_x, start_y, end_x, end_y)
+        """
+        # Unpack rectangle coordinates
+        r1_x1, r1_y1, r1_x2, r1_y2 = rect1
+        r2_x1, r2_y1, r2_x2, r2_y2 = rect2
+
+        # Find closest points on each rectangle
+        if r1_x2 < r2_x1:  # rect1 is left of rect2
+            x1 = r1_x2
+            x2 = r2_x1
+        elif r2_x2 < r1_x1:  # rect1 is right of rect2
+            x1 = r1_x1
+            x2 = r2_x2
+        else:  # rectangles overlap in x
+            x1 = max(r1_x1, r2_x1)
+            x2 = x1
+
+        if r1_y2 < r2_y1:  # rect1 is above rect2
+            y1 = r1_y2
+            y2 = r2_y1
+        elif r2_y2 < r1_y1:  # rect1 is below rect2
+            y1 = r1_y1
+            y2 = r2_y2
+        else:  # rectangles overlap in y
+            y1 = max(r1_y1, r2_y1)
+            y2 = y1
+
+        return (x1, y1, x2, y2)
+
+    def get_vector_to_nearest_mine(self, player_x: int, player_y: int) -> Optional[Tuple[int, int, int, int]]:
+        """Get the vector from the player to the nearest mine within 50 pixels.
+
+        Args:
+            player_x: X coordinate of player center (in game coordinates)
+            player_y: Y coordinate of player center (in game coordinates)
+
+        Returns:
+            Optional[Tuple[int, int, int, int]]: Vector as (start_x, start_y, end_x, end_y) 
+                                                or None if no mines exist within range
+        """
+        if not self.mine_coordinates:
+            return None
+
+        # Convert player coordinates to level space
+        player_box = self.get_player_bounding_box(player_x, player_y)
+
+        # Quick filter mines within rough 50px radius using level coordinates
+        nearby_mines = [
+            (mx, my) for mx, my in self.mine_coordinates
+            if abs(mx - player_box[0]) <= 50 and abs(my - player_box[1]) <= 50
+        ]
+
+        if not nearby_mines:
+            return None
+
+        shortest_vector = None
+        shortest_dist = float('inf')
+
+        # Check filtered mines
+        for mine_x, mine_y in nearby_mines:
+            mine_box = self.get_mine_bounding_box(mine_x, mine_y)
+            vector = self.get_vector_between_rectangles(player_box, mine_box)
+
+            # Calculate distance between vector endpoints
+            dist = ((vector[2] - vector[0])**2 +
+                    (vector[3] - vector[1])**2)**0.5
+
+            if dist <= 50 and (shortest_vector is None or dist < shortest_dist):
+                shortest_dist = dist
+                shortest_vector = vector
+
+        return shortest_vector
 
 
 def parse_level() -> ParsedLevel:
@@ -132,11 +272,10 @@ def _get_playable_space_coordinates(frame: np.ndarray) -> Tuple[int, int, int, i
     min_col, max_col = min(active_cols), max(active_cols) + 1
 
     # Convert to pixel coordinates with padding
-    padding = 2
-    min_x = max(0, min_col * CELL_SIZE - padding)
-    min_y = max(0, min_row * CELL_SIZE - padding)
-    max_x = min(width, max_col * CELL_SIZE + padding)
-    max_y = min(height, max_row * CELL_SIZE + padding)
+    min_x = max(0, min_col * CELL_SIZE)
+    min_y = max(0, min_row * CELL_SIZE)
+    max_x = min(width, max_col * CELL_SIZE)
+    max_y = min(height, max_row * CELL_SIZE)
 
     return (min_x, min_y, max_x, max_y)
 
