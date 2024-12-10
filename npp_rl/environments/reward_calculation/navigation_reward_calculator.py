@@ -1,7 +1,9 @@
 """Navigation reward calculator for evaluating objective-based movement and progress."""
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
+from npp_rl.util import calculate_velocity
+from npp_rl.environments.constants import TIMESTEP
 
 
 class NavigationRewardCalculator(BaseRewardCalculator):
@@ -19,7 +21,6 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.first_exit_distance_update = True
         self.prev_potential = None
         self.consecutive_improvements = 0
-        self.SWITCH_ACTIVATION_REWARD = 10.0  # Increased from default
         self.mine_coords: List[Tuple[float, float]] = []
 
     def set_mine_coordinates(self, mine_coords: List[Tuple[float, float]]):
@@ -42,28 +43,20 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         Returns:
             float: Penalty value (negative or zero)
         """
-        # Convert player coordinates to level coordinates
-        player_x = curr_state['player_x']
-        player_y = curr_state['player_y']
+        # Get mine information from state
+        mine_vector = curr_state['closest_mine_vector']
+        mine_dist = curr_state['closest_mine_distance']
 
-        # Get vector to nearest mine within danger radius
-        mine_vector = self.level_data.get_vector_to_nearest_mine(
-            player_x, player_y)
-        if mine_vector is None:
+        # If no mine vector or distance is too far, return 0
+        if mine_vector == (0.0, 0.0) or mine_dist > self.MINE_DANGER_RADIUS:
             return 0.0
 
-        # Calculate distance to nearest mine
-        mine_dx = mine_vector[2] - mine_vector[0]
-        mine_dy = mine_vector[3] - mine_vector[1]
-        mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
-
-        # Only apply penalty within danger radius
-        if mine_dist > self.MINE_DANGER_RADIUS:
-            return 0.0
+        # Create mine vector tuple in format expected by velocity calculation
+        mine_vector_tuple = (0, 0, mine_vector[0], mine_vector[1])
 
         # Calculate velocity component towards mine
         velocity_towards_mine = self.calculate_velocity_towards_mine(
-            curr_state, prev_state, mine_vector)
+            curr_state, prev_state, mine_vector_tuple)
 
         # Only penalize positive velocity towards mine
         if velocity_towards_mine <= 0:
@@ -147,12 +140,8 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             state['level_width']**2 + state['level_height']**2)
         distance_scale = level_diagonal / 4  # Adaptive scaling
 
-        # Calculate mine avoidance potential
-        mine_penalty = self.calculate_mine_proximity_penalty(
-            state['player_x'],
-            state['player_y'],
-            self.mine_coords
-        )
+        # Calculate mine avoidance potential using current state only
+        mine_penalty = self.calculate_mine_proximity_penalty(state, state)
 
         if not state['switch_activated']:
             # Switch-focused potential with adaptive scaling
@@ -270,3 +259,32 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.prev_potential = None
         self.consecutive_improvements = 0
         # Don't reset mine_coords as they stay constant for the level
+
+    def calculate_velocity_towards_mine(self,
+                                        curr_state: Dict[str, Any],
+                                        prev_state: Dict[str, Any],
+                                        mine_vector: Optional[Tuple[int, int, int, int]]) -> float:
+        """Calculate velocity component towards nearest mine."""
+        if mine_vector is None:
+            return 0.0
+
+        velocity_x, velocity_y = calculate_velocity(
+            curr_state['player_x'],
+            curr_state['player_y'],
+            prev_state['player_x'],
+            prev_state['player_y'],
+            TIMESTEP
+        )
+
+        mine_dx = mine_vector[2] - mine_vector[0]
+        mine_dy = mine_vector[3] - mine_vector[1]
+
+        mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
+        if mine_dist == 0:
+            return 0.0
+
+        mine_dx /= mine_dist
+        mine_dy /= mine_dist
+
+        velocity_towards_mine = (velocity_x * mine_dx + velocity_y * mine_dy)
+        return velocity_towards_mine / self.MAX_VELOCITY

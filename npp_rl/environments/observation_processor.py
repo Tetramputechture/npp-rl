@@ -85,12 +85,23 @@ class ObservationProcessor:
             np.mean(exploration_maps['transitions'][40:44, 40:44])
         ], dtype=np.float32)
 
+        # Process mine features
+        mine_features = np.array([
+            obs['closest_mine_distance'] / 1000.0,  # Normalize distance
+            (np.arctan2(obs['closest_mine_vector'][1], obs['closest_mine_vector']
+             [0]) + np.pi) / (2 * np.pi),  # Normalize angle to [0,1]
+            # Relative velocity towards mine
+            np.dot(np.array([normalized_vx, normalized_vy]),
+                   obs['closest_mine_vector'])
+        ], dtype=np.float32)
+
         # Combine all features
         features = np.concatenate([
             position_features,
             objective_features,
             state_features,
-            exploration_features
+            exploration_features,
+            mine_features
         ])
 
         return np.broadcast_to(
