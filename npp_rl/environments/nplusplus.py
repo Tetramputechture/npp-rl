@@ -338,23 +338,6 @@ class NPlusPlus(gymnasium.Env):
         mines = self.level_data.get_mines_in_radius(level_x, level_y, radius)
         return len(mines)
 
-    def _get_stacked_observation(self, obs: Dict[str, Any], prev_obs: Dict[str, Any], action: int = None) -> np.ndarray:
-        """Process and stack observations for the agent.
-
-        Args:
-            obs: Current observation
-            prev_obs: Previous observation
-            action: Current action taken by the agent
-
-        Returns:
-            np.ndarray: Stacked and processed observation tensor
-        """
-        # Process the observation through the observation processor
-        processed_obs = self.observation_processor.process_observation(
-            obs, prev_obs, action
-        )
-        return processed_obs
-
     def _execute_action(self, action: int):
         """Execute the specified action using the game controller.
 
@@ -623,8 +606,7 @@ class NPlusPlus(gymnasium.Env):
         terminated, truncated = self._check_termination(observation)
 
         # Process observation and calculate reward
-        processed_obs = self._get_stacked_observation(
-            observation, prev_obs, action)
+        processed_obs = self.observation_processor.process_observation(obs)
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 
@@ -732,8 +714,9 @@ class NPlusPlus(gymnasium.Env):
 
         self.initial_time = initial_obs['time_remaining']
 
-        # Get stacked observation (initial observation is used for both current and previous)
-        processed_obs = self._get_stacked_observation(initial_obs, initial_obs)
+        # Get processed observation
+        processed_obs = self.observation_processor.process_observation(
+            initial_obs)
 
         return processed_obs, {}
 

@@ -1,73 +1,56 @@
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch
 from torch import nn
-from npp_rl.environments.constants import NUM_NUMERICAL_FEATURES
+import gymnasium
 
 
 class NppFeatureExtractor(BaseFeaturesExtractor):
     """Custom CNN feature extractor for N++ environment.
 
     Architecture designed to process observations from our N++ environment where:
-    Input: Single tensor of shape (84, 84, frame_stack + 1) containing:
-        - First frame_stack channels: Stacked grayscale frames
-        - Last channel: Time remaining broadcast to 84x84 spatial dimensions
+    Input: Single tensor of shape (84, 84, total_frames + num_features) containing:
+        - First frame_stack channels: Recent stacked grayscale frames
+        - Next 8 channels: Historical frames at 8, 16, 32, 64, 128, 256, 512, 1024 timesteps
+        - Last channels: Numerical features broadcast to 84x84 spatial dimensions
     """
 
-    def __init__(self, observation_space, features_dim=512):
+    def __init__(self, observation_space: gymnasium.spaces.Box):
+        # Calculate output features dimension
+        features_dim = 512  # Output features dimension
+
         super().__init__(observation_space, features_dim)
 
-        n_input_channels = observation_space.shape[2]
-        self.frame_stack = n_input_channels - NUM_NUMERICAL_FEATURES
-
-        # Visual processing network
+        # CNN for processing visual features
         self.cnn = nn.Sequential(
-            # Initial layer to detect basic movement patterns
-            nn.Conv2d(self.frame_stack, 32, kernel_size=8, stride=4),
+            # First conv layer processes recent frames (4 recent frames)
+            nn.Conv2d(4, 32, kernel_size=8, stride=4, padding=0),
             nn.ReLU(),
-            nn.BatchNorm2d(32),
 
-            # Attention mechanism for movement tracking
-            nn.Conv2d(32, 32, kernel_size=1),  # 1x1 conv for channel attention
-            nn.Sigmoid(),
-
-            # Feature extraction
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            # Second conv layer processes historical frames
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
-            nn.BatchNorm2d(64),
 
-            # Spatial attention for obstacle detection
-            nn.Conv2d(64, 64, kernel_size=1),
-            nn.Sigmoid(),
-
-            # High-level feature extraction
-            nn.Conv2d(64, 128, kernel_size=3, stride=1),
+            # Third conv layer combines all features
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             nn.ReLU(),
-            nn.BatchNorm2d(128),
 
-            # Multiple residual connections for better gradient flow
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(128),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(128),
-
-            nn.Flatten()
+            nn.Flatten(),
         )
 
-        # Calculate CNN output dimension: 128 channels * 7 * 7 = 6272
-        self.cnn_output_dim = 128 * 7 * 7
-
-        # Scale down visual features to 512 dimensions
-        self.visual_reduction = nn.Sequential(
-            nn.Linear(self.cnn_output_dim, 512),
+        # Separate CNN for processing historical frames (8 historical frames)
+        self.historical_cnn = nn.Sequential(
+            nn.Conv2d(8, 32, kernel_size=8, stride=4, padding=0),
             nn.ReLU(),
-            nn.BatchNorm1d(512)
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
         )
 
         # Separate networks for different types of numerical features
         self.state_net = nn.Sequential(
-            # time
+            # time remaining
             nn.Linear(1, 64),
             nn.ReLU(),
             nn.BatchNorm1d(64)
@@ -94,40 +77,48 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU()
         )
 
-    def forward(self, observations):
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass with organized numerical feature processing.
+        Process the environment's observation.
 
         Args:
-            observations: Tensor containing stacked frames and numerical features
-                Shape: (batch_size, 84, 84, frame_stack + NUM_NUMERICAL_FEATURES)
-        """
-        # Process visual features
-        visual = observations[..., :self.frame_stack]
-        visual = visual.permute(0, 3, 1, 2)
-        visual_features = self.cnn(visual)
+            observations: torch.Tensor - The input tensor containing stacked frames and features
+                        Shape: (batch_size, 84, 84, total_channels)
 
-        # Reduce visual features to 512 dimensions
-        visual_features = self.visual_reduction(visual_features)
+        Returns:
+            torch.Tensor - The extracted features
+                        Shape: (batch_size, features_dim)
+        """
+        # Process recent frames (first 4 channels)
+        recent_visual = observations[..., :4]
+        recent_visual = recent_visual.permute(0, 3, 1, 2)
+        recent_features = self.cnn(recent_visual)
+
+        # Process historical frames (next 8 channels)
+        historical_visual = observations[..., 4:12]
+        historical_visual = historical_visual.permute(0, 3, 1, 2)
+        historical_features = self.historical_cnn(historical_visual)
 
         # Get numerical features (they're already in the correct order from preprocessing)
-        numerical = observations[..., self.frame_stack:]
+        numerical = observations[..., 12:]
         # Take first spatial location since features are broadcast
         numerical = numerical[:, 0, 0, :]
 
-        # Process time feature
-        state_features = numerical                         # Time remaining feature
-
-        # Process each group through its specialized network
-        processed_state = self.state_net(state_features)
-
-        # Combine numerical features with attention
+        # Process numerical features
+        processed_state = self.state_net(numerical)
         numerical_features = self.numerical_attention(processed_state)
 
-        # Apply gating fusion to combine visual and numerical features
-        combined = torch.cat([visual_features, numerical_features], dim=1)
-        gate = self.fusion_gate(combined)
-        fused_features = gate * numerical_features + \
-            (1 - gate) * visual_features
+        # Apply gating fusion
+        gate_recent = self.fusion_gate(
+            torch.cat([recent_features, numerical_features], dim=1))
+        gate_historical = self.fusion_gate(
+            torch.cat([historical_features, numerical_features], dim=1))
+
+        # Combine features with gating
+        fused_features = (
+            gate_recent * recent_features +
+            gate_historical * historical_features +
+            (1 - gate_recent - gate_historical) * numerical_features
+        )
 
         return self.final_net(fused_features)

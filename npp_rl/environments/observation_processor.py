@@ -12,9 +12,14 @@ class ObservationProcessor:
 
     def __init__(self, frame_stack: int = 4, max_velocity: float = 20000.0):
         self.frame_stack = frame_stack
-        self.frames = deque(maxlen=frame_stack)
+        self.frames = deque(maxlen=frame_stack)  # Recent frames
         self.max_velocity = max_velocity
         self.spatial_memory = SpatialMemoryTracker()
+
+        # Initialize historical frame storage
+        self.frame_history = deque(maxlen=1024)  # Store up to 1024 frames
+        # Indices for historical frames we want to keep (8, 16, 32, 64, 128, 256, 512, 1024)
+        self.historical_indices = [8, 16, 32, 64, 128, 256, 512, 1024]
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale, resize, and normalize"""
@@ -36,97 +41,54 @@ class ObservationProcessor:
 
         return frame
 
-    def get_numerical_features(self, obs: Dict[str, Any],
-                               prev_obs: Dict[str, Any]) -> np.ndarray:
+    def get_numerical_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process numerical features into grouped format"""
-        # Update spatial memory
-        self.spatial_memory.update(obs['player_x'], obs['player_y'])
-
-        # Calculate velocities
-        vx, vy = calculate_velocity(
-            obs['player_x'], obs['player_y'],
-            prev_obs['player_x'], prev_obs['player_y'],
-            TIMESTEP
-        )
-
-        # Normalize velocities
-        normalized_vx = (vx + self.max_velocity) / (2 * self.max_velocity)
-        normalized_vy = (vy + self.max_velocity) / (2 * self.max_velocity)
-
-        # Get exploration maps
-        exploration_maps = self.spatial_memory.get_exploration_maps(
-            obs['player_x'], obs['player_y'])
-
-        # Calculate features
-        position_features = np.array([
-            (obs['player_x'] - 63) / (1217 - 63),
-            (obs['player_y'] - 171) / (791 - 171),
-            normalized_vx,
-            normalized_vy
+        # Only include time remaining feature
+        features = np.array([
+            obs['time_remaining'] / 600.0  # Normalize time remaining to [0,1]
         ], dtype=np.float32)
 
-        objective_features = np.array([
-            (obs['exit_door_x'] - obs['player_x'] + 1258) / 2516,
-            (obs['exit_door_y'] - obs['player_y'] + 802) / 1604,
-            (obs['switch_x'] - obs['player_x'] + 1258) / 2516,
-            (obs['switch_y'] - obs['player_y'] + 802) / 1604
-        ], dtype=np.float32)
-
-        state_features = np.array([
-            obs['time_remaining'] / 600.0,
-            float(obs['switch_activated']),
-            float(obs['in_air'])
-        ], dtype=np.float32)
-
-        exploration_features = np.array([
-            1.0 - exploration_maps['recent_visits'][42, 42],
-            np.mean(exploration_maps['visit_frequency'][40:44, 40:44]),
-            exploration_maps['area_exploration'][42, 42],
-            np.mean(exploration_maps['transitions'][40:44, 40:44])
-        ], dtype=np.float32)
-
-        # Process mine features
-        mine_features = np.array([
-            obs['closest_mine_distance'] / 1000.0,  # Normalize distance
-            (np.arctan2(obs['closest_mine_vector'][1], obs['closest_mine_vector']
-             [0]) + np.pi) / (2 * np.pi),  # Normalize angle to [0,1]
-            # Relative velocity towards mine
-            np.dot(np.array([normalized_vx, normalized_vy]),
-                   obs['closest_mine_vector'])
-        ], dtype=np.float32)
-
-        # Combine all features
-        features = np.concatenate([
-            position_features,
-            objective_features,
-            state_features,
-            exploration_features,
-            mine_features
-        ])
-
+        # Broadcast to spatial dimensions (84x84)
         return np.broadcast_to(
             features.reshape((1, 1, -1)),
             (84, 84, features.shape[0])
         )
 
-    def process_observation(self, obs: Dict[str, Any],
-                            prev_obs: Dict[str, Any],
-                            action: int = None) -> np.ndarray:
+    def process_observation(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process full observation including frame stack and numerical features"""
         # Process current frame
         frame = self.preprocess_frame(obs['screen'])
+
+        # Update recent frames
         self.frames.append(frame)
+
+        # Update historical frames
+        self.frame_history.append(frame)
 
         # Fill frame stack if needed
         while len(self.frames) < self.frame_stack:
             self.frames.append(frame)
 
-        # Stack frames along new axis first
+        # Fill historical frames if needed
+        while len(self.frame_history) < max(self.historical_indices):
+            self.frame_history.append(frame)
+
+        # Stack recent frames
         frames_list = [f[..., np.newaxis] for f in self.frames]
+
+        # Add historical frames
+        for idx in self.historical_indices:
+            if idx < len(self.frame_history):
+                historical_frame = self.frame_history[-idx]
+            else:
+                historical_frame = frame
+            frames_list.append(historical_frame[..., np.newaxis])
+
+        # Concatenate all frames
         stacked_frames = np.concatenate(frames_list, axis=-1)
 
         # Get numerical features
-        features = self.get_numerical_features(obs, prev_obs)
+        features = self.get_numerical_features(obs)
 
         # Combine everything
         final_observation = np.concatenate([stacked_frames, features], axis=2)
@@ -135,4 +97,5 @@ class ObservationProcessor:
     def reset(self) -> None:
         """Reset processor state"""
         self.frames.clear()
+        self.frame_history.clear()
         self.spatial_memory.reset()

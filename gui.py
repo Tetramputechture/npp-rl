@@ -282,26 +282,6 @@ class NinjAI:
         self.ui_components['set_level_data_button'].grid(
             row=2, column=0, sticky="w")
 
-        # Reset controls in a horizontal layout
-        reset_frame = ttk.Frame(training_frame)
-        reset_frame.grid(row=3, column=0, sticky="ew", pady=(5, 0))
-
-        self.ui_components['reset_button'] = ttk.Button(
-            reset_frame,
-            text="Reset Environment",
-            command=self._manual_env_reset
-        )
-        self.ui_components['reset_button'].grid(
-            row=0, column=0, padx=(0, 5))
-
-        self.ui_components['player_reset_button'] = ttk.Button(
-            reset_frame,
-            text="Reset Player",
-            command=self._player_reset
-        )
-        self.ui_components['player_reset_button'].grid(
-            row=0, column=1)
-
         # Save config button
         self.ui_components['save_config_button'] = ttk.Button(
             override_frame,
@@ -495,7 +475,7 @@ class NinjAI:
                 text=f"State: {self.game.state_manager.state}"
             )
 
-    def _update_memory_address_values(self):
+    def _update_memory_addresses(self):
         """Update all memory address displays."""
         for addr in self.memory_addresses.values():
             if not self.game.started:
@@ -523,21 +503,6 @@ class NinjAI:
         """Reset the player's position."""
         self.game.controller.focus_window()
         self.game.controller.press_reset_key()
-
-    def _manual_env_reset(self):
-        """Manually reset the game environment."""
-        print("Resetting environment...")
-        self.ui_components['reset_button'].config(state=tk.DISABLED)
-
-        def reset_environment():
-            self.game.controller.focus_window()
-            test_env = NPlusPlus(
-                self.game.game_value_fetcher, self.game.controller)
-            test_env.reset()
-
-        reset_thread = threading.Thread(target=reset_environment)
-        reset_thread.start()
-        self.ui_components['reset_button'].config(state=tk.NORMAL)
 
     def _on_address_changed(self, memory_address: MemoryAddress):
         """Handle changes to memory address entry fields."""
@@ -644,7 +609,7 @@ class NinjAI:
 
         self._update_frame_display()
         self._update_game_controls()
-        self._update_memory_address_values()
+        self._update_memory_addresses()
         self._update_training_session_info()
         self._update_action_icons()
 

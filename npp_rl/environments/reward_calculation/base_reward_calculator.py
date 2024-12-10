@@ -1,8 +1,7 @@
 """Base reward calculator with constants and common utilities."""
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any
 import numpy as np
-from npp_rl.util.util import calculate_distance, calculate_velocity
-from npp_rl.environments.constants import TIMESTEP
+from npp_rl.util.util import calculate_distance
 
 
 class BaseRewardCalculator:
@@ -13,7 +12,7 @@ class BaseRewardCalculator:
     GOLD_COLLECTION_REWARD = 0.5
     SWITCH_ACTIVATION_REWARD = 10.0
     TERMINAL_REWARD = 25.0
-    DEATH_PENALTY = -5.0
+    DEATH_PENALTY = -10.0
     TIMEOUT_PENALTY = -7.5
 
     # Movement assessment constants
