@@ -10,7 +10,7 @@ NPP-RL is an advanced reinforcement learning implementation that trains an AI ag
 
 ### Advanced Reward System
 
-The project implements a sophisticated multi-layered reward calculation system:
+Our reward system is currently broken down into 4 main components:
 
 1. **Curriculum-Based Learning**
    - Progressive skill development through three main stages:
@@ -70,9 +70,9 @@ The project implements a sophisticated multi-layered reward calculation system:
 The project is structured into several key components:
 
 - **Environment**: Custom N++ environment implementation with sophisticated state management
-- **Agents**: PPO-based agent with custom feature extraction
+- **Agent**: PPO-based agent with custom feature extraction
 - **Reward Calculation**: Modular reward system with multiple specialized calculators
 - **Training**: Comprehensive training session management and monitoring
 - **Observation Processing**: Advanced visual and state processing pipeline
 
-The implementation features sophisticated curriculum learning that automatically adjusts reward scales based on the agent's demonstrated competencies, ensuring efficient skill acquisition and progression.
+The implementation features curriculum learning that automatically adjusts reward scales based on the agent's demonstrated competencies, with skill acquisition and progression.
