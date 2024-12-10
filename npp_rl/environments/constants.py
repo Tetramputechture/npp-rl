@@ -16,5 +16,5 @@ GAME_SPEED_TIMESTEP_FACTOR = 20
 # The time that should be taken between action and observation
 TIMESTEP = 1/(GAME_SPEED_FRAMES_PER_SECOND * GAME_SPEED_TIMESTEP_FACTOR)
 
-# 11 numerical features + 4 grid memory channels + 3 mine features (distance, angle, relative velocity)
-NUM_NUMERICAL_FEATURES = 18
+# 1 numerical feature: time_remaining
+NUM_NUMERICAL_FEATURES = 1

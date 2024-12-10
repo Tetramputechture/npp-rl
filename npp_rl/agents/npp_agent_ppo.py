@@ -89,7 +89,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         gae_lambda=0.95,
         clip_range=0.2,
         clip_range_vf=0.2,
-        ent_coef=0.025,
+        ent_coef=0.001,
         vf_coef=0.7,
         max_grad_norm=0.7,
         target_kl=0.02,
@@ -133,8 +133,8 @@ def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_
         log_dir=log_dir,
         game_controller=game_controller,
         n_steps=n_steps,
-        min_ent_coef=0.005,
-        max_ent_coef=0.025
+        min_ent_coef=0.0005,
+        max_ent_coef=0.001
     )
 
     # Train the model

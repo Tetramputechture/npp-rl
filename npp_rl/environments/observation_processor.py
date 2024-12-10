@@ -21,7 +21,7 @@ class ObservationProcessor:
         if len(frame.shape) == 3:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
-        # Apply edge detection to highlight platforms and obstacles
+        # Apply edge detection to highlight level features
         edges = cv2.Canny(frame, 100, 200)
         frame = cv2.addWeighted(frame, 0.7, edges, 0.3, 0)
 

@@ -285,28 +285,8 @@ class NPlusPlus(gymnasium.Env):
 
     def _get_observation(self) -> Dict[str, Any]:
         """Get the current observation from the game state."""
-        # Get current player position
-        player_x = self.gvf.read_player_x()
-        player_y = self.gvf.read_player_y()
-
-        # Convert to level coordinates for mine calculations
-        level_x, level_y = self.level_data.convert_game_to_level_coordinates(
-            player_x, player_y)
-
         obs = {
-            'player_x': self.gvf.read_player_x(),
-            'player_y': self.gvf.read_player_y(),
             'time_remaining': self.gvf.read_time_remaining(),
-            'switch_activated': self.gvf.read_switch_activated(),
-            'exit_door_x': self.gvf.read_exit_door_x(),
-            'exit_door_y': self.gvf.read_exit_door_y(),
-            'switch_x': self.gvf.read_switch_x(),
-            'switch_y': self.gvf.read_switch_y(),
-            'in_air': self.gvf.read_in_air(),
-            'level_width': self.level_data.width,
-            'level_height': self.level_data.height,
-            'closest_mine_vector': self._get_closest_mine_vector(level_x, level_y),
-            'closest_mine_distance': self._get_closest_mine_distance(level_x, level_y),
             'screen': get_game_window_frame(self.level_data.playable_space)
         }
         return obs

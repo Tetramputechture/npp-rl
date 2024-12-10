@@ -8,12 +8,9 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
     """Custom CNN feature extractor for N++ environment.
 
     Architecture designed to process observations from our N++ environment where:
-    Input: Single tensor of shape (84, 84, frame_stack + 9) containing:
+    Input: Single tensor of shape (84, 84, frame_stack + 1) containing:
         - First frame_stack channels: Stacked grayscale frames
-        - Last NUM_NUMERICAL_FEATURES channels: Numerical features broadcast to 84x84 spatial dimensions
-
-    The network separates and processes visual and numerical data through appropriate
-    pathways before combining them into a final feature representation.
+        - Last channel: Time remaining broadcast to 84x84 spatial dimensions
     """
 
     def __init__(self, observation_space, features_dim=512):
@@ -69,42 +66,14 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         )
 
         # Separate networks for different types of numerical features
-        self.position_net = nn.Sequential(
-            # player_x, player_y, vx, vy
-            nn.Linear(4, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128)
-        )
-
-        self.objective_net = nn.Sequential(
-            # exit_x, exit_y, switch_x, switch_y
-            nn.Linear(4, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128)
-        )
-
         self.state_net = nn.Sequential(
-            # time, switch_activated, in_air
-            nn.Linear(3, 64),
+            # time
+            nn.Linear(1, 64),
             nn.ReLU(),
             nn.BatchNorm1d(64)
         )
 
-        self.exploration_net = nn.Sequential(
-            # recent_visits, frequency, area_exploration, transitions
-            nn.Linear(4, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128)
-        )
-
-        self.mine_net = nn.Sequential(
-            # distance, angle, relative velocity
-            nn.Linear(3, 64),
-            nn.ReLU(),
-            nn.BatchNorm1d(64)
-        )
-
-        total_numerical_features = 128 + 128 + 64 + 128 + 64
+        total_numerical_features = 64
 
         # Combine numerical features with attention
         self.numerical_attention = nn.Sequential(
@@ -131,8 +100,7 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
 
         Args:
             observations: Tensor containing stacked frames and numerical features
-                Shape: (batch_size, 84, 84, frame_stack + \
-                        NUM_NUMERICAL_FEATURES)
+                Shape: (batch_size, 84, 84, frame_stack + NUM_NUMERICAL_FEATURES)
         """
         # Process visual features
         visual = observations[..., :self.frame_stack]
@@ -147,29 +115,14 @@ class NppFeatureExtractor(BaseFeaturesExtractor):
         # Take first spatial location since features are broadcast
         numerical = numerical[:, 0, 0, :]
 
-        # Split numerical features into their groups
-        position_features = numerical[:, :4]                # First 4 features
-        objective_features = numerical[:, 4:8]             # Next 4 features
-        state_features = numerical[:, 8:11]                # Next 3 features
-        exploration_features = numerical[:, 11:15]         # Next 4 features
-        mine_features = numerical[:, 15:18]                # Last 3 features
+        # Process time feature
+        state_features = numerical                         # Time remaining feature
 
         # Process each group through its specialized network
-        processed_position = self.position_net(position_features)
-        processed_objectives = self.objective_net(objective_features)
         processed_state = self.state_net(state_features)
-        processed_exploration = self.exploration_net(exploration_features)
-        processed_mines = self.mine_net(mine_features)
 
         # Combine numerical features with attention
-        numerical_combined = torch.cat([
-            processed_position,
-            processed_objectives,
-            processed_state,
-            processed_exploration,
-            processed_mines
-        ], dim=1)
-        numerical_features = self.numerical_attention(numerical_combined)
+        numerical_features = self.numerical_attention(processed_state)
 
         # Apply gating fusion to combine visual and numerical features
         combined = torch.cat([visual_features, numerical_features], dim=1)

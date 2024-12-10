@@ -73,4 +73,4 @@ The project is structured into several key components:
 - **Agent**: PPO-based agent with custom feature extraction
 - **Reward Calculation**: Modular reward system with multiple specialized calculators
 - **Training**: Custom training session management and monitoring with TKinter GUI, Tensorboard is supported though.
-- **Observation Processing**: We process our state into an 84x84 grayscale image, extended with channels for numerical feature data.
+- **Observation Processing**: We process our state into a 4 frames of 84x84 grayscale, extended with channels for numerical feature data.
