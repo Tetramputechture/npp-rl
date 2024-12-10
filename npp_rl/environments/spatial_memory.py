@@ -9,8 +9,8 @@ class MemoryConfig:
     position_grid_size: int = 10
     area_grid_size: int = 50
     vision_radius: int = 8
-    position_memory_size: Tuple[int, int] = (86, 86)
-    area_memory_size: Tuple[int, int] = (18, 18)
+    position_memory_size: Tuple[int, int] = (88,  88)
+    area_memory_size: Tuple[int, int] = (19, 19)
 
 
 class SpatialMemoryTracker:

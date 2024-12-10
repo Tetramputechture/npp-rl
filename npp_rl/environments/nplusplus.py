@@ -247,14 +247,14 @@ class NPlusPlus(gymnasium.Env):
         )
 
         # Initialize position log folder
-        self.position_log_folder_name = f'training_logs/position_log_{time.strftime("%m-%d-%Y-%H-%M-%S")}'
+        self.position_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S")}/position_log'
         os.makedirs(self.position_log_folder_name)
 
         # Initialize position log file string
         self.position_log_file_string = 'PlayerX,PlayerY\n'
 
         # Initialize action log folder
-        self.action_log_folder_name = f'training_logs/action_log_{time.strftime("%m-%d-%Y-%H-%M-%S")}'
+        self.action_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S")}/action_log'
         os.makedirs(self.action_log_folder_name)
 
         # Initialize action log file string
@@ -263,10 +263,7 @@ class NPlusPlus(gymnasium.Env):
         # Initialize episode counter
         self.episode_counter = 0
 
-        # Initialize current level playable space (x1, y1, x2, y2)
-        self.current_playable_space_coordinates = None
-
-        # Initialize position history
+        # Initialize current level playable space (x1, y1, x2, y2)        # Initialize position history
         self.position_history = deque(maxlen=self.MOVEMENT_CHECK_FRAMES)
 
         # Initialize success tracking
@@ -306,12 +303,11 @@ class NPlusPlus(gymnasium.Env):
             'switch_x': self.gvf.read_switch_x(),
             'switch_y': self.gvf.read_switch_y(),
             'in_air': self.gvf.read_in_air(),
-            'level_width': self.gvf.read_level_width(),
-            'level_height': self.gvf.read_level_height(),
-
-            # Use ParsedLevel utility functions for mine information
+            'level_width': self.level_data.width,
+            'level_height': self.level_data.height,
             'closest_mine_vector': self._get_closest_mine_vector(level_x, level_y),
             'closest_mine_distance': self._get_closest_mine_distance(level_x, level_y),
+            'screen': get_game_window_frame(self.level_data.playable_space)
         }
         return obs
 
@@ -634,6 +630,8 @@ class NPlusPlus(gymnasium.Env):
 
         # Track position and action
         self.position_log_file_string += f'{prev_obs["player_x"]},{prev_obs["player_y"]}\n'
+        self.training_session.add_position(
+            prev_obs["player_x"], prev_obs["player_y"])
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
         # Execute action and get new observation
@@ -650,7 +648,8 @@ class NPlusPlus(gymnasium.Env):
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 
-        # Update training session reward and best reward
+        # Add action and reward in sync (action first, then its resulting reward)
+        self.training_session.add_action(action)
         self.training_session.add_reward(reward)
 
         # Update best reward at episode end
@@ -672,7 +671,8 @@ class NPlusPlus(gymnasium.Env):
         Returns:
             tuple: Initial observation and info dict
         """
-        # Update training session episode counter
+        # Update training session episode counter - this will store current episode data
+        # in historical arrays and reset current episode arrays
         self.training_session.increment_episode()
 
         # Reset success tracking
@@ -741,7 +741,7 @@ class NPlusPlus(gymnasium.Env):
                 "Level data not set in game config. Please set level data first.")
 
         # Get mine coordinates from level data
-        self.mine_coords = self.level_data.get('mine_coords', [])
+        self.mine_coords = self.level_data.mine_coordinates
 
         # Update reward calculator with mine coordinates
         self.reward_calculator.navigation_calculator.set_mine_coordinates(
@@ -763,7 +763,7 @@ class NPlusPlus(gymnasium.Env):
         Since the game window is already visible, we don't need additional rendering.
         We can just return the current game window frame.
         """
-        return get_game_window_frame(self.current_playable_space_coordinates)
+        return get_game_window_frame(self.level_data.playable_space)
 
     def close(self):
         """Clean up environment resources."""

@@ -2,7 +2,7 @@
 from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
-from npp_rl.util import calculate_velocity
+from npp_rl.util.util import calculate_velocity
 from npp_rl.environments.constants import TIMESTEP
 
 

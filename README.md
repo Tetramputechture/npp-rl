@@ -4,11 +4,11 @@ A Deep Reinforcement Learning Agent for the game N++, implementing a PPO (Proxim
 
 ## Project Overview
 
-NPP-RL is an advanced reinforcement learning implementation that trains an AI agent to master the challenging platformer game N++. The project utilizes state-of-the-art techniques in deep reinforcement learning, combining visual processing, curriculum learning, and multi-faceted reward systems.
+This project's goal is to train an agent to master the platformer game N++. The game has a physically simulated movement model, and the agent must learn to navigate the environment, collect resources, and avoid obstacles, eventually reaching the end of the level. 
 
 ## Core Features
 
-### Advanced Reward System
+### Reward System
 
 Our reward system is currently broken down into 4 main components:
 

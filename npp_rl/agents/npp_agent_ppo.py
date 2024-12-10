@@ -20,9 +20,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def setup_training_env(env):
     """Prepare environment for training with proper monitoring."""
-    # Create logging directory
-    log_dir = Path('./training_logs/ppo_training_log')
-    log_dir.mkdir(exist_ok=True)
+    # Create logging directory with timestamp
+    timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    log_dir = Path(
+        f'./training_logs/ppo_training_log/training_session-{timestamp}')
+    log_dir.mkdir(exist_ok=True, parents=True)
 
     # Wrap environment with Monitor for logging
     env = Monitor(env, str(log_dir))
@@ -94,7 +96,8 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         policy_kwargs=policy_kwargs,
         normalize_advantage=True,
         verbose=1,
-        tensorboard_log=tensorboard_log,  # Add Tensorboard logging
+        # Uncomment to use tensorboard
+        # tensorboard_log=tensorboard_log,
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
         seed=42
     )
@@ -118,7 +121,8 @@ def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_
     tensorboard_log.mkdir(exist_ok=True)
 
     # Start Tensorboard
-    start_tensorboard(tensorboard_log)
+    # Uncomment to use tensorboard
+    # start_tensorboard(tensorboard_log)
 
     # Create and set up the model
     model = create_ppo_agent(env, n_steps, str(tensorboard_log))
@@ -244,6 +248,7 @@ def start_training(game_value_fetcher, game_controller: GameController):
 
     try:
         env = NPlusPlus(game_value_fetcher, game_controller)
+        wrapped_env, log_dir = setup_training_env(env)
         game_controller.press_reset_key()
 
         s_size = env.observation_space.shape[0]
@@ -255,9 +260,8 @@ def start_training(game_value_fetcher, game_controller: GameController):
         print("The Action Space is: ", a_size)
 
         print("Starting PPO training...")
-        log_dir = Path('./training_logs/ppo_training_log')
         model = train_ppo_agent(
-            env, log_dir, game_controller, total_timesteps=25000)
+            wrapped_env, log_dir, game_controller, total_timesteps=100000)
 
         # Save final model
         print("Training completed. Saving model...")
