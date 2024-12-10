@@ -69,10 +69,8 @@ Our reward system is currently broken down into 4 main components:
 
 The project is structured into several key components:
 
-- **Environment**: Custom N++ environment implementation with sophisticated state management
+- **Environment**: Custom N++ environment implementation with state management. Input control via `pydirectinput`.
 - **Agent**: PPO-based agent with custom feature extraction
 - **Reward Calculation**: Modular reward system with multiple specialized calculators
-- **Training**: Comprehensive training session management and monitoring
-- **Observation Processing**: Advanced visual and state processing pipeline
-
-The implementation features curriculum learning that automatically adjusts reward scales based on the agent's demonstrated competencies, with skill acquisition and progression.
+- **Training**: Custom training session management and monitoring with TKinter GUI, Tensorboard is supported though.
+- **Observation Processing**: We process our state into an 84x84 grayscale image, extended with channels for numerical feature data.
