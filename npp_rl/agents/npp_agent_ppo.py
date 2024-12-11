@@ -19,7 +19,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def setup_training_env(env):
-    """Prepare environment for training with proper monitoring."""
+    """Prepare environment for training with monitoring."""
     # Create logging directory with timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
     log_dir = Path(
@@ -39,7 +39,7 @@ def start_tensorboard(logdir):
                          str(logdir), '--port', '6006'])
 
     tensorboard_thread = threading.Thread(target=run_tensorboard)
-    tensorboard_thread.daemon = True  # Thread will close when main program exits
+    tensorboard_thread.daemon = True
     tensorboard_thread.start()
     print("Tensorboard started. View at http://localhost:6006")
 

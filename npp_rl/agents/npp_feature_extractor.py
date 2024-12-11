@@ -22,7 +22,13 @@ class ResBlock(nn.Module):
 
 
 class NPPFeatureExtractor(BaseFeaturesExtractor):
-    """Enhanced feature extractor with residual connections and batch normalization"""
+    """CNN-based feature extractor with residual connections and batch normalization,
+    with a separate branch for each of the following:
+    - Frame
+    - Memory
+    - Hazards
+    - Goal
+    """
 
     def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 256):
         super().__init__(observation_space, features_dim)
@@ -130,6 +136,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        """Forward pass for the feature extractor."""
         if observations.dim() == 3:
             observations = observations.unsqueeze(0)
 

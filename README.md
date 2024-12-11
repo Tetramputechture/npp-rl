@@ -30,6 +30,7 @@ each step to execute the action via `pydirectinput`. This is a limitation of the
 implementation, but will be fixed in the future when we have a headless simulation environment.
 
 [![NPP-RL Training Demo](https://img.youtube.com/vi/jubDJgOTRyM/0.jpg)](https://www.youtube.com/watch?v=jubDJgOTRyM)
+(Click the image to watch the video)
 
 ### Environment
 
