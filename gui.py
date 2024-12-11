@@ -687,7 +687,7 @@ class NinjAI:
         self.ax.clear()
         self.ax.plot(training_session.reward_history, 'b-')
         self.ax.set_title("Episode Rewards")
-        self.ax.set_xlabel("Time")
+        self.ax.set_xlabel("Episode")
         self.ax.set_ylabel("Reward")
         self.ax.grid(True)
         self.canvas.draw()
@@ -924,11 +924,13 @@ class NinjAI:
 
         # Add historical episodes
         if training_session.historical_step_rewards:
-            # Get last 4 completed episodes
-            for i, episode_rewards in enumerate(training_session.historical_step_rewards[-4:]):
+            # Get last 4 completed episodes from the end
+            start_idx = max(
+                0, len(training_session.historical_step_rewards) - 4)
+            for i, episode_rewards in enumerate(training_session.historical_step_rewards[start_idx:]):
                 if episode_rewards:  # Only add if we have rewards
                     episode_num = current_episode - \
-                        (len(training_session.historical_step_rewards) - i)
+                        (len(training_session.historical_step_rewards) - start_idx - i)
                     episodes_to_plot.append(episode_rewards)
                     labels_to_plot.append(f'Episode {episode_num}')
                     rewards_to_plot.append(episode_rewards)
@@ -949,7 +951,7 @@ class NinjAI:
                 self.rewards_ax.plot(steps, rewards,
                                      label=label,
                                      color=self.REWARD_COLORS[color_idx],
-                                     linewidth=2,
+                                     linewidth=3,
                                      zorder=10)  # Ensure current episode is on top
             else:
                 self.rewards_ax.plot(steps, rewards,

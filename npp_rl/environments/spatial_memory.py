@@ -66,7 +66,7 @@ class SpatialMemoryTracker:
         grid_x = int(x / grid_size)
         grid_y = int(y / grid_size)
 
-        view = np.zeros((84, 84), dtype=np.float32)
+        view = np.zeros((88, 88), dtype=np.float32)
         radius = self.config.vision_radius
 
         for i in range(-radius, radius + 1):
@@ -76,9 +76,9 @@ class SpatialMemoryTracker:
 
                 if 0 <= mem_y < memory_matrix.shape[0] and \
                    0 <= mem_x < memory_matrix.shape[1]:
-                    obs_x = 42 + j
-                    obs_y = 42 + i
-                    if 0 <= obs_y < 84 and 0 <= obs_x < 84:
+                    obs_x = 44 + j
+                    obs_y = 44 + i
+                    if 0 <= obs_y < 88 and 0 <= obs_x < 88:
                         view[obs_y, obs_x] = memory_matrix[mem_y, mem_x]
 
         return view

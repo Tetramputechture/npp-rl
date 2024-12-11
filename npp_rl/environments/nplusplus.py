@@ -160,8 +160,7 @@ from npp_rl.game.game_value_fetcher import GameValueFetcher
 from npp_rl.environments.reward_calculation import RewardCalculator
 from npp_rl.util.util import calculate_distance
 from npp_rl.environments.movement_evaluator import MovementEvaluator
-from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, NUM_NUMERICAL_FEATURES
-from npp_rl.game.level_parser import parse_level
+from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, NUM_NUMERICAL_FEATURES, NUM_HISTORICAL_FRAMES
 from npp_rl.game.game_config import game_config
 import time
 from typing import Tuple, Dict, Any, List
@@ -242,7 +241,8 @@ class NPlusPlus(gymnasium.Env):
         self.observation_space = box.Box(
             low=0,
             high=1,
-            shape=(84, 84, frame_stack + NUM_NUMERICAL_FEATURES),
+            shape=(84, 84, frame_stack + NUM_HISTORICAL_FRAMES +
+                   NUM_NUMERICAL_FEATURES),
             dtype=np.float32
         )
 
@@ -285,9 +285,34 @@ class NPlusPlus(gymnasium.Env):
 
     def _get_observation(self) -> Dict[str, Any]:
         """Get the current observation from the game state."""
+        player_level_x, player_level_y = self.level_data.convert_game_to_level_coordinates(
+            self.gvf.read_player_x(),
+            self.gvf.read_player_y()
+        )
+
+        level_x, level_y, level_x2, level_y2 = self.level_data.playable_space
+        level_width = level_x2 - level_x
+        level_height = level_y2 - level_y
+
         obs = {
+            'screen': get_game_window_frame(self.level_data.playable_space),
             'time_remaining': self.gvf.read_time_remaining(),
-            'screen': get_game_window_frame(self.level_data.playable_space)
+            'player_x': self.gvf.read_player_x(),
+            'player_y': self.gvf.read_player_y(),
+            'switch_activated': self.gvf.read_switch_activated(),
+            'switch_x': self.gvf.read_switch_x(),
+            'switch_y': self.gvf.read_switch_y(),
+            'exit_door_x': self.gvf.read_exit_door_x(),
+            'exit_door_y': self.gvf.read_exit_door_y(),
+            'player_dead': self.gvf.read_player_dead(),
+            'begin_retry_text': self.gvf.read_begin_retry_text(),
+            'in_air': self.gvf.read_in_air(),
+            'level_width': level_width,
+            'level_height': level_height,
+            'closest_mine_distance': self._get_closest_mine_distance(
+                player_level_x, player_level_y),
+            'closest_mine_vector': self._get_closest_mine_vector(
+                player_level_x, player_level_y),
         }
         return obs
 
@@ -592,9 +617,10 @@ class NPlusPlus(gymnasium.Env):
         prev_obs = self._get_observation()
 
         # Track position and action
-        self.position_log_file_string += f'{prev_obs["player_x"]},{prev_obs["player_y"]}\n'
-        self.training_session.add_position(
-            prev_obs["player_x"], prev_obs["player_y"])
+        player_x = self.gvf.read_player_x()
+        player_y = self.gvf.read_player_y()
+        self.position_log_file_string += f'{player_x},{player_y}\n'
+        self.training_session.add_position(player_x, player_y)
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
         # Execute action and get new observation
@@ -606,7 +632,8 @@ class NPlusPlus(gymnasium.Env):
         terminated, truncated = self._check_termination(observation)
 
         # Process observation and calculate reward
-        processed_obs = self.observation_processor.process_observation(obs)
+        processed_obs = self.observation_processor.process_observation(
+            observation)
         reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
 

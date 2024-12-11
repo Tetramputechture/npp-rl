@@ -13,7 +13,7 @@ import threading
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 from npp_rl.game.game_controller import GameController
-from npp_rl.agents.npp_feature_extractor import NppFeatureExtractor
+from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -58,25 +58,22 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     """
 
     learning_rate = get_linear_fn(
-        start=3e-4,
+        start=2.5e-4,
         end=5e-5,
         end_fraction=0.8
     )
 
     policy_kwargs = dict(
-        features_extractor_class=NppFeatureExtractor,
-        features_extractor_kwargs=dict(
-            features_dim=512,
-        ),
+        features_extractor_class=NPPFeatureExtractor,
         net_arch=dict(
-            pi=[512, 512, 256, 128],
-            vf=[512, 512, 256, 128]
+            pi=[256, 256],
+            vf=[256, 256]
         ),
         normalize_images=True,
         activation_fn=nn.ReLU,
     )
 
-    batch_size = n_steps // 16
+    batch_size = min(128, n_steps // 4)
 
     model = PPO(
         policy="CnnPolicy",
@@ -84,15 +81,15 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         learning_rate=learning_rate,
         n_steps=n_steps,
         batch_size=batch_size,
-        n_epochs=10,
+        n_epochs=4,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        clip_range_vf=0.2,
-        ent_coef=0.001,
-        vf_coef=0.7,
-        max_grad_norm=0.7,
-        target_kl=0.02,
+        clip_range_vf=None,
+        ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        target_kl=None,
         policy_kwargs=policy_kwargs,
         normalize_advantage=True,
         verbose=1,
@@ -134,7 +131,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_
         game_controller=game_controller,
         n_steps=n_steps,
         min_ent_coef=0.0005,
-        max_ent_coef=0.001
+        max_ent_coef=0.01
     )
 
     # Train the model

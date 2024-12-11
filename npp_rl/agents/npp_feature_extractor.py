@@ -2,123 +2,126 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch
 from torch import nn
 import gymnasium
+import torchvision.models as models
 
 
-class NppFeatureExtractor(BaseFeaturesExtractor):
-    """Custom CNN feature extractor for N++ environment.
+class ResBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
 
-    Architecture designed to process observations from our N++ environment where:
-    Input: Single tensor of shape (84, 84, total_frames + num_features) containing:
-        - First frame_stack channels: Recent stacked grayscale frames
-        - Next 8 channels: Historical frames at 8, 16, 32, 64, 128, 256, 512, 1024 timesteps
-        - Last channels: Numerical features broadcast to 84x84 spatial dimensions
-    """
+    def forward(self, x):
+        residual = x
+        x = nn.functional.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        x += residual
+        return nn.functional.relu(x)
 
-    def __init__(self, observation_space: gymnasium.spaces.Box):
-        # Calculate output features dimension
-        features_dim = 512  # Output features dimension
 
+class NPPFeatureExtractor(BaseFeaturesExtractor):
+    """Enhanced feature extractor with residual connections and batch normalization"""
+
+    def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 256):
         super().__init__(observation_space, features_dim)
 
-        # CNN for processing visual features
-        self.cnn = nn.Sequential(
-            # First conv layer processes recent frames (4 recent frames)
-            nn.Conv2d(4, 32, kernel_size=8, stride=4, padding=0),
+        # Input channels configuration
+        self.frame_channels = 4  # 1 current + 3 recent frames
+        self.memory_channels = 4
+        self.time_channel = 1
+
+        # Enhanced CNN architecture
+        self.frame_features = nn.Sequential(
+            # Initial convolution
+            nn.Conv2d(self.frame_channels, 32,
+                      kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
 
-            # Second conv layer processes historical frames
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            # First residual block
+            ResBlock(32),
+
+            # Downsample
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
 
-            # Third conv layer combines all features
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            # Second residual block
+            ResBlock(64),
+
+            # Final convolution
+            nn.Conv2d(64, 128, kernel_size=3, stride=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
 
-            nn.Flatten(),
+            # Adaptive pooling for better feature extraction
+            nn.AdaptiveAvgPool2d((6, 6)),
+            nn.Flatten()
         )
 
-        # Separate CNN for processing historical frames (8 historical frames)
-        self.historical_cnn = nn.Sequential(
-            nn.Conv2d(8, 32, kernel_size=8, stride=4, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
+        # Calculate the flattened size: 128 * 6 * 6 = 4608
+        flat_size = 128 * 6 * 6
 
-        # Separate networks for different types of numerical features
-        self.state_net = nn.Sequential(
-            # time remaining
-            nn.Linear(1, 64),
+        # Enhanced frame processing
+        self.frame_processor = nn.Sequential(
+            nn.Linear(flat_size, 256),
+            nn.LayerNorm(256),
             nn.ReLU(),
-            nn.BatchNorm1d(64)
-        )
-
-        total_numerical_features = 64
-
-        # Combine numerical features with attention
-        self.numerical_attention = nn.Sequential(
-            nn.Linear(total_numerical_features, 512),
-            nn.ReLU(),
-            nn.Dropout(0.2)
-        )
-
-        # Gated fusion mechanism
-        self.fusion_gate = nn.Sequential(
-            nn.Linear(512 + 512, 512),
-            nn.Sigmoid()
-        )
-
-        # Final processing
-        self.final_net = nn.Sequential(
-            nn.Linear(512, features_dim),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
             nn.ReLU()
         )
 
-    def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        """
-        Process the environment's observation.
-
-        Args:
-            observations: torch.Tensor - The input tensor containing stacked frames and features
-                        Shape: (batch_size, 84, 84, total_channels)
-
-        Returns:
-            torch.Tensor - The extracted features
-                        Shape: (batch_size, features_dim)
-        """
-        # Process recent frames (first 4 channels)
-        recent_visual = observations[..., :4]
-        recent_visual = recent_visual.permute(0, 3, 1, 2)
-        recent_features = self.cnn(recent_visual)
-
-        # Process historical frames (next 8 channels)
-        historical_visual = observations[..., 4:12]
-        historical_visual = historical_visual.permute(0, 3, 1, 2)
-        historical_features = self.historical_cnn(historical_visual)
-
-        # Get numerical features (they're already in the correct order from preprocessing)
-        numerical = observations[..., 12:]
-        # Take first spatial location since features are broadcast
-        numerical = numerical[:, 0, 0, :]
-
-        # Process numerical features
-        processed_state = self.state_net(numerical)
-        numerical_features = self.numerical_attention(processed_state)
-
-        # Apply gating fusion
-        gate_recent = self.fusion_gate(
-            torch.cat([recent_features, numerical_features], dim=1))
-        gate_historical = self.fusion_gate(
-            torch.cat([historical_features, numerical_features], dim=1))
-
-        # Combine features with gating
-        fused_features = (
-            gate_recent * recent_features +
-            gate_historical * historical_features +
-            (1 - gate_recent - gate_historical) * numerical_features
+        # Enhanced memory processing
+        self.memory_processor = nn.Sequential(
+            nn.Linear(self.memory_channels, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 32),
+            nn.LayerNorm(32),
+            nn.ReLU()
         )
 
-        return self.final_net(fused_features)
+        # Final integration with skip connection
+        total_features = 128 + 32 + self.time_channel
+        self.integration = nn.Sequential(
+            nn.Linear(total_features, self.features_dim),
+            nn.LayerNorm(self.features_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(self.features_dim, self.features_dim)
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        if observations.dim() == 3:
+            observations = observations.unsqueeze(0)
+
+        # Split channels
+        frames = observations[..., :self.frame_channels]
+        memory = observations[..., -self.memory_channels-1:-1]
+        time = observations[..., -1:]
+
+        # Process frames [B, H, W, C] -> [B, C, H, W]
+        frames = frames.permute(0, 3, 1, 2)
+        frame_features = self.frame_features(frames)
+        frame_features = self.frame_processor(frame_features)
+
+        # Process memory - average over spatial dimensions
+        memory = memory.mean(dim=[1, 2])
+        memory_features = self.memory_processor(memory)
+
+        # Process time - average over spatial dimensions
+        time_features = time.mean(dim=[1, 2])
+
+        # Combine features with skip connection
+        combined = torch.cat([
+            frame_features,
+            memory_features,
+            time_features
+        ], dim=1)
+
+        return self.integration(combined)
