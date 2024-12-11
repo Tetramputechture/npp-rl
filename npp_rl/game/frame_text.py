@@ -21,6 +21,10 @@ print(f'Using device: {device}')
 
 def extract_text(frame: np.ndarray) -> Optional[str]:
     """Extract text from the given frame."""
+    # Note: this isn't currently used right now. So we comment it out
+    # in case this still gets called, since we don't want to hang up
+    # the UI.
+
     # if frame is None:
     #     return None
 

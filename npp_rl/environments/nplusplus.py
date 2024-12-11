@@ -14,15 +14,13 @@ The game level is represented as a 640x480 RGB image where:
     * Exit door (goal)
     * Switch (must be activated to open exit)
     * Optional gold pieces (time bonuses)
-    * Possible hazards (traps, enemies)
+    * Mines (hazards)
     * Terrain (walls, platforms)
 - The player must reach the exit door after activating the switch to complete the level
-- The player is either alive or dead, with a health bar that depletes every second
-  and each gold piece collected adds 1 second to the timer
-- The entire game state and player information is observable from the screen
-- Failure is indicated by player death or time running out
-- Success is indicated by reaching the 'Level Complete' screen, which appears after the player reaches the exit door
-    when the switch is activated
+- The player has a timer that depletes every second, with gold pieces adding time
+- The entire game state is observable through memory reading and screen capture
+- Failure occurs through player death or time expiration
+- Success occurs when reaching the exit door with the switch activated
 
 Action Space:
 ------------
@@ -36,120 +34,72 @@ Discrete(6):
 
 Observation Space:
 ----------------
-Since the entire game can be observed from the screen, the observation space
-is a dictionary containing the following elements:
-- 'screen': 4-frame stack of grayscale images (84x84 pixels) representing the game window
-- 'player_x': Player's x-coordinate in the level (float, pixels)
-- 'player_y': Player's y-coordinate in the level (float, pixels)
-- 'time_remaining': Time remaining in the level (int, milliseconds)
-- 'switch_activated': Whether the switch has been activated (bool)
-- 'exit_door_x': X-coordinate of the exit door (float, pixels)
-- 'exit_door_y': Y-coordinate of the exit door (float, pixels)
-- 'switch_x': X-coordinate of the switch (float, pixels)
-- 'switch_y': Y-coordinate of the switch (float, pixels)
-- 'in_air': Whether the player is in the air (bool)
+Dictionary containing:
+- 'screen': 4-frame stack of preprocessed grayscale images (84x84 pixels)
+- 'player_x': Normalized player x-coordinate
+- 'player_y': Normalized player y-coordinate
+- 'time_remaining': Normalized time remaining
+- 'switch_activated': Boolean as float (0 or 1)
+- 'exit_door_x': Normalized exit door x-coordinate
+- 'exit_door_y': Normalized exit door y-coordinate
+- 'switch_x': Normalized switch x-coordinate
+- 'switch_y': Normalized switch y-coordinate
+- 'in_air': Boolean as float (0 or 1)
 
-When processing, the observation space is preprocessed as follows:
-- The screen is resized to 84x84 pixels and normalized to [0, 1]
-- The player's x and y coordinates are normalized to the level dimensions
-- Time remaining is normalized to [0, 1]
-- Switch activated status is converted to a float (0 or 1)
-- Exit door and switch coordinates are normalized to the level dimensions
-- In-air status is converted to a float (0 or 1)
-
-When building the input tensor for the agent, the observation space is stacked
-with the last 4 frames to provide temporal information. We have 84x84 resolution
-gray-scale images, so the final observation space is (84, 84, 4 + 9) where 4 is the
-frame stack and 9 is the numerical features.
-
+The observation is processed through ObservationProcessor which:
+- Resizes and normalizes screen frames to 84x84 pixels
+- Maintains a frame stack of 4 frames
+- Normalizes all numerical features to [0, 1]
+- Combines visual and numerical features into a single tensor
 
 Rewards:
 -------
-See _calculate_reward method for detailed reward structure.
+The reward system is composed of multiple components:
+1. Main Reward: Base rewards for key achievements (switch activation, level completion)
+2. Movement Reward: Evaluates efficiency and quality of movement
+3. Navigation Reward: Rewards progress towards objectives
+4. Time Reward: Penalties for time usage and rewards for gold collection
 
-The episode ends when:
-- The player reaches the exit after activating the switch (success)
-- The player health reaches 0 (collision with hazards/enemies)
-- The time remaining reaches 0
+Each component is calculated by specialized reward calculators that consider:
+- Distance to objectives
+- Movement efficiency
+- Time management
+- Gold collection
+- Hazard avoidance
 
-Our episode reward will be the sum of all rewards received during the episode.
-We do not want to train on individual rewards, as they may not be indicative of the
-agent's performance throughout the level. Instead, we will use the episode reward
-to evaluate the agent's performance on the level. Take for example a level where the player
-has to take a roundabout way to reach the exit. The agent may receive negative rewards
-for moving away from the exit, but this is necessary to reach the switch and open the exit.
-In this case, the episode reward will be positive, indicating that the agent performed well.
+Game State Management:
+--------------------
+The environment manages game state through:
+1. GameValueFetcher: Reads game memory for precise state information
+2. GameController: Handles game input and window management
+3. TrainingSession: Manages training progress and configuration
+4. Fixed timestep execution (1/60th second) for consistent physics simulation
 
-Starting State:
--------------
-- Player spawns at predetermined position in level
-- Timer starts at level-specific value (typically 90 seconds)
-- Switch is inactive
-- Exit door is closed
-- Player is grounded
+Additional Features:
+-----------------
+1. Position Logging: Tracks player movement for analysis
+2. Movement Evaluation: Assesses movement quality and efficiency
+3. Spatial Memory: Tracks visited areas and exploration
+4. Mine Avoidance: Special handling of hazardous areas
+5. Training Session Management: Configurable training parameters
 
-Episode Termination:
-------------------
-The episode terminates under the following conditions:
+Version: v2.0
 
-1. Success:
-    - Player reaches the exit after activating the switch
+Render Modes:
+------------
+- 'human': Displays game window
 
-2. Failure:
-    - Player is dead
-    - Time remaining reaches 0 (this results in a player death)
+Max Episode Steps:
+----------------
+~36000 frames (600 seconds at 60 FPS)
 
-Additional Info:
---------------
-1. The state of the player is the only part of the observation space that is directly controllable.
-   The rest of the state is normally ran at a random FPS, so we have to pause the game to get the game state.
-   We pause the game at a fixed timestep of 1/60th of a second (0.0167 seconds) to get the game state after an action
-   is taken.
-   The game (an episode) should start by pressing the space key to start the game. After this,
-   the observation should be built by getting the frame data of the game and the game state
-   in memory. Then, the game should be paused to wait for the agent to decide on what action to take.
-   When a decision is made, the game should be unpaused, the action should be taken, and the game should be paused
-   again after 0.0167 seconds to get the new observation space. This should be repeated until the episode ends.
-   The episode ends when the player reaches the exit while the switch is activated, the player dies, or the time runs out (time remaining = 0).
-
-2. Version:
-    - v1.0
-
-3. Render modes:
-    - 'human': Displays game window
-
-4. Max episode steps:
-    - Since the entire game state is not in direct controler, we have a fixed timestep of 1/60th of a second (0.0167 seconds)
-      that we will run the game for after taking an action. After this time, we will capture the frame, pause the game, and
-      get the reward. This will be repeated until the episode ends. The max episode steps should be around 600 seconds (36000 frames).
-
-5. Game Value Fetcher class: Class to fetch game values. These should be read when the game is paused.
-    Methods:
-        set_pm: Set the pymem object.
-        read_player_x: Read the player's x position
-        read_player_y: Read the player's y position
-        read_time_remaining: Read the time remaining in seconds as a float
-        read_switch_activated: Read the switch activated status
-        read_player_dead: Read the player dead status
-        read_exit_door_x: Read the exit door's x position
-        read_exit_door_y: Read the exit door's y position.
-        read_switch_x: Read the switch's x position.
-        read_switch_y: Read the switch's y position.
-
-6. Game Controller class: Class to control the game. This should be used to take actions based on the game state.
-    Methods:
-        focus_window: Focus the game window.
-
-7. get_game_window_frame: Function to get the current RGB window frame as a numpy array.
-
-8. We can assume the env is instantiated when the game is in a level_playing state.
-   In this state, we can either be waiting to start the level, or waiting to retry the level after failing or succeeding.
-   In these cases, no episode is running, and we should start a new episode by pressing the space key to start the level.
-
-9. We keep a frame stack of 4 frames to provide the agent with temporal information.
-
-10. When taking an action that includes the same key or keys as the previous action, we don't want to release the keys
-    before pressing them again. This is because the agent may want to continue holding the key(s) for the next action.
+Dependencies:
+-----------
+- gymnasium
+- numpy
+- pymem (for memory reading)
+- win32gui (for window management)
+- pygame (for input simulation)
 """
 import gymnasium
 from gymnasium.spaces import discrete, box

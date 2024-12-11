@@ -3,6 +3,7 @@ from pymem import Pymem
 
 
 def safe_read_float(pm: Pymem, address: int) -> float:
+    """Read a float from memory, returning 0.0 if there is an error."""
     if address == 0:
         return 0.0
 
@@ -14,6 +15,7 @@ def safe_read_float(pm: Pymem, address: int) -> float:
 
 
 def safe_read_double(pm: Pymem, address: int) -> float:
+    """Read a double from memory, returning 0.0 if there is an error."""
     if address == 0:
         return 0.0
 
@@ -25,6 +27,7 @@ def safe_read_double(pm: Pymem, address: int) -> float:
 
 
 def safe_read_byte(pm: Pymem, address: int) -> bool:
+    """Read a byte from memory, returning False if there is an error."""
     if address == 0:
         return False
 
@@ -36,12 +39,14 @@ def safe_read_byte(pm: Pymem, address: int) -> bool:
 
 
 def safe_read_string(pm: Pymem, address: int) -> str:
+    """Read a string from memory, returning an empty string if there is an error."""
     if address == 0:
         return ""
 
     try:
         return pm.read_string(address)
     except Exception as e:
+        print(f'Error reading string at address {address}: {e}')
         return ""
 
 

@@ -29,9 +29,9 @@ class ParsedLevel:
     """Class to store parsed level information."""
     playable_space: Tuple[int, int, int, int]  # (min_x, min_y, max_x, max_y)
     mine_coordinates: List[Tuple[int, int]]  # List of (x, y) coordinates
-    width: int
-    height: int
-    hazard_map: np.ndarray  # Added hazard map field
+    width: int  # Width of the playable level in pixels
+    height: int  # Height of the playable level in pixels
+    hazard_map: np.ndarray  # Hazard map showing mine locations with gaussian falloff
 
     def create_hazard_map(self, image_size: int = 84) -> np.ndarray:
         """Create a hazard map showing mine locations with gaussian falloff.

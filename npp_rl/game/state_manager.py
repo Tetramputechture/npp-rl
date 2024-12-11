@@ -24,7 +24,11 @@ class TransitionRule:
 
 
 class StateManager:
-    """Manages game state transitions and actions based on frame analysis."""
+    """Manages game state transitions and actions based on frame analysis.
+
+    Note: This really isn't used much anymore since we only really care about
+    the level playing state. We can eventually remove this if we want.
+    """
 
     def __init__(self):
         self.state: str = "game_loading"

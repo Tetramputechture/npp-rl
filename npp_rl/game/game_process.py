@@ -21,6 +21,10 @@ from npp_rl.game.game_window import get_game_window_handle, get_game_window_rect
 
 import pymem
 
+# Modify this path to point to the N++ executable
+# TODO: make this configurable, maybe via ENV variable
+# Either way, won't matter when we have a simulated environment that
+# we can import and control ourselves
 GAME_EXECUTABLE_PATH = r"D:\Games\Steam\steamapps\common\N++\N++.exe"
 GAME_EXECUTABLE_NAME = "N++.exe"
 

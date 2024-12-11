@@ -5,10 +5,6 @@ import threading
 from npp_rl.agents.npp_agent_ppo import start_training
 from npp_rl.game.training_session import training_session
 
-import pydirectinput
-
-pydirectinput.PAUSE = 0.01
-
 
 class AgentTrainer:
     def __init__(self, game_value_fetcher: GameValueFetcher, game_controller: GameController):

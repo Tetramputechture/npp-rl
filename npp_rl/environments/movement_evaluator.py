@@ -18,7 +18,8 @@ class MovementEvaluator:
 
     # Constants for movement evaluation
     STABLE_VELOCITY_THRESHOLD = 0.1  # Threshold for controlled movement
-    SAFE_LANDING_VELOCITY = 15.0     # Maximum safe landing speed
+    # Maximum safe landing speed (todo: check this)
+    SAFE_LANDING_VELOCITY = 10000.0
     MIN_MOVEMENT_THRESHOLD = 0.05     # Minimum meaningful movement
     TRAJECTORY_HISTORY_SIZE = 30      # Frames to track for trajectory analysis
 
@@ -285,7 +286,7 @@ class MovementEvaluator:
 
         return total_score / num_metrics
 
-    def _calculate_landing_precision(self, current_state: Dict[str, float]) -> float:
+    def _calculate_landing_precision(self) -> float:
         """
         Evaluates how precisely the agent lands on platforms.
 
@@ -325,6 +326,7 @@ class MovementEvaluator:
         # Prefer near-vertical landing approaches
         # 1.0 for vertical, 0.0 for horizontal
         angle_score = np.cos(approach_angle)
+
         total_score += angle_score
         num_metrics += 1
 
@@ -332,6 +334,7 @@ class MovementEvaluator:
         landing_speed = np.linalg.norm(landing_velocity)
         speed_score = max(0.0, 1.0 - landing_speed /
                           self.SAFE_LANDING_VELOCITY)
+
         total_score += speed_score
         num_metrics += 1
 
@@ -341,6 +344,7 @@ class MovementEvaluator:
         landing_movement = np.linalg.norm(landing_pos - pre_landing_pos)
         movement_score = max(0.0, 1.0 - landing_movement /
                              self.MIN_MOVEMENT_THRESHOLD)
+
         total_score += movement_score
         num_metrics += 1
 
@@ -369,7 +373,7 @@ class MovementEvaluator:
             velocity_factor = max(
                 0, 1 - landing_velocity / self.SAFE_LANDING_VELOCITY)
             stability_factor = self._calculate_landing_stability()
-            precision_factor = self._calculate_landing_precision(current_state)
+            precision_factor = self._calculate_landing_precision()
 
             landing_score = (velocity_factor +
                              stability_factor + precision_factor) / 3

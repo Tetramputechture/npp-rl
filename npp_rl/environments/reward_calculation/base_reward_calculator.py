@@ -56,6 +56,7 @@ class BaseRewardCalculator:
         time_diff = curr_state['time_remaining'] - prev_state['time_remaining']
         if time_diff > 0:  # Collected gold
             return self.GOLD_COLLECTION_REWARD * time_diff
-        else:  # Normal time decrease
-            time_penalty_scale = 1.0 / max(curr_state['time_remaining'], 1.0)
-            return self.BASE_TIME_PENALTY * min(time_penalty_scale, 5.0)
+
+        # Normal time decrease
+        time_penalty_scale = 1.0 / max(curr_state['time_remaining'], 1.0)
+        return self.BASE_TIME_PENALTY * min(time_penalty_scale, 5.0)

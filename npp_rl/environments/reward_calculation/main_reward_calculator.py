@@ -75,7 +75,7 @@ class RewardCalculator(BaseRewardCalculator):
 
         # Level 4: Exploration and discovery
         exploration_reward = self.exploration_calculator.calculate_exploration_reward(
-            obs, prev_obs
+            obs
         )
         reward += exploration_reward
 
@@ -110,7 +110,7 @@ class RewardCalculator(BaseRewardCalculator):
         self.progression_tracker.update_progression_metrics()
         metrics = self.progression_tracker.get_progression_metrics()
 
-        print(f"\nProgression Metrics:")
+        print("\nProgression Metrics:")
         print(f"Movement Success Rate: {metrics['movement_success_rate']:.3f}")
         print(
             f"Navigation Success Rate: {metrics['navigation_success_rate']:.3f}")

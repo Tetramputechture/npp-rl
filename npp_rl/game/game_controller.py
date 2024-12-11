@@ -108,13 +108,6 @@ class GameController:
         self._key_up('k')
         self._key_up('ctrl')
 
-    def reset_level(self):
-        time.sleep(0.5)
-
-        # Press space to start level
-        self.press_space_key()
-        self.press_space_key()
-
     def press_advanced_pause_key(self):
         self._press([MOVEMENT_KEYS['advanced_pause']], pause=False)
 

@@ -2,6 +2,7 @@ import win32gui
 import numpy as np
 from PIL import ImageGrab
 from typing import Optional
+
 GAME_WINDOW_TITLE = "NPP"
 
 MAIN_WINDOW_RESOLUTION = (1280, 720)

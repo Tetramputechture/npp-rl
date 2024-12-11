@@ -1,12 +1,6 @@
 from npp_rl.game.strategies.base_state_strategy import BaseStateStrategy
 from npp_rl.game.game_config import game_config
 from npp_rl.game.agent_trainer import AgentTrainer
-# Our controls:
-# 1: Move Left (A key)
-# 2: Move Right (D key)
-# 3: Jump (Space key press)
-# 4: Jump + Left (Space + A)
-# 5: Jump + Right (Space + D)
 
 
 class LevelStrategy(BaseStateStrategy):

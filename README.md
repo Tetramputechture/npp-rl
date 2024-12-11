@@ -1,19 +1,54 @@
 # NPP-RL
 
-A Deep Reinforcement Learning Agent for the game N++, implementing PPO (Proximal Policy Optimization) via Stable Baselines 3 with an environment that has curriculum learning, pathfinding, spatial memory, and a multi-layered reward system. 
+A Deep Reinforcement Learning Agent for the game N++, implementing PPO (Proximal Policy Optimization) via Stable Baselines 3 with an environment featuring curriculum learning, pathfinding, spatial memory, and a multi-layered reward system.
 
 ## Project Overview
 
-This project's goal is to train an agent to master the platformer game N++. The game has a physically simulated movement model, and the agent must learn to navigate the environment, collect gold, and avoid hazards.
+This project's goal is to train an agent to master the game [N++](https://en.wikipedia.org/wiki/N%2B%2B). The game has a physically simulated movement model (the level is grid based, but the player can move continuously in any direction), and the agent must learn to navigate the environment, while avoiding hazards and collecting gold. The agent should learn to activate a switch to open a door, and navigate to the exit door. Currently, the scope of the project is limited to these three levels:
 
-## Core Features
+- Intro A-00, Level 1 ('the basics')
+- Intro A-01, Level 1 ('regarding speed and jump control')
+- Intro A-02, Level 1 ('double-jumping, of a sort')
+
+These are levels that only include these features:
+
+- One switch and one exit door
+- Mines that kill the player if they touch them
+- Gold that the player can collect
+- Sloped surfaces that the player can walk up and down
+
+This simplifies the kind of agent we can train, and allows us to focus on the core mechanics of the game.
+Later, we can introduce more mechanics from the game one level at a time, and train the agent on new level
+mechanics as we add support for them in the environment.
+
+## Training Demo Video
+
+This is a video of the agent training on level A-01, Level 1 ('regarding speed and jump control').
+
+It is an off-screen recording, because the agent is forcing focus to the game window frame
+each step to execute the action via `pydirectinput`. This is a limitation of the current
+implementation, but will be fixed in the future when we have a headless simulation environment.
+
+[![NPP-RL Training Demo](https://img.youtube.com/vi/jubDJgOTRyM/0.jpg)](https://www.youtube.com/watch?v=jubDJgOTRyM)
 
 ### Environment
 
-The environment is planned to be a custom implementation of the game N++. It will be built using the `gymnasium` library, and will be able to run on CPU or GPU.
-
-Right now, the environment directly launches and controls the original N++ game process, but in the future it will be replaced with a custom implementation.
+Right now, the environment directly launches and controls the original N++ game process via `pydirectinput`, but in the future it will be replaced with a custom simulation environment.
 This is because the original game process cannot be run in headless mode at a faster rate than 60 FPS, which is too slow for training.
+
+Our training GUI has fields for memory addresses that read:
+- Player's position
+- Player's in air state
+- Player's death state
+- Exit door position
+- Switch position
+- Switch activated state
+- Time remaining
+- Text reading 'Begin' or 'Retry' to indicate the state of the level
+
+The memory addresses are read from the game process using `pymem`, and the values are stored in a `GameConfig` object. We retrieve these addresses using reverse engineering software, making sure to launch the game
+in offline mode. This project is only used for research purposes and any reverse engineering work has been done
+only to the extent that it is necessary to retrieve the memory addresses. No writing to the game process is done.
 
 Our environment is a level from the game, and includes (at a minimum) the following features:
 
@@ -23,7 +58,7 @@ Our environment is a level from the game, and includes (at a minimum) the follow
 
 The environment may also include:
 
-- Hazards that kill the player if they touch them.
+- Hazards that kill the player if they touch them. Currently, the only hazard is a mine.
 - Gold that the player can collect.
 
 An episode ends when the player reaches the goal, or dies.

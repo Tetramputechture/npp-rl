@@ -115,8 +115,7 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         return 1.0
 
     def calculate_exploration_reward(self,
-                                     curr_state: Dict[str, Any],
-                                     prev_state: Dict[str, Any]) -> float:
+                                     curr_state: Dict[str, Any]) -> float:
         """Calculate comprehensive exploration reward."""
         self.total_steps += 1
         penalty_scale = self._get_penalty_scale()

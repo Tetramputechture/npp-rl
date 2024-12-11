@@ -1,19 +1,14 @@
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any, List, Tuple
+from typing import Optional, Callable, Dict, Any
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageDraw
-import numpy as np
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from npp_rl.game.game_process import GameProcess
 from npp_rl.game.game_config import game_config
-from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.game.level_parser import parse_level
 from npp_rl.game.training_session import training_session
-from npp_rl.game.game_window import LEVEL_WIDTH, LEVEL_HEIGHT
-import threading
 
 
 @dataclass
