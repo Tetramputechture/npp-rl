@@ -44,7 +44,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         # Dynamic scaling based on level size and progress
         level_diagonal = np.sqrt(
             state['level_width']**2 + state['level_height']**2)
-        distance_scale = level_diagonal / 4
+        distance_scale = level_diagonal / 3
 
         # Calculate progress-based potential scaling
         if not state['switch_activated']:
@@ -56,18 +56,18 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             if self.episode_start_switch_distance is not None:
                 progress = 1.0 - (distance_to_switch /
                                   self.episode_start_switch_distance)
-                # Bonus for overall progress
-                progress_bonus = 10.0 * max(0, progress)
+                # Increased progress bonus
+                progress_bonus = 15.0 * max(0, progress)
             else:
                 progress_bonus = 0.0
 
-            # Exponential potential with progress bonus
-            switch_potential = (25.0 * np.exp(-distance_to_switch / distance_scale) +
+            # Stronger exponential potential with progress bonus
+            switch_potential = (35.0 * np.exp(-distance_to_switch / distance_scale) +
                                 progress_bonus)
 
-            # Add bonus for new best distances
+            # Larger bonus for new best distances
             if distance_to_switch < self.best_switch_distance:
-                switch_potential += 5.0
+                switch_potential += 7.5
                 self.best_switch_distance = distance_to_switch
 
             return switch_potential
@@ -81,17 +81,17 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 progress = 1.0 - (distance_to_exit /
                                   self.episode_start_exit_distance)
                 # Larger bonus for exit progress
-                progress_bonus = 15.0 * max(0, progress)
+                progress_bonus = 20.0 * max(0, progress)
             else:
                 progress_bonus = 0.0
 
-            # Exponential potential with progress bonus
-            exit_potential = (30.0 * np.exp(-distance_to_exit / distance_scale) +
-                              15.0 + progress_bonus)
+            # Stronger exponential potential with progress bonus
+            exit_potential = (40.0 * np.exp(-distance_to_exit / distance_scale) +
+                              20.0 + progress_bonus)
 
-            # Add bonus for new best distances
+            # Larger bonus for new best distances
             if distance_to_exit < self.best_exit_distance:
-                exit_potential += 7.5
+                exit_potential += 10.0
                 self.best_exit_distance = distance_to_exit
 
             return exit_potential
@@ -102,7 +102,6 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                                     navigation_scale: float) -> Tuple[float, bool]:
         """Calculate comprehensive navigation reward with enhanced shaping."""
         self.total_steps += 1
-        penalty_scale = self._get_penalty_scale()
         reward = 0.0
         switch_activated = False
 
@@ -204,7 +203,6 @@ class NavigationRewardCalculator(BaseRewardCalculator):
 
     def reset(self):
         """Reset internal state for new episode."""
-        super().reset()
         self.prev_improvement = None
         self.min_distance_to_switch = float('inf')
         self.min_distance_to_exit = float('inf')
@@ -228,15 +226,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
     def calculate_mine_proximity_penalty(self,
                                          curr_state: Dict[str, Any],
                                          prev_state: Dict[str, Any]) -> float:
-        """Calculate penalty based on velocity towards nearest mine.
-
-        Args:
-            curr_state: Current game state
-            prev_state: Previous game state
-
-        Returns:
-            float: Penalty value (negative or zero)
-        """
+        """Calculate penalty based on velocity towards nearest mine."""
         # Get mine information from state
         mine_vector = curr_state['closest_mine_vector']
         mine_dist = curr_state['closest_mine_distance']
@@ -256,9 +246,10 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         if velocity_towards_mine <= 0:
             return 0.0
 
-        # Calculate penalty based on velocity and proximity
+        # Calculate penalty based on velocity and proximity with penalty scaling
         proximity_factor = 1.0 - (mine_dist / self.MINE_DANGER_RADIUS)
-        penalty = -self.MINE_PENALTY_SCALE * velocity_towards_mine * proximity_factor
+        penalty = -self.MINE_PENALTY_SCALE * velocity_towards_mine * \
+            proximity_factor * self._get_penalty_scale()
 
         return penalty
 
@@ -268,18 +259,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                                     navigation_scale: float,
                                     curr_state: Dict[str, Any],
                                     prev_state: Dict[str, Any]) -> float:
-        """Evaluate navigation quality using temporal difference learning.
-
-        Args:
-            curr_distance: Current distance to objective
-            prev_distance: Previous distance to objective 
-            navigation_scale: Current navigation reward scale
-            curr_state: Current game state
-            prev_state: Previous game state
-
-        Returns:
-            float: Navigation quality reward
-        """
+        """Evaluate navigation quality using temporal difference learning."""
         if prev_distance is None or prev_distance == float('inf'):
             return 0.0
 
@@ -287,19 +267,19 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         absolute_improvement = prev_distance - curr_distance
         relative_improvement = absolute_improvement / (prev_distance + 1e-6)
 
-        # Apply progressive scaling based on consecutive improvements
+        # Apply stronger progressive scaling based on consecutive improvements
         if absolute_improvement > 0:
             self.consecutive_improvements += 1
             progress_multiplier = min(
-                1.5, 1.0 + (self.consecutive_improvements * 0.1))
+                2.0, 1.0 + (self.consecutive_improvements * 0.15))
         else:
             self.consecutive_improvements = 0
             progress_multiplier = 1.0
 
-        # Calculate base reward using both absolute and relative improvements
+        # Calculate base reward with stronger emphasis on absolute improvement
         base_reward = (
-            0.7 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) +
-            0.3 * np.sign(relative_improvement) *
+            0.8 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) +
+            0.2 * np.sign(relative_improvement) *
             np.sqrt(abs(relative_improvement))
         )
 
@@ -307,14 +287,14 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         momentum_bonus = 0.0
         if self.prev_improvement is not None:
             if np.sign(relative_improvement) == np.sign(self.prev_improvement):
-                momentum_bonus = 1.0 * progress_multiplier
+                momentum_bonus = 1.5 * progress_multiplier
             else:
-                momentum_bonus = -0.5  # Increased penalty for inconsistent progress
+                momentum_bonus = -0.75
 
         # Store current improvement
         self.prev_improvement = relative_improvement
 
-        # Calculate mine proximity penalty based on velocity
+        # Calculate mine proximity penalty
         mine_penalty = self.calculate_mine_proximity_penalty(
             curr_state, prev_state)
 

@@ -73,10 +73,11 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         activation_fn=nn.ReLU,
     )
 
-    batch_size = min(128, n_steps // 4)
+    batch_size = min(512, n_steps // 4)
 
     model = PPO(
-        policy="CnnPolicy",
+        policy="MultiInputPolicy",
+        policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
         n_steps=n_steps,
@@ -90,7 +91,6 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         vf_coef=0.5,
         max_grad_norm=0.5,
         target_kl=None,
-        policy_kwargs=policy_kwargs,
         normalize_advantage=True,
         verbose=1,
         # Uncomment to use tensorboard

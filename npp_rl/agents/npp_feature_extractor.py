@@ -30,7 +30,8 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         # Input channels configuration
         self.frame_channels = 4  # 1 current + 3 recent frames
         self.memory_channels = 4
-        self.time_channel = 1
+        self.hazard_channel = 1  # Channel for mine hazards
+        self.goal_channels = 2   # Switch and exit door channels
 
         # Enhanced CNN architecture
         self.frame_features = nn.Sequential(
@@ -86,8 +87,40 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU()
         )
 
+        # Hazard processing branch
+        self.hazard_processor = nn.Sequential(
+            nn.Conv2d(self.hazard_channel, 16,
+                      kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.Flatten(),
+            nn.Linear(32 * 4 * 4, 32),
+            nn.LayerNorm(32),
+            nn.ReLU()
+        )
+
+        # Goal processing branch - similar to hazard but with more features
+        self.goal_processor = nn.Sequential(
+            nn.Conv2d(self.goal_channels, 32,
+                      kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.Flatten(),
+            nn.Linear(64 * 4 * 4, 64),
+            nn.LayerNorm(64),
+            nn.ReLU()
+        )
+
         # Final integration with skip connection
-        total_features = 128 + 32 + self.time_channel
+        total_features = 128 + 32 + 32 + 64  # Frame + memory + hazard + goal features
         self.integration = nn.Sequential(
             nn.Linear(total_features, self.features_dim),
             nn.LayerNorm(self.features_dim),
@@ -102,8 +135,11 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
 
         # Split channels
         frames = observations[..., :self.frame_channels]
-        memory = observations[..., -self.memory_channels-1:-1]
-        time = observations[..., -1:]
+        memory = observations[..., -self.memory_channels -
+                              self.hazard_channel - self.goal_channels:-self.hazard_channel - self.goal_channels]
+        hazard = observations[..., -self.hazard_channel -
+                              self.goal_channels:-self.goal_channels]
+        goals = observations[..., -self.goal_channels:]
 
         # Process frames [B, H, W, C] -> [B, C, H, W]
         frames = frames.permute(0, 3, 1, 2)
@@ -114,14 +150,20 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         memory = memory.mean(dim=[1, 2])
         memory_features = self.memory_processor(memory)
 
-        # Process time - average over spatial dimensions
-        time_features = time.mean(dim=[1, 2])
+        # Process hazard channel
+        hazard = hazard.permute(0, 3, 1, 2)
+        hazard_features = self.hazard_processor(hazard)
+
+        # Process goal channels
+        goals = goals.permute(0, 3, 1, 2)
+        goal_features = self.goal_processor(goals)
 
         # Combine features with skip connection
         combined = torch.cat([
             frame_features,
             memory_features,
-            time_features
+            hazard_features,
+            goal_features
         ], dim=1)
 
         return self.integration(combined)

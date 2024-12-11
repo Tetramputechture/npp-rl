@@ -250,12 +250,12 @@ class PPOTrainingCallback(BaseCallback):
             # We're about to start training, pause the game
             print("Model is learning after batch of steps, pausing game...")
             self.game_controller.release_all_keys()
-            self.game_controller.press_pause_key()
+            self.game_controller.press_advanced_pause_key()
             self.is_training = True
         elif self.n_calls % self.n_steps == 1 and self.is_training:
             # We've just finished learning and are about to start the next batch of steps
             print("Model has learned from batch of steps, resuming game...")
-            self.game_controller.press_pause_key()
+            self.game_controller.press_advanced_continue_key()
             self.is_training = False
 
         # Record episode statistics

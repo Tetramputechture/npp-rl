@@ -31,6 +31,42 @@ class ParsedLevel:
     mine_coordinates: List[Tuple[int, int]]  # List of (x, y) coordinates
     width: int
     height: int
+    hazard_map: np.ndarray  # Added hazard map field
+
+    def create_hazard_map(self, image_size: int = 84) -> np.ndarray:
+        """Create a hazard map showing mine locations with gaussian falloff.
+
+        Args:
+            image_size: Size of the output hazard map (default: 84x84 to match observation space)
+
+        Returns:
+            np.ndarray: Hazard map with gaussian falloff around mines
+        """
+        hazard_map = np.zeros((image_size, image_size), dtype=np.float32)
+
+        if not self.mine_coordinates:
+            return hazard_map
+
+        # Scale coordinates to our observation size
+        min_x, min_y, max_x, max_y = self.playable_space
+        level_width = max_x - min_x
+        level_height = max_y - min_y
+
+        for mine_x, mine_y in self.mine_coordinates:
+            # Convert mine coordinates to normalized space
+            norm_x = (mine_x - min_x) / level_width
+            norm_y = (mine_y - min_y) / level_height
+
+            # Convert to observation space coordinates
+            obs_x = int(norm_x * image_size)
+            obs_y = int(norm_y * image_size)
+
+            # Create gaussian falloff around mine (sigma=2 pixels)
+            y, x = np.ogrid[-obs_y:image_size-obs_y, -obs_x:image_size-obs_x]
+            mask = np.exp(-(x*x + y*y) / (2 * 2**2))
+            hazard_map = np.maximum(hazard_map, mask)
+
+        return hazard_map
 
     @property
     def bounds(self) -> Tuple[int, int, int, int]:
@@ -230,12 +266,19 @@ def parse_level() -> ParsedLevel:
     # Get mine coordinates
     mine_coords = _get_mine_coordinates(frame, playable_space)
 
-    return ParsedLevel(
+    # Create level object
+    level = ParsedLevel(
         playable_space=playable_space,
         mine_coordinates=mine_coords,
         width=width,
-        height=height
+        height=height,
+        hazard_map=None  # Initialize as None
     )
+
+    # Create hazard map
+    level.hazard_map = level.create_hazard_map()
+
+    return level
 
 
 def _get_playable_space_coordinates(frame: np.ndarray) -> Tuple[int, int, int, int]:

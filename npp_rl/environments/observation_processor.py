@@ -13,7 +13,7 @@ class ObservationProcessor:
         self.frames = deque(maxlen=frame_stack)  # Recent frames
         self.max_velocity = max_velocity
         self.spatial_memory = SpatialMemoryTracker()
-        self.image_size = 42  # Reduced from 84x84 to 42x42
+        self.image_size = 84  # Increased from 84x84 to 84x84
 
         # Initialize frame storage with smaller fixed intervals
         # This helps capture more immediate temporal dependencies
@@ -25,6 +25,14 @@ class ObservationProcessor:
         self.movement_history = deque(maxlen=16)  # Store recent movements
         self.prev_frame = None
         self.prev_gray = None  # Store previous grayscale frame for optical flow
+
+        # Initialize empty hazard and goal maps
+        self.hazard_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.switch_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.exit_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale, resize, normalize, and extract motion features"""
@@ -52,7 +60,7 @@ class ObservationProcessor:
         return frame
 
     def get_numerical_features(self, obs: Dict[str, Any]) -> np.ndarray:
-        """Process numerical features including time and spatial memory metrics"""
+        """Process numerical features including spatial memory metrics"""
         # Get spatial memory metrics
         if 'player_x' in obs and 'player_y' in obs:
             memory_maps = self.spatial_memory.get_exploration_maps(
@@ -65,24 +73,37 @@ class ObservationProcessor:
                 'transitions': np.zeros((88, 88))
             }
 
-        # Resize memory maps from 88x88 to 42x42 while preserving information
+        # Resize memory maps from 88x88 to 84x84 while preserving information
         resized_maps = {
             key: cv2.resize(
                 value, (self.image_size, self.image_size), interpolation=cv2.INTER_AREA)
             for key, value in memory_maps.items()
         }
 
-        # Stack memory maps and time remaining
+        # Stack memory maps without time remaining
         features = np.stack([
             resized_maps['recent_visits'],
             resized_maps['visit_frequency'],
             resized_maps['area_exploration'],
-            resized_maps['transitions'],
-            np.full((self.image_size, self.image_size),
-                    obs['time_remaining'] / 600.0)  # Normalized time
+            resized_maps['transitions']
         ], axis=-1)
 
         return features.astype(np.float32)
+
+    def create_goal_heatmap(self, x: float, y: float, sigma: float = 5.0) -> np.ndarray:
+        """Create a Gaussian heatmap centered on a goal location."""
+        x_grid = np.linspace(0, self.image_size-1, self.image_size)
+        y_grid = np.linspace(0, self.image_size-1, self.image_size)
+        xx, yy = np.meshgrid(x_grid, y_grid)
+
+        # Scale coordinates to image size (now 1:1 since both are 84x84)
+        x_scaled = x
+        y_scaled = y
+
+        # Create Gaussian heatmap with tighter sigma since we're using actual coordinates
+        heatmap = np.exp(-((xx - x_scaled) ** 2 +
+                         (yy - y_scaled) ** 2) / (2 * sigma ** 2))
+        return heatmap.astype(np.float32)
 
     def process_observation(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process full observation with temporal features"""
@@ -112,9 +133,31 @@ class ObservationProcessor:
         # Get numerical features (spatial memory + time)
         features = self.get_numerical_features(obs)
 
+        # Update hazard map from level data if available
+        if 'level_data' in obs and obs['level_data'] is not None:
+            self.hazard_map = obs['level_data'].hazard_map
+
+        # Create goal heatmaps - coordinates are already in 84x84 space
+        if not obs['switch_activated']:
+            # When switch is not activated, make switch location the goal
+            self.switch_map = self.create_goal_heatmap(
+                obs['switch_x'], obs['switch_y'])
+            self.exit_map = np.zeros_like(self.switch_map)  # Clear exit map
+        else:
+            # When switch is activated, make exit door the goal
+            self.switch_map = np.zeros_like(self.exit_map)  # Clear switch map
+            self.exit_map = self.create_goal_heatmap(
+                obs['exit_door_x'], obs['exit_door_y'])
+
+        # Add hazard and goal channels
+        hazard_channel = self.hazard_map[..., np.newaxis]
+        switch_channel = self.switch_map[..., np.newaxis]
+        exit_channel = self.exit_map[..., np.newaxis]
+
         # Combine everything
         final_observation = np.concatenate(
-            recent_frames + historical_frames + [features],
+            recent_frames + historical_frames +
+            [features, hazard_channel, switch_channel, exit_channel],
             axis=-1
         )
 
@@ -132,3 +175,9 @@ class ObservationProcessor:
         self.spatial_memory.reset()
         self.prev_frame = None
         self.prev_gray = None
+        self.hazard_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.switch_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.exit_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)

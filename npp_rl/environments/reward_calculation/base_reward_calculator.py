@@ -19,13 +19,13 @@ class BaseRewardCalculator:
     FINE_DISTANCE_THRESHOLD = 5.0
 
     # Distance-based reward scales
-    DISTANCE_SCALE = 0.05
-    APPROACH_REWARD_SCALE = 2.5
-    RETREAT_PENALTY_SCALE = 0.1
+    DISTANCE_SCALE = 0.15
+    APPROACH_REWARD_SCALE = 5.0
+    RETREAT_PENALTY_SCALE = 0.3
 
     # Mine avoidance constants
-    MINE_DANGER_RADIUS = 10.0  # Reduced to 10px radius
-    MINE_PENALTY_SCALE = 0.3   # Increased penalty scale for velocity-based penalties
+    MINE_DANGER_RADIUS = 15.0
+    MINE_PENALTY_SCALE = 0.5
     MAX_VELOCITY = 20000.0     # Maximum velocity magnitude for normalization
 
     def __init__(self):

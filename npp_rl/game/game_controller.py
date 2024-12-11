@@ -12,6 +12,8 @@ MOVEMENT_KEYS = {
     'space': 'space',
     'pause': 'esc',
     'reset': 'k',
+    'advanced_pause': 'i',
+    'advanced_continue': 'o'
 }
 
 
@@ -112,3 +114,9 @@ class GameController:
         # Press space to start level
         self.press_space_key()
         self.press_space_key()
+
+    def press_advanced_pause_key(self):
+        self._press([MOVEMENT_KEYS['advanced_pause']], pause=False)
+
+    def press_advanced_continue_key(self):
+        self._press([MOVEMENT_KEYS['advanced_continue']], pause=False)

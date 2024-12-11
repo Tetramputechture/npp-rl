@@ -160,7 +160,7 @@ from npp_rl.game.game_value_fetcher import GameValueFetcher
 from npp_rl.environments.reward_calculation import RewardCalculator
 from npp_rl.util.util import calculate_distance
 from npp_rl.environments.movement_evaluator import MovementEvaluator
-from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, NUM_NUMERICAL_FEATURES, NUM_HISTORICAL_FRAMES
+from npp_rl.environments.constants import TIMESTEP, GAME_SPEED_FRAMES_PER_SECOND, TOTAL_OBSERVATION_CHANNELS, OBSERVATION_IMAGE_SIZE
 from npp_rl.game.game_config import game_config
 import time
 from typing import Tuple, Dict, Any, List
@@ -241,8 +241,8 @@ class NPlusPlus(gymnasium.Env):
         self.observation_space = box.Box(
             low=0,
             high=1,
-            shape=(84, 84, frame_stack + NUM_HISTORICAL_FRAMES +
-                   NUM_NUMERICAL_FEATURES),
+            shape=(OBSERVATION_IMAGE_SIZE, OBSERVATION_IMAGE_SIZE,
+                   TOTAL_OBSERVATION_CHANNELS),
             dtype=np.float32
         )
 
@@ -313,6 +313,7 @@ class NPlusPlus(gymnasium.Env):
                 player_level_x, player_level_y),
             'closest_mine_vector': self._get_closest_mine_vector(
                 player_level_x, player_level_y),
+            'level_data': self.level_data
         }
         return obs
 
@@ -616,16 +617,27 @@ class NPlusPlus(gymnasium.Env):
         # Get previous observation
         prev_obs = self._get_observation()
 
-        # Track position and action
         player_x = self.gvf.read_player_x()
         player_y = self.gvf.read_player_y()
+
         self.position_log_file_string += f'{player_x},{player_y}\n'
         self.training_session.add_position(player_x, player_y)
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
-        # Execute action and get new observation
+        # Continue game with advanced continue
+        # self.gc.press_advanced_continue_key()
+
+        # Execute action
         self._execute_action(action)
+
+        # Wait scaled timestep
+        print(f"Waiting for {TIMESTEP} seconds")
         time.sleep(TIMESTEP)
+
+        # Pause game with advanced pause
+        # self.gc.press_advanced_pause_key()
+
+        # Get new observation
         observation = self._get_observation()
 
         # Check termination
@@ -697,6 +709,9 @@ class NPlusPlus(gymnasium.Env):
 
         # Release all held keys
         self.gc.release_all_keys()
+
+        # Make sure game is continued before we start
+        self.gc.press_advanced_continue_key()
 
         # Case when level is completed -- read_begin_retry_text contains 'retry level'
         # In this case, we want to press the success reset key

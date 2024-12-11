@@ -1,7 +1,4 @@
-# Class to store runtime configuration settings,
-# including:
-# - Set training to ON or OFF
-#   - Must be in the level_playing state
+
 
 import json
 import os
@@ -21,6 +18,24 @@ CONFIG_PATH = 'game_config.json'
 
 
 class GameConfig:
+    """Class to store runtime configuration settings, including:
+
+    - Set training to ON or OFF
+      - Must be in the level_playing state
+
+    Memory addresses for the game state:
+    - Player position 
+    - Time remaining
+    - Switch activated
+    - Player dead
+    - Exit door position
+    - Switch position
+    - Begin retry text
+    - In air
+
+    - Current level data
+    """
+
     def __init__(self):
         self.training = False
         self.automate_init_screen = False
@@ -71,7 +86,6 @@ class GameConfig:
             config = json.load(f)
             self.training = config['training']
             self.automate_init_screen = config['automate_init_screen']
-            # Use get() to handle missing key
             self.level_data = config.get('level_data')
             self.player_x_address = config['player_x_address']
             self.player_y_address = config['player_y_address']
