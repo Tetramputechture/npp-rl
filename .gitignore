@@ -40,3 +40,5 @@ game_config.json
 
 # Model zip files
 *.zip
+
+anim_data_line_new.txt.bin

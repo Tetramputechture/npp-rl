@@ -1,6 +1,8 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 import torch
 from torch import nn
 import numpy as np
@@ -18,7 +20,7 @@ from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-def setup_training_env(env):
+def setup_training_env(vec_env):
     """Prepare environment for training with monitoring."""
     # Create logging directory with timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
@@ -27,7 +29,7 @@ def setup_training_env(env):
     log_dir.mkdir(exist_ok=True, parents=True)
 
     # Wrap environment with Monitor for logging
-    env = Monitor(env, str(log_dir))
+    env = VecMonitor(vec_env, str(log_dir))
 
     return env, log_dir
 
@@ -245,7 +247,10 @@ def start_training(game_value_fetcher, game_controller: GameController):
 
     try:
         env = NPlusPlus(game_value_fetcher, game_controller)
+        vec_env = make_vec_env(wrapped_env, n_envs=1,
+                               vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(env)
+
         game_controller.press_reset_key()
 
         s_size = env.observation_space.shape[0]
