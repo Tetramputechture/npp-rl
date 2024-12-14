@@ -8,7 +8,7 @@ class BaseRewardCalculator:
     """Base class containing reward constants and common utility methods."""
 
     # Base reward/penalty constants
-    BASE_TIME_PENALTY = -0.005
+    BASE_TIME_PENALTY = -0.01
     GOLD_COLLECTION_REWARD = 0.5
     SWITCH_ACTIVATION_REWARD = 10.0
     TERMINAL_REWARD = 25.0
