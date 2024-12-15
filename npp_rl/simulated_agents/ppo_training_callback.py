@@ -22,7 +22,6 @@ class PPOTrainingCallback(BaseCallback):
     def __init__(self,
                  check_freq: int,
                  log_dir: Path,
-                 game_controller,
                  n_steps: int,
                  verbose: int = 1,
                  save_freq: int = 10000,
@@ -45,8 +44,6 @@ class PPOTrainingCallback(BaseCallback):
         """
         super().__init__(verbose)
 
-        # Store game controller and n_steps
-        self.game_controller = game_controller
         self.n_steps = n_steps
         self.is_training = False
 
@@ -228,7 +225,7 @@ class PPOTrainingCallback(BaseCallback):
         """
         log_path = self.log_dir / 'training_log.json'
         with open(log_path, 'w') as f:
-            json.dump(self.training_log, f)
+            json.dump(str(self.training_log), f)
 
     def get_training_statistics(self) -> Dict[str, Any]:
         """

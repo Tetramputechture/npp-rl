@@ -29,7 +29,7 @@ class RewardCalculator(BaseRewardCalculator):
         reward = 0.0
 
         # Subtract BASE_TIME_PENALTY each tick
-        reward -= self.BASE_TIME_PENALTY
+        reward += self.BASE_TIME_PENALTY
 
         # if player has won, add TERMINAL REWARD
         if obs.get('player_won', False):

@@ -76,7 +76,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         )
 
         # Final integration with skip connection
-        total_features = 128 + 128  # Frame + frame features
+        total_features = 128  # Only frame features (not 128 + 128 as before)
         self.integration = nn.Sequential(
             nn.Linear(total_features, self.features_dim),
             nn.LayerNorm(self.features_dim),

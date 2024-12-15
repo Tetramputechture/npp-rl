@@ -1,16 +1,13 @@
 import gymnasium
 from gymnasium.spaces import discrete, box
 import numpy as np
-from npp_rl.game.game_controller import GameController
-from npp_rl.game.game_window import get_game_window_frame
-from npp_rl.game.game_value_fetcher import GameValueFetcher
 from npp_rl.simulated_environments.reward_calculation.main_reward_calculator import RewardCalculator
-from npp_rl.game.game_config import game_config
 import time
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any
 import os
 from npp_rl.simulated_environments.observation_processor import ObservationProcessor
 from nplay_headless import NPlayHeadless
+import uuid
 
 OBSERVATION_IMAGE_SIZE = 84
 
@@ -32,17 +29,17 @@ class NPlusPlus(gymnasium.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, gvf: GameValueFetcher, gc: GameController, frame_stack: int = 4):
+    def __init__(self, frame_stack: int = 4):
         """Initialize the environment.
 
         Args:
-            gvf (GameValueFetcher): Game value fetcher instance
-            gc (GameController): Game controller instance
             frame_stack (int, optional): Number of frames to stack. Defaults to 4.
         """
         super().__init__()
 
         self.nplay_headless = NPlayHeadless()
+        self.nplay_headless.load_map("../nclone/map_data")
+
         self.frame_stack = frame_stack
 
         self.reward_calculator = RewardCalculator()
@@ -59,19 +56,20 @@ class NPlusPlus(gymnasium.Env):
             low=0,
             high=1,
             shape=(OBSERVATION_IMAGE_SIZE, OBSERVATION_IMAGE_SIZE,
-                   1),
+                   7),
             dtype=np.float32
         )
 
         # Initialize position log folder
-        self.position_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S")}/position_log'
+        # add uuid to folder name
+        self.position_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S-")}/{uuid.uuid4()}/position_log'
         os.makedirs(self.position_log_folder_name)
 
         # Initialize position log file string
         self.position_log_file_string = 'PlayerX,PlayerY\n'
 
         # Initialize action log folder
-        self.action_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S")}/action_log'
+        self.action_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S-")}/{uuid.uuid4()}/action_log'
         os.makedirs(self.action_log_folder_name)
 
         # Initialize action log file string
@@ -149,13 +147,22 @@ class NPlusPlus(gymnasium.Env):
             - terminated: True if episode should be terminated, False otherwise
             - truncated: True if episode should be truncated, False otherwise
         """
-        terminated = self.nplay_headless.ninja_has_won(
-        ) or self.nplay_headless.ninja_has_died()
+        terminated = observation.get(
+            'player_won', False) or observation.get('player_dead', False)
 
         if terminated:
-            print("Episode terminated")
+            print(
+                f"Episode terminated at frame {self.nplay_headless.sim.frame}")
 
-        return terminated, False
+        # Check truncation
+        # Truncation is when the current simulation frame is greater than 30000
+        truncated = self.nplay_headless.sim.frame > 500
+
+        if truncated:
+            print(
+                f"Episode truncated at frame {self.nplay_headless.sim.frame}")
+
+        return terminated, truncated
 
     def _get_success_metrics(self):
         """Compile comprehensive success metrics combining movement and objectives."""
@@ -174,16 +181,10 @@ class NPlusPlus(gymnasium.Env):
         3. Progressive reward calculation
         4. Detailed metrics and monitoring
         """
-        # Get previous observation
-        prev_obs = self._get_observation()
-
         player_x, player_y = self.nplay_headless.ninja_position()
 
         self.position_log_file_string += f'{player_x},{player_y}\n'
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
-
-        # Continue game with advanced continue
-        # self.gc.press_advanced_continue_key()
 
         # Execute action
         action_hoz, action_jump = self._actions_to_execute(action)
@@ -198,8 +199,13 @@ class NPlusPlus(gymnasium.Env):
         # Process observation and calculate reward
         processed_obs = self.observation_processor.process_observation(
             observation)
-        reward = self.reward_calculator.calculate_reward(
-            observation, prev_obs)
+        reward = self.reward_calculator.calculate_reward(observation)
+
+        success_metrics = self._get_success_metrics()
+
+        # Print reward if terminated or truncated
+        if terminated or truncated:
+            print(f"Episode reward: {reward}")
 
         return processed_obs, reward, terminated, truncated, {}
 
@@ -218,15 +224,15 @@ class NPlusPlus(gymnasium.Env):
         # Increment episode counter
         self.episode_counter += 1
 
-        # Reset reward calculator and movement evaluator
-        self.reward_calculator.reset()
-
         # Reset observation processor
         self.observation_processor.reset()
 
         # Reset position and action logs
         self.position_log_file_string = 'PlayerX,PlayerY\n'
         self.action_log_file_string = 'Action\n'
+
+        # reset level
+        self.nplay_headless.reset()
 
         # Get initial observation
         initial_obs = self._get_observation()

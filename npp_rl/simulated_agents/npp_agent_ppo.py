@@ -104,7 +104,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_steps=2048, total_timesteps=1000000) -> PPO:
+def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=2048, total_timesteps=1000000) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
@@ -130,7 +130,6 @@ def train_ppo_agent(env: NPlusPlus, log_dir, game_controller: GameController, n_
     callback = PPOTrainingCallback(
         check_freq=50,
         log_dir=log_dir,
-        game_controller=game_controller,
         n_steps=n_steps,
         min_ent_coef=0.0005,
         max_ent_coef=0.01
@@ -194,7 +193,6 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     Evaluate, Generate a video and save the model locally
     This method does the complete pipeline:
     - It evaluates the model
-    - It generates the model card
     - It generates a replay video of the agent
     - It saves the model locally and replay video locally
 
@@ -204,7 +202,7 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     :param video_fps: how many frame per seconds to record our video replay
     """
     # save to the directory agent_eval_data_ppo
-    local_directory = Path('./agent_eval_data/ppo')
+    local_directory = Path('./agent_eval_data/ppo_sim')
     local_directory.mkdir(exist_ok=True)
 
     # Step 2: Save the model
@@ -234,24 +232,23 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     print("Recording video...")
 
     # Step 6: Record videos for 5 episodes
+    env.reset()
     video_path = local_directory / "replay.mp4"
     record_video(env, model, video_path, num_episodes=5)
 
     return local_directory
 
 
-def start_training(game_value_fetcher, game_controller: GameController):
+def start_training():
     """Initialize environment and start training process. Assumes the player is already in the game
     and playing the level, as this method will attempt to press the reset key so training can start
     from a fresh level."""
 
     try:
-        env = NPlusPlus(game_value_fetcher, game_controller)
-        vec_env = make_vec_env(wrapped_env, n_envs=1,
+        env = NPlusPlus()
+        vec_env = make_vec_env(lambda: NPlusPlus(), n_envs=16,
                                vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
-
-        game_controller.press_reset_key()
 
         s_size = env.observation_space.shape[0]
         a_size = env.action_space.n
@@ -263,7 +260,7 @@ def start_training(game_value_fetcher, game_controller: GameController):
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, game_controller, total_timesteps=100000)
+            wrapped_env, log_dir, total_timesteps=100000)
 
         # Save final model
         print("Training completed. Saving model...")
@@ -272,13 +269,13 @@ def start_training(game_value_fetcher, game_controller: GameController):
         # Record gameplay video
         # First, press the reset key to start a new episode
         print("Resetting environment to record video...")
-        game_controller.press_reset_key()
+        env.reset()
 
         print("Recording video...")
         hyperparameters = {
             "env_id": "N++",
-            "n_episodes": 5,
-            "n_evaluation_episodes": 5
+            "n_episodes": 1,
+            "n_evaluation_episodes": 1
         }
         record_agent_training(env, model, hyperparameters)
 
