@@ -10,14 +10,12 @@ class ObservationProcessor:
 
     def __init__(self, frame_stack: int = 4):
         self.frame_stack = frame_stack
-        self.frames = deque(maxlen=frame_stack)  # Recent frames
         self.image_size = 84
 
-        # Initialize frame storage with smaller fixed intervals
-        # This helps capture more immediate temporal dependencies
-        # Fixed intervals for 3 historical frames
-        self.historical_intervals = [2, 4, 8]
-        self.frame_history = deque(maxlen=max(self.historical_intervals))
+        # Store frames with fixed intervals (current frame, 5th frame back, 9th frame back, 13th frame back)
+        self.frame_intervals = [0, 4, 8, 12]  # Intervals for 4 frames
+        # Store enough frames for our intervals
+        self.frame_history = deque(maxlen=max(self.frame_intervals) + 1)
 
         # Velocity normalization constant
         self.max_velocity = 100.0  # Maximum velocity for normalization
@@ -156,25 +154,21 @@ class ObservationProcessor:
         # Process current frame
         frame = self.preprocess_frame(obs['screen'])
 
-        # Update frame histories
-        self.frames.append(frame)
+        # Update frame history
         self.frame_history.append(frame)
 
-        # Fill frame stack if needed
-        while len(self.frames) < self.frame_stack:
-            self.frames.append(frame)
+        # Fill frame history if needed
+        while len(self.frame_history) < max(self.frame_intervals) + 1:
+            self.frame_history.append(frame)
 
-        # Stack recent frames (4 frames)
-        recent_frames = [f[..., np.newaxis] for f in self.frames]
-
-        # Add historical frames at fixed intervals
-        historical_frames = []
-        for interval in self.historical_intervals:
-            if len(self.frame_history) >= interval:
-                historical_frame = self.frame_history[-interval]
+        # Stack frames at specified intervals
+        stacked_frames = []
+        for interval in self.frame_intervals:
+            if len(self.frame_history) > interval:
+                historical_frame = self.frame_history[-interval-1]
             else:
                 historical_frame = frame
-            historical_frames.append(historical_frame[..., np.newaxis])
+            stacked_frames.append(historical_frame[..., np.newaxis])
 
         # Get numerical features (spatial memory)
         features = self.get_numerical_features(obs)
@@ -200,8 +194,8 @@ class ObservationProcessor:
 
         # Combine everything
         final_observation = np.concatenate(
-            recent_frames + historical_frames +
-            [features, player_state, switch_channel, exit_channel],
+            stacked_frames + [features, player_state,
+                              switch_channel, exit_channel],
             axis=-1
         )
 
@@ -213,7 +207,6 @@ class ObservationProcessor:
 
     def reset(self) -> None:
         """Reset processor state"""
-        self.frames.clear()
         self.frame_history.clear()
         self.movement_history.clear()
         self.spatial_memory.reset()

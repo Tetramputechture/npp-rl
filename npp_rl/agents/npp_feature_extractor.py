@@ -24,8 +24,7 @@ class ResBlock(nn.Module):
 class NPPFeatureExtractor(BaseFeaturesExtractor):
     """CNN-based feature extractor with residual connections and batch normalization,
     with separate branches for:
-    - Recent frames (4 frames)
-    - Historical frames (3 frames)
+    - Temporal frames (4 frames spaced 4 frames apart)
     - Spatial memory (4 channels: recent_visits, visit_frequency, area_exploration, transitions)
     - Player state (6 channels: pos_x, pos_y, vel_x, vel_y, in_air, walled)
     - Goals (2 channels: switch and exit heatmaps)
@@ -35,16 +34,15 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
 
         # Input channels configuration
-        self.recent_frames = 4  # Current + 3 recent frames
-        self.historical_frames = 3  # Historical frames at fixed intervals
+        self.temporal_frames = 4  # 4 frames spaced 4 frames apart
         self.memory_channels = 4  # Spatial memory features
         # Player position, velocity, in_air, and walled status
         self.player_state_channels = 6
         self.goal_channels = 2  # Switch and exit door heatmaps
 
-        # Recent frames processing branch with attention
-        self.recent_frame_features = nn.Sequential(
-            nn.Conv2d(self.recent_frames, 64,
+        # Temporal frames processing branch with attention
+        self.temporal_frame_features = nn.Sequential(
+            nn.Conv2d(self.temporal_frames, 64,
                       kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.Mish(),
@@ -69,45 +67,17 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.Flatten()
         )
 
-        # Historical frames processing branch
-        self.historical_frame_features = nn.Sequential(
-            nn.Conv2d(self.historical_frames, 32,
-                      kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.Mish(),
+        # Calculate correct flattened size
+        temporal_flat_size = 256 * 6 * 6  # 9216
 
-            ResBlock(32),
-
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.Mish(),
-
-            nn.AdaptiveAvgPool2d((6, 6)),
-            nn.Flatten()
-        )
-
-        # Calculate correct flattened sizes
-        recent_flat_size = 256 * 6 * 6  # 9216
-        historical_flat_size = 64 * 6 * 6  # 2304
-
-        # Frame processing networks with residual connections
-        self.recent_frame_processor = nn.Sequential(
-            nn.Linear(recent_flat_size, 512),
+        # Temporal frame processing network with residual connections
+        self.temporal_frame_processor = nn.Sequential(
+            nn.Linear(temporal_flat_size, 512),
             nn.LayerNorm(512),
             nn.Mish(),
             nn.Dropout(0.3),
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.Mish()
-        )
-
-        self.historical_frame_processor = nn.Sequential(
-            nn.Linear(historical_flat_size, 256),
-            nn.LayerNorm(256),
-            nn.Mish(),
-            nn.Dropout(0.3),
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
+            nn.Linear(512, 384),
+            nn.LayerNorm(384),
             nn.Mish()
         )
 
@@ -123,13 +93,13 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.Mish(),
 
             # Added attention mechanism
-            nn.Conv2d(64, 64, kernel_size=1),  # Changed to preserve channels
+            nn.Conv2d(64, 64, kernel_size=1),
             nn.Sigmoid(),
 
             nn.AdaptiveAvgPool2d((6, 6)),
             nn.Flatten(),
 
-            nn.Linear(64 * 6 * 6, 128),  # Corrected input size
+            nn.Linear(64 * 6 * 6, 128),
             nn.LayerNorm(128),
             nn.Mish()
         )
@@ -148,7 +118,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Flatten(),
 
-            nn.Linear(64 * 4 * 4, 64),  # Corrected input size
+            nn.Linear(64 * 4 * 4, 64),
             nn.LayerNorm(64),
             nn.Mish()
         )
@@ -165,19 +135,19 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.Mish(),
 
             # Added attention
-            nn.Conv2d(64, 64, kernel_size=1),  # Changed to preserve channels
+            nn.Conv2d(64, 64, kernel_size=1),
             nn.Sigmoid(),
 
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Flatten(),
 
-            nn.Linear(64 * 4 * 4, 64),  # Corrected input size
+            nn.Linear(64 * 4 * 4, 64),
             nn.LayerNorm(64),
             nn.Mish()
         )
 
         # Final integration with skip connections
-        total_features = 256 + 128 + 128 + 64 + 64  # 640 total
+        total_features = 384 + 128 + 64 + 64  # 640 total
         self.integration = nn.Sequential(
             nn.Linear(total_features, self.features_dim),
             nn.LayerNorm(self.features_dim),
@@ -195,15 +165,10 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         # Split channels in the same order as observation_processor concatenates them
         start_idx = 0
 
-        # Recent frames (4 channels)
-        recent_frames = observations[...,
-                                     start_idx:start_idx + self.recent_frames]
-        start_idx += self.recent_frames
-
-        # Historical frames (3 channels)
-        historical_frames = observations[...,
-                                         start_idx:start_idx + self.historical_frames]
-        start_idx += self.historical_frames
+        # Temporal frames (4 frames)
+        temporal_frames = observations[...,
+                                       start_idx:start_idx + self.temporal_frames]
+        start_idx += self.temporal_frames
 
         # Memory features (4 channels)
         memory_features = observations[...,
@@ -220,16 +185,10 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
                                      start_idx:start_idx + self.goal_channels]
 
         # Process each branch
-        recent_frames = recent_frames.permute(0, 3, 1, 2)
-        recent_frame_features = self.recent_frame_features(recent_frames)
-        recent_frame_features = self.recent_frame_processor(
-            recent_frame_features)
-
-        historical_frames = historical_frames.permute(0, 3, 1, 2)
-        historical_frame_features = self.historical_frame_features(
-            historical_frames)
-        historical_frame_features = self.historical_frame_processor(
-            historical_frame_features)
+        temporal_frames = temporal_frames.permute(0, 3, 1, 2)
+        temporal_frame_features = self.temporal_frame_features(temporal_frames)
+        temporal_frame_features = self.temporal_frame_processor(
+            temporal_frame_features)
 
         memory_features = memory_features.permute(0, 3, 1, 2)
         memory_features = self.memory_processor(memory_features)
@@ -243,8 +202,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
 
         # Combine all features with skip connections
         combined = torch.cat([
-            recent_frame_features,
-            historical_frame_features,
+            temporal_frame_features,
             memory_features,
             player_state_features,
             goal_features
