@@ -1,11 +1,11 @@
 """Main reward calculator that orchestrates all reward components."""
 from typing import Dict, Any
-from npp_rl.environments.movement_evaluator import MovementEvaluator
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
 from npp_rl.environments.reward_calculation.movement_reward_calculator import MovementRewardCalculator
 from npp_rl.environments.reward_calculation.navigation_reward_calculator import NavigationRewardCalculator
 from npp_rl.environments.reward_calculation.exploration_reward_calculator import ExplorationRewardCalculator
 from npp_rl.environments.reward_calculation.progression_tracker import ProgressionTracker
+from npp_rl.environments.reward_calculation.movement_reward_calculator import MovementEvaluator
 
 
 class RewardCalculator(BaseRewardCalculator):
@@ -35,22 +35,22 @@ class RewardCalculator(BaseRewardCalculator):
         self.progression_tracker = ProgressionTracker()
 
     def calculate_reward(self, obs: Dict[str, Any], prev_obs: Dict[str, Any], action_taken: int) -> float:
-        """Calculate comprehensive reward incorporating all components.
+        """Calculate reward.
 
         Args:
             obs: Current game state
-            prev_obs: Previous game state
-            action_taken: Action index taken
 
         Returns:
             float: Total reward for the transition
         """
-        # Level 1: Basic survival and immediate penalties
+        # Termination penalties
+        # Death penalty
         if obs.get('player_dead', False):
             return self.DEATH_PENALTY
 
-        if obs['time_remaining'] <= 0:
-            return self.TIMEOUT_PENALTY
+        # Win condition
+        if obs.get('player_won', False):
+            return self.TERMINAL_REWARD
 
         # Get current reward scales
         scales = self.progression_tracker.get_reward_scales()
@@ -80,13 +80,8 @@ class RewardCalculator(BaseRewardCalculator):
         reward += exploration_reward
 
         # Level 5: Time management
-        time_reward = self.calculate_time_reward(obs, prev_obs)
+        time_reward = self.calculate_time_reward()
         reward += time_reward
-
-        # Level 6: Level completion
-        if 'retry level' in obs.get('begin_retry_text', '').lower():
-            reward += self.TERMINAL_REWARD * scales['completion']
-            self.progression_tracker.demonstrated_skills['exit_reaching'] = True
 
         # Update movement-related skills
         if movement_reward > 0:
@@ -95,13 +90,6 @@ class RewardCalculator(BaseRewardCalculator):
                 self.progression_tracker.demonstrated_skills['platform_landing'] = True
             if len(self.movement_calculator.velocity_history) >= 2:
                 self.progression_tracker.demonstrated_skills['momentum_control'] = True
-
-        # Log reward components
-        print(f"Reward: {reward:.2f} | "
-              f"Movement: {movement_reward:.2f} | "
-              f"Navigation: {navigation_reward:.2f} | "
-              f"Exploration: {exploration_reward:.2f} | "
-              f"Time: {time_reward:.2f}")
 
         return reward
 

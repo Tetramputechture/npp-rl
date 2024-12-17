@@ -8,12 +8,10 @@ from npp_rl.environments.spatial_memory import SpatialMemoryTracker
 class ObservationProcessor:
     """Processes raw game observations into the format needed by the agent"""
 
-    def __init__(self, frame_stack: int = 4, max_velocity: float = 20000.0):
+    def __init__(self, frame_stack: int = 4):
         self.frame_stack = frame_stack
         self.frames = deque(maxlen=frame_stack)  # Recent frames
-        self.max_velocity = max_velocity
-        self.spatial_memory = SpatialMemoryTracker()
-        self.image_size = 84  # Increased from 84x84 to 84x84
+        self.image_size = 84
 
         # Initialize frame storage with smaller fixed intervals
         # This helps capture more immediate temporal dependencies
@@ -21,18 +19,23 @@ class ObservationProcessor:
         self.historical_intervals = [2, 4, 8]
         self.frame_history = deque(maxlen=max(self.historical_intervals))
 
+        # Velocity normalization constant
+        self.max_velocity = 100.0  # Maximum velocity for normalization
+        self.spatial_memory = SpatialMemoryTracker()
+
         # Store movement vectors for velocity calculation
         self.movement_history = deque(maxlen=16)  # Store recent movements
         self.prev_frame = None
-        self.prev_gray = None  # Store previous grayscale frame for optical flow
 
-        # Initialize empty hazard and goal maps
-        self.hazard_map = np.zeros(
-            (self.image_size, self.image_size), dtype=np.float32)
+        # Initialize goal maps
         self.switch_map = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
         self.exit_map = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
+
+        # Initialize player state channels
+        self.player_state = np.zeros(
+            (self.image_size, self.image_size, 6), dtype=np.float32)
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale, resize, normalize, and extract motion features"""
@@ -51,13 +54,26 @@ class ObservationProcessor:
         # Enhance contrast
         frame = cv2.equalizeHist(frame)  # type: ignore
 
-        # Update previous frame
-        self.prev_gray = frame.copy()
-
         # Normalize frame
         frame = frame.astype(np.float32) / 255.0
 
         return frame
+
+    def get_distance_features(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Calculate normalized distances to objectives"""
+        player_x = obs.get('player_x', 0)
+        player_y = obs.get('player_y', 0)
+
+        # Calculate Euclidean distances
+        switch_dist = np.sqrt(
+            (player_x - obs['switch_x'])**2 + (player_y - obs['switch_y'])**2)
+        exit_dist = np.sqrt(
+            (player_x - obs['exit_door_x'])**2 + (player_y - obs['exit_door_y'])**2)
+
+        # Normalize by diagonal of level
+        level_diagonal = np.sqrt(
+            obs['level_width']**2 + obs['level_height']**2)
+        return np.array([switch_dist/level_diagonal, exit_dist/level_diagonal], dtype=np.float32)
 
     def get_numerical_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process numerical features including spatial memory metrics"""
@@ -80,7 +96,7 @@ class ObservationProcessor:
             for key, value in memory_maps.items()
         }
 
-        # Stack memory maps without time remaining
+        # Stack memory maps
         features = np.stack([
             resized_maps['recent_visits'],
             resized_maps['visit_frequency'],
@@ -96,7 +112,7 @@ class ObservationProcessor:
         y_grid = np.linspace(0, self.image_size-1, self.image_size)
         xx, yy = np.meshgrid(x_grid, y_grid)
 
-        # Scale coordinates to image size (now 1:1 since both are 84x84)
+        # Scale coordinates to image size
         x_scaled = x
         y_scaled = y
 
@@ -104,6 +120,36 @@ class ObservationProcessor:
         heatmap = np.exp(-((xx - x_scaled) ** 2 +
                          (yy - y_scaled) ** 2) / (2 * sigma ** 2))
         return heatmap.astype(np.float32)
+
+    def get_player_state_features(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Extract and normalize player position and velocity features"""
+        # Get player position and normalize to [0,1]
+        player_x = obs.get('player_x', 0) / obs.get('level_width', 1)
+        player_y = obs.get('player_y', 0) / obs.get('level_height', 1)
+
+        # Get player velocity and normalize to [0, 1]
+        player_vx = np.clip(obs.get('player_vx', 0) / self.max_velocity, -1, 1)
+        player_vy = np.clip(obs.get('player_vy', 0) / self.max_velocity, -1, 1)
+        player_vx = (player_vx + 1) / 2
+        player_vy = (player_vy + 1) / 2
+
+        # Get in_air status (0 or 1)
+        in_air = float(obs.get('in_air', False))
+
+        # Get walled status (0 or 1)
+        walled = float(obs.get('walled', False))
+
+        # Create feature maps for each value
+        player_state = np.zeros(
+            (self.image_size, self.image_size, 6), dtype=np.float32)
+        player_state[..., 0] = player_x  # Normalized X position
+        player_state[..., 1] = player_y  # Normalized Y position
+        player_state[..., 2] = player_vx  # Normalized X velocity
+        player_state[..., 3] = player_vy  # Normalized Y velocity
+        player_state[..., 4] = in_air     # In air status
+        player_state[..., 5] = walled     # Walled status
+
+        return player_state
 
     def process_observation(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process full observation with temporal features"""
@@ -121,7 +167,7 @@ class ObservationProcessor:
         # Stack recent frames (4 frames)
         recent_frames = [f[..., np.newaxis] for f in self.frames]
 
-        # Add historical frames at fixed intervals (3 frames)
+        # Add historical frames at fixed intervals
         historical_frames = []
         for interval in self.historical_intervals:
             if len(self.frame_history) >= interval:
@@ -130,12 +176,11 @@ class ObservationProcessor:
                 historical_frame = frame
             historical_frames.append(historical_frame[..., np.newaxis])
 
-        # Get numerical features (spatial memory + time)
+        # Get numerical features (spatial memory)
         features = self.get_numerical_features(obs)
 
-        # Update hazard map from level data if available
-        if 'level_data' in obs and obs['level_data'] is not None:
-            self.hazard_map = obs['level_data'].hazard_map
+        # Get player state features
+        player_state = self.get_player_state_features(obs)
 
         # Create goal heatmaps - coordinates are already in 84x84 space
         if not obs['switch_activated']:
@@ -150,14 +195,13 @@ class ObservationProcessor:
                 obs['exit_door_x'], obs['exit_door_y'])
 
         # Add hazard and goal channels
-        hazard_channel = self.hazard_map[..., np.newaxis]
         switch_channel = self.switch_map[..., np.newaxis]
         exit_channel = self.exit_map[..., np.newaxis]
 
         # Combine everything
         final_observation = np.concatenate(
             recent_frames + historical_frames +
-            [features, hazard_channel, switch_channel, exit_channel],
+            [features, player_state, switch_channel, exit_channel],
             axis=-1
         )
 
@@ -174,9 +218,6 @@ class ObservationProcessor:
         self.movement_history.clear()
         self.spatial_memory.reset()
         self.prev_frame = None
-        self.prev_gray = None
-        self.hazard_map = np.zeros(
-            (self.image_size, self.image_size), dtype=np.float32)
         self.switch_map = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
         self.exit_map = np.zeros(

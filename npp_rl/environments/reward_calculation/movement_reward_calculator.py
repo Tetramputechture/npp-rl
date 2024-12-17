@@ -9,7 +9,7 @@ from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRe
 class MovementRewardCalculator(BaseRewardCalculator):
     """Handles calculation of movement-related rewards."""
 
-    BASE_MOVEMENT_REWARD = 0.05
+    BASE_MOVEMENT_REWARD = 0.005
 
     def __init__(self, movement_evaluator: MovementEvaluator):
         """Initialize movement reward calculator.

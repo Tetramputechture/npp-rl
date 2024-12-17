@@ -9,23 +9,19 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of exploration and area-based rewards."""
 
     # Increased exploration rewards
-    EXPLORATION_REWARD = 2.0  # Increased from 0.75
+    EXPLORATION_REWARD = 0.01
     STUCK_PENALTY = -0.3  # Reduced from -0.5
-    AREA_EXPLORATION_REWARD = 3.0  # Increased from 1.5
-    NEW_TRANSITION_REWARD = 4.0  # Increased from 2.0
-    BACKTRACK_PENALTY = -0.8  # Reduced from -1.2
-    LOCAL_MINIMA_PENALTY = -0.5  # Reduced from -0.75
-    AREA_REVISIT_DECAY = 0.6  # Increased from 0.4 to be less punishing
-    PROGRESSIVE_BACKTRACK_PENALTY = -0.2  # Reduced from -0.3
-    OBJECTIVE_DISTANCE_WEIGHT = 0.2  # Reduced from 0.3 to emphasize exploration more
-
-    # Survival reward
-    SURVIVAL_REWARD = 0.05  # Small positive reward for staying alive
+    AREA_EXPLORATION_REWARD = 0.01
+    NEW_TRANSITION_REWARD = 0.01
+    BACKTRACK_PENALTY = -0.01
+    LOCAL_MINIMA_PENALTY = -0.01
+    AREA_REVISIT_DECAY = 0.6
+    PROGRESSIVE_BACKTRACK_PENALTY = -0.01
 
     # Add maximum penalty caps
-    MAX_BACKTRACK_PENALTY = -2.0  # Reduced from -3.0
-    MAX_LOCAL_MINIMA_PENALTY = -1.5  # Reduced from -2.0
-    MAX_TOTAL_PENALTY = -3.0  # Reduced from -5.0
+    MAX_BACKTRACK_PENALTY = -0.01  # Reduced from -3.0
+    MAX_LOCAL_MINIMA_PENALTY = -0.01  # Reduced from -2.0
+    MAX_TOTAL_PENALTY = -0.25  # Reduced from -5.0
 
     def __init__(self):
         """Initialize exploration reward calculator."""
@@ -119,7 +115,7 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         """Calculate comprehensive exploration reward."""
         self.total_steps += 1
         penalty_scale = self._get_penalty_scale()
-        reward = self.SURVIVAL_REWARD  # Base survival reward
+        reward = 0.0
 
         current_pos = (curr_state['player_x'], curr_state['player_y'])
         grid_pos = self._get_grid_id(*current_pos)

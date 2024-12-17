@@ -11,14 +11,14 @@ class ProgressionTracker:
     NAVIGATION_MASTERY_THRESHOLD = 0.8
 
     # Maximum scale limits
-    MAX_MOVEMENT_SCALE = 1.2
-    MAX_NAVIGATION_SCALE = 0.8
-    MAX_COMPLETION_SCALE = 0.4
+    MAX_MOVEMENT_SCALE = 0.5
+    MAX_NAVIGATION_SCALE = 0.2
+    MAX_COMPLETION_SCALE = 0.15
 
     # Minimum scale limits
-    MIN_MOVEMENT_SCALE = 0.4
-    MIN_NAVIGATION_SCALE = 0.15
-    MIN_COMPLETION_SCALE = 0.08
+    MIN_MOVEMENT_SCALE = 0.01
+    MIN_NAVIGATION_SCALE = 0.01
+    MIN_COMPLETION_SCALE = 0.01
 
     def __init__(self):
         """Initialize progression tracker."""
@@ -28,9 +28,9 @@ class ProgressionTracker:
         self.level_completion_rate = 0.0
 
         # Reward scales
-        self.movement_scale = 0.8
-        self.navigation_scale = 0.4
-        self.completion_scale = 0.15
+        self.movement_scale = 0.01
+        self.navigation_scale = 0.01
+        self.completion_scale = 0.01
 
         # Skill tracking
         self.demonstrated_skills = {
@@ -144,9 +144,9 @@ class ProgressionTracker:
         self.movement_success_rate = 0.0
         self.navigation_success_rate = 0.0
         self.level_completion_rate = 0.0
-        self.movement_scale = 0.8
-        self.navigation_scale = 0.4
-        self.completion_scale = 0.15
+        self.movement_scale = 0.01
+        self.navigation_scale = 0.01
+        self.completion_scale = 0.01
         self.demonstrated_skills = {
             'precise_movement': False,
             'platform_landing': False,

@@ -8,20 +8,15 @@ class BaseRewardCalculator:
     """Base class containing reward constants and common utility methods."""
 
     # Base reward/penalty constants
-    BASE_TIME_PENALTY = -0.005
+    BASE_TIME_PENALTY = -0.01
     GOLD_COLLECTION_REWARD = 0.5
     SWITCH_ACTIVATION_REWARD = 5.0
-    TERMINAL_REWARD = 50.0
-    DEATH_PENALTY = -10.0
-    TIMEOUT_PENALTY = -7.5
+    TERMINAL_REWARD = 100.0
+    DEATH_PENALTY = -5.0
+    TIMEOUT_PENALTY = -2.0
 
     # Movement assessment constants
     FINE_DISTANCE_THRESHOLD = 5.0
-
-    # Distance-based reward scales
-    DISTANCE_SCALE = 0.15
-    APPROACH_REWARD_SCALE = 5.0
-    RETREAT_PENALTY_SCALE = 0.3
 
     # Mine avoidance constants
     MINE_DANGER_RADIUS = 15.0
@@ -49,14 +44,6 @@ class BaseRewardCalculator:
             curr_state['player_y'] - prev_state['player_y']
         ])
 
-    def calculate_time_reward(self,
-                              curr_state: Dict[str, Any],
-                              prev_state: Dict[str, Any]) -> float:
+    def calculate_time_reward(self) -> float:
         """Calculate time-based rewards/penalties."""
-        time_diff = curr_state['time_remaining'] - prev_state['time_remaining']
-        if time_diff > 0:  # Collected gold
-            return self.GOLD_COLLECTION_REWARD * time_diff
-
-        # Normal time decrease
-        time_penalty_scale = 1.0 / max(curr_state['time_remaining'], 1.0)
-        return self.BASE_TIME_PENALTY * min(time_penalty_scale, 5.0)
+        return self.BASE_TIME_PENALTY

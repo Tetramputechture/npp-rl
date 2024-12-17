@@ -1,5 +1,6 @@
 from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
+from stable_baselines3.common.logger import Image
 from pathlib import Path
 import json
 from typing import Dict, Any, Optional
@@ -22,7 +23,6 @@ class PPOTrainingCallback(BaseCallback):
     def __init__(self,
                  check_freq: int,
                  log_dir: Path,
-                 game_controller,
                  n_steps: int,
                  verbose: int = 1,
                  save_freq: int = 10000,
@@ -45,8 +45,6 @@ class PPOTrainingCallback(BaseCallback):
         """
         super().__init__(verbose)
 
-        # Store game controller and n_steps
-        self.game_controller = game_controller
         self.n_steps = n_steps
         self.is_training = False
 
@@ -66,6 +64,7 @@ class PPOTrainingCallback(BaseCallback):
         self.episode_rewards = deque(maxlen=moving_average_window)
         self.episode_lengths = deque(maxlen=moving_average_window)
         self.moving_avg_rewards = deque(maxlen=moving_average_window)
+        self.num_episodes = 0
 
         # Training stability metrics
         self.loss_values = deque(maxlen=moving_average_window)
@@ -75,6 +74,7 @@ class PPOTrainingCallback(BaseCallback):
 
         # Success tracking
         self.success_rate = deque(maxlen=moving_average_window)
+        self.num_successes = 0
         self.training_progress = 0.0
 
         # Create log directory
@@ -102,113 +102,7 @@ class PPOTrainingCallback(BaseCallback):
                 self.original_action_bias = self.model.policy.action_net.bias.data.clone()
 
     def _adjust_entropy_coefficient(self) -> None:
-        """
-        Dynamically adjusts the entropy coefficient based on comprehensive success metrics.
-
-        In N++, success is hierarchical:
-        1. Basic Movement: Precision, landing, and momentum control
-        2. Navigation: Reaching and activating the switch
-        3. Completion: Reaching the exit after switch activation
-
-        The entropy adjustment considers all these levels to maintain appropriate
-        exploration throughout the learning process.
-        """
-        print('Attempting to adjust entropy coefficient')
-
-        # We need enough history to make informed adjustments
-        if len(self.moving_avg_rewards) < 2 or len(self.loss_values) < 2:
-            print('Not enough history to adjust entropy coefficient')
-            return
-
-        # Get the latest episode info for detailed success metrics
-        if len(self.model.ep_info_buffer) > 0:
-            last_info = self.model.ep_info_buffer[-1]
-
-            # Extract all success components with defaults
-            movement_success = last_info.get('movement_efficiency', 0.0)
-            landing_success = last_info.get('landing_quality', 0.0)
-            momentum_success = last_info.get('momentum_efficiency', 0.0)
-
-            # Separate switch and exit progress
-            switch_progress = last_info.get(
-                'switch_progress', 0.0)  # Progress towards switch
-            # Binary switch activation
-            switch_activated = float(last_info.get('switch_activated', 0.0))
-            exit_progress = last_info.get(
-                'exit_progress', 0.0)  # Progress towards exit
-            level_success = last_info.get('success', 0.0)
-
-            # Calculate composite success rates with emphasis on navigation
-            movement_mastery = np.mean(
-                [movement_success, landing_success, momentum_success])
-
-            # Consider both progress and achievements
-            switch_mastery = np.mean([switch_progress, switch_activated])
-            exit_mastery = exit_progress if switch_activated else 0.0
-            # More weight on switch mastery
-            navigation_success = np.mean([switch_mastery * 1.2, exit_mastery])
-
-            # Calculate overall progress (weighted average with more emphasis on navigation)
-            overall_progress = (
-                0.3 * movement_mastery +  # Reduced weight
-                0.5 * navigation_success +  # Increased weight
-                0.2 * level_success
-            )
-
-            # Update success rate with granular progress
-            self.success_rate.append(overall_progress)
-        else:
-            movement_mastery = 0.0
-            navigation_success = 0.0
-            level_success = 0.0
-            overall_progress = 0.0
-
-        print(f'Movement Mastery: {movement_mastery:.3f}')
-        print(f'Navigation Success: {navigation_success:.3f}')
-        print(f'Level Success: {level_success:.3f}')
-        print(f'Overall Progress: {overall_progress:.3f}')
-
-        # Adjust entropy based on navigation success specifically
-        if navigation_success < 0.2:
-            # Early navigation - high exploration
-            target_entropy = self.max_ent_coef
-        elif navigation_success < 0.5:
-            # Mid navigation - gradual reduction
-            progress_ratio = (navigation_success - 0.2) / 0.3
-            target_entropy = self.max_ent_coef - \
-                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.6)
-        else:
-            # Late navigation - low exploration
-            progress_ratio = (navigation_success - 0.5) / 0.5
-            target_entropy = self.max_ent_coef - \
-                (progress_ratio * (self.max_ent_coef - self.min_ent_coef) * 0.9)
-
-        # Smooth the transition
-        adjustment_rate = 0.15  # Slightly faster adjustment
-        new_ent_coef = self.current_ent_coef * \
-            (1 - adjustment_rate) + target_entropy * adjustment_rate
-
-        # Ensure we stay within bounds
-        new_ent_coef = np.clip(
-            new_ent_coef, self.min_ent_coef, self.max_ent_coef)
-
-        # Apply the new entropy coefficient if it's significantly different
-        if abs(new_ent_coef - self.current_ent_coef) > 0.001:
-            self._update_policy_entropy(new_ent_coef)
-
-            # Log the adjustment if verbose
-            if self.verbose > 0:
-                print(f"\nAdjusting entropy coefficient:")
-                print(f"Previous: {self.current_ent_coef:.4f}")
-                print(f"New: {new_ent_coef:.4f}")
-                print(f"Target: {target_entropy:.4f}")
-                print(f"Progress metrics:")
-                print(f"- Movement mastery: {movement_mastery:.3f}")
-                print(f"- Navigation success: {navigation_success:.3f}")
-                print(f"  - Switch mastery: {switch_mastery:.3f}")
-                print(f"  - Exit mastery: {exit_mastery:.3f}")
-                print(f"- Level success: {level_success:.3f}")
-                print(f"- Overall progress: {overall_progress:.3f}")
+        pass
 
     def _update_policy_entropy(self, new_ent_coef: float) -> None:
         """
@@ -245,19 +139,6 @@ class PPOTrainingCallback(BaseCallback):
         """
         Update callback statistics and adjust training parameters.
         """
-        # Check if we're at the end of a batch of steps
-        if self.n_calls % self.n_steps == 0 and not self.is_training:
-            # We're about to start training, pause the game
-            print("Model is learning after batch of steps, pausing game...")
-            self.game_controller.release_all_keys()
-            self.game_controller.press_advanced_pause_key()
-            self.is_training = True
-        elif self.n_calls % self.n_steps == 1 and self.is_training:
-            # We've just finished learning and are about to start the next batch of steps
-            print("Model has learned from batch of steps, resuming game...")
-            self.game_controller.press_advanced_continue_key()
-            self.is_training = False
-
         # Record episode statistics
         if len(self.model.ep_info_buffer) > 0:
             last_info = self.model.ep_info_buffer[-1]
@@ -265,8 +146,14 @@ class PPOTrainingCallback(BaseCallback):
             self.episode_lengths.append(last_info['l'])
 
             # Update success rate
-            if 'success' in last_info:
-                self.success_rate.append(float(last_info['success']))
+            if 'is_success' in last_info and last_info['is_success']:
+                self.success_rate.append(float(last_info['is_success']))
+                self.num_successes += 1
+                self.logger.record("env/num_successes", self.num_successes)
+
+            if 'num_episodes' in last_info:
+                self.num_episodes = last_info['num_episodes']
+                self.logger.record("env/num_episodes", self.num_episodes)
 
         # Calculate moving average reward
         if self.episode_rewards:
@@ -309,6 +196,12 @@ class PPOTrainingCallback(BaseCallback):
 
         return True
 
+    def _on_training_start(self):
+        print('Training started')
+
+    def _on_rollout_start(self):
+        print('Rollout started')
+
     def _log_training_progress(self) -> None:
         """
         Log detailed training progress information.
@@ -334,6 +227,8 @@ class PPOTrainingCallback(BaseCallback):
             print(f"Training Progress at Step {self.n_calls}")
             print(f"Mean reward: {current_reward:.2f}")
             print(f"Mean episode length: {current_length:.2f}")
+            print(f"Number of episodes: {self.num_episodes}")
+            print(f"Number of successes: {self.num_successes}")
             print(f"Current entropy coefficient: {self.current_ent_coef:.4f}")
             print(f"Success rate: {current_success:.2%}")
             if self.loss_values:
@@ -347,7 +242,7 @@ class PPOTrainingCallback(BaseCallback):
         """
         log_path = self.log_dir / 'training_log.json'
         with open(log_path, 'w') as f:
-            json.dump(self.training_log, f)
+            json.dump(str(self.training_log), f)
 
     def get_training_statistics(self) -> Dict[str, Any]:
         """
