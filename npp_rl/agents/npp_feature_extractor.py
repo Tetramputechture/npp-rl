@@ -23,47 +23,37 @@ class ResBlock(nn.Module):
 
 class NPPFeatureExtractor(BaseFeaturesExtractor):
     """CNN-based feature extractor with residual connections and batch normalization,
-    with a separate branch for each of the following:
-    - Frame
-    - Memory
-    - Hazards
-    - Goal
+    with separate branches for:
+    - Recent frames (4 frames)
+    - Historical frames (3 frames)
+    - Spatial memory (4 channels: recent_visits, visit_frequency, area_exploration, transitions)
+    - Player state (6 channels: pos_x, pos_y, vel_x, vel_y, in_air, walled)
+    - Goals (2 channels: switch and exit heatmaps)
     """
 
-    def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 256):
+    def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
 
-        # Input channels configuration
-        self.frame_channels = 4  # 1 current + 3 recent frames
-        self.memory_channels = 4
-        self.hazard_channel = 1  # Channel for mine hazards
-        self.goal_channels = 2   # Switch and exit door channels
+        # Input channels configuration matching observation processor
+        self.recent_frames = 4  # Current + 3 recent frames
+        self.historical_frames = 3  # Historical frames at fixed intervals
+        self.memory_channels = 4  # Spatial memory features
+        self.player_state_channels = 6  # Player state features
+        self.goal_channels = 2  # Switch and exit door heatmaps
 
-        # Enhanced CNN architecture
+        # Enhanced CNN architecture for frame processing
         self.frame_features = nn.Sequential(
-            # Initial convolution
-            nn.Conv2d(self.frame_channels, 32,
-                      kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-
-            # First residual block
             ResBlock(32),
-
-            # Downsample
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-
-            # Second residual block
             ResBlock(64),
-
-            # Final convolution
             nn.Conv2d(64, 128, kernel_size=3, stride=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
-
-            # Adaptive pooling for better feature extraction
             nn.AdaptiveAvgPool2d((6, 6)),
             nn.Flatten()
         )
@@ -71,7 +61,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         # Calculate the flattened size: 128 * 6 * 6 = 4608
         flat_size = 128 * 6 * 6
 
-        # Enhanced frame processing
+        # Frame processing for both recent and historical frames
         self.frame_processor = nn.Sequential(
             nn.Linear(flat_size, 256),
             nn.LayerNorm(256),
@@ -82,34 +72,39 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU()
         )
 
-        # Enhanced memory processing
+        # Memory processing
         self.memory_processor = nn.Sequential(
-            nn.Linear(self.memory_channels, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(64, 32),
-            nn.LayerNorm(32),
-            nn.ReLU()
-        )
-
-        # Hazard processing branch
-        self.hazard_processor = nn.Sequential(
-            nn.Conv2d(self.hazard_channel, 16,
+            nn.Conv2d(self.memory_channels, 32,
                       kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((4, 4)),
             nn.Flatten(),
-            nn.Linear(32 * 4 * 4, 32),
-            nn.LayerNorm(32),
+            nn.Linear(64 * 4 * 4, 64),
+            nn.LayerNorm(64),
             nn.ReLU()
         )
 
-        # Goal processing branch - similar to hazard but with more features
+        # Player state processing
+        self.player_state_processor = nn.Sequential(
+            nn.Conv2d(self.player_state_channels, 32,
+                      kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.Flatten(),
+            nn.Linear(64 * 4 * 4, 64),
+            nn.LayerNorm(64),
+            nn.ReLU()
+        )
+
+        # Goal processing
         self.goal_processor = nn.Sequential(
             nn.Conv2d(self.goal_channels, 32,
                       kernel_size=3, stride=2, padding=1),
@@ -125,8 +120,9 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU()
         )
 
-        # Final integration with skip connection
-        total_features = 128 + 32 + 32 + 64  # Frame + memory + hazard + goal features
+        # Final integration
+        # Recent frames + historical frames + memory + player state + goal features
+        total_features = 128 + 128 + 64 + 64 + 64
         self.integration = nn.Sequential(
             nn.Linear(total_features, self.features_dim),
             nn.LayerNorm(self.features_dim),
@@ -140,36 +136,63 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         if observations.dim() == 3:
             observations = observations.unsqueeze(0)
 
-        # Split channels
-        frames = observations[..., :self.frame_channels]
-        memory = observations[..., -self.memory_channels -
-                              self.hazard_channel - self.goal_channels:-self.hazard_channel - self.goal_channels]
-        hazard = observations[..., -self.hazard_channel -
-                              self.goal_channels:-self.goal_channels]
-        goals = observations[..., -self.goal_channels:]
+        # Split channels according to observation processor's concatenation order
+        start_idx = 0
 
-        # Process frames [B, H, W, C] -> [B, C, H, W]
-        frames = frames.permute(0, 3, 1, 2)
-        frame_features = self.frame_features(frames)
-        frame_features = self.frame_processor(frame_features)
+        # Recent frames: first 4 channels
+        recent_frames = observations[:,
+                                     start_idx:start_idx + self.recent_frames]
+        start_idx += self.recent_frames
 
-        # Process memory - average over spatial dimensions
-        memory = memory.mean(dim=[1, 2])
-        memory_features = self.memory_processor(memory)
+        # Historical frames: next 3 channels
+        historical_frames = observations[:,
+                                         start_idx:start_idx + self.historical_frames]
+        start_idx += self.historical_frames
 
-        # Process hazard channel
-        hazard = hazard.permute(0, 3, 1, 2)
-        hazard_features = self.hazard_processor(hazard)
+        # Memory features: next 4 channels
+        memory_features = observations[:,
+                                       start_idx:start_idx + self.memory_channels]
+        start_idx += self.memory_channels
 
-        # Process goal channels
-        goals = goals.permute(0, 3, 1, 2)
-        goal_features = self.goal_processor(goals)
+        # Player state: next 6 channels
+        player_state_features = observations[:,
+                                             start_idx:start_idx + self.player_state_channels]
+        start_idx += self.player_state_channels
 
-        # Combine features with skip connection
+        # Goal features: final 2 channels (switch and exit)
+        goal_features = observations[:,
+                                     start_idx:start_idx + self.goal_channels]
+
+        # Process recent frames (process each frame independently)
+        recent_frame_features = []
+        for i in range(self.recent_frames):
+            frame = recent_frames[:, i:i+1]
+            features = self.frame_features(frame)
+            recent_frame_features.append(self.frame_processor(features))
+        recent_frame_features = torch.mean(
+            torch.stack(recent_frame_features, dim=1), dim=1)
+
+        # Process historical frames (process each frame independently)
+        historical_frame_features = []
+        for i in range(self.historical_frames):
+            frame = historical_frames[:, i:i+1]
+            features = self.frame_features(frame)
+            historical_frame_features.append(self.frame_processor(features))
+        historical_frame_features = torch.mean(
+            torch.stack(historical_frame_features, dim=1), dim=1)
+
+        # Process other features
+        memory_features = self.memory_processor(memory_features)
+        player_state_features = self.player_state_processor(
+            player_state_features)
+        goal_features = self.goal_processor(goal_features)
+
+        # Combine all features
         combined = torch.cat([
-            frame_features,
+            recent_frame_features,
+            historical_frame_features,
             memory_features,
-            hazard_features,
+            player_state_features,
             goal_features
         ], dim=1)
 

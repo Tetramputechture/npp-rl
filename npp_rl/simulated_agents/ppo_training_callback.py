@@ -1,5 +1,6 @@
 from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
+from stable_baselines3.common.logger import Image
 from pathlib import Path
 import json
 from typing import Dict, Any, Optional
@@ -63,6 +64,7 @@ class PPOTrainingCallback(BaseCallback):
         self.episode_rewards = deque(maxlen=moving_average_window)
         self.episode_lengths = deque(maxlen=moving_average_window)
         self.moving_avg_rewards = deque(maxlen=moving_average_window)
+        self.num_episodes = 0
 
         # Training stability metrics
         self.loss_values = deque(maxlen=moving_average_window)
@@ -72,6 +74,7 @@ class PPOTrainingCallback(BaseCallback):
 
         # Success tracking
         self.success_rate = deque(maxlen=moving_average_window)
+        self.num_successes = 0
         self.training_progress = 0.0
 
         # Create log directory
@@ -143,8 +146,14 @@ class PPOTrainingCallback(BaseCallback):
             self.episode_lengths.append(last_info['l'])
 
             # Update success rate
-            if 'success' in last_info:
-                self.success_rate.append(float(last_info['success']))
+            if 'is_success' in last_info and last_info['is_success']:
+                self.success_rate.append(float(last_info['is_success']))
+                self.num_successes += 1
+                self.logger.record("env/num_successes", self.num_successes)
+
+            if 'num_episodes' in last_info:
+                self.num_episodes = last_info['num_episodes']
+                self.logger.record("env/num_episodes", self.num_episodes)
 
         # Calculate moving average reward
         if self.episode_rewards:
@@ -187,6 +196,12 @@ class PPOTrainingCallback(BaseCallback):
 
         return True
 
+    def _on_training_start(self):
+        print('Training started')
+
+    def _on_rollout_start(self):
+        print('Rollout started')
+
     def _log_training_progress(self) -> None:
         """
         Log detailed training progress information.
@@ -212,6 +227,8 @@ class PPOTrainingCallback(BaseCallback):
             print(f"Training Progress at Step {self.n_calls}")
             print(f"Mean reward: {current_reward:.2f}")
             print(f"Mean episode length: {current_length:.2f}")
+            print(f"Number of episodes: {self.num_episodes}")
+            print(f"Number of successes: {self.num_successes}")
             print(f"Current entropy coefficient: {self.current_ent_coef:.4f}")
             print(f"Success rate: {current_success:.2%}")
             if self.loss_values:

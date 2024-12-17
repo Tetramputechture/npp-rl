@@ -2,7 +2,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv
 import torch
 from torch import nn
 import numpy as np
@@ -49,6 +49,7 @@ def start_tensorboard(logdir):
 def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
+    Memory-optimized version with smaller network architecture.
 
     Args:
         env: The N++ environment instance
@@ -60,21 +61,22 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     """
 
     learning_rate = get_linear_fn(
-        start=2.5e-4,
+        start=3e-4,
         end=5e-5,
-        end_fraction=0.8
+        end_fraction=0.85
     )
 
     policy_kwargs = dict(
         features_extractor_class=NPPFeatureExtractor,
         net_arch=dict(
-            pi=[256, 256],
-            vf=[256, 256]
+            pi=[256, 128, 64],
+            vf=[256, 128, 64]
         ),
         normalize_images=True,
         activation_fn=nn.ReLU,
     )
 
+    # Reduced batch size for lower memory usage
     batch_size = min(512, n_steps // 4)
 
     model = PPO(
@@ -84,19 +86,17 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         learning_rate=learning_rate,
         n_steps=n_steps,
         batch_size=batch_size,
-        n_epochs=4,
+        n_epochs=3,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        clip_range_vf=None,
+        clip_range_vf=0.2,
         ent_coef=0.01,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        target_kl=None,
+        vf_coef=0.75,
+        max_grad_norm=0.7,
         normalize_advantage=True,
         verbose=1,
-        # Uncomment to use tensorboard
-        # tensorboard_log=tensorboard_log,
+        tensorboard_log=tensorboard_log,
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
         seed=42
     )
@@ -104,16 +104,16 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=2048, total_timesteps=1000000) -> PPO:
+def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=1000000, load_model_path=None) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
     Args:
         env: The N++ environment instance
         log_dir: Directory for saving logs and models
-        game_controller: Game controller instance
         n_steps: Number of steps per update
         total_timesteps: Total training timesteps
+        load_model_path: Optional path to a previously saved model to continue training from
     """
     # Set up Tensorboard log directory
     tensorboard_log = log_dir / "tensorboard"
@@ -123,8 +123,19 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=2048, total_timesteps=10000
     # Uncomment to use tensorboard
     # start_tensorboard(tensorboard_log)
 
-    # Create and set up the model
-    model = create_ppo_agent(env, n_steps, str(tensorboard_log))
+    # Create or load the model
+    if load_model_path is not None and Path(load_model_path).exists():
+        print(f"Loading pre-trained model from {load_model_path}")
+        model = PPO.load(load_model_path, env=env)
+        # Update the learning rate schedule
+        model.learning_rate = get_linear_fn(
+            start=2.5e-4,
+            end=5e-5,
+            end_fraction=0.8
+        )
+    else:
+        print("Creating new model")
+        model = create_ppo_agent(env, n_steps, str(tensorboard_log))
 
     # Configure callback for monitoring and saving
     callback = PPOTrainingCallback(
@@ -139,7 +150,9 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=2048, total_timesteps=10000
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
-        progress_bar=True
+        progress_bar=True,
+        # Only reset if starting from scratch
+        reset_num_timesteps=load_model_path is None
     )
 
     return model
@@ -234,20 +247,30 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     # Step 6: Record videos for 5 episodes
     env.reset()
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, num_episodes=5)
+    record_video(env, model, video_path, num_episodes=1)
 
     return local_directory
 
 
-def start_training():
+def start_training(load_model_path=None, render_mode='rgb_array'):
     """Initialize environment and start training process. Assumes the player is already in the game
     and playing the level, as this method will attempt to press the reset key so training can start
-    from a fresh level."""
+    from a fresh level.
+
+    Args:
+        load_model_path: Optional path to a previously saved model to continue training from
+    """
 
     try:
         env = NPlusPlus()
-        vec_env = make_vec_env(lambda: NPlusPlus(), n_envs=16,
-                               vec_env_cls=SubprocVecEnv)
+        if render_mode == 'human':
+            print('Rendering in human mode with 1 environment')
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human'), n_envs=1,
+                                   vec_env_cls=DummyVecEnv)
+        else:
+            print('Rendering in rgb_array mode with 4 environments')
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
+                                   vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         s_size = env.observation_space.shape[0]
@@ -260,11 +283,11 @@ def start_training():
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, total_timesteps=100000)
+            wrapped_env, log_dir, n_steps=2048, total_timesteps=1000000, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
-        model.save("npp_ppo")
+        model.save("npp_ppo_sim")
 
         # Record gameplay video
         # First, press the reset key to start a new episode

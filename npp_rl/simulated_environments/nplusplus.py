@@ -6,10 +6,12 @@ import time
 from typing import Tuple, Dict, Any
 import os
 from npp_rl.simulated_environments.observation_processor import ObservationProcessor
+from npp_rl.simulated_environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
 import uuid
+from npp_rl.simulated_environments.constants import TOTAL_OBSERVATION_CHANNELS, OBSERVATION_IMAGE_SIZE
 
-OBSERVATION_IMAGE_SIZE = 84
+MAP_DATA_PATH = "../nclone/maps/map_data_simple"
 
 
 class NPlusPlus(gymnasium.Env):
@@ -27,9 +29,9 @@ class NPlusPlus(gymnasium.Env):
     1. Overall level completion
 
     """
-    metadata = {'render.modes': ['human']}
+    metadata = {'render.modes': ['human', 'rgb_array']}
 
-    def __init__(self, frame_stack: int = 4):
+    def __init__(self, frame_stack: int = 4, render_mode: str = 'rgb_array'):
         """Initialize the environment.
 
         Args:
@@ -37,12 +39,15 @@ class NPlusPlus(gymnasium.Env):
         """
         super().__init__()
 
-        self.nplay_headless = NPlayHeadless()
-        self.nplay_headless.load_map("../nclone/map_data")
+        self.nplay_headless = NPlayHeadless(render_mode=render_mode)
+        self.nplay_headless.load_random_map(seed=42)
 
         self.frame_stack = frame_stack
+        self.render_mode = render_mode
 
-        self.reward_calculator = RewardCalculator()
+        self.movement_evaluator = MovementEvaluator()
+        self.reward_calculator = RewardCalculator(
+            movement_evaluator=self.movement_evaluator)
 
         # Initialize observation processing
         self.observation_processor = ObservationProcessor(
@@ -56,7 +61,7 @@ class NPlusPlus(gymnasium.Env):
             low=0,
             high=1,
             shape=(OBSERVATION_IMAGE_SIZE, OBSERVATION_IMAGE_SIZE,
-                   7),
+                   TOTAL_OBSERVATION_CHANNELS),
             dtype=np.float32
         )
 
@@ -78,14 +83,29 @@ class NPlusPlus(gymnasium.Env):
         # Initialize episode counter
         self.episode_counter = 0
 
+        # Initialize current episode reward
+        self.current_episode_reward = 0.0
+
     def _get_observation(self) -> Dict[str, Any]:
         """Get the current observation from the game state."""
+        # print ninja velocity
         obs = {
             'screen': self.nplay_headless.render(),
             'player_x': self.nplay_headless.ninja_position()[0],
             'player_y': self.nplay_headless.ninja_position()[1],
+            'player_vx': self.nplay_headless.ninja_velocity()[0],
+            'player_vy': self.nplay_headless.ninja_velocity()[1],
             'player_dead': self.nplay_headless.ninja_has_died(),
-            'player_won': self.nplay_headless.ninja_has_won()
+            'player_won': self.nplay_headless.ninja_has_won(),
+            'switch_activated': self.nplay_headless.exit_switch_activated(),
+            'switch_x': self.nplay_headless.exit_switch_position()[0],
+            'switch_y': self.nplay_headless.exit_switch_position()[1],
+            'exit_door_x': self.nplay_headless.exit_door_position()[0],
+            'exit_door_y': self.nplay_headless.exit_door_position()[1],
+            'in_air': self.nplay_headless.ninja_is_in_air(),
+            'walled': self.nplay_headless.ninja_is_walled(),
+            'level_width': 1032.0,
+            'level_height': 576.0,
         }
         return obs
 
@@ -155,8 +175,8 @@ class NPlusPlus(gymnasium.Env):
                 f"Episode terminated at frame {self.nplay_headless.sim.frame}")
 
         # Check truncation
-        # Truncation is when the current simulation frame is greater than 30000
-        truncated = self.nplay_headless.sim.frame > 500
+        # Truncation is when the current simulation frame is greater than 5000
+        truncated = self.nplay_headless.sim.frame > 5000
 
         if truncated:
             print(
@@ -181,6 +201,9 @@ class NPlusPlus(gymnasium.Env):
         3. Progressive reward calculation
         4. Detailed metrics and monitoring
         """
+        # Get previous observation
+        prev_obs = self._get_observation()
+
         player_x, player_y = self.nplay_headless.ninja_position()
 
         self.position_log_file_string += f'{player_x},{player_y}\n'
@@ -199,13 +222,15 @@ class NPlusPlus(gymnasium.Env):
         # Process observation and calculate reward
         processed_obs = self.observation_processor.process_observation(
             observation)
-        reward = self.reward_calculator.calculate_reward(observation)
 
-        success_metrics = self._get_success_metrics()
+        reward = self.reward_calculator.calculate_reward(
+            observation, prev_obs, action)
+
+        self.current_episode_reward += reward
 
         # Print reward if terminated or truncated
         if terminated or truncated:
-            print(f"Episode reward: {reward}")
+            print(f"Episode reward: {self.current_episode_reward}")
 
         return processed_obs, reward, terminated, truncated, {}
 
@@ -224,6 +249,13 @@ class NPlusPlus(gymnasium.Env):
         # Increment episode counter
         self.episode_counter += 1
 
+        # Reset current episode reward
+        self.current_episode_reward = 0.0
+
+        # Reset reward calculator and movement evaluator
+        self.reward_calculator.reset()
+        self.movement_evaluator.reset()
+
         # Reset observation processor
         self.observation_processor.reset()
 
@@ -233,6 +265,9 @@ class NPlusPlus(gymnasium.Env):
 
         # reset level
         self.nplay_headless.reset()
+
+        # load random map
+        self.nplay_headless.load_random_map()
 
         # Get initial observation
         initial_obs = self._get_observation()
@@ -244,11 +279,7 @@ class NPlusPlus(gymnasium.Env):
         return processed_obs, {}
 
     def render(self):
-        """Render the environment.
-
-        Since the game window is already visible, we don't need additional rendering.
-        We can just return the current game window frame.
-        """
+        """Render the environment."""
         return self.nplay_headless.render()
 
     def close(self):

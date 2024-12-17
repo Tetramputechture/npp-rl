@@ -29,4 +29,5 @@ if __name__ == "__main__":
     # frame = Image.fromarray(frame)
     # frame.save("frame.png")
     # print("Done")
+    # start_training('npp_ppo_sim_basic.zip')
     start_training()

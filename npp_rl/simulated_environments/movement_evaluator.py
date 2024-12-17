@@ -1,7 +1,6 @@
 import numpy as np
 from typing import Dict, Any
 from collections import deque
-from npp_rl.util.util import calculate_velocity
 from npp_rl.environments.constants import TIMESTEP
 
 
@@ -76,8 +75,8 @@ class MovementEvaluator:
             current_state['player_x'] - previous_state['player_x'],
             current_state['player_y'] - previous_state['player_y']
         ])
-        vx, vy = [current_state['player_vx'], current_state['player_vy']]
-        velocity_vector = np.array([vx, vy])
+        velocity_vector = np.array(
+            [current_state['player_vx'],  current_state['player_vy']])
         movement_magnitude = np.linalg.norm(movement_vector)
 
         # Update trajectory history
@@ -358,11 +357,7 @@ class MovementEvaluator:
         """
         # Detect landing event
         if previous_state['in_air'] and not current_state['in_air']:
-            _, vy = calculate_velocity(
-                current_state['player_x'], current_state['player_y'],
-                previous_state['player_x'], previous_state['player_y'],
-                TIMESTEP
-            )
+            vy = current_state['player_vy']
             landing_velocity = abs(vy)
 
             # Calculate landing score
