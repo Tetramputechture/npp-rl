@@ -297,14 +297,14 @@ class ObservationProcessor:
             stacked_frames.append(historical_frame[..., np.newaxis])
 
         # Get numerical features
-        memory_features = self.get_numerical_features(obs)
-        pathfinding_features = self.get_pathfinding_features(obs)
-        collision_features = self.get_collision_features(obs)
+        # memory_features = self.get_numerical_features(obs)
+        # pathfinding_features = self.get_pathfinding_features(obs)
+        # collision_features = self.get_collision_features(obs)
 
         # Convert memory features to uint8
-        memory_features = (memory_features * 255).astype(np.uint8)
-        pathfinding_features = (pathfinding_features * 255).astype(np.uint8)
-        collision_features = (collision_features * 255).astype(np.uint8)
+        # memory_features = (memory_features * 255).astype(np.uint8)
+        # pathfinding_features = (pathfinding_features * 255).astype(np.uint8)
+        # collision_features = (collision_features * 255).astype(np.uint8)
 
         # Get player state features
         player_state = self.get_player_state_features(obs)
@@ -313,16 +313,21 @@ class ObservationProcessor:
         goal_features = self.get_goal_features(obs)
 
         # Combine all visual features
-        visual_observation = np.concatenate(
-            stacked_frames +
-            [memory_features] +
-            [pathfinding_features] +
-            [collision_features],
-            axis=-1
-        )
+        # visual_observation = np.concatenate(
+        #     stacked_frames +
+        #     [memory_features] +
+        #     [pathfinding_features] +
+        #     [collision_features],
+        #     axis=-1
+        # )
 
+        # return {
+        #     'visual': visual_observation,  # Already uint8 in [0, 255] range
+        #     'player_state': player_state.astype(np.float32),
+        #     'goal_features': goal_features.astype(np.float32)
+        # }
         return {
-            'visual': visual_observation,  # Already uint8 in [0, 255] range
+            'visual': stacked_frames,
             'player_state': player_state.astype(np.float32),
             'goal_features': goal_features.astype(np.float32)
         }
