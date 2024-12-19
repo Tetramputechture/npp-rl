@@ -1,8 +1,8 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv
+from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
 from torch import nn
 import numpy as np
@@ -14,7 +14,6 @@ import subprocess
 import threading
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
-from npp_rl.game.game_controller import GameController
 from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -30,6 +29,9 @@ def setup_training_env(vec_env):
 
     # Wrap environment with Monitor for logging
     env = VecMonitor(vec_env, str(log_dir))
+
+    env = VecCheckNan(env, raise_exception=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True)
 
     return env, log_dir
 
@@ -73,7 +75,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
             vf=[256, 128, 64]
         ),
         normalize_images=True,
-        activation_fn=nn.ReLU,
+        activation_fn=nn.SiLU,
     )
 
     # Reduced batch size for lower memory usage
@@ -86,7 +88,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         learning_rate=learning_rate,
         n_steps=n_steps,
         batch_size=batch_size,
-        n_epochs=3,
+        n_epochs=5,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
@@ -139,7 +141,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
 
     # Configure callback for monitoring and saving
     callback = PPOTrainingCallback(
-        check_freq=50,
+        check_freq=200,
         log_dir=log_dir,
         n_steps=n_steps,
         min_ent_coef=0.0005,
@@ -247,7 +249,7 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     # Step 6: Record videos for 5 episodes
     env.reset()
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, num_episodes=1)
+    record_video(env, model, video_path, num_episodes=5)
 
     return local_directory
 
@@ -262,24 +264,18 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
     """
 
     try:
-        env = NPlusPlus()
+        env = NPlusPlus(render_mode=render_mode)
+        # check if the environment is valid
+        check_env(env)
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
             vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human'), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
-            print('Rendering in rgb_array mode with 4 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
+            print('Rendering in rgb_array mode with 8 environments')
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=8,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
-
-        s_size = env.observation_space.shape[0]
-        a_size = env.action_space.n
-
-        print("_____OBSERVATION SPACE_____ \n")
-        print("The State Space is: ", s_size)
-        print("\n _____ACTION SPACE_____ \n")
-        print("The Action Space is: ", a_size)
 
         print("Starting PPO training...")
         model = train_ppo_agent(
@@ -297,8 +293,8 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
         print("Recording video...")
         hyperparameters = {
             "env_id": "N++",
-            "n_episodes": 1,
-            "n_evaluation_episodes": 1
+            "n_episodes": 5,
+            "n_evaluation_episodes": 5
         }
         record_agent_training(env, model, hyperparameters)
 

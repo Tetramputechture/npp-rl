@@ -1,8 +1,8 @@
+# Temporal frames (4 frames spaced 4 frames apart)
+NUM_TEMPORAL_FRAMES = 4
+
 # Features: recent_visits, visit_frequency, area_exploration, transitions
 NUM_NUMERICAL_FEATURES = 4
-
-# Number of historical frames at fixed intervals (2, 4, 8)
-NUM_HISTORICAL_FRAMES = 3
 
 # Number of goal channels (switch and exit door heatmaps)
 NUM_GOAL_CHANNELS = 2
@@ -11,8 +11,22 @@ NUM_GOAL_CHANNELS = 2
 NUM_PLAYER_STATE_CHANNELS = 6
 
 # Total observation channels
-TOTAL_OBSERVATION_CHANNELS = 4 + NUM_HISTORICAL_FRAMES + \
+TOTAL_OBSERVATION_CHANNELS = NUM_TEMPORAL_FRAMES + \
     NUM_NUMERICAL_FEATURES + NUM_PLAYER_STATE_CHANNELS + NUM_GOAL_CHANNELS
 
 # Observation image size
 OBSERVATION_IMAGE_SIZE = 84
+
+# Frame intervals for temporal stacking
+FRAME_INTERVALS = [0, 4, 8, 12]
+
+# Maximum velocity for normalization
+MAX_VELOCITY = 20.0
+
+# Observation space constants
+TEMPORAL_FRAMES = 4
+MEMORY_CHANNELS = 4
+PATHFINDING_CHANNELS = 3  # Distance field, path visualization, clearance map
+COLLISION_CHANNELS = 2    # Static obstacles, dynamic obstacles
+TOTAL_OBSERVATION_CHANNELS = TEMPORAL_FRAMES + \
+    MEMORY_CHANNELS + PATHFINDING_CHANNELS + COLLISION_CHANNELS

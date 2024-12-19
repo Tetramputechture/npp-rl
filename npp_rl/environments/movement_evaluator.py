@@ -1,7 +1,6 @@
 import numpy as np
 from typing import Dict, Any
 from collections import deque
-from npp_rl.environments.constants import TIMESTEP
 
 
 class MovementEvaluator:

@@ -227,10 +227,7 @@ class PPOTrainingCallback(BaseCallback):
             print(f"Training Progress at Step {self.n_calls}")
             print(f"Mean reward: {current_reward:.2f}")
             print(f"Mean episode length: {current_length:.2f}")
-            print(f"Number of episodes: {self.num_episodes}")
-            print(f"Number of successes: {self.num_successes}")
             print(f"Current entropy coefficient: {self.current_ent_coef:.4f}")
-            print(f"Success rate: {current_success:.2%}")
             if self.loss_values:
                 print(f"Current loss: {self.loss_values[-1]:.4f}")
             print(f"Best mean reward: {self.best_mean_reward:.2f}")

@@ -8,12 +8,12 @@ class BaseRewardCalculator:
     """Base class containing reward constants and common utility methods."""
 
     # Base reward/penalty constants
-    BASE_TIME_PENALTY = -0.01
+    BASE_TIME_PENALTY = -0.05
     GOLD_COLLECTION_REWARD = 0.5
-    SWITCH_ACTIVATION_REWARD = 5.0
+    SWITCH_ACTIVATION_REWARD = 10.0
     TERMINAL_REWARD = 100.0
-    DEATH_PENALTY = -5.0
-    TIMEOUT_PENALTY = -2.0
+    DEATH_PENALTY = -2.0
+    TIMEOUT_PENALTY = -1.0
 
     # Movement assessment constants
     FINE_DISTANCE_THRESHOLD = 5.0
@@ -21,7 +21,6 @@ class BaseRewardCalculator:
     # Mine avoidance constants
     MINE_DANGER_RADIUS = 15.0
     MINE_PENALTY_SCALE = 0.5
-    MAX_VELOCITY = 20000.0     # Maximum velocity magnitude for normalization
 
     def __init__(self):
         """Initialize base reward calculator."""

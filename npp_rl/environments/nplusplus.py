@@ -2,6 +2,9 @@ import gymnasium
 from gymnasium.spaces import discrete, box
 import numpy as np
 from npp_rl.environments.reward_calculation.main_reward_calculator import RewardCalculator
+from npp_rl.environments.reward_calculation.planning_reward_calculator import PlanningRewardCalculator
+from npp_rl.environments.planning.path_planner import PathPlanner
+from npp_rl.environments.planning.waypoint_manager import WaypointManager
 import time
 from typing import Tuple, Dict, Any
 import os
@@ -9,7 +12,12 @@ from npp_rl.environments.observation_processor import ObservationProcessor
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
 import uuid
-from npp_rl.environments.constants import TOTAL_OBSERVATION_CHANNELS, OBSERVATION_IMAGE_SIZE
+from npp_rl.environments.constants import (
+    OBSERVATION_IMAGE_SIZE,
+    TOTAL_OBSERVATION_CHANNELS
+)
+from npp_rl.environments.visualization.path_visualizer import PathVisualizer
+import imageio
 
 MAP_DATA_PATH = "../nclone/maps/map_data_simple"
 
@@ -45,7 +53,16 @@ class NPlusPlus(gymnasium.Env):
         self.frame_stack = frame_stack
         self.render_mode = render_mode
 
+        # Initialize planning components
+        self.path_planner = PathPlanner()
+        self.waypoint_manager = WaypointManager(self.path_planner)
+        self.planning_reward_calculator = PlanningRewardCalculator(
+            waypoint_manager=self.waypoint_manager)
+
+        # Initialize movement evaluator
         self.movement_evaluator = MovementEvaluator()
+
+        # Initialize reward calculator
         self.reward_calculator = RewardCalculator(
             movement_evaluator=self.movement_evaluator)
 
@@ -56,14 +73,38 @@ class NPlusPlus(gymnasium.Env):
         # Initialize action space
         self.action_space = discrete.Discrete(6)
 
-        # Initialize observation space
-        self.observation_space = box.Box(
-            low=0,
-            high=1,
-            shape=(OBSERVATION_IMAGE_SIZE, OBSERVATION_IMAGE_SIZE,
-                   TOTAL_OBSERVATION_CHANNELS),
-            dtype=np.float32
-        )
+        # Initialize observation space as a Dict space with all features
+        self.observation_space = gymnasium.spaces.Dict({
+            'visual': box.Box(
+                low=0,
+                high=255,
+                shape=(
+                    OBSERVATION_IMAGE_SIZE,
+                    OBSERVATION_IMAGE_SIZE,
+                    TOTAL_OBSERVATION_CHANNELS
+                ),
+                dtype=np.uint8
+            ),
+            'player_state': box.Box(
+                low=0,
+                high=1,
+                shape=(6,),  # pos_x, pos_y, vel_x, vel_y, in_air, walled
+                dtype=np.float32
+            ),
+            'goal_features': box.Box(
+                low=0,
+                high=1,
+                shape=(3,),  # switch_dist, exit_dist, switch_activated
+                dtype=np.float32
+            ),
+            'planning_features': box.Box(
+                low=0,
+                high=1,
+                # distance_to_waypoint, progress_to_waypoint, path_deviation, consecutive_waypoints
+                shape=(4,),
+                dtype=np.float32
+            )
+        })
 
         # Initialize position log folder
         # add uuid to folder name
@@ -86,9 +127,16 @@ class NPlusPlus(gymnasium.Env):
         # Initialize current episode reward
         self.current_episode_reward = 0.0
 
+        # Initialize path visualizer
+        self.path_visualizer = PathVisualizer()
+        self.current_path = []
+        self.episode_step_counter = 0
+
+        # Initialize frame buffer for path visualization
+        self.path_viz_buffer = []
+
     def _get_observation(self) -> Dict[str, Any]:
         """Get the current observation from the game state."""
-        # print ninja velocity
         obs = {
             'screen': self.nplay_headless.render(),
             'player_x': self.nplay_headless.ninja_position()[0],
@@ -106,6 +154,12 @@ class NPlusPlus(gymnasium.Env):
             'walled': self.nplay_headless.ninja_is_walled(),
             'level_width': 1032.0,
             'level_height': 576.0,
+            # Add collision and pathfinding data
+            'tile_data': self.nplay_headless.get_tile_data(),
+            'segment_data': self.nplay_headless.get_segment_data(),
+            'grid_edges': self.nplay_headless.get_grid_edges(),
+            'segment_edges': self.nplay_headless.get_segment_edges(),
+            'dynamic_objects': self.nplay_headless.get_dynamic_objects() if hasattr(self.nplay_headless, 'get_dynamic_objects') else []
         }
         return obs
 
@@ -191,16 +245,103 @@ class NPlusPlus(gymnasium.Env):
             'success': float(self.nplay_headless.ninja_has_won())
         }
 
-    def step(self, action):
-        """
-        Execute one environment step with tracking and evaluation.
+    def _update_planning(self, observation: Dict[str, Any]):
+        """Update path planning based on current state."""
+        # Get current position
+        current_pos = (observation['player_x'], observation['player_y'])
 
-        Provides:
-        1. Success tracking
-        2. Movement evaluation
-        3. Progressive reward calculation
-        4. Detailed metrics and monitoring
-        """
+        # Get target position based on game state
+        if not observation['switch_activated']:
+            target_pos = (observation['switch_x'], observation['switch_y'])
+        else:
+            target_pos = (observation['exit_door_x'],
+                          observation['exit_door_y'])
+
+        # Get tile and segment data from simulator
+        tile_data = self.nplay_headless.get_tile_data()
+        segment_data = self.nplay_headless.get_segment_data()
+        grid_edges = self.nplay_headless.get_grid_edges()
+        segment_edges = self.nplay_headless.get_segment_edges()
+
+        # Update collision grid with all available data
+        self.path_planner.update_collision_grid(
+            tile_data=tile_data,
+            segment_data=segment_data,
+            grid_edges=grid_edges,
+            segment_edges=segment_edges
+        )
+
+        # Find path to target
+        path = self.path_planner.find_path(current_pos, target_pos)
+
+        # Store current path for visualization
+        self.current_path = path
+
+        # Update waypoint manager
+        if path:
+            self.waypoint_manager.update_path(path)
+            self.planning_reward_calculator.update_path(path)
+
+    def _save_path_visualization(self, observation: Dict[str, Any], prev_obs: Dict[str, Any]):
+        """Save visualization of current path and agent state to buffer."""
+        return
+        if not self.current_path:
+            return
+
+        # Get current frame
+        frame = self.render()
+
+        # Get current position and goal
+        current_pos = (observation['player_x'], observation['player_y'])
+        if not observation['switch_activated']:
+            goal_pos = (observation['switch_x'], observation['switch_y'])
+        else:
+            goal_pos = (observation['exit_door_x'], observation['exit_door_y'])
+
+        prev_pos = (prev_obs['player_x'], prev_obs['player_y'])
+
+        # Get current waypoint
+        current_waypoint = self.waypoint_manager.get_current_waypoint()
+
+        # Get path deviation
+        metrics = self.waypoint_manager.calculate_metrics(
+            current_pos, prev_pos)
+        path_deviation = metrics.path_deviation if metrics else 0.0
+
+        # Render path visualization
+        viz_frame = self.path_visualizer.render_path(
+            frame=frame,
+            planned_path=self.current_path,
+            current_pos=current_pos,
+            current_waypoint=current_waypoint,
+            goal_pos=goal_pos,
+            path_deviation=path_deviation,
+            distance_to_waypoint=metrics.distance_to_waypoint,
+            episode_reward=self.current_episode_reward
+        )
+
+        # Add frame to buffer
+        self.path_viz_buffer.append(viz_frame)
+
+    def _save_path_video(self):
+        """Save path visualization buffer as video."""
+        if not self.path_viz_buffer:
+            return
+
+        # # Create video filename with HMS timestamp
+        # timestamp = time.strftime("%H-%M-%S")
+        # video_path = os.path.join(
+        #     self.path_visualizer.session_dir, f'paths_{timestamp}.mp4')
+
+        # # Save video using imageio
+        # if len(self.path_viz_buffer) > 0:
+        #     imageio.mimsave(video_path, self.path_viz_buffer, fps=30)
+
+        # Clear buffer
+        self.path_viz_buffer = []
+
+    def step(self, action: int):
+        """Execute one environment step with planning and visualization."""
         # Get previous observation
         prev_obs = self._get_observation()
 
@@ -216,15 +357,32 @@ class NPlusPlus(gymnasium.Env):
         # Get new observation
         observation = self._get_observation()
 
+        # Update planning
+        self._update_planning(observation)
+
+        # Save path visualization every 2 steps
+        if self.episode_step_counter % 2 == 0:
+            self._save_path_visualization(observation, prev_obs)
+
+        self.episode_step_counter += 1
+
         # Check termination
         terminated, truncated = self._check_termination(observation)
 
-        # Process observation and calculate reward
+        # Process observation and calculate rewards
         processed_obs = self.observation_processor.process_observation(
             observation)
 
-        reward = self.reward_calculator.calculate_reward(
+        # Add planning features to observation
+        processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
+
+        # Calculate combined reward
+        movement_reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
+        planning_reward = self.planning_reward_calculator.calculate_planning_reward(
+            observation, prev_obs)
+
+        reward = movement_reward + planning_reward
 
         self.current_episode_reward += reward
 
@@ -235,17 +393,10 @@ class NPlusPlus(gymnasium.Env):
         return processed_obs, reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
-        """Reset the environment to start a new episode.
+        """Reset the environment with planning components and visualization."""
+        # Save video from previous episode if buffer is not empty
+        self._save_path_video()
 
-        This method:
-        1. Resets game state with proper key presses
-        2. Gets initial observation
-        3. Updates mine coordinates for the new level
-        4. Returns initial observation
-
-        Returns:
-            tuple: Initial observation and info dict
-        """
         # Increment episode counter
         self.episode_counter += 1
 
@@ -255,6 +406,7 @@ class NPlusPlus(gymnasium.Env):
         # Reset reward calculator and movement evaluator
         self.reward_calculator.reset()
         self.movement_evaluator.reset()
+        self.reward_calculator.update_progression_metrics()
 
         # Reset observation processor
         self.observation_processor.reset()
@@ -269,12 +421,30 @@ class NPlusPlus(gymnasium.Env):
         # load random map
         self.nplay_headless.load_random_map()
 
+        # Reset planning components
+        self.path_planner = PathPlanner()
+        self.waypoint_manager = WaypointManager(
+            path_planner=self.path_planner)
+        self.planning_reward_calculator.reset(
+            waypoint_manager=self.waypoint_manager)
+
+        # Reset episode step counter
+        self.episode_step_counter = 0
+        self.current_path = []
+
         # Get initial observation
         initial_obs = self._get_observation()
 
-        # Get processed observation
+        # Update initial planning
+        self._update_planning(initial_obs)
+
+        # Save initial planned path
+        self._save_path_visualization(initial_obs, initial_obs)
+
+        # Get processed observation with planning features
         processed_obs = self.observation_processor.process_observation(
             initial_obs)
+        processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
 
         return processed_obs, {}
 

@@ -3,19 +3,19 @@ from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
 from npp_rl.util.util import calculate_velocity
-from npp_rl.environments.constants import TIMESTEP
 
 
 class NavigationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of navigation and objective-based rewards."""
 
     # Navigation constants
-    DISTANCE_IMPROVEMENT_SCALE = 2.0  # Scale factor for distance improvements
-    CONSECUTIVE_IMPROVEMENT_BONUS = 0.2  # Bonus for consecutive improvements
-    MOMENTUM_BONUS = 2.0  # Increased momentum bonus
-    MOMENTUM_PENALTY = -0.5  # Reduced momentum penalty
-    MIN_DISTANCE_THRESHOLD = 50.0  # Threshold for close proximity rewards
-    PROXIMITY_BONUS_SCALE = 3.0  # Scale factor for proximity bonuses
+    DISTANCE_IMPROVEMENT_SCALE = 5.0  # Increased scale for distance improvements
+    # Increased bonus for consecutive improvements
+    CONSECUTIVE_IMPROVEMENT_BONUS = 0.4
+    MOMENTUM_BONUS = 3.0  # Increased momentum bonus
+    MOMENTUM_PENALTY = -0.2  # Reduced momentum penalty
+    MIN_DISTANCE_THRESHOLD = 75.0  # Increased threshold for close proximity rewards
+    PROXIMITY_BONUS_SCALE = 5.0  # Increased scale for proximity bonuses
 
     def __init__(self):
         """Initialize navigation reward calculator."""
@@ -293,17 +293,23 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         if absolute_improvement > 0:
             self.consecutive_improvements += 1
             progress_multiplier = min(
-                3.0, 1.0 + (self.consecutive_improvements * self.CONSECUTIVE_IMPROVEMENT_BONUS))
+                4.0,  # Increased max multiplier
+                1.0 + (self.consecutive_improvements * \
+                       self.CONSECUTIVE_IMPROVEMENT_BONUS)
+            )
         else:
             self.consecutive_improvements = max(
                 0, self.consecutive_improvements - 1)
             progress_multiplier = max(
-                0.5, 1.0 - (0.1 * (self.consecutive_improvements == 0)))
+                0.7,  # Increased minimum multiplier
+                # Reduced penalty
+                1.0 - (0.05 * (self.consecutive_improvements == 0))
+            )
 
         # Calculate base reward with stronger emphasis on absolute improvement
         base_reward = (
-            0.9 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) * self.DISTANCE_IMPROVEMENT_SCALE +
-            0.1 * np.sign(relative_improvement) *
+            0.95 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) * self.DISTANCE_IMPROVEMENT_SCALE +
+            0.05 * np.sign(relative_improvement) *
             np.sqrt(abs(relative_improvement))
         )
 
@@ -335,26 +341,27 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                                         prev_state: Dict[str, Any],
                                         mine_vector: Optional[Tuple[int, int, int, int]]) -> float:
         """Calculate velocity component towards nearest mine."""
-        if mine_vector is None:
-            return 0.0
+        # if mine_vector is None:
+        #     return 0.0
 
-        velocity_x, velocity_y = calculate_velocity(
-            curr_state['player_x'],
-            curr_state['player_y'],
-            prev_state['player_x'],
-            prev_state['player_y'],
-            TIMESTEP
-        )
+        # velocity_x, velocity_y = calculate_velocity(
+        #     curr_state['player_x'],
+        #     curr_state['player_y'],
+        #     prev_state['player_x'],
+        #     prev_state['player_y'],
+        #     TIMESTEP
+        # )
 
-        mine_dx = mine_vector[2] - mine_vector[0]
-        mine_dy = mine_vector[3] - mine_vector[1]
+        # mine_dx = mine_vector[2] - mine_vector[0]
+        # mine_dy = mine_vector[3] - mine_vector[1]
 
-        mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
-        if mine_dist == 0:
-            return 0.0
+        # mine_dist = np.sqrt(mine_dx**2 + mine_dy**2)
+        # if mine_dist == 0:
+        #     return 0.0
 
-        mine_dx /= mine_dist
-        mine_dy /= mine_dist
+        # mine_dx /= mine_dist
+        # mine_dy /= mine_dist
 
-        velocity_towards_mine = (velocity_x * mine_dx + velocity_y * mine_dy)
-        return velocity_towards_mine / self.MAX_VELOCITY
+        # velocity_towards_mine = (velocity_x * mine_dx + velocity_y * mine_dy)
+        # return velocity_towards_mine / self.MAX_VELOCITY
+        return 0.0

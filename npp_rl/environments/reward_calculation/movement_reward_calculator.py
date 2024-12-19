@@ -9,7 +9,7 @@ from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRe
 class MovementRewardCalculator(BaseRewardCalculator):
     """Handles calculation of movement-related rewards."""
 
-    BASE_MOVEMENT_REWARD = 0.005
+    BASE_MOVEMENT_REWARD = 0.0005
 
     def __init__(self, movement_evaluator: MovementEvaluator):
         """Initialize movement reward calculator.
@@ -48,11 +48,11 @@ class MovementRewardCalculator(BaseRewardCalculator):
 
         # Precise movement reward
         if 0 < movement_magnitude < self.FINE_DISTANCE_THRESHOLD:
-            reward += 0.05
+            reward += 0.1
 
         # Platform landing reward
         if was_in_air and is_grounded:
-            reward += 0.25
+            reward += 0.5
 
         # Movement consistency reward
         if len(self.velocity_history) >= 2:
@@ -62,7 +62,7 @@ class MovementRewardCalculator(BaseRewardCalculator):
                     np.linalg.norm(movement_vector) *
                     np.linalg.norm(prev_velocity)
                 )
-                reward += 0.15 * direction_consistency
+                reward += 0.3 * direction_consistency
 
         return reward * movement_scale
 
@@ -109,38 +109,38 @@ class MovementRewardCalculator(BaseRewardCalculator):
         # Precision rewards
         precision_score = movement_success['metrics']['precision']
         if precision_score > 0.8:
-            reward += self.BASE_MOVEMENT_REWARD * 2.0
+            reward += self.BASE_MOVEMENT_REWARD * 3.0
             self.movement_skills['precise_landing'] = min(
-                1.0, self.movement_skills['precise_landing'] + 0.1)
+                1.0, self.movement_skills['precise_landing'] + 0.15)
         elif precision_score > 0.6:
-            reward += self.BASE_MOVEMENT_REWARD * 1.5
+            reward += self.BASE_MOVEMENT_REWARD * 2.0
 
         # Landing rewards
         if prev_state['in_air'] and not curr_state['in_air']:
             landing_quality = movement_success['metrics']['landing']
             if landing_quality > 0.8:
-                reward += self.BASE_MOVEMENT_REWARD * 3.0
+                reward += self.BASE_MOVEMENT_REWARD * 4.0
                 self.movement_skills['precise_landing'] = min(
-                    1.0, self.movement_skills['precise_landing'] + 0.2)
+                    1.0, self.movement_skills['precise_landing'] + 0.25)
             elif landing_quality > 0.5:
-                reward += self.BASE_MOVEMENT_REWARD * 2.0
+                reward += self.BASE_MOVEMENT_REWARD * 2.5
 
         # Momentum rewards
         momentum_score = movement_success['metrics']['momentum']
         if momentum_score > 0.7:
-            reward += self.BASE_MOVEMENT_REWARD * 1.5
+            reward += self.BASE_MOVEMENT_REWARD * 2.0
             self.movement_skills['momentum_control'] = min(
-                1.0, self.movement_skills['momentum_control'] + 0.1)
+                1.0, self.movement_skills['momentum_control'] + 0.15)
 
-        # Apply skill-based scaling
+        # Apply skill-based scaling with increased impact
         skill_multiplier = 1.0 + (
-            self.movement_skills['precise_landing'] +
-            self.movement_skills['momentum_control']
+            self.movement_skills['precise_landing'] * 1.5 +
+            self.movement_skills['momentum_control'] * 1.5
         ) / 2.0
         reward *= skill_multiplier
 
         if movement_success['overall_success']:
-            reward += movement_scale * 1.0
+            reward += movement_scale * 1.5
 
         # Update velocity history
         self.velocity_history.append(movement_vector)

@@ -6,6 +6,7 @@ from npp_rl.environments.reward_calculation.navigation_reward_calculator import 
 from npp_rl.environments.reward_calculation.exploration_reward_calculator import ExplorationRewardCalculator
 from npp_rl.environments.reward_calculation.progression_tracker import ProgressionTracker
 from npp_rl.environments.reward_calculation.movement_reward_calculator import MovementEvaluator
+import numpy as np
 
 
 class RewardCalculator(BaseRewardCalculator):

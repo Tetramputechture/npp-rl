@@ -3,6 +3,8 @@ from collections import deque
 import cv2
 from typing import Dict, Any
 from npp_rl.environments.spatial_memory import SpatialMemoryTracker
+from npp_rl.environments.constants import MAX_VELOCITY, OBSERVATION_IMAGE_SIZE
+from npp_rl.environments.planning.path_planner import PathPlanner
 
 
 class ObservationProcessor:
@@ -10,30 +12,33 @@ class ObservationProcessor:
 
     def __init__(self, frame_stack: int = 4):
         self.frame_stack = frame_stack
-        self.image_size = 84
+        self.image_size = OBSERVATION_IMAGE_SIZE
 
-        # Store frames with fixed intervals (current frame, 5th frame back, 9th frame back, 13th frame back)
-        self.frame_intervals = [0, 4, 8, 12]  # Intervals for 4 frames
-        # Store enough frames for our intervals
+        # Initialize path planner for distance field computation
+        self.path_planner = PathPlanner()
+
+        # Store frames with fixed intervals
+        self.frame_intervals = [0, 4, 8, 12]
         self.frame_history = deque(maxlen=max(self.frame_intervals) + 1)
 
-        # Velocity normalization constant
-        self.max_velocity = 100.0  # Maximum velocity for normalization
+        # Initialize spatial memory tracker
         self.spatial_memory = SpatialMemoryTracker()
 
         # Store movement vectors for velocity calculation
-        self.movement_history = deque(maxlen=16)  # Store recent movements
+        self.movement_history = deque(maxlen=16)
         self.prev_frame = None
 
-        # Initialize goal maps
-        self.switch_map = np.zeros(
+        # Initialize observation channels
+        self.distance_field = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
-        self.exit_map = np.zeros(
+        self.path_visualization = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
-
-        # Initialize player state channels
-        self.player_state = np.zeros(
-            (self.image_size, self.image_size, 6), dtype=np.float32)
+        self.clearance_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.static_obstacles = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+        self.dynamic_obstacles = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale, resize, normalize, and extract motion features"""
@@ -52,10 +57,8 @@ class ObservationProcessor:
         # Enhance contrast
         frame = cv2.equalizeHist(frame)  # type: ignore
 
-        # Normalize frame
-        frame = frame.astype(np.float32) / 255.0
-
-        return frame
+        # Keep frame in uint8 range [0, 255]
+        return frame.astype(np.uint8)
 
     def get_distance_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """Calculate normalized distances to objectives"""
@@ -104,21 +107,6 @@ class ObservationProcessor:
 
         return features.astype(np.float32)
 
-    def create_goal_heatmap(self, x: float, y: float, sigma: float = 5.0) -> np.ndarray:
-        """Create a Gaussian heatmap centered on a goal location."""
-        x_grid = np.linspace(0, self.image_size-1, self.image_size)
-        y_grid = np.linspace(0, self.image_size-1, self.image_size)
-        xx, yy = np.meshgrid(x_grid, y_grid)
-
-        # Scale coordinates to image size
-        x_scaled = x
-        y_scaled = y
-
-        # Create Gaussian heatmap with tighter sigma since we're using actual coordinates
-        heatmap = np.exp(-((xx - x_scaled) ** 2 +
-                         (yy - y_scaled) ** 2) / (2 * sigma ** 2))
-        return heatmap.astype(np.float32)
-
     def get_player_state_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """Extract and normalize player position and velocity features"""
         # Get player position and normalize to [0,1]
@@ -126,8 +114,8 @@ class ObservationProcessor:
         player_y = obs.get('player_y', 0) / obs.get('level_height', 1)
 
         # Get player velocity and normalize to [0, 1]
-        player_vx = np.clip(obs.get('player_vx', 0) / self.max_velocity, -1, 1)
-        player_vy = np.clip(obs.get('player_vy', 0) / self.max_velocity, -1, 1)
+        player_vx = np.clip(obs.get('player_vx', 0) / MAX_VELOCITY, -1, 1)
+        player_vy = np.clip(obs.get('player_vy', 0) / MAX_VELOCITY, -1, 1)
         player_vx = (player_vx + 1) / 2
         player_vy = (player_vy + 1) / 2
 
@@ -137,20 +125,157 @@ class ObservationProcessor:
         # Get walled status (0 or 1)
         walled = float(obs.get('walled', False))
 
-        # Create feature maps for each value
-        player_state = np.zeros(
-            (self.image_size, self.image_size, 6), dtype=np.float32)
-        player_state[..., 0] = player_x  # Normalized X position
-        player_state[..., 1] = player_y  # Normalized Y position
-        player_state[..., 2] = player_vx  # Normalized X velocity
-        player_state[..., 3] = player_vy  # Normalized Y velocity
-        player_state[..., 4] = in_air     # In air status
-        player_state[..., 5] = walled     # Walled status
+        # Return as 1D array
+        return np.array([
+            player_x, player_y,
+            player_vx, player_vy,
+            in_air, walled
+        ], dtype=np.float32)
 
-        return player_state
+    def get_goal_features(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Extract goal-related features"""
+        # Get player position
+        player_x = obs.get('player_x', 0)
+        player_y = obs.get('player_y', 0)
 
-    def process_observation(self, obs: Dict[str, Any]) -> np.ndarray:
-        """Process full observation with temporal features"""
+        # Calculate normalized distances
+        switch_x = obs.get('switch_x', 0)
+        switch_y = obs.get('switch_y', 0)
+        exit_x = obs.get('exit_door_x', 0)
+        exit_y = obs.get('exit_door_y', 0)
+
+        # Calculate Euclidean distances and normalize by diagonal
+        level_diagonal = np.sqrt(
+            obs.get('level_width', 1)**2 + obs.get('level_height', 1)**2)
+
+        switch_dist = np.sqrt((player_x - switch_x)**2 +
+                              (player_y - switch_y)**2) / level_diagonal
+        exit_dist = np.sqrt((player_x - exit_x)**2 +
+                            (player_y - exit_y)**2) / level_diagonal
+
+        # Get switch activation status
+        switch_activated = float(obs.get('switch_activated', False))
+
+        return np.array([switch_dist, exit_dist, switch_activated], dtype=np.float32)
+
+    def get_pathfinding_features(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Generate pathfinding-related observation channels."""
+        # Update path planner with current game state
+        tile_data = obs.get('tile_data', {})
+        segment_data = obs.get('segment_data', {})
+        grid_edges = obs.get('grid_edges', {})
+        segment_edges = obs.get('segment_edges', {})
+
+        self.path_planner.update_collision_grid(
+            tile_data=tile_data,
+            segment_data=segment_data,
+            grid_edges=grid_edges,
+            segment_edges=segment_edges
+        )
+
+        # Get current position and goal
+        current_pos = (obs.get('player_x', 0), obs.get('player_y', 0))
+        goal_pos = (obs.get('switch_x', 0), obs.get('switch_y', 0)) if not obs.get(
+            'switch_activated', False) else (obs.get('exit_door_x', 0), obs.get('exit_door_y', 0))
+
+        # Compute optimal path
+        path = self.path_planner.find_path(current_pos, goal_pos)
+
+        # Generate distance field (normalized distances to goal along optimal path)
+        self.distance_field = self._compute_distance_field(
+            current_pos, goal_pos, path)
+
+        # Generate path visualization (gaussian blur around path)
+        self.path_visualization = self._visualize_path(path)
+
+        # Generate clearance map (distance to nearest obstacle)
+        self.clearance_map = self._compute_clearance_map(
+            tile_data, segment_data)
+
+        return np.stack([
+            self.distance_field,
+            self.path_visualization,
+            self.clearance_map
+        ], axis=-1)
+
+    def get_collision_features(self, obs: Dict[str, Any]) -> np.ndarray:
+        """Generate collision-related observation channels."""
+        # Process static obstacles (tiles, segments)
+        tile_data = obs.get('tile_data', {})
+        segment_data = obs.get('segment_data', {})
+
+        self.static_obstacles = self._process_static_obstacles(
+            tile_data, segment_data)
+
+        # Since we're not supporting dynamic objects, just return static obstacles
+        return np.stack([
+            self.static_obstacles,
+            # Empty dynamic obstacles channel
+            np.zeros_like(self.static_obstacles)
+        ], axis=-1)
+
+    def _compute_distance_field(self, current_pos: tuple, goal_pos: tuple, path: list) -> np.ndarray:
+        """Compute normalized distance field to goal along optimal path."""
+        distance_field = np.ones(
+            (self.image_size, self.image_size), dtype=np.float32)
+
+        if path:
+            # Normalize coordinates to observation size
+            path = [(int(x * self.image_size / 1032),
+                     int(y * self.image_size / 576)) for x, y in path]
+
+            # Create distance field using distance transform
+            path_image = np.zeros(
+                (self.image_size, self.image_size), dtype=np.uint8)
+            for x, y in path:
+                if 0 <= x < self.image_size and 0 <= y < self.image_size:
+                    path_image[y, x] = 255
+
+            distance_field = cv2.distanceTransform(
+                255 - path_image, cv2.DIST_L2, 3)
+            distance_field = 1 - (distance_field / distance_field.max())
+
+        return distance_field
+
+    def _visualize_path(self, path: list) -> np.ndarray:
+        """Create a visualization of the optimal path."""
+        path_viz = np.zeros(
+            (self.image_size, self.image_size), dtype=np.float32)
+
+        if path:
+            # Normalize coordinates
+            path = [(int(x * self.image_size / 1032),
+                     int(y * self.image_size / 576)) for x, y in path]
+
+            # Draw path with gaussian blur
+            for i in range(len(path)-1):
+                pt1 = path[i]
+                pt2 = path[i+1]
+                cv2.line(path_viz, pt1, pt2, 1, 2)
+
+            path_viz = cv2.GaussianBlur(path_viz, (5, 5), 1.0)
+
+        return path_viz
+
+    def _compute_clearance_map(self, tile_data: dict, segment_data: dict) -> np.ndarray:
+        """Compute clearance map showing distance to nearest obstacle."""
+        obstacle_map = np.zeros(
+            (self.image_size, self.image_size), dtype=np.uint8)
+
+        # Mark obstacles
+        for (x, y), tile_id in tile_data.items():
+            if tile_id == 1:  # Solid tile
+                x = int(x * self.image_size / 37)
+                y = int(y * self.image_size / 21)
+                if 0 <= x < self.image_size and 0 <= y < self.image_size:
+                    obstacle_map[y:y+2, x:x+2] = 255
+
+        # Compute distance transform
+        clearance = cv2.distanceTransform(255 - obstacle_map, cv2.DIST_L2, 3)
+        return clearance / clearance.max()
+
+    def process_observation(self, obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
+        """Process full observation including pathfinding and collision features."""
         # Process current frame
         frame = self.preprocess_frame(obs['screen'])
 
@@ -168,50 +293,95 @@ class ObservationProcessor:
                 historical_frame = self.frame_history[-interval-1]
             else:
                 historical_frame = frame
+            # Already in uint8 range [0, 255], just add channel dimension
             stacked_frames.append(historical_frame[..., np.newaxis])
 
-        # Get numerical features (spatial memory)
-        features = self.get_numerical_features(obs)
+        # Get numerical features
+        memory_features = self.get_numerical_features(obs)
+        pathfinding_features = self.get_pathfinding_features(obs)
+        collision_features = self.get_collision_features(obs)
+
+        # Convert memory features to uint8
+        memory_features = (memory_features * 255).astype(np.uint8)
+        pathfinding_features = (pathfinding_features * 255).astype(np.uint8)
+        collision_features = (collision_features * 255).astype(np.uint8)
 
         # Get player state features
         player_state = self.get_player_state_features(obs)
 
-        # Create goal heatmaps - coordinates are already in 84x84 space
-        if not obs['switch_activated']:
-            # When switch is not activated, make switch location the goal
-            self.switch_map = self.create_goal_heatmap(
-                obs['switch_x'], obs['switch_y'])
-            self.exit_map = np.zeros_like(self.switch_map)  # Clear exit map
-        else:
-            # When switch is activated, make exit door the goal
-            self.switch_map = np.zeros_like(self.exit_map)  # Clear switch map
-            self.exit_map = self.create_goal_heatmap(
-                obs['exit_door_x'], obs['exit_door_y'])
+        # Get goal features
+        goal_features = self.get_goal_features(obs)
 
-        # Add hazard and goal channels
-        switch_channel = self.switch_map[..., np.newaxis]
-        exit_channel = self.exit_map[..., np.newaxis]
-
-        # Combine everything
-        final_observation = np.concatenate(
-            stacked_frames + [features, player_state,
-                              switch_channel, exit_channel],
+        # Combine all visual features
+        visual_observation = np.concatenate(
+            stacked_frames +
+            [memory_features] +
+            [pathfinding_features] +
+            [collision_features],
             axis=-1
         )
 
-        # Assert our values are in the correct range
-        assert np.all(final_observation >= 0) and np.all(
-            final_observation <= 1), "Observation values are out of range"
-
-        return np.clip(final_observation, 0, 1).astype(np.float32)
+        return {
+            'visual': visual_observation,  # Already uint8 in [0, 255] range
+            'player_state': player_state.astype(np.float32),
+            'goal_features': goal_features.astype(np.float32)
+        }
 
     def reset(self) -> None:
-        """Reset processor state"""
+        """Reset processor state."""
         self.frame_history.clear()
         self.movement_history.clear()
         self.spatial_memory.reset()
         self.prev_frame = None
-        self.switch_map = np.zeros(
+
+        # Reset pathfinding and collision features
+        self.distance_field.fill(0)
+        self.path_visualization.fill(0)
+        self.clearance_map.fill(0)
+        self.static_obstacles.fill(0)
+        self.dynamic_obstacles.fill(0)
+
+    def _process_static_obstacles(self, tile_data: dict, segment_data: dict) -> np.ndarray:
+        """Process static obstacles (tiles and segments) into an obstacle map.
+
+        Args:
+            tile_data: Dictionary mapping (x,y) coordinates to tile IDs
+            segment_data: Dictionary mapping (x,y) coordinates to list of segments
+
+        Returns:
+            np.ndarray: Binary obstacle map of shape (image_size, image_size)
+        """
+        # Initialize empty obstacle map
+        obstacle_map = np.zeros(
             (self.image_size, self.image_size), dtype=np.float32)
-        self.exit_map = np.zeros(
-            (self.image_size, self.image_size), dtype=np.float32)
+
+        # Scale factors to convert from tile/segment coordinates to observation size
+        scale_x = self.image_size / 42  # 42 tiles per row
+        scale_y = self.image_size / 23  # 23 tiles per column
+
+        # Process tiles
+        for (x, y), tile_id in tile_data.items():
+            if tile_id == 1:  # Solid tile
+                # Convert tile coordinates to pixel coordinates in observation space
+                x_start = int(x * scale_x)
+                y_start = int(y * scale_y)
+                x_end = int((x + 1) * scale_x)
+                y_end = int((y + 1) * scale_y)
+
+                # Mark tile area as obstacle
+                obstacle_map[y_start:y_end, x_start:x_end] = 1.0
+
+        # Process segments
+        for (x, y), segments in segment_data.items():
+            if segments:  # If there are any segments in this cell
+                # Convert cell coordinates to pixel coordinates
+                x_start = int(x * scale_x)
+                y_start = int(y * scale_y)
+                x_end = int((x + 1) * scale_x)
+                y_end = int((y + 1) * scale_y)
+
+                # Mark segment area as obstacle
+                # Note: This is a simplification - in reality segments could be drawn more precisely
+                obstacle_map[y_start:y_end, x_start:x_end] = 1.0
+
+        return obstacle_map
