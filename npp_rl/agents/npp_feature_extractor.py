@@ -7,86 +7,109 @@ from npp_rl.environments.constants import TEMPORAL_FRAMES
 torch.autograd.set_detect_anomaly(True)
 
 
-class NPPFeatureExtractor(BaseFeaturesExtractor):
-    """Feature extractor using Nature CNN for visual processing and MLP for player state."""
+class ResidualBlock(nn.Module):
+    """Residual block used in IMPALA CNN architecture."""
 
-    def __init__(self, observation_space: gymnasium.spaces.Dict, features_dim: int = 512):
+    def __init__(self, depth):
+        super().__init__()
+        self.conv1 = nn.Conv2d(depth, depth, 3, padding=1)
+        self.conv2 = nn.Conv2d(depth, depth, 3, padding=1)
+
+    def forward(self, x):
+        out = nn.functional.relu(x)
+        out = self.conv1(out)
+        out = nn.functional.relu(out)
+        out = self.conv2(out)
+        return out + x
+
+
+class ConvSequence(nn.Module):
+    """Convolutional sequence with max pooling and residual blocks."""
+
+    def __init__(self, input_depth, output_depth):
+        super().__init__()
+        self.conv = nn.Conv2d(input_depth, output_depth, 3, padding=1)
+        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.res1 = ResidualBlock(output_depth)
+        self.res2 = ResidualBlock(output_depth)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.max_pool(x)
+        x = self.res1(x)
+        x = self.res2(x)
+        return x
+
+
+class ImpalaCNN(nn.Module):
+    """IMPALA CNN architecture."""
+
+    def __init__(self, input_channels, depths=[16, 32, 32]):
+        super().__init__()
+        self.depths = depths
+
+        # Build conv sequences
+        self.conv_sequences = nn.ModuleList([
+            ConvSequence(
+                input_channels if i == 0 else depths[i-1],
+                depth
+            ) for i, depth in enumerate(depths)
+        ])
+
+        # Final dense layer
+        # 32 is the last depth, 11x11 is the spatial dimension after conv sequences
+        self.final_dense = nn.Linear(32 * 11 * 11, 256)
+
+    def forward(self, x):
+        # Initial scaling
+        x = x / 255.0
+
+        # Process through conv sequences
+        for conv_sequence in self.conv_sequences:
+            x = conv_sequence(x)
+
+        # Flatten and process through dense layer
+        x = torch.flatten(x, start_dim=1)
+        x = nn.functional.relu(x)
+        x = self.final_dense(x)
+        x = nn.functional.relu(x)
+
+        return x
+
+
+class NPPFeatureExtractor(BaseFeaturesExtractor):
+    """Feature extractor using IMPALA CNN for visual processing."""
+
+    def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
 
         # Input channels configuration
         self.temporal_frames = TEMPORAL_FRAMES
 
-        # Nature CNN for visual processing (as per OpenAI's DQN paper)
-        self.nature_cnn = nn.Sequential(
-            # Layer 1: 32 8x8 filters with stride 4
-            nn.Conv2d(self.temporal_frames, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-
-            # Layer 2: 64 4x4 filters with stride 2
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-
-            # Layer 3: 64 3x3 filters with stride 1
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-
-            nn.Flatten(),
+        # IMPALA CNN for visual processing
+        self.impala_cnn = ImpalaCNN(
+            input_channels=self.temporal_frames,
+            depths=[16, 32, 32]  # As per IMPALA paper
         )
 
-        # Calculate the size of flattened features from Nature CNN
-        # We'll do a forward pass with a dummy tensor to get the size
-        with torch.no_grad():
-            # Nature CNN expects 84x84 input
-            dummy_input = torch.zeros(1, self.temporal_frames, 84, 84)
-            n_flatten = self.nature_cnn(dummy_input).shape[1]
-
-        # Dense layer after CNN
-        self.visual_net = nn.Sequential(
-            nn.Linear(n_flatten, 512),
-            nn.ReLU(),
-            nn.Linear(512, 192),
-            nn.ReLU()
-        )
-
-        # Player state MLP branch
-        self.player_state_mlp = nn.Sequential(
-            nn.Linear(6, 32),
-            nn.ReLU(),
-            nn.Linear(32, 64),
-            nn.ReLU()
-        )
-
-        # Final integration layer
-        combined_features = 192 + 64
-        self.integration = nn.Sequential(
-            nn.Linear(combined_features, self.features_dim),
+        # Final layer to match features_dim
+        self.final_layer = nn.Sequential(
+            nn.Linear(256, self.features_dim),
             nn.ReLU(),
             nn.Linear(self.features_dim, self.features_dim)
         )
 
-    def forward(self, observations: dict) -> torch.Tensor:
-        # Process frame stack
-        visual_input = observations['visual'].float() / 255.0
+    def forward(self, observations) -> torch.Tensor:
+        # Process frame stack - observations is already (batch_size, height, width, channels)
+        visual_input = observations.float()
+
+        # Permute from (batch_size, height, width, channels) to (batch_size, channels, height, width)
         visual_input = visual_input.permute(0, 3, 1, 2)
 
-        # Ensure input is the right size (84x84) as per Nature DQN
-        if visual_input.shape[-1] != 84:
-            visual_input = nn.functional.interpolate(
-                visual_input, size=(84, 84), mode='bilinear', align_corners=False)
+        # Process through IMPALA CNN
+        cnn_features = self.impala_cnn(visual_input)
 
-        # Process through Nature CNN
-        cnn_features = self.nature_cnn(visual_input)
-        visual_features = self.visual_net(cnn_features)
+        # Process through final layer
+        output = self.final_layer(cnn_features)
 
-        # Process player state features
-        player_features = self.player_state_mlp(observations['player_state'])
-
-        # Combine all features
-        combined = torch.cat([
-            visual_features,
-            player_features
-        ], dim=1)
-
-        # Final integration
-        output = self.integration(combined)
         return output

@@ -12,9 +12,11 @@ from npp_rl.environments.observation_processor import ObservationProcessor
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
 import uuid
+import random
 from npp_rl.environments.constants import (
     OBSERVATION_IMAGE_SIZE,
-    TOTAL_OBSERVATION_CHANNELS
+    NUM_TEMPORAL_FRAMES,
+    NUM_PLAYER_STATE_CHANNELS
 )
 from npp_rl.environments.visualization.path_visualizer import PathVisualizer
 import imageio
@@ -39,18 +41,13 @@ class NPlusPlus(gymnasium.Env):
     """
     metadata = {'render.modes': ['human', 'rgb_array']}
 
-    def __init__(self, frame_stack: int = 4, render_mode: str = 'rgb_array'):
-        """Initialize the environment.
-
-        Args:
-            frame_stack (int, optional): Number of frames to stack. Defaults to 4.
-        """
+    def __init__(self, render_mode: str = 'rgb_array'):
+        """Initialize the environment."""
         super().__init__()
 
         self.nplay_headless = NPlayHeadless(render_mode=render_mode)
         self.nplay_headless.load_random_map(seed=42)
 
-        self.frame_stack = frame_stack
         self.render_mode = render_mode
 
         # Initialize planning components
@@ -67,28 +64,41 @@ class NPlusPlus(gymnasium.Env):
             movement_evaluator=self.movement_evaluator)
 
         # Initialize observation processing
-        self.observation_processor = ObservationProcessor(
-            frame_stack=frame_stack)
+        self.observation_processor = ObservationProcessor()
 
         # Initialize action space
         self.action_space = discrete.Discrete(6)
 
+        # Initialize observation space as a box for visual features
+        # self.observation_space = box.Box(
+        #     low=0,
+        #     high=255,
+        #     shape=(
+        #         OBSERVATION_IMAGE_SIZE,
+        #         OBSERVATION_IMAGE_SIZE,
+        #         NUM_TEMPORAL_FRAMES
+        #     ),
+        #     dtype=np.uint8
+        # )
+
         # Initialize observation space as a Dict space with all features
         self.observation_space = gymnasium.spaces.Dict({
+            # Frame stack of 4 grayscale images
             'visual': box.Box(
                 low=0,
                 high=255,
                 shape=(
                     OBSERVATION_IMAGE_SIZE,
                     OBSERVATION_IMAGE_SIZE,
-                    TOTAL_OBSERVATION_CHANNELS
+                    NUM_TEMPORAL_FRAMES
                 ),
                 dtype=np.uint8
             ),
             'player_state': box.Box(
                 low=0,
                 high=1,
-                shape=(6,),  # pos_x, pos_y, vel_x, vel_y, in_air, walled
+                # pos_x, pos_y, vel_x, vel_y, in_air, walled
+                shape=(NUM_PLAYER_STATE_CHANNELS,),
                 dtype=np.float32
             ),
             'goal_features': box.Box(
@@ -97,13 +107,6 @@ class NPlusPlus(gymnasium.Env):
                 shape=(3,),  # switch_dist, exit_dist, switch_activated
                 dtype=np.float32
             ),
-            'planning_features': box.Box(
-                low=0,
-                high=1,
-                # distance_to_waypoint, progress_to_waypoint, path_deviation, consecutive_waypoints
-                shape=(4,),
-                dtype=np.float32
-            )
         })
 
         # Initialize position log folder
@@ -350,39 +353,41 @@ class NPlusPlus(gymnasium.Env):
         self.position_log_file_string += f'{player_x},{player_y}\n'
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
-        # Execute action
-        action_hoz, action_jump = self._actions_to_execute(action)
-        self.nplay_headless.tick(action_hoz, action_jump)
+        # Randomly choose number of frames to repeat action (2-4)
+        num_repeat_frames = random.randint(2, 4)
 
-        # Get new observation
+        # Execute action for the chosen number of frames
+        action_hoz, action_jump = self._actions_to_execute(action)
+
+        terminated = False
+        truncated = False
+
+        # Execute the same action for num_repeat_frames
+        for _ in range(num_repeat_frames):
+            self.nplay_headless.tick(action_hoz, action_jump)
+
+            # Check termination after each frame
+            curr_obs = self._get_observation()
+            terminated, truncated = self._check_termination(curr_obs)
+
+            # Break early if episode ended
+            if terminated or truncated:
+                break
+
+        # Get final observation after all repeated frames
         observation = self._get_observation()
 
-        # Update planning
-        self._update_planning(observation)
-
-        # Save path visualization every 2 steps
-        if self.episode_step_counter % 2 == 0:
-            self._save_path_visualization(observation, prev_obs)
-
         self.episode_step_counter += 1
-
-        # Check termination
-        terminated, truncated = self._check_termination(observation)
 
         # Process observation and calculate rewards
         processed_obs = self.observation_processor.process_observation(
             observation)
 
-        # Add planning features to observation
-        processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
-
         # Calculate combined reward
         movement_reward = self.reward_calculator.calculate_reward(
             observation, prev_obs, action)
-        planning_reward = self.planning_reward_calculator.calculate_planning_reward(
-            observation, prev_obs)
 
-        reward = movement_reward + planning_reward
+        reward = movement_reward
 
         self.current_episode_reward += reward
 
@@ -406,7 +411,7 @@ class NPlusPlus(gymnasium.Env):
         # Reset reward calculator and movement evaluator
         self.reward_calculator.reset()
         self.movement_evaluator.reset()
-        self.reward_calculator.update_progression_metrics()
+        # self.reward_calculator.update_progression_metrics()
 
         # Reset observation processor
         self.observation_processor.reset()
@@ -436,15 +441,15 @@ class NPlusPlus(gymnasium.Env):
         initial_obs = self._get_observation()
 
         # Update initial planning
-        self._update_planning(initial_obs)
+        # self._update_planning(initial_obs)
 
         # Save initial planned path
-        self._save_path_visualization(initial_obs, initial_obs)
+        # self._save_path_visualization(initial_obs, initial_obs)
 
         # Get processed observation with planning features
         processed_obs = self.observation_processor.process_observation(
             initial_obs)
-        processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
+        # processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
 
         return processed_obs, {}
 

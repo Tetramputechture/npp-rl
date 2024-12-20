@@ -68,32 +68,40 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         end_fraction=0.85
     )
 
-    policy_kwargs = dict(
-        features_extractor_class=NPPFeatureExtractor,
-        net_arch=dict(
-            pi=[256, 128, 64],
-            vf=[256, 128, 64]
-        ),
-        normalize_images=True,
-        activation_fn=nn.SiLU,
-    )
+    # Lets do what we can with Stable Baselines 3's own MultiInputPolicy/feature extractor
+    # policy_kwargs = dict(
+    #     features_extractor_class=NPPFeatureExtractor,
+    #     net_arch=dict(
+    #         pi=[256, 128, 64],
+    #         vf=[256, 128, 64]
+    #     ),
+    #     normalize_images=True,
+    #     activation_fn=nn.ReLU,
+    # )
 
     # Reduced batch size for lower memory usage
     batch_size = min(512, n_steps // 4)
 
     model = PPO(
-        policy="MultiInputPolicy",
-        policy_kwargs=policy_kwargs,
+        # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
+        # Right now, we're trying a simple approach where we use MultiInputPolicy with no policy_kwargs,
+        # which does the following when processing the observation space:
+        # If input is an image (automatically detected, see common.preprocessing.is_image_space),
+        #   process image with Nature Atari CNN network and output a latent vector of size 256.
+        # If input is not an image, flatten it (no layers).
+        # Concatenate all previous vectors into one long vector and pass it to policy.
+        policy="MultiInputPolicy",  # Expects a Dict, with a Box and a Dict
+        # policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
         n_steps=n_steps,
         batch_size=batch_size,
-        n_epochs=5,
+        n_epochs=6,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
         clip_range_vf=0.2,
-        ent_coef=0.01,
+        ent_coef=0.005,  # Should be between 0.001 and 0.01
         vf_coef=0.75,
         max_grad_norm=0.7,
         normalize_advantage=True,
@@ -145,7 +153,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
         log_dir=log_dir,
         n_steps=n_steps,
         min_ent_coef=0.0005,
-        max_ent_coef=0.01
+        max_ent_coef=0.005
     )
 
     # Train the model
@@ -279,7 +287,7 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, n_steps=2048, total_timesteps=1000000, load_model_path=load_model_path)
+            wrapped_env, log_dir, n_steps=2048, total_timesteps=4000000, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")

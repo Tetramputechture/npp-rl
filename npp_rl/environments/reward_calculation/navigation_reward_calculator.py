@@ -9,13 +9,14 @@ class NavigationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of navigation and objective-based rewards."""
 
     # Navigation constants
-    DISTANCE_IMPROVEMENT_SCALE = 5.0  # Increased scale for distance improvements
+    # Increased scale for distance improvements/penalties
+    DISTANCE_IMPROVEMENT_SCALE = 0.15
     # Increased bonus for consecutive improvements
-    CONSECUTIVE_IMPROVEMENT_BONUS = 0.4
-    MOMENTUM_BONUS = 3.0  # Increased momentum bonus
-    MOMENTUM_PENALTY = -0.2  # Reduced momentum penalty
-    MIN_DISTANCE_THRESHOLD = 75.0  # Increased threshold for close proximity rewards
-    PROXIMITY_BONUS_SCALE = 5.0  # Increased scale for proximity bonuses
+    CONSECUTIVE_IMPROVEMENT_BONUS = 0.05
+    MOMENTUM_BONUS = 0.05  # Increased momentum bonus
+    MOMENTUM_PENALTY = -0.1  # Increased base momentum penalty
+    MIN_DISTANCE_THRESHOLD = 50.0  # Increased threshold for close proximity rewards
+    PROXIMITY_BONUS_SCALE = 0.5  # Increased scale for proximity bonuses
 
     def __init__(self):
         """Initialize navigation reward calculator."""
@@ -66,17 +67,17 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 progress = 1.0 - (distance_to_switch /
                                   self.episode_start_switch_distance)
                 # Increased progress bonus
-                progress_bonus = 3.0 * max(0, progress)  # Increased from 2.0
+                progress_bonus = max(0, progress)
             else:
                 progress_bonus = 0.0
 
             # Enhanced exponential potential with progress bonus
-            switch_potential = (8.0 * np.exp(-distance_to_switch / distance_scale) +
-                                progress_bonus)  # Increased base potential
+            switch_potential = (
+                2.0 * np.exp(-distance_to_switch / distance_scale) + progress_bonus)
 
             # Larger bonus for new best distances
             if distance_to_switch < self.best_switch_distance:
-                switch_potential += 8.0  # Increased from 5.0
+                switch_potential += 2.0
                 self.best_switch_distance = distance_to_switch
 
             # Add proximity bonus for being close to switch
@@ -96,17 +97,17 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 progress = 1.0 - (distance_to_exit /
                                   self.episode_start_exit_distance)
                 # Larger bonus for exit progress
-                progress_bonus = 3.0 * max(0, progress)  # Increased from 2.0
+                progress_bonus = max(0, progress)
             else:
                 progress_bonus = 0.0
 
             # Enhanced exponential potential with progress bonus
-            exit_potential = (8.0 * np.exp(-distance_to_exit / distance_scale) +
-                              8.0 + progress_bonus)  # Increased base potentials
+            exit_potential = (
+                2.0 * np.exp(-distance_to_exit / distance_scale) + progress_bonus)
 
             # Larger bonus for new best distances
             if distance_to_exit < self.best_exit_distance:
-                exit_potential += 8.0  # Increased from 5.0
+                exit_potential += 2.0
                 self.best_exit_distance = distance_to_exit
 
             # Add proximity bonus for being close to exit
@@ -119,8 +120,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
 
     def calculate_navigation_reward(self,
                                     curr_state: Dict[str, Any],
-                                    prev_state: Dict[str, Any],
-                                    navigation_scale: float) -> Tuple[float, bool]:
+                                    prev_state: Dict[str, Any]) -> Tuple[float, bool]:
         """Calculate comprehensive navigation reward with enhanced shaping."""
         self.total_steps += 1
         reward = 0.0
@@ -152,7 +152,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_switch,
                 self.prev_distance_to_switch,
-                navigation_scale * progress_scale,
+                progress_scale,
                 curr_state, prev_state
             )
             reward += navigation_reward
@@ -161,7 +161,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             if curr_distance_to_switch < self.min_distance_to_switch:
                 improvement = self.min_distance_to_switch - curr_distance_to_switch
                 if not self.first_switch_distance_update:
-                    reward += improvement * navigation_scale * progress_scale
+                    reward += improvement * progress_scale
                 self.min_distance_to_switch = curr_distance_to_switch
                 self.first_switch_distance_update = False
 
@@ -186,7 +186,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             navigation_reward = self.evaluate_navigation_quality(
                 curr_distance_to_exit,
                 self.prev_distance_to_exit,
-                navigation_scale * progress_scale,
+                progress_scale,
                 curr_state, prev_state
             )
             reward += navigation_reward
@@ -195,7 +195,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             if curr_distance_to_exit < self.min_distance_to_exit:
                 improvement = self.min_distance_to_exit - curr_distance_to_exit
                 if not self.first_exit_distance_update:
-                    reward += improvement * navigation_scale * progress_scale
+                    reward += improvement * progress_scale
                 self.min_distance_to_exit = curr_distance_to_exit
                 self.first_exit_distance_update = False
 
@@ -205,16 +205,6 @@ class NavigationRewardCalculator(BaseRewardCalculator):
             shaping_reward = self.gamma * current_potential - self.prev_potential
             reward += shaping_reward
         self.prev_potential = current_potential
-
-        # Add small survival reward that scales with progress
-        if not curr_state['switch_activated']:
-            progress = 1.0 - (curr_distance_to_switch /
-                              self.episode_start_switch_distance)
-        else:
-            progress = 1.0 - (curr_distance_to_exit /
-                              self.episode_start_exit_distance)
-        survival_reward = 0.05 * (1.0 + max(0, progress))
-        reward += survival_reward
 
         # Update previous distances
         self.prev_distance_to_switch = curr_distance_to_switch
@@ -293,39 +283,50 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         if absolute_improvement > 0:
             self.consecutive_improvements += 1
             progress_multiplier = min(
-                4.0,  # Increased max multiplier
+                1.0,  # Increased max multiplier
                 1.0 + (self.consecutive_improvements * \
                        self.CONSECUTIVE_IMPROVEMENT_BONUS)
             )
         else:
-            self.consecutive_improvements = max(
-                0, self.consecutive_improvements - 1)
+            # Increase penalty for moving away from objective
+            self.consecutive_improvements = 0
             progress_multiplier = max(
-                0.7,  # Increased minimum multiplier
-                # Reduced penalty
-                1.0 - (0.05 * (self.consecutive_improvements == 0))
+                0.5,  # Decreased minimum multiplier for stronger penalties
+                # Scale penalty with magnitude of movement away
+                1.0 - (0.15 * abs(relative_improvement))
             )
 
         # Calculate base reward with stronger emphasis on absolute improvement
+        # Increase penalty for negative improvements
         base_reward = (
-            0.95 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) * self.DISTANCE_IMPROVEMENT_SCALE +
-            0.05 * np.sign(relative_improvement) *
+            0.95 * np.sign(absolute_improvement) * np.sqrt(abs(absolute_improvement)) * (
+                self.DISTANCE_IMPROVEMENT_SCALE if absolute_improvement >= 0
+                else self.DISTANCE_IMPROVEMENT_SCALE * 2.0  # Double penalty for moving away
+            ) +
+            0.05 * np.sign(relative_improvement) * \
             np.sqrt(abs(relative_improvement))
         )
 
-        # Enhanced momentum bonus for consistent progress
+        # Enhanced momentum bonus/penalty for consistent movement
         momentum_bonus = 0.0
         if self.prev_improvement is not None:
             if np.sign(relative_improvement) == np.sign(self.prev_improvement):
-                momentum_bonus = self.MOMENTUM_BONUS * progress_multiplier
+                if relative_improvement > 0:
+                    momentum_bonus = self.MOMENTUM_BONUS * progress_multiplier
+                else:
+                    # Increased penalty for consistently moving away
+                    momentum_bonus = self.MOMENTUM_PENALTY * 1.5
             else:
                 momentum_bonus = self.MOMENTUM_PENALTY
 
-        # Add proximity bonus for being close to objective
+        # Add proximity bonus/penalty
         proximity_bonus = 0.0
         if curr_distance < self.MIN_DISTANCE_THRESHOLD:
             proximity_bonus = self.PROXIMITY_BONUS_SCALE * \
                 (1.0 - curr_distance / self.MIN_DISTANCE_THRESHOLD)
+        elif curr_distance > prev_distance:
+            # Add extra penalty for moving away when already far
+            proximity_bonus = -self.PROXIMITY_BONUS_SCALE * 0.5
 
         # Store current improvement
         self.prev_improvement = relative_improvement

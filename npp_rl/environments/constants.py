@@ -15,10 +15,17 @@ TOTAL_OBSERVATION_CHANNELS = NUM_TEMPORAL_FRAMES + \
     NUM_NUMERICAL_FEATURES + NUM_PLAYER_STATE_CHANNELS + NUM_GOAL_CHANNELS
 
 # Observation image size
-OBSERVATION_IMAGE_SIZE = 84
+OBSERVATION_IMAGE_SIZE = 120
 
 # Frame intervals for temporal stacking
 FRAME_INTERVALS = [0, 4, 8, 12]
+
+# Frame stack count
+FRAME_STACK_COUNT = 4
+
+# Level width and height for normalization
+LEVEL_WIDTH = 1032.0
+LEVEL_HEIGHT = 576.0
 
 # Maximum velocity for normalization
 MAX_VELOCITY = 20.0
