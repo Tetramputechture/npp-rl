@@ -1,4 +1,5 @@
-from npp_rl.agents.npp_agent_ppo import start_training
+# from npp_rl.agents.npp_agent_ppo import start_training
+from npp_rl.agents.npp_agent_recurrent_ppo import start_training
 
 """
 Main entry point for the NinjAI application.

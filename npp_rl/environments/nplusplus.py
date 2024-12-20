@@ -14,12 +14,13 @@ from nplay_headless import NPlayHeadless
 import uuid
 import random
 from npp_rl.environments.constants import (
-    OBSERVATION_IMAGE_SIZE,
+    OBSERVATION_IMAGE_WIDTH,
+    OBSERVATION_IMAGE_HEIGHT,
     NUM_TEMPORAL_FRAMES,
     NUM_PLAYER_STATE_CHANNELS
 )
 from npp_rl.environments.visualization.path_visualizer import PathVisualizer
-import imageio
+from PIL import Image
 
 MAP_DATA_PATH = "../nclone/maps/map_data_simple"
 
@@ -69,44 +70,27 @@ class NPlusPlus(gymnasium.Env):
         # Initialize action space
         self.action_space = discrete.Discrete(6)
 
-        # Initialize observation space as a box for visual features
-        # self.observation_space = box.Box(
-        #     low=0,
-        #     high=255,
-        #     shape=(
-        #         OBSERVATION_IMAGE_SIZE,
-        #         OBSERVATION_IMAGE_SIZE,
-        #         NUM_TEMPORAL_FRAMES
-        #     ),
-        #     dtype=np.uint8
-        # )
-
-        # Initialize observation space as a Dict space with all features
+        # Initialize observation space as a Dict space with visual and game state features
         self.observation_space = gymnasium.spaces.Dict({
             # Frame stack of 4 grayscale images
             'visual': box.Box(
                 low=0,
                 high=255,
                 shape=(
-                    OBSERVATION_IMAGE_SIZE,
-                    OBSERVATION_IMAGE_SIZE,
+                    OBSERVATION_IMAGE_WIDTH,
+                    OBSERVATION_IMAGE_HEIGHT,
                     NUM_TEMPORAL_FRAMES
                 ),
                 dtype=np.uint8
             ),
-            'player_state': box.Box(
+            'game_state': box.Box(
                 low=0,
                 high=1,
-                # pos_x, pos_y, vel_x, vel_y, in_air, walled
-                shape=(NUM_PLAYER_STATE_CHANNELS,),
+                # Combined player state and goal features:
+                # [pos_x, pos_y, vel_x, vel_y, in_air, walled, switch_x, switch_y, exit_x, exit_y, switch_activated]
+                shape=(11,),
                 dtype=np.float32
-            ),
-            'goal_features': box.Box(
-                low=0,
-                high=1,
-                shape=(3,),  # switch_dist, exit_dist, switch_activated
-                dtype=np.float32
-            ),
+            )
         })
 
         # Initialize position log folder
@@ -450,6 +434,10 @@ class NPlusPlus(gymnasium.Env):
         processed_obs = self.observation_processor.process_observation(
             initial_obs)
         # processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
+
+        # Lets save our initial visual frame as an image to make sure our image has enough visual data for training
+        # image = Image.fromarray(processed_obs['visual'][..., 0])
+        # image.save("initial_visual_frame.png")
 
         return processed_obs, {}
 

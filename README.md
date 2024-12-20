@@ -71,8 +71,8 @@ by 1 for each gold collected.
 
 Our observation space is currently:
 
-- 4 stacked frames of 84x84 grayscale.
-- 3 historical frames of 84x84 grayscale.
+- 4 stacked frames of 120x120 grayscale.
+- 3 historical frames of 120x120 grayscale.
 - 4 numerical features for pathfinding:
    - recent_visits
    - visit_frequency
@@ -121,7 +121,7 @@ most recent action.
 
 ### Observation Processing
 
-When an observation is received, it is processed into a 4 frames of 84x84 grayscale, extended with channels for numerical feature data.
+When an observation is received, it is processed into a 4 frames of 120x120 grayscale, extended with channels for numerical feature data.
 
 ### Observation Feature Extraction
 

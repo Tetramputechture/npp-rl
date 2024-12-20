@@ -2,30 +2,32 @@ import numpy as np
 from collections import deque
 import cv2
 from typing import Dict, Any
-from npp_rl.environments.constants import OBSERVATION_IMAGE_SIZE, LEVEL_WIDTH, LEVEL_HEIGHT, MAX_VELOCITY
+from npp_rl.environments.constants import OBSERVATION_IMAGE_WIDTH, OBSERVATION_IMAGE_HEIGHT, LEVEL_WIDTH, LEVEL_HEIGHT, MAX_VELOCITY, FRAME_INTERVALS
 
 
 class ObservationProcessor:
     """Processes raw game observations into frame stacks and normalized feature vectors."""
 
     def __init__(self):
-        self.image_size = OBSERVATION_IMAGE_SIZE
-
-        # Store frames with fixed intervals
-        self.frame_intervals = [0, 4, 8, 12]
-        self.frame_history = deque(maxlen=max(self.frame_intervals) + 1)
+        self.frame_history = deque(maxlen=max(FRAME_INTERVALS) + 1)
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale and resize with improved accuracy"""
         # Convert to grayscale using more accurate weights if needed
         if len(frame.shape) == 3:
             # Using BT.601 standard for RGB to grayscale conversion
-            frame = np.dot(frame[..., :3], [0.2989, 0.5870, 0.1140])
+            frame = np.dot(frame[..., :3], [0.2989, 0.5870, 0.1140])\
+                
+        # Note: OpenCV expects the shape to be (height, width, channels)
+        frame = frame.swapaxes(0, 1)
 
         # Resize with better quality interpolation
         frame = cv2.resize(
-            frame, (self.image_size, self.image_size),
+            frame, (OBSERVATION_IMAGE_HEIGHT, OBSERVATION_IMAGE_WIDTH),
             interpolation=cv2.INTER_LANCZOS4)
+        
+        # Reswap axes
+        # frame = frame.swapaxes(0, 1)
 
         # Normalize to [0, 255] range and convert to uint8
         frame = np.clip(frame, 0, 255).astype(np.uint8)
@@ -52,20 +54,16 @@ class ObservationProcessor:
 
     def process_goal_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """Process and normalize goal-related features."""
-        # Calculate distances to switch and exit
-        switch_pos = np.array([obs['switch_x'], obs['switch_y']])
-        exit_pos = np.array([obs['exit_door_x'], obs['exit_door_y']])
-        player_pos = np.array([obs['player_x'], obs['player_y']])
-
-        # Calculate Euclidean distances and normalize by diagonal of level
-        level_diagonal = np.sqrt(LEVEL_WIDTH**2 + LEVEL_HEIGHT**2)
-        switch_dist = np.linalg.norm(player_pos - switch_pos) / level_diagonal
-        exit_dist = np.linalg.norm(player_pos - exit_pos) / level_diagonal
+        # Normalize switch and exit door coordinates
+        switch_x = obs['switch_x'] / LEVEL_WIDTH
+        switch_y = obs['switch_y'] / LEVEL_HEIGHT
+        exit_x = obs['exit_door_x'] / LEVEL_WIDTH
+        exit_y = obs['exit_door_y'] / LEVEL_HEIGHT
 
         # Switch activation is already boolean (0 or 1)
         switch_activated = float(obs['switch_activated'])
 
-        return np.array([switch_dist, exit_dist, switch_activated], dtype=np.float32)
+        return np.array([switch_x, switch_y, exit_x, exit_y, switch_activated], dtype=np.float32)
 
     def process_observation(self, obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
         """Process observation into frame stack and feature vectors."""
@@ -76,12 +74,12 @@ class ObservationProcessor:
         self.frame_history.append(frame)
 
         # Fill frame history if needed
-        while len(self.frame_history) < max(self.frame_intervals) + 1:
+        while len(self.frame_history) < max(FRAME_INTERVALS) + 1:
             self.frame_history.append(frame)
 
         # Stack frames at specified intervals
         stacked_frames = []
-        for interval in self.frame_intervals:
+        for interval in FRAME_INTERVALS:
             if len(self.frame_history) > interval:
                 historical_frame = self.frame_history[-interval-1]
             else:
@@ -92,10 +90,13 @@ class ObservationProcessor:
         player_state = self.process_player_state(obs)
         goal_features = self.process_goal_features(obs)
 
+        # Combine player state and goal features into single game state vector
+        # Now contains: [pos_x, pos_y, vel_x, vel_y, in_air, walled, switch_x, switch_y, exit_x, exit_y, switch_activated]
+        game_state = np.concatenate([player_state, goal_features])
+
         return {
             'visual': np.concatenate(stacked_frames, axis=-1),
-            'player_state': player_state,
-            'goal_features': goal_features
+            'game_state': game_state
         }
 
     def reset(self) -> None:
