@@ -1,0 +1,292 @@
+"""Optuna script for optimizing the hyperparameters of a RecurrentPPO agent
+from Stable-Baselines3-Contrib for the N++ environment.
+
+This script uses Optuna to perform hyperparameter optimization for the RecurrentPPO
+agent. It includes pruning of bad trials and proper handling of the evaluation
+environment.
+"""
+
+from typing import Any, Dict
+import optuna
+from optuna.pruners import MedianPruner
+from optuna.samplers import TPESampler
+from sb3_contrib import RecurrentPPO
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
+import torch
+import torch.nn as nn
+from pathlib import Path
+import json
+import datetime
+from npp_rl.environments.nplusplus import NPlusPlus
+
+# Tuning constants
+N_TRIALS = 100  # Number of trials to run
+N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
+N_EVALUATIONS = 4  # Number of evaluations per trial
+N_TIMESTEPS = int(2e5)  # Total timesteps per trial
+EVAL_FREQ = int(N_TIMESTEPS / N_EVALUATIONS)  # Evaluation frequency
+N_EVAL_EPISODES = 3  # Episodes per evaluation
+N_ENVS = 4  # Number of parallel environments
+
+# Default hyperparameters that won't be tuned
+DEFAULT_HYPERPARAMS = {
+    "policy": "MultiInputLstmPolicy",
+    "device": "cuda" if torch.cuda.is_available() else "cpu",
+}
+
+
+def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
+    """Create a vectorized environment for training or evaluation."""
+    if n_envs == 1:
+        env = DummyVecEnv([lambda: NPlusPlus(render_mode=render_mode)])
+    else:
+        env = SubprocVecEnv(
+            [lambda: NPlusPlus(render_mode=render_mode) for _ in range(n_envs)])
+
+    env = VecMonitor(env)
+    env = VecCheckNan(env, raise_exception=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+
+    return env
+
+
+def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
+    """Sampler for RecurrentPPO hyperparameters."""
+    # Discount factor
+    gamma = 1.0 - trial.suggest_float("gamma", 0.0001, 0.1, log=True)
+
+    # GAE parameter
+    gae_lambda = 1.0 - trial.suggest_float("gae_lambda", 0.001, 0.2, log=True)
+
+    # Neural network architecture
+    net_arch_type = trial.suggest_categorical("net_arch", ["small", "medium"])
+    net_arch = {
+        "small": [64, 64],
+        "medium": [256, 128],
+    }[net_arch_type]
+
+    # Learning rate
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
+
+    # Batch size and n_steps
+    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
+    batch_size = min(
+        2 ** trial.suggest_int("exponent_batch_size", 6, 10), n_steps)  # 64 to 1024
+
+    # Number of epochs
+    n_epochs = trial.suggest_int("n_epochs", 5, 20)
+
+    # Entropy coefficient
+    ent_coef = trial.suggest_float("ent_coef", 0.0001, 0.01, log=True)
+
+    # Value function coefficient
+    vf_coef = trial.suggest_float("vf_coef", 0.1, 0.9)
+
+    # Clipping parameters
+    clip_range = trial.suggest_float("clip_range", 0.1, 0.4)
+    clip_range_vf = trial.suggest_categorical(
+        "clip_range_vf", [None, 0.1, 0.2, 0.3, 0.4])
+
+    # Max gradient norm
+    max_grad_norm = trial.suggest_float("max_grad_norm", 0.3, 5.0, log=True)
+
+    # LSTM-specific parameters
+    # 32 to 256
+    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 5, 8)
+
+    # Store true values for logging
+    trial.set_user_attr("gamma_", gamma)
+    trial.set_user_attr("gae_lambda_", gae_lambda)
+    trial.set_user_attr("n_steps", n_steps)
+    trial.set_user_attr("lstm_hidden_size", lstm_hidden_size)
+
+    return {
+        "n_steps": n_steps,
+        "batch_size": batch_size,
+        "gamma": gamma,
+        "learning_rate": learning_rate,
+        "ent_coef": ent_coef,
+        "vf_coef": vf_coef,
+        "n_epochs": n_epochs,
+        "gae_lambda": gae_lambda,
+        "max_grad_norm": max_grad_norm,
+        "clip_range": clip_range,
+        "clip_range_vf": clip_range_vf,
+        "policy_kwargs": {
+            "net_arch": net_arch,
+            "lstm_hidden_size": lstm_hidden_size,
+        },
+    }
+
+
+class TrialEvalCallback(EvalCallback):
+    """Callback for evaluating and pruning trials during optimization."""
+
+    def __init__(
+        self,
+        eval_env: VecNormalize,
+        trial: optuna.Trial,
+        n_eval_episodes: int = 5,
+        eval_freq: int = 10000,
+        deterministic: bool = True,
+        verbose: int = 0,
+    ):
+        super().__init__(
+            eval_env=eval_env,
+            n_eval_episodes=n_eval_episodes,
+            eval_freq=eval_freq,
+            deterministic=deterministic,
+            verbose=verbose,
+        )
+        self.trial = trial
+        self.eval_idx = 0
+        self.is_pruned = False
+
+    def _on_step(self) -> bool:
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            super()._on_step()
+            self.eval_idx += 1
+            # Report current mean reward to Optuna
+            self.trial.report(self.last_mean_reward, self.eval_idx)
+            # Prune trial if needed
+            if self.trial.should_prune():
+                self.is_pruned = True
+                return False
+        return True
+
+
+def objective(trial: optuna.Trial) -> float:
+    """Optimization objective for Optuna."""
+
+    # Create timestamp for logging
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_dir = Path(f'training_logs/tune_logs/trial_{trial.number}_{timestamp}')
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Initialize hyperparameters
+    kwargs = DEFAULT_HYPERPARAMS.copy()
+    kwargs.update(sample_ppo_params(trial))
+
+    # Create environments
+    env = create_env(n_envs=N_ENVS)
+    eval_env = create_env(n_envs=1)
+
+    # Create the RecurrentPPO model
+    model = RecurrentPPO(
+        env=env,
+        tensorboard_log=str(log_dir / "tensorboard"),
+        verbose=0,
+        **kwargs
+    )
+
+    # Create evaluation callback
+    eval_callback = TrialEvalCallback(
+        eval_env=eval_env,
+        trial=trial,
+        n_eval_episodes=N_EVAL_EPISODES,
+        eval_freq=EVAL_FREQ,
+        deterministic=True,
+    )
+
+    nan_encountered = False
+    try:
+        model.learn(
+            total_timesteps=N_TIMESTEPS,
+            callback=eval_callback,
+            progress_bar=True,
+        )
+    except AssertionError as e:
+        # Handle NaN errors
+        print(f"Trial {trial.number} failed with error: {e}")
+        nan_encountered = True
+    finally:
+        # Clean up environments
+        env.close()
+        eval_env.close()
+
+    # Save trial results
+    results = {
+        "trial_number": trial.number,
+        "params": trial.params,
+        "user_attrs": trial.user_attrs,
+    }
+    with open(log_dir / "trial_results.json", "w") as f:
+        json.dump(results, f, indent=4)
+
+    if nan_encountered:
+        return float("nan")
+
+    if eval_callback.is_pruned:
+        raise optuna.exceptions.TrialPruned()
+
+    return eval_callback.last_mean_reward
+
+
+def optimize_agent():
+    """Run the hyperparameter optimization."""
+
+    # Set PyTorch threads for faster training
+    torch.set_num_threads(1)
+
+    # Initialize sampler and pruner
+    sampler = TPESampler(n_startup_trials=N_STARTUP_TRIALS)
+    pruner = MedianPruner(
+        n_startup_trials=N_STARTUP_TRIALS,
+        n_warmup_steps=N_EVALUATIONS // 3
+    )
+
+    # Create study
+    study = optuna.create_study(
+        sampler=sampler,
+        pruner=pruner,
+        direction="maximize",
+        study_name=f"recurrent_ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
+
+    try:
+        study.optimize(objective, n_trials=N_TRIALS)
+    except KeyboardInterrupt:
+        print("\nOptimization interrupted by user.")
+
+    print("\nOptimization Results:")
+    print(f"Number of finished trials: {len(study.trials)}")
+
+    print("\nBest trial:")
+    trial = study.best_trial
+
+    print(f"  Value: {trial.value}")
+    print("\n  Params:")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+
+    print("\n  User attrs:")
+    for key, value in trial.user_attrs.items():
+        print(f"    {key}: {value}")
+
+    # Save study results
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    results_dir = Path(f'training_logs/tune_results_{timestamp}')
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save study statistics
+    study_stats = {
+        "best_trial": {
+            "number": trial.number,
+            "value": trial.value,
+            "params": trial.params,
+            "user_attrs": trial.user_attrs,
+        },
+        "n_trials": len(study.trials),
+        "datetime": timestamp,
+    }
+
+    with open(results_dir / "study_results.json", "w") as f:
+        json.dump(study_stats, f, indent=4)
+
+    return study
+
+
+if __name__ == "__main__":
+    optimize_agent()
