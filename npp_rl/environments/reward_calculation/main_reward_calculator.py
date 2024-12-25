@@ -45,58 +45,29 @@ class RewardCalculator(BaseRewardCalculator):
             float: Total reward for the transition
         """
         # Termination penalties
-        # Death penalty
         if obs.get('player_dead', False):
-            # return self.DEATH_PENALTY
-            print('\n\n---Player dead---\n\n')
-            return 0.0
+            return 0
 
         # Win condition
         if obs.get('player_won', False):
-            print('\n\n---Player won---\n\n')
             return self.TERMINAL_REWARD
 
-        # For now, lets try our only reward being the terminal reward, and navigation reward.
+        # Initialize reward
         reward = 0.0
 
-        # # Get current reward scales
-        # scales = self.progression_tracker.get_reward_scales()
+        # Add time pressure
+        reward += self.BASE_TIME_PENALTY
 
-        # # Initialize total reward
-        # reward = 0.0
-
-        # # Level 2: Movement quality and control
-        # movement_reward = self.movement_calculator.calculate_movement_reward(
-        #     obs, prev_obs, action_taken, scales['movement']
+        # Navigation reward with progressive scaling
+        # navigation_reward, switch_activated = self.navigation_calculator.calculate_navigation_reward(
+        #     obs, prev_obs
         # )
-        # reward += movement_reward
+        # reward += navigation_reward
 
-        # # Level 3: Navigation and objective completion
-        navigation_reward, switch_activated = self.navigation_calculator.calculate_navigation_reward(
-            obs, prev_obs
-        )
-        reward += navigation_reward
-
+        # Bonus for switch activation with time-based scaling
         # if switch_activated:
-        #     self.progression_tracker.demonstrated_skills['switch_activation'] = True
-
-        # # Level 4: Exploration and discovery
-        # exploration_reward = self.exploration_calculator.calculate_exploration_reward(
-        #     obs
-        # )
-        # reward += exploration_reward
-
-        # # Level 5: Time management
-        # time_reward = self.calculate_time_reward()
-        # reward += time_reward
-
-        # # Update movement-related skills
-        # if movement_reward > 0:
-        #     self.progression_tracker.demonstrated_skills['precise_movement'] = True
-        #     if not obs['in_air'] and prev_obs['in_air']:
-        #         self.progression_tracker.demonstrated_skills['platform_landing'] = True
-        #     if len(self.movement_calculator.velocity_history) >= 2:
-        #         self.progression_tracker.demonstrated_skills['momentum_control'] = True
+        #     time_factor = max(0.5, 1.0 - (obs.get('time_elapsed', 0) / obs.get('time_limit', 100)))
+        #     reward += self.SWITCH_ACTIVATION_REWARD * time_factor
 
         return reward
 

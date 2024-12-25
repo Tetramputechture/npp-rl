@@ -1,26 +1,29 @@
 import gymnasium
-from gymnasium.spaces import discrete, box
+from gymnasium.spaces import discrete, box, Dict
 import numpy as np
 from npp_rl.environments.reward_calculation.main_reward_calculator import RewardCalculator
 from npp_rl.environments.reward_calculation.planning_reward_calculator import PlanningRewardCalculator
 from npp_rl.environments.planning.path_planner import PathPlanner
 from npp_rl.environments.planning.waypoint_manager import WaypointManager
 import time
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict as TypeDict, Any
 import os
-from npp_rl.environments.observation_processor import ObservationProcessor
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
 import uuid
 import random
 from npp_rl.environments.constants import (
-    OBSERVATION_IMAGE_WIDTH,
+    GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
     OBSERVATION_IMAGE_HEIGHT,
-    NUM_TEMPORAL_FRAMES,
-    NUM_PLAYER_STATE_CHANNELS
+    OBSERVATION_IMAGE_WIDTH,
+    TEMPORAL_FRAMES,
+    PLAYER_FRAME_WIDTH,
+    PLAYER_FRAME_HEIGHT
 )
 from npp_rl.environments.visualization.path_visualizer import PathVisualizer
 from PIL import Image
+from npp_rl.environments.constants import MAX_TIME_IN_FRAMES
+from npp_rl.environments.observation_processor import ObservationProcessor
 
 MAP_DATA_PATH = "../nclone/maps/map_data_simple"
 
@@ -47,9 +50,12 @@ class NPlusPlus(gymnasium.Env):
         super().__init__()
 
         self.nplay_headless = NPlayHeadless(render_mode=render_mode)
-        self.nplay_headless.load_random_map(seed=42)
+        self.nplay_headless.load_random_map()
 
         self.render_mode = render_mode
+
+        # Initialize observation processor
+        self.observation_processor = ObservationProcessor()
 
         # Initialize planning components
         self.path_planner = PathPlanner()
@@ -64,31 +70,31 @@ class NPlusPlus(gymnasium.Env):
         self.reward_calculator = RewardCalculator(
             movement_evaluator=self.movement_evaluator)
 
-        # Initialize observation processing
-        self.observation_processor = ObservationProcessor()
-
         # Initialize action space
         self.action_space = discrete.Discrete(6)
 
-        # Initialize observation space as a Dict space with visual and game state features
-        self.observation_space = gymnasium.spaces.Dict({
-            # Frame stack of 4 grayscale images
-            'visual': box.Box(
+        # Initialize observation space as a Dict space with player_frame, base_frame, and game_state
+        self.observation_space = Dict({
+            # Player-centered frame
+            'player_frame': box.Box(
                 low=0,
                 high=255,
-                shape=(
-                    OBSERVATION_IMAGE_WIDTH,
-                    OBSERVATION_IMAGE_HEIGHT,
-                    NUM_TEMPORAL_FRAMES
-                ),
+                shape=(PLAYER_FRAME_HEIGHT, PLAYER_FRAME_WIDTH, 1),
                 dtype=np.uint8
             ),
-            'game_state': box.Box(
+            # Base frame (full screen)
+            'base_frame': box.Box(
                 low=0,
+                high=255,
+                shape=(OBSERVATION_IMAGE_HEIGHT, OBSERVATION_IMAGE_WIDTH, 1),
+                dtype=np.uint8
+            ),
+            # Game state features
+            'game_state': box.Box(
+                low=-1,
                 high=1,
-                # Combined player state and goal features:
-                # [pos_x, pos_y, vel_x, vel_y, in_air, walled, switch_x, switch_y, exit_x, exit_y, switch_activated]
-                shape=(11,),
+                # +5 for time remaining and vectors to objectives
+                shape=(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH + 5,),
                 dtype=np.float32
             )
         })
@@ -122,33 +128,32 @@ class NPlusPlus(gymnasium.Env):
         # Initialize frame buffer for path visualization
         self.path_viz_buffer = []
 
-    def _get_observation(self) -> Dict[str, Any]:
+    def _get_observation(self) -> np.ndarray:
         """Get the current observation from the game state."""
-        obs = {
-            'screen': self.nplay_headless.render(),
-            'player_x': self.nplay_headless.ninja_position()[0],
-            'player_y': self.nplay_headless.ninja_position()[1],
-            'player_vx': self.nplay_headless.ninja_velocity()[0],
-            'player_vy': self.nplay_headless.ninja_velocity()[1],
+        # Calculate time remaining feature
+        time_remaining = (MAX_TIME_IN_FRAMES -
+                          self.nplay_headless.sim.frame) / MAX_TIME_IN_FRAMES
+
+        ninja_state = self.nplay_headless.get_ninja_state()
+        entity_states = self.nplay_headless.get_entity_states(
+            only_exit_and_switch=True)
+        game_state = np.concatenate([ninja_state, entity_states])
+
+        return {
+            'screen': self.render(),
+            'game_state': game_state,
             'player_dead': self.nplay_headless.ninja_has_died(),
             'player_won': self.nplay_headless.ninja_has_won(),
+            'player_x': self.nplay_headless.ninja_position()[0],
+            'player_y': self.nplay_headless.ninja_position()[1],
             'switch_activated': self.nplay_headless.exit_switch_activated(),
             'switch_x': self.nplay_headless.exit_switch_position()[0],
             'switch_y': self.nplay_headless.exit_switch_position()[1],
             'exit_door_x': self.nplay_headless.exit_door_position()[0],
             'exit_door_y': self.nplay_headless.exit_door_position()[1],
-            'in_air': self.nplay_headless.ninja_is_in_air(),
-            'walled': self.nplay_headless.ninja_is_walled(),
-            'level_width': 1032.0,
-            'level_height': 576.0,
-            # Add collision and pathfinding data
-            'tile_data': self.nplay_headless.get_tile_data(),
-            'segment_data': self.nplay_headless.get_segment_data(),
-            'grid_edges': self.nplay_headless.get_grid_edges(),
-            'segment_edges': self.nplay_headless.get_segment_edges(),
-            'dynamic_objects': self.nplay_headless.get_dynamic_objects() if hasattr(self.nplay_headless, 'get_dynamic_objects') else []
+            'time_remaining': time_remaining,
+            'sim_frame': self.nplay_headless.sim.frame,
         }
-        return obs
 
     def _actions_to_execute(self, action: int) -> Tuple[int, int]:
         """Execute the specified action using the game controller.
@@ -197,19 +202,20 @@ class NPlusPlus(gymnasium.Env):
         }
         return action_names.get(action, 'Unknown')
 
-    def _check_termination(self, observation: Dict[str, Any]) -> Tuple[bool, bool]:
+    def _check_termination(self) -> Tuple[bool, bool]:
         """Check if the episode should be terminated.
 
         Args:
-            observation: Current observation dictionary
+            observation: Current observation array
 
         Returns:
             Tuple containing:
             - terminated: True if episode should be terminated, False otherwise
             - truncated: True if episode should be truncated, False otherwise
         """
-        terminated = observation.get(
-            'player_won', False) or observation.get('player_dead', False)
+        player_won = self.nplay_headless.ninja_has_won()
+        player_dead = self.nplay_headless.ninja_has_died()
+        terminated = player_won or player_dead
 
         if terminated:
             print(
@@ -217,7 +223,7 @@ class NPlusPlus(gymnasium.Env):
 
         # Check truncation
         # Truncation is when the current simulation frame is greater than 5000
-        truncated = self.nplay_headless.sim.frame > 5000
+        truncated = self.nplay_headless.sim.frame > MAX_TIME_IN_FRAMES
 
         if truncated:
             print(
@@ -232,7 +238,7 @@ class NPlusPlus(gymnasium.Env):
             'success': float(self.nplay_headless.ninja_has_won())
         }
 
-    def _update_planning(self, observation: Dict[str, Any]):
+    def _update_planning(self, observation: np.ndarray):
         """Update path planning based on current state."""
         # Get current position
         current_pos = (observation['player_x'], observation['player_y'])
@@ -269,7 +275,7 @@ class NPlusPlus(gymnasium.Env):
             self.waypoint_manager.update_path(path)
             self.planning_reward_calculator.update_path(path)
 
-    def _save_path_visualization(self, observation: Dict[str, Any], prev_obs: Dict[str, Any]):
+    def _save_path_visualization(self, observation: np.ndarray, prev_obs: np.ndarray):
         """Save visualization of current path and agent state to buffer."""
         return
         if not self.current_path:
@@ -337,47 +343,29 @@ class NPlusPlus(gymnasium.Env):
         self.position_log_file_string += f'{player_x},{player_y}\n'
         self.action_log_file_string += f'{self._action_to_string(action)}\n'
 
-        # Randomly choose number of frames to repeat action (2-4)
-        num_repeat_frames = random.randint(2, 4)
-
-        # Execute action for the chosen number of frames
+        # Execute action
         action_hoz, action_jump = self._actions_to_execute(action)
+        self.nplay_headless.tick(action_hoz, action_jump)
 
-        terminated = False
-        truncated = False
-
-        # Execute the same action for num_repeat_frames
-        for _ in range(num_repeat_frames):
-            self.nplay_headless.tick(action_hoz, action_jump)
-
-            # Check termination after each frame
-            curr_obs = self._get_observation()
-            terminated, truncated = self._check_termination(curr_obs)
-
-            # Break early if episode ended
-            if terminated or truncated:
-                break
-
-        # Get final observation after all repeated frames
-        observation = self._get_observation()
+        # Get current observation
+        curr_obs = self._get_observation()
+        terminated, truncated = self._check_termination()
 
         self.episode_step_counter += 1
 
-        # Process observation and calculate rewards
-        processed_obs = self.observation_processor.process_observation(
-            observation)
-
-        # Calculate combined reward
+        # Calculate reward
         movement_reward = self.reward_calculator.calculate_reward(
-            observation, prev_obs, action)
-
+            curr_obs, prev_obs, action)
         reward = movement_reward
-
         self.current_episode_reward += reward
 
         # Print reward if terminated or truncated
         if terminated or truncated:
             print(f"Episode reward: {self.current_episode_reward}")
+
+        # Process observation using ObservationProcessor
+        processed_obs = self.observation_processor.process_observation(
+            curr_obs)
 
         return processed_obs, reward, terminated, truncated, {}
 
@@ -392,52 +380,27 @@ class NPlusPlus(gymnasium.Env):
         # Reset current episode reward
         self.current_episode_reward = 0.0
 
-        # Reset reward calculator and movement evaluator
-        self.reward_calculator.reset()
-        self.movement_evaluator.reset()
-        # self.reward_calculator.update_progression_metrics()
-
         # Reset observation processor
         self.observation_processor.reset()
+
+        # Reset reward calculator and movement evaluator
+        self.reward_calculator.reset()
 
         # Reset position and action logs
         self.position_log_file_string = 'PlayerX,PlayerY\n'
         self.action_log_file_string = 'Action\n'
 
-        # reset level
+        # Reset level and load random map
         self.nplay_headless.reset()
-
-        # load random map
         self.nplay_headless.load_random_map()
-
-        # Reset planning components
-        self.path_planner = PathPlanner()
-        self.waypoint_manager = WaypointManager(
-            path_planner=self.path_planner)
-        self.planning_reward_calculator.reset(
-            waypoint_manager=self.waypoint_manager)
 
         # Reset episode step counter
         self.episode_step_counter = 0
-        self.current_path = []
 
-        # Get initial observation
+        # Get initial observation and process it
         initial_obs = self._get_observation()
-
-        # Update initial planning
-        # self._update_planning(initial_obs)
-
-        # Save initial planned path
-        # self._save_path_visualization(initial_obs, initial_obs)
-
-        # Get processed observation with planning features
         processed_obs = self.observation_processor.process_observation(
             initial_obs)
-        # processed_obs['planning_features'] = self.planning_reward_calculator.get_planning_features()
-
-        # Lets save our initial visual frame as an image to make sure our image has enough visual data for training
-        # image = Image.fromarray(processed_obs['visual'][..., 0])
-        # image.save("initial_visual_frame.png")
 
         return processed_obs, {}
 

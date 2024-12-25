@@ -3,20 +3,19 @@ from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
 from npp_rl.util.util import calculate_velocity
+from npp_rl.environments.constants import LEVEL_WIDTH, LEVEL_HEIGHT
 
 
 class NavigationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of navigation and objective-based rewards."""
 
     # Navigation constants
-    # Increased scale for distance improvements/penalties
-    DISTANCE_IMPROVEMENT_SCALE = 0.15
-    # Increased bonus for consecutive improvements
+    DISTANCE_IMPROVEMENT_SCALE = 0.2
     CONSECUTIVE_IMPROVEMENT_BONUS = 0.05
-    MOMENTUM_BONUS = 0.05  # Increased momentum bonus
-    MOMENTUM_PENALTY = -0.1  # Increased base momentum penalty
-    MIN_DISTANCE_THRESHOLD = 50.0  # Increased threshold for close proximity rewards
-    PROXIMITY_BONUS_SCALE = 0.5  # Increased scale for proximity bonuses
+    MOMENTUM_BONUS = 0.05
+    MOMENTUM_PENALTY = -0.05
+    MIN_DISTANCE_THRESHOLD = 20.0
+    PROXIMITY_BONUS_SCALE = 0.5
 
     def __init__(self):
         """Initialize navigation reward calculator."""
@@ -52,8 +51,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         """Calculate enhanced state potential for reward shaping."""
         # Dynamic scaling based on level size and progress
         level_diagonal = np.sqrt(
-            state['level_width']**2 + state['level_height']**2)
-        # Reduced scale for sharper potential gradients
+            LEVEL_WIDTH**2 + LEVEL_HEIGHT**2)
         distance_scale = level_diagonal / 4
 
         # Calculate progress-based potential scaling
@@ -166,9 +164,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
                 self.first_switch_distance_update = False
 
         else:
-            # Enhanced switch activation reward
             if not prev_state['switch_activated']:
-                reward += self.SWITCH_ACTIVATION_REWARD
                 switch_activated = True
                 self.min_distance_to_exit = curr_distance_to_exit
                 self.first_exit_distance_update = True

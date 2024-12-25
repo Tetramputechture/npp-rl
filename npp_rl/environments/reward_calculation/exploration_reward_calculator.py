@@ -2,11 +2,20 @@
 from typing import Dict, Any, Set, Tuple
 from collections import deque
 import numpy as np
+import pygame
+import cairo
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
 
 
 class ExplorationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of exploration and area-based rewards."""
+
+    # Game environment dimensions
+    TILE_SIZE = 24  # pixels
+    MAP_WIDTH = 42  # tiles
+    MAP_HEIGHT = 23  # tiles
+    TOTAL_WIDTH = TILE_SIZE * MAP_WIDTH  # 1008 pixels
+    TOTAL_HEIGHT = TILE_SIZE * MAP_HEIGHT  # 552 pixels
 
     # Increased exploration rewards
     EXPLORATION_REWARD = 0.01
@@ -23,12 +32,18 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
     MAX_LOCAL_MINIMA_PENALTY = -0.01  # Reduced from -2.0
     MAX_TOTAL_PENALTY = -0.25  # Reduced from -5.0
 
+    # Visualization colors
+    UNEXPLORED_COLOR = (50, 50, 50)  # Dark gray
+    EXPLORED_COLOR = (200, 200, 200)  # Light gray
+    CURRENT_POS_COLOR = (255, 0, 0)  # Red
+    TRANSITION_COLOR = (0, 255, 0)  # Green
+
     def __init__(self):
         """Initialize exploration reward calculator."""
         super().__init__()
-        # Grid sizes for position tracking
-        self.position_grid_size = 10
-        self.area_grid_size = 50
+        # Grid sizes for position tracking - aligned with tile size
+        self.position_grid_size = self.TILE_SIZE  # Track per tile
+        self.area_grid_size = self.TILE_SIZE * 2  # Track per 2x2 tile area
 
         # Exploration tracking
         self.exploration_memory = 1000
@@ -51,13 +66,92 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         self.total_steps = 0
         self.early_training_threshold = 50000  # Steps considered "early training"
 
+        # Visualization surface
+        self._init_visualization_surface()
+
+    def _init_visualization_surface(self):
+        """Initialize the visualization surface for rendering explored areas."""
+        self.vis_surface = cairo.ImageSurface(
+            cairo.Format.RGB24, self.TOTAL_WIDTH, self.TOTAL_HEIGHT)
+        self.vis_context = cairo.Context(self.vis_surface)
+        # Fill with unexplored color initially
+        self.vis_context.set_source_rgb(
+            *[x/255 for x in self.UNEXPLORED_COLOR])
+        self.vis_context.paint()
+
+    def render_exploration_map(self) -> np.ndarray:
+        """Render a visualization of explored areas and return as a numpy array.
+
+        Returns:
+            np.ndarray: RGB image of exploration map (height, width, 3)
+        """
+        # Clear surface with unexplored color
+        self.vis_context.set_source_rgb(
+            *[x/255 for x in self.UNEXPLORED_COLOR])
+        self.vis_context.paint()
+
+        # Draw explored areas
+        self.vis_context.set_source_rgb(*[x/255 for x in self.EXPLORED_COLOR])
+        for pos in self.visited_positions:
+            x, y = pos
+            x *= self.position_grid_size
+            y *= self.position_grid_size
+            self.vis_context.rectangle(
+                x, y, self.position_grid_size, self.position_grid_size)
+        self.vis_context.fill()
+
+        # Draw transition points
+        self.vis_context.set_source_rgb(
+            *[x/255 for x in self.TRANSITION_COLOR])
+        self.vis_context.set_line_width(2)
+        for (start, end) in self.area_transition_points:
+            start_x = start[0] * self.area_grid_size + self.area_grid_size // 2
+            start_y = start[1] * self.area_grid_size + self.area_grid_size // 2
+            end_x = end[0] * self.area_grid_size + self.area_grid_size // 2
+            end_y = end[1] * self.area_grid_size + self.area_grid_size // 2
+            self.vis_context.move_to(start_x, start_y)
+            self.vis_context.line_to(end_x, end_y)
+        self.vis_context.stroke()
+
+        # Convert cairo surface to numpy array
+        buf = self.vis_surface.get_data()
+        img_array = np.ndarray(shape=(self.TOTAL_HEIGHT, self.TOTAL_WIDTH, 4),
+                               dtype=np.uint8,
+                               buffer=buf)
+        # Convert BGRA to RGB
+        return img_array[:, :, [2, 1, 0]]
+
     def _get_grid_id(self, x: float, y: float) -> Tuple[int, int]:
-        """Convert continuous position to discrete grid position."""
+        """Convert continuous position to discrete grid position.
+
+        Args:
+            x: X position in game coordinates (pixels)
+            y: Y position in game coordinates (pixels)
+
+        Returns:
+            Tuple[int, int]: Grid coordinates (tile x, tile y)
+        """
+        # Ensure coordinates are within map bounds
+        x = max(0, min(x, self.TOTAL_WIDTH - 1))
+        y = max(0, min(y, self.TOTAL_HEIGHT - 1))
+
         return (int(x / self.position_grid_size),
                 int(y / self.position_grid_size))
 
     def _get_area_id(self, x: float, y: float) -> Tuple[int, int]:
-        """Convert position to larger area grid position."""
+        """Convert position to larger area grid position.
+
+        Args:
+            x: X position in game coordinates (pixels)
+            y: Y position in game coordinates (pixels)
+
+        Returns:
+            Tuple[int, int]: Area coordinates (area x, area y)
+        """
+        # Ensure coordinates are within map bounds
+        x = max(0, min(x, self.TOTAL_WIDTH - 1))
+        y = max(0, min(y, self.TOTAL_HEIGHT - 1))
+
         return (int(x / self.area_grid_size),
                 int(y / self.area_grid_size))
 
@@ -67,8 +161,8 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         """Detect if agent is stuck in a local minimum.
 
         Args:
-            curr_pos: Current grid position
-            current_distance: Current distance to objective
+            curr_pos: Current grid position (tile coordinates)
+            current_distance: Current distance to objective (in pixels)
 
         Returns:
             bool: Whether agent is stuck in local minimum
@@ -80,20 +174,21 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         if len(self.position_history) < self.stuck_threshold:
             return False
 
-        # Check position variety
+        # Check position variety in recent history
         recent_positions = set(list(self.position_history)
                                [-self.stuck_threshold:])
         position_variety = len(recent_positions)
 
-        # Check distance progress
+        # Check distance progress - now using pixel distances
         recent_distances = list(self.distance_history)[-self.stuck_threshold:]
         min_distance = min(recent_distances)
         max_distance = max(recent_distances)
         distance_progress = max_distance - min_distance
 
-        # Determine if stuck
-        is_stuck = (position_variety < 5 and
-                    abs(distance_progress) < 50 and
+        # Determine if stuck - adjusted thresholds for pixel coordinates
+        is_stuck = (position_variety < 5 and  # Still stuck if visiting less than 5 unique tiles
+                    # Less than 2 tiles of progress
+                    abs(distance_progress) < self.TILE_SIZE * 2 and
                     len(recent_positions) >= self.stuck_threshold)
 
         if is_stuck:
@@ -112,16 +207,24 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
 
     def calculate_exploration_reward(self,
                                      curr_state: Dict[str, Any]) -> float:
-        """Calculate comprehensive exploration reward."""
+        """Calculate comprehensive exploration reward.
+
+        Args:
+            curr_state: Current game state containing player position and objectives
+
+        Returns:
+            float: Calculated reward value
+        """
         self.total_steps += 1
         penalty_scale = self._get_penalty_scale()
         reward = 0.0
 
+        # Get current positions in both coordinate systems
         current_pos = (curr_state['player_x'], curr_state['player_y'])
         grid_pos = self._get_grid_id(*current_pos)
         current_area = self._get_area_id(*current_pos)
 
-        # Calculate current objective distance
+        # Calculate current objective distance in pixels
         if not curr_state['switch_activated']:
             current_distance = self.calculate_distance_to_objective(
                 curr_state['player_x'], curr_state['player_y'],
@@ -136,7 +239,9 @@ class ExplorationRewardCalculator(BaseRewardCalculator):
         # Enhanced exploration reward for new positions
         if grid_pos not in self.visited_positions:
             # Exponential decay based on distance to encourage thorough exploration
-            distance_factor = np.exp(-current_distance / 500.0)
+            # Normalize distance by tile size for consistent scaling
+            # Decay over ~20 tiles
+            distance_factor = np.exp(-current_distance / (self.TILE_SIZE * 20))
             exploration_reward = self.EXPLORATION_REWARD * \
                 (1.0 + distance_factor)
             reward += exploration_reward

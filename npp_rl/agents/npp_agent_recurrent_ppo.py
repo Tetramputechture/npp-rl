@@ -82,7 +82,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> Recu
 
     model = RecurrentPPO(
         # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
-        policy="MultiInputLstmPolicy",  # Expects a Dict, with a Box and a Dict
+        policy="MultiInputLstmPolicy",  # Expects a Dict, with
         # policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
@@ -100,6 +100,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> Recu
         verbose=1,
         tensorboard_log=tensorboard_log,
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
+        # device='cpu',
         seed=42
     )
 
@@ -144,8 +145,8 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
         check_freq=200,
         log_dir=log_dir,
         n_steps=n_steps,
-        min_ent_coef=0.0005,
-        max_ent_coef=0.005
+        min_ent_coef=0.005,
+        max_ent_coef=0.01
     )
 
     # Train the model
@@ -237,7 +238,7 @@ def record_agent_training(env: NPlusPlus, model: RecurrentPPO,
 
     # Step 4: Evaluate the model and build JSON
     mean_reward, std_reward = evaluate_agent(
-        env, model, hyperparameters['n_episodes'])
+        env, model, 5)
     # Get datetime
     eval_datetime = datetime.datetime.now()
     eval_form_datetime = eval_datetime.isoformat()
@@ -257,7 +258,7 @@ def record_agent_training(env: NPlusPlus, model: RecurrentPPO,
     # Step 6: Record videos for 5 episodes
     env.reset()
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, num_episodes=5)
+    record_video(env, model, video_path, num_episodes=3)
 
     return local_directory
 
@@ -275,19 +276,24 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
         env = NPlusPlus(render_mode=render_mode)
         # check if the environment is valid
         check_env(env)
+
+        # Print our observation and action spaces
+        print(f"Observation space: {env.observation_space.shape}")
+        print(f"Action space: {env.action_space}")
+
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
             vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human'), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
-            print('Rendering in rgb_array mode with 8 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=8,
+            print('Rendering in rgb_array mode with 4 environments')
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, n_steps=2048, total_timesteps=100000, load_model_path=load_model_path)
+            wrapped_env, log_dir, n_steps=2048, total_timesteps=1000000, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
@@ -301,8 +307,7 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
         print("Recording video...")
         hyperparameters = {
             "env_id": "N++",
-            "n_episodes": 5,
-            "n_evaluation_episodes": 5
+            "n_evaluation_episodes": 3
         }
         record_agent_training(env, model, hyperparameters)
 

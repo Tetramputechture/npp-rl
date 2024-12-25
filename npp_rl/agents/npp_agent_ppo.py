@@ -14,7 +14,7 @@ import subprocess
 import threading
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
-from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
+# from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -90,7 +90,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         #   process image with Nature Atari CNN network and output a latent vector of size 256.
         # If input is not an image, flatten it (no layers).
         # Concatenate all previous vectors into one long vector and pass it to policy.
-        policy="MultiInputPolicy",  # Expects a Dict, with a Box and a Dict
+        policy="MultiInputPolicy",  # Expects a Dict, with two Boxes
         # policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
@@ -101,7 +101,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         gae_lambda=0.95,
         clip_range=0.2,
         clip_range_vf=0.2,
-        ent_coef=0.005,  # Should be between 0.001 and 0.01
+        ent_coef=0.01,  # Should be between 0.001 and 0.01
         vf_coef=0.75,
         max_grad_norm=0.7,
         normalize_advantage=True,
@@ -257,7 +257,7 @@ def record_agent_training(env: NPlusPlus, model: PPO,
     # Step 6: Record videos for 5 episodes
     env.reset()
     video_path = local_directory / "replay.mp4"
-    record_video(env, model, video_path, num_episodes=5)
+    record_video(env, model, video_path, num_episodes=3)
 
     return local_directory
 
@@ -281,13 +281,13 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 8 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=8,
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, n_steps=2048, total_timesteps=4000000, load_model_path=load_model_path)
+            wrapped_env, log_dir, n_steps=2048, total_timesteps=2000000, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")

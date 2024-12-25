@@ -1,22 +1,10 @@
-# Temporal frames (4 frames spaced 4 frames apart)
-NUM_TEMPORAL_FRAMES = 4
-
-# Features: recent_visits, visit_frequency, area_exploration, transitions
-NUM_NUMERICAL_FEATURES = 4
-
-# Number of goal channels (switch and exit door heatmaps)
-NUM_GOAL_CHANNELS = 2
-
-# Number of player state channels (position x and y, velocity x and y, in_air status, and walled status)
-NUM_PLAYER_STATE_CHANNELS = 6
-
-# Total observation channels
-TOTAL_OBSERVATION_CHANNELS = NUM_TEMPORAL_FRAMES + \
-    NUM_NUMERICAL_FEATURES + NUM_PLAYER_STATE_CHANNELS + NUM_GOAL_CHANNELS
-
 # Observation image size
-OBSERVATION_IMAGE_WIDTH = 260
-OBSERVATION_IMAGE_HEIGHT = 148
+OBSERVATION_IMAGE_WIDTH = 160
+OBSERVATION_IMAGE_HEIGHT = 120
+
+# Player frame size
+PLAYER_FRAME_WIDTH = 60
+PLAYER_FRAME_HEIGHT = 50
 
 # Frame intervals for temporal stacking
 FRAME_INTERVALS = [0, 4, 8, 12]
@@ -33,3 +21,53 @@ MAX_VELOCITY = 20.0
 
 # Observation space constants
 TEMPORAL_FRAMES = 4
+
+# Max time in frames per level
+MAX_TIME_IN_FRAMES = 5000
+
+# Game state features
+# Ninja State (12 values):
+# Position X
+# Position Y
+# Speed X
+# Speed Y
+# Airborn
+# Walled
+# Jump duration
+# Facing
+# Tilt angle
+# Applied gravity
+# Applied drag
+# Applied friction
+
+# Entity States:
+# 160004 values
+#
+# Geometry State (Fixed Size):
+# Tile data: 44 × 25 = 1,100 values
+# Horizontal grid edges: 88 × 51 = 4,488 values
+# Vertical grid edges: 89 × 50 = 4,450 values
+# Horizontal segments: 88 × 51 = 4,488 values
+# Vertical segments: 89 × 50 = 4,450 values
+#
+# Time remaining state: 1 value
+#
+# Total state vector size calculation:
+# Ninja state: 13 values
+# Entity states: 28 types × (1 count + 10 entities × 8 attributes) = 2,268 values
+# Geometry state: 1,100 + 4,488 + 4,450 + 4,488 + 4,450 = 18,976 values
+# Total: 12 + 160004 + 18,976 + 1 = 177993 values
+GAME_STATE_FEATURES = 177993
+
+# Without entities besides our exit and switch,
+# We have 258 features for our entities
+# Total: 12 + 258 + 18,976 + 1 = 19247
+GAME_STATE_FEATURES_ONLY_EXIT_AND_SWITCH = 19247
+
+# Only ninja and 1 exit and 1 switch, no tile data (to be used in conjunction with frame stacking) = 270
+# + 1 time remaining
+GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH = 270
+
+TILE_SIZE = 24
+TILE_COUNT_X = 42
+TILE_COUNT_Y = 23
