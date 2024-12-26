@@ -96,8 +96,9 @@ def calculate_vector(from_x: float, from_y: float, to_x: float, to_y: float) -> 
 class ObservationProcessor:
     """Processes raw game observations into frame stacks and normalized feature vectors."""
 
-    def __init__(self):
+    def __init__(self, enable_frame_stack: bool = False):
         self.frame_history = deque(maxlen=max(FRAME_INTERVALS) + 1)
+        self.enable_frame_stack = enable_frame_stack
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """Convert raw frame to grayscale and resize with improved accuracy"""
@@ -217,43 +218,46 @@ class ObservationProcessor:
             obs['player_y']
         )
 
-        # Frame stacking logic. We don't need this since we are only using the current frame now,
-        # with an LSTM head on our feature extractor.
-        # # Update frame history
-        # self.frame_history.append(frame)
-
-        # # Fill frame history if needed
-        # while len(self.frame_history) < max(FRAME_INTERVALS) + 1:
-        #     self.frame_history.append(frame)
-
-        # # Get player-centered frames at specified intervals
-        # player_frames = []
-        # for interval in FRAME_INTERVALS:
-        #     historical_frame = self.frame_history[-interval-1]
-        #     player_frame = self.frame_around_player(
-        #         historical_frame,
-        #         obs['player_x'],
-        #         obs['player_y']
-        #     )
-        #     player_frames.append(player_frame[..., np.newaxis])
-
-        # Process base map
-        base_map = self.process_base_map(obs['screen'])
-
-        # Process game state
-        game_state = self.process_game_state(obs)
-
-        # Print our shapes
-        # print(
-        #     f"Player frames shape: {player_frame.shape}")
-        # print(f"Base map shape: {base_map.shape}")
-        # print(f"Game state shape: {game_state.shape}")
-
-        return {
-            'player_frame': player_frame,
-            'base_frame': base_map,
-            'game_state': game_state
+        result = {
+            'base_frame': self.process_base_map(obs['screen']),
+            'game_state': self.process_game_state(obs)
         }
+
+        if self.enable_frame_stack:
+            # Update frame history
+            self.frame_history.append(obs['screen'])
+
+            # Fill frame history if needed
+            while len(self.frame_history) < max(FRAME_INTERVALS) + 1:
+                self.frame_history.append(obs['screen'])
+
+            # Get player-centered frames at specified intervals
+            player_frames = []
+            for interval in FRAME_INTERVALS:
+                historical_frame = self.frame_history[-interval-1]
+                player_frame = self.frame_around_player(
+                    historical_frame,
+                    obs['player_x'],
+                    obs['player_y']
+                )
+                # Ensure each frame has shape (H, W, 1)
+                if len(player_frame.shape) == 2:
+                    player_frame = player_frame[..., np.newaxis]
+                player_frames.append(player_frame)
+
+            # Stack frames along channel dimension
+            result['player_frame'] = np.concatenate(player_frames, axis=-1)
+
+            # Verify we have the correct number of channels
+            assert result['player_frame'].shape[-1] == len(
+                FRAME_INTERVALS), f"Expected {len(FRAME_INTERVALS)} channels, got {result['player_frame'].shape[-1]}"
+        else:
+            # Ensure single frame has shape (H, W, 1)
+            if len(player_frame.shape) == 2:
+                player_frame = player_frame[..., np.newaxis]
+            result['player_frame'] = player_frame
+
+        return result
 
     def reset(self) -> None:
         """Reset processor state."""

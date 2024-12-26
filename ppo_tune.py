@@ -1,16 +1,16 @@
-"""Optuna script for optimizing the hyperparameters of a RecurrentPPO agent
-from Stable-Baselines3-Contrib for the N++ environment.
+"""Optuna script for optimizing the hyperparameters of a PPO agent
+from Stable-Baselines3 for the N++ environment.
 
-This script uses Optuna to perform hyperparameter optimization for the RecurrentPPO
-agent. It includes pruning of bad trials and proper handling of the evaluation
-environment.
+This script uses Optuna to perform hyperparameter optimization for the PPO
+agent with frame stacking. It includes pruning of bad trials and proper handling 
+of the evaluation environment.
 """
 
 from typing import Any, Dict, Optional
 import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
-from sb3_contrib import RecurrentPPO
+from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
@@ -32,7 +32,7 @@ N_ENVS = 4  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
-    "policy": "MultiInputLstmPolicy",
+    "policy": "MultiInputPolicy",
     "device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 
@@ -40,10 +40,11 @@ DEFAULT_HYPERPARAMS = {
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     if n_envs == 1:
-        env = DummyVecEnv([lambda: NPlusPlus(render_mode=render_mode)])
+        env = DummyVecEnv(
+            [lambda: NPlusPlus(render_mode=render_mode, enable_frame_stack=True)])
     else:
         env = SubprocVecEnv(
-            [lambda: NPlusPlus(render_mode=render_mode) for _ in range(n_envs)])
+            [lambda: NPlusPlus(render_mode=render_mode, enable_frame_stack=True) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
@@ -53,7 +54,7 @@ def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
 
 
 def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
-    """Sampler for RecurrentPPO hyperparameters."""
+    """Sampler for PPO hyperparameters."""
     # Discount factor
     gamma = 1.0 - trial.suggest_float("gamma", 0.0001, 0.1, log=True)
 
@@ -61,7 +62,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     gae_lambda = 1.0 - trial.suggest_float("gae_lambda", 0.001, 0.2, log=True)
 
     # Neural network architecture
-    net_arch_type = trial.suggest_categorical("net_arch", ["small", "medium"])
+    net_arch_type = trial.suggest_categorical(
+        "net_arch", ["tiny", "small", "medium"])
     net_arch = {
         "tiny": [64, 64],
         "small": [128, 128],
@@ -102,15 +104,10 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     # Max gradient norm
     max_grad_norm = trial.suggest_float("max_grad_norm", 0.3, 5.0, log=True)
 
-    # LSTM-specific parameters
-    # 32 to 256
-    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 5, 8)
-
     # Store true values for logging
     trial.set_user_attr("gamma_", gamma)
     trial.set_user_attr("gae_lambda_", gae_lambda)
     trial.set_user_attr("n_steps", n_steps)
-    trial.set_user_attr("lstm_hidden_size", lstm_hidden_size)
 
     return {
         "n_steps": n_steps,
@@ -125,8 +122,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "clip_range": clip_range,
         "clip_range_vf": clip_range_vf,
         "policy_kwargs": {
-            "net_arch": net_arch,
-            "lstm_hidden_size": lstm_hidden_size,
+            "net_arch": dict(pi=net_arch, vf=net_arch),
+            "normalize_images": True,
         },
     }
 
@@ -185,8 +182,8 @@ def objective(trial: optuna.Trial) -> float:
     env = create_env(n_envs=N_ENVS)
     eval_env = create_env(n_envs=1)
 
-    # Create the RecurrentPPO model
-    model = RecurrentPPO(
+    # Create the PPO model
+    model = PPO(
         env=env,
         tensorboard_log=str(log_dir / "tensorboard"),
         verbose=0,
@@ -258,7 +255,7 @@ def optimize_agent():
         sampler=sampler,
         pruner=pruner,
         direction="maximize",
-        study_name=f"recurrent_ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        study_name=f"ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
     try:

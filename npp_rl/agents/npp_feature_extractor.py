@@ -7,109 +7,121 @@ from npp_rl.environments.constants import TEMPORAL_FRAMES
 torch.autograd.set_detect_anomaly(True)
 
 
-class ResidualBlock(nn.Module):
-    """Residual block used in IMPALA CNN architecture."""
+class NatureCNN(nn.Module):
+    """Nature CNN architecture from the DQN paper."""
 
-    def __init__(self, depth):
+    def __init__(self, input_channels, features_dim=256):
         super().__init__()
-        self.conv1 = nn.Conv2d(depth, depth, 3, padding=1)
-        self.conv2 = nn.Conv2d(depth, depth, 3, padding=1)
+        self.conv_layers = nn.Sequential(
+            # First conv layer
+            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            # Second conv layer
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            # Third conv layer
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Flatten()
+        )
+
+        # Calculate the size of flattened features
+        # For player frame: 50x60 -> 11x13 -> 4x5 -> 2x3
+        # For base frame: 120x160 -> 29x39 -> 13x18 -> 11x16
+        with torch.no_grad():
+            # Use player frame size for calculation
+            dummy_input = torch.zeros(1, input_channels, 50, 60)
+            conv_out = self.conv_layers(dummy_input)
+            n_flatten = conv_out.shape[1]
+
+        # Create linear layers with proper input dimensions
+        self.linear = nn.Sequential(
+            nn.Linear(n_flatten, 512),  # First reduce to 512
+            nn.ReLU(),
+            nn.Linear(512, features_dim)  # Then to desired output dimension
+        )
 
     def forward(self, x):
-        out = nn.functional.relu(x)
-        out = self.conv1(out)
-        out = nn.functional.relu(out)
-        out = self.conv2(out)
-        return out + x
-
-
-class ConvSequence(nn.Module):
-    """Convolutional sequence with max pooling and residual blocks."""
-
-    def __init__(self, input_depth, output_depth):
-        super().__init__()
-        self.conv = nn.Conv2d(input_depth, output_depth, 3, padding=1)
-        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.res1 = ResidualBlock(output_depth)
-        self.res2 = ResidualBlock(output_depth)
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.max_pool(x)
-        x = self.res1(x)
-        x = self.res2(x)
-        return x
-
-
-class ImpalaCNN(nn.Module):
-    """IMPALA CNN architecture."""
-
-    def __init__(self, input_channels, depths=[16, 32, 32]):
-        super().__init__()
-        self.depths = depths
-
-        # Build conv sequences
-        self.conv_sequences = nn.ModuleList([
-            ConvSequence(
-                input_channels if i == 0 else depths[i-1],
-                depth
-            ) for i, depth in enumerate(depths)
-        ])
-
-        # Final dense layer
-        # 32 is the last depth, 11x11 is the spatial dimension after conv sequences
-        self.final_dense = nn.Linear(32 * 11 * 11, 256)
-
-    def forward(self, x):
-        # Initial scaling
-        x = x / 255.0
-
-        # Process through conv sequences
-        for conv_sequence in self.conv_sequences:
-            x = conv_sequence(x)
-
-        # Flatten and process through dense layer
-        x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(x)
-        x = self.final_dense(x)
-        x = nn.functional.relu(x)
-
-        return x
+        x = x / 255.0  # Normalize
+        return self.linear(self.conv_layers(x))
 
 
 class NPPFeatureExtractor(BaseFeaturesExtractor):
-    """Feature extractor using IMPALA CNN for visual processing."""
+    """Feature extractor using Nature CNN for visual processing and MLP for game state."""
 
-    def __init__(self, observation_space: gymnasium.spaces.Box, features_dim: int = 512):
+    def __init__(self, observation_space: gymnasium.spaces.Dict, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
 
-        # Input channels configuration
-        self.temporal_frames = TEMPORAL_FRAMES
-
-        # IMPALA CNN for visual processing
-        self.impala_cnn = ImpalaCNN(
-            input_channels=self.temporal_frames,
-            depths=[16, 32, 32]  # As per IMPALA paper
+        # Nature CNN for player frame processing
+        self.player_frame_cnn = NatureCNN(
+            input_channels=4,  # Four stacked frames when frame stacking is enabled
+            features_dim=256
         )
 
-        # Final layer to match features_dim
-        self.final_layer = nn.Sequential(
-            nn.Linear(256, self.features_dim),
+        # Nature CNN for base frame processing
+        self.base_frame_cnn = NatureCNN(
+            input_channels=1,  # Single grayscale frame
+            features_dim=256
+        )
+
+        # MLP for game state processing
+        self.game_state_mlp = nn.Sequential(
+            nn.Linear(29, 64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128)
+        )
+
+        # Final fusion layer
+        self.fusion_layer = nn.Sequential(
+            # 256 from each CNN + 128 from MLP
+            nn.Linear(256 + 256 + 128, self.features_dim),
             nn.ReLU(),
             nn.Linear(self.features_dim, self.features_dim)
         )
 
     def forward(self, observations) -> torch.Tensor:
-        # Process frame stack - observations is already (batch_size, height, width, channels)
-        visual_input = observations.float()
+        # Process player frame stack
+        player_frames = observations['player_frame'].float()
 
-        # Permute from (batch_size, height, width, channels) to (batch_size, channels, height, width)
-        visual_input = visual_input.permute(0, 3, 1, 2)
+        # Debug print for input shape
+        print(f"Initial player_frames shape: {player_frames.shape}")
 
-        # Process through IMPALA CNN
-        cnn_features = self.impala_cnn(visual_input)
+        # Ensure shape is [batch, channels, height, width]
+        if len(player_frames.shape) == 3:  # If no batch dimension
+            player_frames = player_frames.unsqueeze(0)  # Add batch dimension
 
-        # Process through final layer
-        output = self.final_layer(cnn_features)
+        # Always permute to ensure correct order, regardless of input shape
+        if len(player_frames.shape) == 4:
+            # If shape is [batch, height, width, channels] or similar
+            player_frames = player_frames.permute(0, 3, 1, 2)
+
+        print(f"Final player_frames shape: {player_frames.shape}")
+        player_features = self.player_frame_cnn(player_frames)
+
+        # Process base frame
+        base_frames = observations['base_frame'].float()
+        if len(base_frames.shape) == 3:  # If no batch dimension
+            base_frames = base_frames.unsqueeze(0)  # Add batch dimension
+        if len(base_frames.shape) == 4:
+            base_frames = base_frames.permute(0, 3, 1, 2)
+        base_features = self.base_frame_cnn(base_frames)
+
+        # Process game state
+        game_state = observations['game_state'].float()
+        if len(game_state.shape) == 1:  # If no batch dimension
+            game_state = game_state.unsqueeze(0)  # Add batch dimension
+        game_state_features = self.game_state_mlp(game_state)
+
+        # Concatenate all features
+        combined_features = torch.cat([
+            player_features,
+            base_features,
+            game_state_features
+        ], dim=1)
+
+        # Final fusion
+        output = self.fusion_layer(combined_features)
 
         return output

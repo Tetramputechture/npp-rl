@@ -11,7 +11,6 @@ import os
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
 import uuid
-import random
 from npp_rl.environments.constants import (
     GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
     OBSERVATION_IMAGE_HEIGHT,
@@ -21,7 +20,6 @@ from npp_rl.environments.constants import (
     PLAYER_FRAME_HEIGHT
 )
 from npp_rl.environments.visualization.path_visualizer import PathVisualizer
-from PIL import Image
 from npp_rl.environments.constants import MAX_TIME_IN_FRAMES
 from npp_rl.environments.observation_processor import ObservationProcessor
 
@@ -32,20 +30,12 @@ class NPlusPlus(gymnasium.Env):
     """Custom Gym environment for the game N++.
 
     This environment provides a Gym interface for the N++ game, allowing reinforcement
-    learning agents to learn to play levels. The environment handles game state
-    management, reward calculation, and action execution while maintaining proper
-    timing and synchronization with the game. The environment also tracks
-    overall success in the level and progress towards sub-goals in the level,
-    such as activating the switch or reaching the exit door, to help the agent
-    learn efficient sub-paths through the level.
-
-    Success metrics include:
-    1. Overall level completion
-
+    learning agents to learn to play levels. We use a headless version of the game
+    to speed up training.
     """
     metadata = {'render.modes': ['human', 'rgb_array']}
 
-    def __init__(self, render_mode: str = 'rgb_array'):
+    def __init__(self, render_mode: str = 'rgb_array', enable_frame_stack: bool = False):
         """Initialize the environment."""
         super().__init__()
 
@@ -55,7 +45,8 @@ class NPlusPlus(gymnasium.Env):
         self.render_mode = render_mode
 
         # Initialize observation processor
-        self.observation_processor = ObservationProcessor()
+        self.observation_processor = ObservationProcessor(
+            enable_frame_stack=enable_frame_stack)
 
         # Initialize planning components
         self.path_planner = PathPlanner()
@@ -74,12 +65,14 @@ class NPlusPlus(gymnasium.Env):
         self.action_space = discrete.Discrete(6)
 
         # Initialize observation space as a Dict space with player_frame, base_frame, and game_state
+        player_frame_dimension_count = 4 if enable_frame_stack else 1
         self.observation_space = Dict({
             # Player-centered frame
             'player_frame': box.Box(
                 low=0,
                 high=255,
-                shape=(PLAYER_FRAME_HEIGHT, PLAYER_FRAME_WIDTH, 1),
+                shape=(PLAYER_FRAME_HEIGHT, PLAYER_FRAME_WIDTH,
+                       player_frame_dimension_count),
                 dtype=np.uint8
             ),
             # Base frame (full screen)
@@ -93,8 +86,8 @@ class NPlusPlus(gymnasium.Env):
             'game_state': box.Box(
                 low=-1,
                 high=1,
-                # +5 for time remaining and vectors to objectives
-                shape=(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH + 5,),
+                # + 4 for vectors to objectives
+                shape=(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH + 4,),
                 dtype=np.float32
             )
         })
@@ -136,7 +129,7 @@ class NPlusPlus(gymnasium.Env):
 
         ninja_state = self.nplay_headless.get_ninja_state()
         entity_states = self.nplay_headless.get_entity_states(
-            only_exit_and_switch=True)
+            only_one_exit_and_switch=True)
         game_state = np.concatenate([ninja_state, entity_states])
 
         return {

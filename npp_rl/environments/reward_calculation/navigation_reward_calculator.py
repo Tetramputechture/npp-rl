@@ -9,12 +9,12 @@ class NavigationRewardCalculator(BaseRewardCalculator):
     """Handles calculation of navigation and objective-based rewards."""
 
     # Navigation constants
-    DISTANCE_IMPROVEMENT_SCALE = 0.2
-    CONSECUTIVE_IMPROVEMENT_BONUS = 0.05
-    MOMENTUM_BONUS = 0.05
-    MOMENTUM_PENALTY = -0.05
+    DISTANCE_IMPROVEMENT_SCALE = 0.01
+    CONSECUTIVE_IMPROVEMENT_BONUS = 0.01
+    MOMENTUM_BONUS = 0.01
+    MOMENTUM_PENALTY = -0.01
     MIN_DISTANCE_THRESHOLD = 20.0
-    PROXIMITY_BONUS_SCALE = 0.5
+    PROXIMITY_BONUS_SCALE = 1.1
 
     def __init__(self):
         """Initialize navigation reward calculator."""

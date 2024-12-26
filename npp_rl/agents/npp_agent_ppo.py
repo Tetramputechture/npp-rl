@@ -14,7 +14,7 @@ import subprocess
 import threading
 from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
-# from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
+from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -68,30 +68,23 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
         end_fraction=0.85
     )
 
-    # Lets do what we can with Stable Baselines 3's own MultiInputPolicy/feature extractor
-    # policy_kwargs = dict(
-    #     features_extractor_class=NPPFeatureExtractor,
-    #     net_arch=dict(
-    #         pi=[256, 128, 64],
-    #         vf=[256, 128, 64]
-    #     ),
-    #     normalize_images=True,
-    #     activation_fn=nn.ReLU,
-    # )
+    policy_kwargs = dict(
+        # features_extractor_class=NPPFeatureExtractor,
+        net_arch=dict(
+            pi=[128, 128],
+            vf=[128, 128]
+        ),
+        normalize_images=True,
+        activation_fn=nn.ReLU,
+    )
 
     # Reduced batch size for lower memory usage
     batch_size = min(512, n_steps // 4)
 
     model = PPO(
         # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
-        # Right now, we're trying a simple approach where we use MultiInputPolicy with no policy_kwargs,
-        # which does the following when processing the observation space:
-        # If input is an image (automatically detected, see common.preprocessing.is_image_space),
-        #   process image with Nature Atari CNN network and output a latent vector of size 256.
-        # If input is not an image, flatten it (no layers).
-        # Concatenate all previous vectors into one long vector and pass it to policy.
-        policy="MultiInputPolicy",  # Expects a Dict, with two Boxes
-        # policy_kwargs=policy_kwargs,
+        policy="MultiInputPolicy",  # Shouldn't matter since we're using policy_kwargs
+        policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
         n_steps=n_steps,
@@ -263,26 +256,26 @@ def record_agent_training(env: NPlusPlus, model: PPO,
 
 
 def start_training(load_model_path=None, render_mode='rgb_array'):
-    """Initialize environment and start training process. Assumes the player is already in the game
-    and playing the level, as this method will attempt to press the reset key so training can start
-    from a fresh level.
+    """Initialize environment and start training process.
 
     Args:
         load_model_path: Optional path to a previously saved model to continue training from
+        render_mode: 'human' or 'rgb_array'
     """
 
     try:
-        env = NPlusPlus(render_mode=render_mode)
-        # check if the environment is valid
+        env = NPlusPlus(render_mode=render_mode, enable_frame_stack=True)
         check_env(env)
+
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human'), n_envs=1,
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human', enable_frame_stack=True), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 8 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array', enable_frame_stack=True), n_envs=4,
                                    vec_env_cls=SubprocVecEnv)
+
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
