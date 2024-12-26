@@ -56,18 +56,17 @@ class RewardCalculator(BaseRewardCalculator):
         reward = 0.0
 
         # Add time pressure
-        reward += self.BASE_TIME_PENALTY
+        # reward += self.BASE_TIME_PENALTY
 
         # Navigation reward with progressive scaling
-        # navigation_reward, switch_activated = self.navigation_calculator.calculate_navigation_reward(
-        #     obs, prev_obs
-        # )
-        # reward += navigation_reward
+        navigation_reward, switch_activated = self.navigation_calculator.calculate_navigation_reward(
+            obs, prev_obs
+        )
+        reward += navigation_reward
 
         # Bonus for switch activation with time-based scaling
-        # if switch_activated:
-        #     time_factor = max(0.5, 1.0 - (obs.get('time_elapsed', 0) / obs.get('time_limit', 100)))
-        #     reward += self.SWITCH_ACTIVATION_REWARD * time_factor
+        if switch_activated:
+            reward += self.SWITCH_ACTIVATION_REWARD
 
         return reward
 

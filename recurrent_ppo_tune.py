@@ -6,16 +6,15 @@ agent. It includes pruning of bad trials and proper handling of the evaluation
 environment.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from sb3_contrib import RecurrentPPO
-from stable_baselines3.common.callbacks import EvalCallback
-from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.utils import get_linear_fn
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
-import torch.nn as nn
 from pathlib import Path
 import json
 import datetime
@@ -23,11 +22,12 @@ from npp_rl.environments.nplusplus import NPlusPlus
 
 # Tuning constants
 N_TRIALS = 100  # Number of trials to run
-N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
+N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
-N_TIMESTEPS = int(2e5)  # Total timesteps per trial
-EVAL_FREQ = int(N_TIMESTEPS / N_EVALUATIONS)  # Evaluation frequency
-N_EVAL_EPISODES = 3  # Episodes per evaluation
+N_WARMUP_STEPS = 10
+N_TIMESTEPS = int(1e6)  # Total timesteps per trial
+EVAL_FREQ = 10000  # Evaluation frequency
+N_EVAL_EPISODES = 5  # Episodes per evaluation
 N_ENVS = 4  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
@@ -63,12 +63,22 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     # Neural network architecture
     net_arch_type = trial.suggest_categorical("net_arch", ["small", "medium"])
     net_arch = {
-        "small": [64, 64],
-        "medium": [256, 128],
+        "tiny": [64, 64],
+        "small": [128, 128],
+        "medium": [256, 256],
     }[net_arch_type]
 
     # Learning rate
-    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+    lr_schedule = trial.suggest_categorical(
+        "lr_schedule", ["linear", "constant"])
+
+    if lr_schedule == 'linear':
+        learning_rate = get_linear_fn(
+            start=learning_rate,
+            end=5e-6,
+            end_fraction=0.85
+        )
 
     # Batch size and n_steps
     n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
@@ -107,6 +117,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "batch_size": batch_size,
         "gamma": gamma,
         "learning_rate": learning_rate,
+        "lr_schedule": lr_schedule,
         "ent_coef": ent_coef,
         "vf_coef": vf_coef,
         "n_epochs": n_epochs,
@@ -132,6 +143,7 @@ class TrialEvalCallback(EvalCallback):
         eval_freq: int = 10000,
         deterministic: bool = True,
         verbose: int = 0,
+        callback_after_eval: Optional[BaseCallback] = None,
     ):
         super().__init__(
             eval_env=eval_env,
@@ -139,6 +151,7 @@ class TrialEvalCallback(EvalCallback):
             eval_freq=eval_freq,
             deterministic=deterministic,
             verbose=verbose,
+            callback_after_eval=callback_after_eval,
         )
         self.trial = trial
         self.eval_idx = 0
@@ -181,6 +194,9 @@ def objective(trial: optuna.Trial) -> float:
         **kwargs
     )
 
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=30, min_evals=50, verbose=1)
+
     # Create evaluation callback
     eval_callback = TrialEvalCallback(
         eval_env=eval_env,
@@ -188,6 +204,7 @@ def objective(trial: optuna.Trial) -> float:
         n_eval_episodes=N_EVAL_EPISODES,
         eval_freq=EVAL_FREQ,
         deterministic=True,
+        callback_after_eval=stop_callback,
     )
 
     nan_encountered = False
@@ -231,10 +248,10 @@ def optimize_agent():
     torch.set_num_threads(1)
 
     # Initialize sampler and pruner
-    sampler = TPESampler(n_startup_trials=N_STARTUP_TRIALS)
+    sampler = TPESampler(n_startup_trials=N_STARTUP_TRIALS, multivariate=True)
     pruner = MedianPruner(
         n_startup_trials=N_STARTUP_TRIALS,
-        n_warmup_steps=N_EVALUATIONS // 3
+        n_warmup_steps=N_WARMUP_STEPS
     )
 
     # Create study
@@ -246,7 +263,7 @@ def optimize_agent():
     )
 
     try:
-        study.optimize(objective, n_trials=N_TRIALS)
+        study.optimize(objective, n_trials=N_TRIALS, n_jobs=4)
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user.")
 

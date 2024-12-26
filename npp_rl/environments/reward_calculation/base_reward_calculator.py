@@ -10,7 +10,7 @@ class BaseRewardCalculator:
     # Base reward/penalty constants
     BASE_TIME_PENALTY = -0.01
     GOLD_COLLECTION_REWARD = 0.5
-    SWITCH_ACTIVATION_REWARD = 50.0
+    SWITCH_ACTIVATION_REWARD = 5.0
     TERMINAL_REWARD = 10.0
     DEATH_PENALTY = -10.0
     TIMEOUT_PENALTY = -5.0

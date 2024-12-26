@@ -2,7 +2,6 @@
 from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from npp_rl.environments.reward_calculation.base_reward_calculator import BaseRewardCalculator
-from npp_rl.util.util import calculate_velocity
 from npp_rl.environments.constants import LEVEL_WIDTH, LEVEL_HEIGHT
 
 
@@ -40,12 +39,6 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.best_exit_distance = float('inf')
         self.episode_start_switch_distance = None
         self.episode_start_exit_distance = None
-
-    def _get_penalty_scale(self) -> float:
-        """Calculate penalty scaling based on training progress."""
-        if self.total_steps < self.early_training_threshold:
-            return 0.3 + (0.7 * (self.total_steps / self.early_training_threshold))
-        return 1.0
 
     def calculate_potential(self, state: Dict[str, Any]) -> float:
         """Calculate enhanced state potential for reward shaping."""
@@ -221,6 +214,8 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         self.consecutive_improvements = 0
         self.episode_start_switch_distance = None
         self.episode_start_exit_distance = None
+        self.best_exit_distance = float('inf')
+        self.best_switch_distance = float('inf')
 
     def set_mine_coordinates(self, mine_coords: List[Tuple[float, float]]):
         """Set the mine coordinates for the current level.
@@ -271,7 +266,7 @@ class NavigationRewardCalculator(BaseRewardCalculator):
         if prev_distance is None or prev_distance == float('inf'):
             return 0.0
 
-        # Calculate absolute and relative improvement with enhanced scaling
+        # Calculate absolute and relative improvement
         absolute_improvement = prev_distance - curr_distance
         relative_improvement = absolute_improvement / (prev_distance + 1e-6)
 
