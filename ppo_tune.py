@@ -180,8 +180,8 @@ class TrialEvalCallback(EvalCallback):
                 return False
         return True
 
-    def _on_training_end(self) -> None:
-        super()._on_training_end()
+    def _on_training_start(self) -> None:
+        super()._on_training_start()
         tqdm_objects = [obj for obj in gc.get_objects()
                         if 'tqdm' in type(obj).__name__]
         for tqdm_object in tqdm_objects:
