@@ -9,7 +9,7 @@ import time
 from typing import Tuple, Dict as TypeDict, Any
 import os
 from npp_rl.environments.movement_evaluator import MovementEvaluator
-from nplay_headless import NPlayHeadless
+from nclone.nplay_headless import NPlayHeadless
 import uuid
 from npp_rl.environments.constants import (
     GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
