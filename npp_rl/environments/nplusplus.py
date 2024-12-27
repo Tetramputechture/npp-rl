@@ -334,12 +334,6 @@ class NPlusPlus(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         """Reset the environment with planning components and visualization."""
-        # Save video from previous episode if buffer is not empty
-        self._save_path_video()
-
-        # Increment episode counter
-        self.episode_counter += 1
-
         # Reset current episode reward
         self.current_episode_reward = 0.0
 
@@ -348,10 +342,6 @@ class NPlusPlus(gymnasium.Env):
 
         # Reset reward calculator and movement evaluator
         self.reward_calculator.reset()
-
-        # Reset position and action logs
-        self.position_log_file_string = 'PlayerX,PlayerY\n'
-        self.action_log_file_string = 'Action\n'
 
         # Reset level and load random map
         self.nplay_headless.reset()

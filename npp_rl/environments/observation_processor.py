@@ -40,6 +40,7 @@ This class should handle returning:
     - Vector between ninja and exit door
 """
 import numpy as np
+import os
 from collections import deque
 import cv2
 from typing import Dict, Any, Tuple
