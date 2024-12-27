@@ -56,7 +56,7 @@ class RewardCalculator(BaseRewardCalculator):
         reward = 0.0
 
         # Add time pressure
-        # reward += self.BASE_TIME_PENALTY
+        reward += self.BASE_TIME_PENALTY
 
         # Navigation reward with progressive scaling
         navigation_reward, switch_activated = self.navigation_calculator.calculate_navigation_reward(

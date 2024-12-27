@@ -116,7 +116,6 @@ class NPlusPlus(gymnasium.Env):
         # Initialize path visualizer
         self.path_visualizer = PathVisualizer()
         self.current_path = []
-        self.episode_step_counter = 0
 
         # Initialize frame buffer for path visualization
         self.path_viz_buffer = []
@@ -331,11 +330,6 @@ class NPlusPlus(gymnasium.Env):
         # Get previous observation
         prev_obs = self._get_observation()
 
-        player_x, player_y = self.nplay_headless.ninja_position()
-
-        self.position_log_file_string += f'{player_x},{player_y}\n'
-        self.action_log_file_string += f'{self._action_to_string(action)}\n'
-
         # Execute action
         action_hoz, action_jump = self._actions_to_execute(action)
         self.nplay_headless.tick(action_hoz, action_jump)
@@ -343,8 +337,6 @@ class NPlusPlus(gymnasium.Env):
         # Get current observation
         curr_obs = self._get_observation()
         terminated, truncated = self._check_termination()
-
-        self.episode_step_counter += 1
 
         # Calculate reward
         movement_reward = self.reward_calculator.calculate_reward(
@@ -386,9 +378,6 @@ class NPlusPlus(gymnasium.Env):
         # Reset level and load random map
         self.nplay_headless.reset()
         self.nplay_headless.load_random_map()
-
-        # Reset episode step counter
-        self.episode_step_counter = 0
 
         # Get initial observation and process it
         initial_obs = self._get_observation()
