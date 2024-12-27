@@ -28,7 +28,7 @@ N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(1e6)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 4  # Number of parallel environments
+N_ENVS = 32  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
