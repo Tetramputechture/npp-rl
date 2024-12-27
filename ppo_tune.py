@@ -231,7 +231,7 @@ def objective(trial: optuna.Trial) -> float:
         model.learn(
             total_timesteps=N_TIMESTEPS,
             callback=eval_callback,
-            progress_bar=True,
+            progress_bar=False,
         )
     except AssertionError as e:
         # Handle NaN errors
