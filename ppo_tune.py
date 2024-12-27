@@ -6,6 +6,7 @@ agent with frame stacking. It includes pruning of bad trials and proper handling
 of the evaluation environment.
 """
 
+import gc
 from typing import Any, Dict, Optional
 import optuna
 from optuna.pruners import MedianPruner
@@ -35,6 +36,20 @@ DEFAULT_HYPERPARAMS = {
     "policy": "MultiInputPolicy",
     "device": "cuda" if torch.cuda.is_available() else "cpu",
 }
+
+
+# On cherche tous les objets dont le nom du type contient tqdm
+tqdm_objects = [obj for obj in gc.get_objects()
+                if 'tqdm' in type(obj).__name__]
+
+# On affiche leur type
+for tqdm_object in tqdm_objects:
+    print(type(tqdm_object).__name__)
+
+# On ferme ceux qu'on veut
+for tqdm_object in tqdm_objects:
+    if 'tqdm_rich' in type(tqdm_object).__name__:
+        tqdm_object.close()
 
 
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
