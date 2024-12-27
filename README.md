@@ -8,25 +8,46 @@ This project aims to train an agent to play [N++](https://en.wikipedia.org/wiki/
 
 ## Environment
 
-The environment uses a community-built simulator ([nclone](https://github.com/SimonV42/nclone)) rather than controlling the actual game process. This allows for faster training and headless operation.
+The environment uses a custom fork of community-built simulator ([nclone](https://github.com/Tetramputechture/nclone)) rather than controlling the actual game process. This allows for faster training and headless operation.
 
 ### Observation Space
 
 The observation space consists of three components:
 
 1. **Player Frame** - A localized view centered on the player
-   - Dimensions: PLAYER_FRAME_HEIGHT x PLAYER_FRAME_WIDTH x 1 (grayscale)
+   - Dimensions: PLAYER_FRAME_HEIGHT x PLAYER_FRAME_WIDTH x 3 (stacked grayscale frames)
    - Provides detailed information about the immediate surroundings
+   - Frame stacking:
+     - Current frame (most recent)
+     - Last frame (1 frame ago)
+     - Second to last frame (2 frames ago)
+   - Each frame is preprocessed:
+     - Converted to grayscale
+     - Centered on player position
+     - Cropped to focus on local area
+     - Normalized to [0, 255] range
 
 2. **Base Frame** - A global view of the entire level
    - Dimensions: OBSERVATION_IMAGE_HEIGHT x OBSERVATION_IMAGE_WIDTH x 1 (grayscale)
    - Gives context about the overall level layout
 
 3. **Game State** - A vector containing:
-   - Ninja state (position, speed, airborne status, etc.)
+   - Ninja state:
+     - Position X
+     - Position Y
+     - Speed X
+     - Speed Y
+     - Airborn
+     - Walled
+     - Jump duration
+     - Facing
+     - Tilt angle
+     - Applied gravity
+     - Applied drag
+     - Applied friction
    - Exit and switch entity states
-   - Time remaining
    - Vectors between ninja and objectives (switch/exit)
+   - Time remaining
 
 ### Action Space
 
