@@ -180,6 +180,14 @@ class TrialEvalCallback(EvalCallback):
                 return False
         return True
 
+    def _on_training_end(self) -> None:
+        super()._on_training_end()
+        tqdm_objects = [obj for obj in gc.get_objects()
+                        if 'tqdm' in type(obj).__name__]
+        for tqdm_object in tqdm_objects:
+            if 'tqdm_rich' in type(tqdm_object).__name__:
+                tqdm_object.close()
+
 
 def objective(trial: optuna.Trial) -> float:
     """Optimization objective for Optuna."""
