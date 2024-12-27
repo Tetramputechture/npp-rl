@@ -97,7 +97,8 @@ class ObservationProcessor:
     """Processes raw game observations into frame stacks and normalized feature vectors."""
 
     def __init__(self, enable_frame_stack: bool = False):
-        self.frame_history = deque(maxlen=max(FRAME_INTERVALS) + 1)
+        # Keep only 3 frames in history: current, last, and second to last
+        self.frame_history = deque(maxlen=3)
         self.enable_frame_stack = enable_frame_stack
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
@@ -228,15 +229,15 @@ class ObservationProcessor:
             self.frame_history.append(obs['screen'])
 
             # Fill frame history if needed
-            while len(self.frame_history) < max(FRAME_INTERVALS) + 1:
+            while len(self.frame_history) < 3:
                 self.frame_history.append(obs['screen'])
 
-            # Get player-centered frames at specified intervals
+            # Get player-centered frames for current and previous frames
             player_frames = []
-            for interval in FRAME_INTERVALS:
-                historical_frame = self.frame_history[-interval-1]
+            # Reverse to get [current, last, second_to_last]
+            for frame in reversed(self.frame_history):
                 player_frame = self.frame_around_player(
-                    historical_frame,
+                    frame,
                     obs['player_x'],
                     obs['player_y']
                 )
@@ -248,9 +249,9 @@ class ObservationProcessor:
             # Stack frames along channel dimension
             result['player_frame'] = np.concatenate(player_frames, axis=-1)
 
-            # Verify we have the correct number of channels
-            assert result['player_frame'].shape[-1] == len(
-                FRAME_INTERVALS), f"Expected {len(FRAME_INTERVALS)} channels, got {result['player_frame'].shape[-1]}"
+            # Verify we have exactly 3 channels
+            assert result['player_frame'].shape[
+                -1] == 3, f"Expected 3 channels, got {result['player_frame'].shape[-1]}"
         else:
             # Ensure single frame has shape (H, W, 1)
             if len(player_frame.shape) == 2:

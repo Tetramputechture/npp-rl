@@ -42,3 +42,6 @@ game_config.json
 *.zip
 
 anim_data_line_new.txt.bin
+
+# Benchmarking
+benchmark_data/

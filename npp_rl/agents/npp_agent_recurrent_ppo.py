@@ -273,7 +273,7 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
     """
 
     try:
-        env = NPlusPlus(render_mode=render_mode)
+        env = NPlusPlus(render_mode=render_mode, enable_frame_stack=True)
         # check if the environment is valid
         check_env(env)
 
@@ -283,11 +283,11 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human'), n_envs=1,
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human', enable_frame_stack=True), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 4 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array'), n_envs=4,
+            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array', enable_frame_stack=True), n_envs=4,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 

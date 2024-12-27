@@ -6,7 +6,7 @@ from npp_rl.environments.reward_calculation.planning_reward_calculator import Pl
 from npp_rl.environments.planning.path_planner import PathPlanner
 from npp_rl.environments.planning.waypoint_manager import WaypointManager
 import time
-from typing import Tuple, Dict as TypeDict, Any
+from typing import Tuple
 import os
 from npp_rl.environments.movement_evaluator import MovementEvaluator
 from nplay_headless import NPlayHeadless
@@ -65,7 +65,7 @@ class NPlusPlus(gymnasium.Env):
         self.action_space = discrete.Discrete(6)
 
         # Initialize observation space as a Dict space with player_frame, base_frame, and game_state
-        player_frame_dimension_count = 4 if enable_frame_stack else 1
+        player_frame_dimension_count = TEMPORAL_FRAMES if enable_frame_stack else 1
         self.observation_space = Dict({
             # Player-centered frame
             'player_frame': box.Box(
@@ -91,24 +91,6 @@ class NPlusPlus(gymnasium.Env):
                 dtype=np.float32
             )
         })
-
-        # Initialize position log folder
-        # add uuid to folder name
-        self.position_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S-")}/{uuid.uuid4()}/position_log'
-        os.makedirs(self.position_log_folder_name)
-
-        # Initialize position log file string
-        self.position_log_file_string = 'PlayerX,PlayerY\n'
-
-        # Initialize action log folder
-        self.action_log_folder_name = f'training_logs/{time.strftime("%m-%d-%Y_%H-%M-%S-")}/{uuid.uuid4()}/action_log'
-        os.makedirs(self.action_log_folder_name)
-
-        # Initialize action log file string
-        self.action_log_file_string = 'Action\n'
-
-        # Initialize episode counter
-        self.episode_counter = 0
 
         # Initialize current episode reward
         self.current_episode_reward = 0.0
@@ -343,10 +325,6 @@ class NPlusPlus(gymnasium.Env):
             curr_obs, prev_obs, action)
         reward = movement_reward
         self.current_episode_reward += reward
-
-        # Print reward if terminated or truncated
-        if terminated or truncated:
-            print(f"Episode reward: {self.current_episode_reward}")
 
         # Process observation using ObservationProcessor
         processed_obs = self.observation_processor.process_observation(

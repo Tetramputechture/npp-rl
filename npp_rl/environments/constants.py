@@ -20,7 +20,7 @@ LEVEL_HEIGHT = 576.0
 MAX_VELOCITY = 20.0
 
 # Observation space constants
-TEMPORAL_FRAMES = 4
+TEMPORAL_FRAMES = 3
 
 # Max time in frames per level
 MAX_TIME_IN_FRAMES = 5000
