@@ -28,7 +28,7 @@ N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(1e6)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 32  # Number of parallel environments
+N_ENVS = 64  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
@@ -259,7 +259,7 @@ def optimize_agent():
     )
 
     try:
-        study.optimize(objective, n_trials=N_TRIALS, n_jobs=1)
+        study.optimize(objective, n_trials=N_TRIALS, n_jobs=4)
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user.")
 
