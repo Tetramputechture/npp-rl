@@ -61,15 +61,14 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     gae_lambda = 1.0 - trial.suggest_float("gae_lambda", 0.001, 0.2, log=True)
 
     # Neural network architecture
-    net_arch_type = trial.suggest_categorical("net_arch", ["small", "medium"])
+    net_arch_type = trial.suggest_categorical("net_arch", ["tiny", "small"])
     net_arch = {
         "tiny": [64, 64],
         "small": [128, 128],
-        "medium": [256, 256],
     }[net_arch_type]
 
     # Learning rate
-    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
     lr_schedule = trial.suggest_categorical(
         "lr_schedule", ["linear", "constant"])
 
@@ -81,12 +80,12 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         )
 
     # Batch size and n_steps
-    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
+    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 7, 10)  # 128 to 1024
     batch_size = min(
-        2 ** trial.suggest_int("exponent_batch_size", 6, 10), n_steps)  # 64 to 1024
+        2 ** trial.suggest_int("exponent_batch_size", 5, 8), n_steps)  # 32 to 256
 
     # Number of epochs
-    n_epochs = trial.suggest_int("n_epochs", 5, 20)
+    n_epochs = trial.suggest_int("n_epochs", 5, 15)
 
     # Entropy coefficient
     ent_coef = trial.suggest_float("ent_coef", 0.0001, 0.01, log=True)
@@ -103,8 +102,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     max_grad_norm = trial.suggest_float("max_grad_norm", 0.3, 5.0, log=True)
 
     # LSTM-specific parameters
-    # 32 to 256
-    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 5, 8)
+    # 16 to 64
+    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 4, 6)
 
     # Store true values for logging
     trial.set_user_attr("gamma_", gamma)
