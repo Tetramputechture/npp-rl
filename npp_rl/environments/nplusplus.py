@@ -79,7 +79,7 @@ class NPlusPlus(gymnasium.Env):
             'base_frame': box.Box(
                 low=0,
                 high=255,
-                shape=(OBSERVATION_IMAGE_HEIGHT, OBSERVATION_IMAGE_WIDTH, 1),
+                shape=(OBSERVATION_IMAGE_WIDTH, OBSERVATION_IMAGE_HEIGHT, 1),
                 dtype=np.uint8
             ),
             # Game state features
@@ -91,9 +91,6 @@ class NPlusPlus(gymnasium.Env):
                 dtype=np.float32
             )
         })
-
-        # Initialize current episode reward
-        self.current_episode_reward = 0.0
 
         # Initialize path visualizer
         self.path_visualizer = PathVisualizer()
@@ -191,17 +188,9 @@ class NPlusPlus(gymnasium.Env):
         player_dead = self.nplay_headless.ninja_has_died()
         terminated = player_won or player_dead
 
-        if terminated:
-            print(
-                f"Episode terminated at frame {self.nplay_headless.sim.frame}")
-
         # Check truncation
         # Truncation is when the current simulation frame is greater than 5000
         truncated = self.nplay_headless.sim.frame > MAX_TIME_IN_FRAMES
-
-        if truncated:
-            print(
-                f"Episode truncated at frame {self.nplay_headless.sim.frame}")
 
         return terminated, truncated
 
@@ -324,7 +313,6 @@ class NPlusPlus(gymnasium.Env):
         movement_reward = self.reward_calculator.calculate_reward(
             curr_obs, prev_obs, action)
         reward = movement_reward
-        self.current_episode_reward += reward
 
         # Process observation using ObservationProcessor
         processed_obs = self.observation_processor.process_observation(
@@ -334,13 +322,10 @@ class NPlusPlus(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         """Reset the environment with planning components and visualization."""
-        # Reset current episode reward
-        self.current_episode_reward = 0.0
-
         # Reset observation processor
         self.observation_processor.reset()
 
-        # Reset reward calculator and movement evaluator
+        # Reset reward calculator
         self.reward_calculator.reset()
 
         # Reset level and load random map

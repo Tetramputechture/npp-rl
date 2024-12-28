@@ -60,10 +60,6 @@ def frame_to_grayscale(frame: np.ndarray) -> np.ndarray:
     2. Handles different input shapes
     3. Avoids unnecessary operations if input is already grayscale
     """
-    # If already grayscale, return as is
-    if len(frame.shape) == 2 or (len(frame.shape) == 3 and frame.shape[-1] == 1):
-        return frame if len(frame.shape) == 3 else frame[..., np.newaxis]
-
     # Ensure we're only taking first 3 channels if more exist
     frame = frame[..., :3]
 
@@ -73,7 +69,7 @@ def frame_to_grayscale(frame: np.ndarray) -> np.ndarray:
                  0.5870 * frame[..., 1] +
                  0.1140 * frame[..., 2])
 
-    return grayscale[..., np.newaxis]  # Add channel dimension
+    return grayscale[..., np.newaxis].astype(np.uint8)
 
 
 def resize_frame(frame: np.ndarray, width: int, height: int) -> np.ndarray:
@@ -120,18 +116,6 @@ class ObservationProcessor:
         self.frame_history = deque(maxlen=3)
         self.enable_frame_stack = enable_frame_stack
 
-    def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Convert raw frame to grayscale and resize with improved accuracy"""
-        if len(frame.shape) == 3 and frame.shape[-1] != 1:
-            frame = frame_to_grayscale(frame)
-        frame = resize_frame(frame, OBSERVATION_IMAGE_WIDTH,
-                             OBSERVATION_IMAGE_HEIGHT)
-        frame = clip_frame(frame)
-        if len(frame.shape) == 2:
-            # Ensure we have a channel dimension
-            frame = frame[..., np.newaxis]
-        return frame
-
     def frame_around_player(self, frame: np.ndarray, player_x: float, player_y: float) -> np.ndarray:
         """Crop the frame to a rectangle centered on the player."""
         # Frame is already grayscale at this point
@@ -152,13 +136,21 @@ class ObservationProcessor:
         # Get the cropped frame
         player_frame = player_frame[start_x:end_x, start_y:end_y]
 
-        # Calculate padding needed on each side
-        top_pad = max(0, PLAYER_FRAME_HEIGHT // 2 - int(player_y))
-        bottom_pad = max(0, PLAYER_FRAME_HEIGHT -
-                         player_frame.shape[1] - top_pad)
-        left_pad = max(0, PLAYER_FRAME_WIDTH // 2 - int(player_x))
-        right_pad = max(0, PLAYER_FRAME_WIDTH -
-                        player_frame.shape[0] - left_pad)
+        # Calculate padding needed on each side to reach target dimensions
+        current_width = player_frame.shape[1]
+        current_height = player_frame.shape[0]
+
+        # Calculate padding amounts
+        left_pad = (PLAYER_FRAME_WIDTH - current_width) // 2
+        right_pad = PLAYER_FRAME_WIDTH - current_width - left_pad
+        top_pad = (PLAYER_FRAME_HEIGHT - current_height) // 2
+        bottom_pad = PLAYER_FRAME_HEIGHT - current_height - top_pad
+
+        # Ensure no negative padding
+        left_pad = max(0, left_pad)
+        right_pad = max(0, right_pad)
+        top_pad = max(0, top_pad)
+        bottom_pad = max(0, bottom_pad)
 
         # Pad the frame
         player_frame = cv2.copyMakeBorder(
@@ -172,6 +164,13 @@ class ObservationProcessor:
         if len(player_frame.shape) == 2:
             # Ensure we have a channel dimension
             player_frame = player_frame[..., np.newaxis]
+
+        # Final size check and correction if needed
+        if player_frame.shape[:2] != (PLAYER_FRAME_HEIGHT, PLAYER_FRAME_WIDTH):
+            player_frame = cv2.resize(
+                player_frame, (PLAYER_FRAME_WIDTH, PLAYER_FRAME_HEIGHT))
+            if len(player_frame.shape) == 2:
+                player_frame = player_frame[..., np.newaxis]
 
         return player_frame
 
@@ -188,8 +187,8 @@ class ObservationProcessor:
         # Resize to standard dimensions
         base_map = resize_frame(
             screen,
-            OBSERVATION_IMAGE_WIDTH,
-            OBSERVATION_IMAGE_HEIGHT
+            OBSERVATION_IMAGE_HEIGHT,
+            OBSERVATION_IMAGE_WIDTH
         )
 
         if len(base_map.shape) == 2:
@@ -274,10 +273,15 @@ class ObservationProcessor:
                 player_frame = player_frame[..., np.newaxis]
             result['player_frame'] = player_frame
 
-        # Write our player frame to a file if the obs['sim_frame'] is 1
-        if obs['sim_frame'] == 1:
-            cv2.imwrite('player_frame.png', result['player_frame'])
-            cv2.imwrite('base_frame.png', result['base_frame'])
+        # # Write our player frame to a file if the obs['sim_frame'] is 1
+        # if obs['sim_frame'] == 5:
+        #     cv2.imwrite('player_frame.png', result['player_frame'])
+        #     cv2.imwrite('base_frame.png', result['base_frame'])
+
+        # # Print shapes
+        # print(f'result["player_frame"].shape: {result["player_frame"].shape}')
+        # print(f'result["base_frame"].shape: {result["base_frame"].shape}')
+        # print(f'result["game_state"].shape: {result["game_state"].shape}')
 
         return result
 
