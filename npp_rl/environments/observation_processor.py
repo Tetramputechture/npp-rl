@@ -53,8 +53,26 @@ from npp_rl.environments.constants import (
 
 
 def frame_to_grayscale(frame: np.ndarray) -> np.ndarray:
-    """Convert frame to grayscale with shape (H, W, 1)."""
-    grayscale = np.dot(frame[..., :3], [0.2989, 0.5870, 0.1140])
+    """Convert frame to grayscale with shape (H, W, 1).
+
+    This is an optimized version that:
+    1. Uses direct array indexing instead of np.dot
+    2. Handles different input shapes
+    3. Avoids unnecessary operations if input is already grayscale
+    """
+    # If already grayscale, return as is
+    if len(frame.shape) == 2 or (len(frame.shape) == 3 and frame.shape[-1] == 1):
+        return frame if len(frame.shape) == 3 else frame[..., np.newaxis]
+
+    # Ensure we're only taking first 3 channels if more exist
+    frame = frame[..., :3]
+
+    # Use direct array operations instead of np.dot
+    # Weights for RGB to grayscale conversion (same as before)
+    grayscale = (0.2989 * frame[..., 0] +
+                 0.5870 * frame[..., 1] +
+                 0.1140 * frame[..., 2])
+
     return grayscale[..., np.newaxis]  # Add channel dimension
 
 
@@ -116,10 +134,8 @@ class ObservationProcessor:
 
     def frame_around_player(self, frame: np.ndarray, player_x: float, player_y: float) -> np.ndarray:
         """Crop the frame to a rectangle centered on the player."""
-        # Convert to grayscale if needed
+        # Frame is already grayscale at this point
         player_frame = frame
-        if len(frame.shape) == 3 and frame.shape[-1] != 1:
-            player_frame = frame_to_grayscale(frame)
 
         # Calculate the starting and ending coordinates for the crop
         start_x = int(player_x - PLAYER_FRAME_WIDTH // 2)
@@ -129,20 +145,20 @@ class ObservationProcessor:
 
         # Ensure the crop is within the frame boundaries
         start_x = max(0, start_x)
-        end_x = min(frame.shape[1], end_x)
+        end_x = min(frame.shape[0], end_x)
         start_y = max(0, start_y)
-        end_y = min(frame.shape[0], end_y)
+        end_y = min(frame.shape[1], end_y)
 
         # Get the cropped frame
-        player_frame = player_frame[start_y:end_y, start_x:end_x]
+        player_frame = player_frame[start_x:end_x, start_y:end_y]
 
         # Calculate padding needed on each side
         top_pad = max(0, PLAYER_FRAME_HEIGHT // 2 - int(player_y))
         bottom_pad = max(0, PLAYER_FRAME_HEIGHT -
-                         player_frame.shape[0] - top_pad)
+                         player_frame.shape[1] - top_pad)
         left_pad = max(0, PLAYER_FRAME_WIDTH // 2 - int(player_x))
         right_pad = max(0, PLAYER_FRAME_WIDTH -
-                        player_frame.shape[1] - left_pad)
+                        player_frame.shape[0] - left_pad)
 
         # Pad the frame
         player_frame = cv2.copyMakeBorder(
@@ -153,23 +169,18 @@ class ObservationProcessor:
             value=0
         )
 
-        clipped_frame = clip_frame(player_frame)
-
-        if len(clipped_frame.shape) == 2:
+        if len(player_frame.shape) == 2:
             # Ensure we have a channel dimension
-            clipped_frame = clipped_frame[..., np.newaxis]
+            player_frame = player_frame[..., np.newaxis]
 
-        return clipped_frame
+        return player_frame
 
     def process_base_map(self, screen: np.ndarray) -> np.ndarray:
         """Process the base map (screen) into a standardized format.
 
         Returns a grayscale version of the current screen frame at the standard observation dimensions.
+        Frame is already in grayscale at this point.
         """
-        # Convert to grayscale if needed
-        if len(screen.shape) == 3 and screen.shape[-1] != 1:
-            screen = frame_to_grayscale(screen)
-
         # Our simulator logic pads each edge of the map with 24 pixel tiles
         # We need to remove these padding tiles to get the actual map
         screen = screen[24:-24, 24:-24]
@@ -181,7 +192,6 @@ class ObservationProcessor:
             OBSERVATION_IMAGE_HEIGHT
         )
 
-        base_map = clip_frame(base_map)
         if len(base_map.shape) == 2:
             # Ensure we have a channel dimension
             base_map = base_map[..., np.newaxis]
@@ -213,32 +223,37 @@ class ObservationProcessor:
 
     def process_observation(self, obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
         """Process observation into frame stack, base map, and feature vectors."""
-        # Process current frame
+        # Convert to grayscale once at the start
+        screen = obs['screen']
+        if len(screen.shape) == 3 and screen.shape[-1] != 1:
+            screen = frame_to_grayscale(screen)
+
+        # Process current frame using already grayscale screen
         player_frame = self.frame_around_player(
-            obs['screen'],
+            screen,
             obs['player_x'],
             obs['player_y']
         )
 
         result = {
-            'base_frame': self.process_base_map(obs['screen']),
+            'base_frame': self.process_base_map(screen),
             'game_state': self.process_game_state(obs)
         }
 
         if self.enable_frame_stack:
-            # Update frame history
-            self.frame_history.append(obs['screen'])
+            # Update frame history with grayscale frame
+            self.frame_history.append(screen)
 
             # Fill frame history if needed
             while len(self.frame_history) < 3:
-                self.frame_history.append(obs['screen'])
+                self.frame_history.append(screen)
 
             # Get player-centered frames for current and previous frames
             player_frames = []
             # Reverse to get [current, last, second_to_last]
             for frame in reversed(self.frame_history):
                 player_frame = self.frame_around_player(
-                    frame,
+                    frame,  # Frame is already grayscale
                     obs['player_x'],
                     obs['player_y']
                 )
@@ -258,6 +273,11 @@ class ObservationProcessor:
             if len(player_frame.shape) == 2:
                 player_frame = player_frame[..., np.newaxis]
             result['player_frame'] = player_frame
+
+        # Write our player frame to a file if the obs['sim_frame'] is 1
+        if obs['sim_frame'] == 1:
+            cv2.imwrite('player_frame.png', result['player_frame'])
+            cv2.imwrite('base_frame.png', result['base_frame'])
 
         return result
 

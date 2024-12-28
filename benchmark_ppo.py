@@ -11,6 +11,29 @@ from npp_rl.environments.nplusplus import NPlusPlus
 from npp_rl.agents.npp_agent_ppo import create_ppo_agent, setup_training_env
 
 
+def benchmark_env_step(env, n_steps=1000):
+    """
+    Benchmark environment step() function performance.
+
+    Args:
+        env: The environment to benchmark
+        n_steps: Number of steps to profile
+    """
+    # Profile the step function
+    profiler = cProfile.Profile()
+    profiler.enable()
+
+    # Take random actions for n_steps
+    for _ in range(n_steps):
+        action = env.action_space.sample()
+        _, _, terminated, truncated, _ = env.step(action)
+        if terminated or truncated:
+            env.reset()
+
+    profiler.disable()
+    return profiler
+
+
 def benchmark_ppo_training(total_timesteps=1000, n_envs=4, render_mode='rgb_array'):
     """
     Benchmark PPO training performance using cProfile.
@@ -49,7 +72,24 @@ def benchmark_ppo_training(total_timesteps=1000, n_envs=4, render_mode='rgb_arra
     model = create_ppo_agent(wrapped_env, n_steps=512,
                              tensorboard_log=str(profile_dir))
 
+    # First benchmark environment step function
+    print("\nBenchmarking environment step function...")
+    env_step_profiler = benchmark_env_step(
+        NPlusPlus(render_mode='rgb_array', enable_frame_stack=True))
+
+    # Save environment step profiling results
+    env_step_stats_file = profile_dir / 'env_step_profile_stats.txt'
+    with open(env_step_stats_file, 'w') as f:
+        stats = pstats.Stats(env_step_profiler, stream=f)
+        stats.sort_stats(SortKey.TIME)
+        stats.print_stats()
+        stats.print_callers()
+        stats.print_callees()
+
+    print(f"Environment step profiling data saved to {env_step_stats_file}")
+
     # Profile the training
+    print("\nBenchmarking PPO training...")
     profiler = cProfile.Profile()
     profiler.enable()
 
@@ -67,15 +107,11 @@ def benchmark_ppo_training(total_timesteps=1000, n_envs=4, render_mode='rgb_arra
     with open(stats_file, 'w') as f:
         stats = pstats.Stats(profiler, stream=f)
         stats.sort_stats(SortKey.TIME)
-
-        # Print overall stats
         stats.print_stats()
-
-        # Print callers and callees for expensive functions
         stats.print_callers()
         stats.print_callees()
 
-    print(f"\nProfiling data saved to {stats_file}")
+    print(f"PPO training profiling data saved to {stats_file}")
 
     return profile_dir
 
