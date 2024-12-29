@@ -25,7 +25,7 @@ N_TRIALS = 50  # Number of trials to run
 N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
-N_TIMESTEPS = int(1e6)  # Total timesteps per trial
+N_TIMESTEPS = int(1e7)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
 N_ENVS = 4  # Number of parallel environments
@@ -80,9 +80,9 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         )
 
     # Batch size and n_steps
-    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 7, 10)  # 128 to 1024
+    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
     batch_size = min(
-        2 ** trial.suggest_int("exponent_batch_size", 5, 8), n_steps)  # 32 to 256
+        2 ** trial.suggest_int("exponent_batch_size", 5, 9), n_steps)  # 32 to 512
 
     # Number of epochs
     n_epochs = trial.suggest_int("n_epochs", 5, 15)
