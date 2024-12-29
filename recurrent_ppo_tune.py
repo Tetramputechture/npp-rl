@@ -140,7 +140,7 @@ class TrialEvalCallback(EvalCallback):
         n_eval_episodes: int = 5,
         eval_freq: int = 10000,
         deterministic: bool = True,
-        verbose: int = 0,
+        verbose: int = 1,
         callback_after_eval: Optional[BaseCallback] = None,
     ):
         super().__init__(
