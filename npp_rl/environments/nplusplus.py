@@ -40,8 +40,8 @@ class NPlusPlus(gymnasium.Env):
         super().__init__()
 
         self.nplay_headless = NPlayHeadless(render_mode=render_mode)
-        # self.nplay_headless.load_random_map()
-        self.nplay_headless.load_map(MAP_DATA_PATH)
+        self.nplay_headless.load_random_map()
+        # self.nplay_headless.load_map(MAP_DATA_PATH)
 
         self.render_mode = render_mode
 
@@ -193,7 +193,7 @@ class NPlusPlus(gymnasium.Env):
         # Truncation is when the current simulation frame is greater than 5000
         truncated = self.nplay_headless.sim.frame > MAX_TIME_IN_FRAMES
 
-        return terminated, truncated
+        return terminated, truncated, player_won
 
     def _get_success_metrics(self):
         """Compile comprehensive success metrics combining movement and objectives."""
@@ -308,7 +308,7 @@ class NPlusPlus(gymnasium.Env):
 
         # Get current observation
         curr_obs = self._get_observation()
-        terminated, truncated = self._check_termination()
+        terminated, truncated, player_won = self._check_termination()
 
         # Calculate reward
         movement_reward = self.reward_calculator.calculate_reward(
@@ -319,7 +319,9 @@ class NPlusPlus(gymnasium.Env):
         processed_obs = self.observation_processor.process_observation(
             curr_obs)
 
-        return processed_obs, reward, terminated, truncated, {}
+        ep_info = {'is_success': player_won}
+
+        return processed_obs, reward, terminated, truncated, ep_info
 
     def reset(self, seed=None, options=None):
         """Reset the environment with planning components and visualization."""
@@ -331,8 +333,8 @@ class NPlusPlus(gymnasium.Env):
 
         # Reset level and load random map
         self.nplay_headless.reset()
-        # self.nplay_headless.load_random_map()
-        self.nplay_headless.load_map(MAP_DATA_PATH)
+        self.nplay_headless.load_random_map()
+        # self.nplay_headless.load_map(MAP_DATA_PATH)
 
         # Get initial observation and process it
         initial_obs = self._get_observation()
