@@ -21,8 +21,8 @@ import datetime
 from npp_rl.environments.nplusplus import NPlusPlus
 
 # Tuning constants
-N_TRIALS = 100  # Number of trials to run
-N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
+N_TRIALS = 50  # Number of trials to run
+N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(1e6)  # Total timesteps per trial
@@ -210,7 +210,7 @@ def objective(trial: optuna.Trial) -> float:
         model.learn(
             total_timesteps=N_TIMESTEPS,
             callback=eval_callback,
-            progress_bar=True,
+            progress_bar=False,
         )
     except AssertionError as e:
         # Handle NaN errors
@@ -261,7 +261,7 @@ def optimize_agent():
     )
 
     try:
-        study.optimize(objective, n_trials=N_TRIALS, n_jobs=1)
+        study.optimize(objective, n_trials=N_TRIALS, n_jobs=4)
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user.")
 
