@@ -23,7 +23,7 @@ from npp_rl.environments.visualization.path_visualizer import PathVisualizer
 from npp_rl.environments.constants import MAX_TIME_IN_FRAMES
 from npp_rl.environments.observation_processor import ObservationProcessor
 
-MAP_DATA_PATH = "../nclone/maps/map_data_simple"
+MAP_DATA_PATH = "../nclone/maps/map_data_complex"
 
 
 class NPlusPlus(gymnasium.Env):
@@ -40,7 +40,8 @@ class NPlusPlus(gymnasium.Env):
         super().__init__()
 
         self.nplay_headless = NPlayHeadless(render_mode=render_mode)
-        self.nplay_headless.load_random_map()
+        # self.nplay_headless.load_random_map()
+        self.nplay_headless.load_map(MAP_DATA_PATH)
 
         self.render_mode = render_mode
 
@@ -330,7 +331,8 @@ class NPlusPlus(gymnasium.Env):
 
         # Reset level and load random map
         self.nplay_headless.reset()
-        self.nplay_headless.load_random_map()
+        # self.nplay_headless.load_random_map()
+        self.nplay_headless.load_map(MAP_DATA_PATH)
 
         # Get initial observation and process it
         initial_obs = self._get_observation()

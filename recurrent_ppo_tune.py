@@ -21,14 +21,14 @@ import datetime
 from npp_rl.environments.nplusplus import NPlusPlus
 
 # Tuning constants
-N_TRIALS = 50  # Number of trials to run
-N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
+N_TRIALS = 100  # Number of trials to run
+N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(1e7)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 4  # Number of parallel environments
+N_ENVS = 32  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
@@ -102,8 +102,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     max_grad_norm = trial.suggest_float("max_grad_norm", 0.3, 5.0, log=True)
 
     # LSTM-specific parameters
-    # 16 to 64
-    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 4, 6)
+    # 128 to 512
+    lstm_hidden_size = 2 ** trial.suggest_int("exponent_lstm_hidden", 7, 9)
 
     # Store true values for logging
     trial.set_user_attr("gamma_", gamma)
