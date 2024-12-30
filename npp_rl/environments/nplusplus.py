@@ -349,4 +349,4 @@ class NPlusPlus(gymnasium.Env):
 
     def close(self):
         """Clean up environment resources."""
-        self.nplay_headless.exit()
+        # self.nplay_headless.exit()
