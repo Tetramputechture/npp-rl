@@ -11,7 +11,7 @@ import datetime
 import imageio
 import subprocess
 import threading
-from nclone.environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 # from npp_rl.agents.cnn_lstm_feature_extractor import CNNLSTMFeatureExtractor
 
@@ -271,8 +271,7 @@ def start_training(load_model_path=None, render_mode='rgb_array', n_envs=1):
     """
 
     try:
-        env = BasicLevelNoGold(render_mode=render_mode,
-                               enable_frame_stack=True)
+        env = BasicLevelNoGold(render_mode=render_mode)
         # check if the environment is valid
         check_env(env)
 
@@ -282,11 +281,11 @@ def start_training(load_model_path=None, render_mode='rgb_array', n_envs=1):
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=True), n_envs=1,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human'), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 4 environments')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=True), n_envs=n_envs,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array'), n_envs=n_envs,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 
