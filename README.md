@@ -94,6 +94,34 @@ The reward system includes:
 - Terminal rewards for level completion
 - Death penalties
 
+### Hyperparameter Tuning
+
+The project includes automated hyperparameter optimization using Optuna. To run the tuning process:
+
+```bash
+python recurrent_ppo_tune.py
+```
+
+The tuning process:
+
+- Runs 100 trials using Optuna's TPE sampler
+- Uses median pruning to stop underperforming trials early
+- Runs for up to 24 hours on a 2x NVIDIA H100 instance
+- Optimizes key hyperparameters including:
+  - Learning rate and schedule
+  - Network architecture (tiny vs small)
+  - LSTM hidden size (128 to 512)
+  - Batch size (32 to 512)
+  - N-steps (256 to 4096)
+  - GAE lambda and gamma
+  - PPO clip ranges
+  - Entropy and value function coefficients
+
+Results are saved in:
+
+- `training_logs/tune_logs/` - Individual trial logs and Tensorboard data
+- `training_logs/tune_results_<timestamp>/` - Final optimization results
+
 ## Dependencies
 
 Required packages:
