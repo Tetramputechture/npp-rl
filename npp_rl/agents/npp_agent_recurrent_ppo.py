@@ -12,7 +12,7 @@ import imageio
 import subprocess
 import threading
 from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
-from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
+from stable_baselines3.common.callbacks import EvalCallback
 # from npp_rl.agents.cnn_lstm_feature_extractor import CNNLSTMFeatureExtractor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -88,7 +88,7 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPP
         learning_rate=learning_rate,
         n_steps=n_steps,
         batch_size=batch_size,
-        n_epochs=6,
+        n_epochs=9,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
@@ -140,12 +140,8 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1e7, load_mo
         model = create_ppo_agent(env, str(tensorboard_log))
 
     # Configure callback for monitoring and saving
-    callback = PPOTrainingCallback(
-        check_freq=200,
-        log_dir=log_dir,
-        min_ent_coef=0.005,
-        max_ent_coef=0.01
-    )
+    callback = EvalCallback(env, n_eval_episodes=5,
+                            eval_freq=10000, deterministic=True, verbose=1, log_path=log_dir)
 
     # Train the model
     model.learn(
