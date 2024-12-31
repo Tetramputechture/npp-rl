@@ -11,7 +11,7 @@ import datetime
 import imageio
 import subprocess
 import threading
-from npp_rl.environments.nplusplus import NPlusPlus
+from nclone.environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
 # from npp_rl.agents.cnn_lstm_feature_extractor import CNNLSTMFeatureExtractor
 
@@ -47,7 +47,7 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> RecurrentPPO:
+def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
     Memory-optimized version with smaller network architecture.
@@ -77,8 +77,8 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> Recu
     #     activation_fn=nn.ReLU,
     # )
 
-    # Reduced batch size for lower memory usage
-    batch_size = min(512, n_steps // 4)
+    n_steps = 2048
+    batch_size = 128
 
     model = RecurrentPPO(
         # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
@@ -99,15 +99,14 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> Recu
         normalize_advantage=True,
         verbose=1,
         tensorboard_log=tensorboard_log,
-        device='cuda:0' if torch.cuda.is_available() else 'cpu',
-        # device='cpu',
+        device=device,
         seed=42
     )
 
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=1000000, load_model_path=None) -> RecurrentPPO:
+def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1e7, load_model_path=None) -> RecurrentPPO:
     """
     Trains the PPO agent with Tensorboard integration
 
@@ -138,13 +137,12 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
         )
     else:
         print("Creating new model")
-        model = create_ppo_agent(env, n_steps, str(tensorboard_log))
+        model = create_ppo_agent(env, str(tensorboard_log))
 
     # Configure callback for monitoring and saving
     callback = PPOTrainingCallback(
         check_freq=200,
         log_dir=log_dir,
-        n_steps=n_steps,
         min_ent_coef=0.005,
         max_ent_coef=0.01
     )
@@ -161,7 +159,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
     return model
 
 
-def evaluate_agent(env: NPlusPlus, policy: RecurrentPPO, n_episodes):
+def evaluate_agent(env: BasicLevelNoGold, policy: RecurrentPPO, n_episodes):
     """Evaluate the agent without computing gradients."""
     scores = []
     num_envs = 1
@@ -188,7 +186,7 @@ def evaluate_agent(env: NPlusPlus, policy: RecurrentPPO, n_episodes):
     return np.mean(scores), np.std(scores)
 
 
-def record_video(env: NPlusPlus, policy: RecurrentPPO, video_path, num_episodes=1):
+def record_video(env: BasicLevelNoGold, policy: RecurrentPPO, video_path, num_episodes=1):
     """Record a video of the trained agent playing."""
     images = []
     num_envs = 1
@@ -211,7 +209,7 @@ def record_video(env: NPlusPlus, policy: RecurrentPPO, video_path, num_episodes=
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
 
 
-def record_agent_training(env: NPlusPlus, model: RecurrentPPO,
+def record_agent_training(env: BasicLevelNoGold, model: RecurrentPPO,
                           hyperparameters):
     """
     Evaluate, Generate a video and save the model locally
@@ -263,7 +261,7 @@ def record_agent_training(env: NPlusPlus, model: RecurrentPPO,
     return local_directory
 
 
-def start_training(load_model_path=None, render_mode='rgb_array'):
+def start_training(load_model_path=None, render_mode='rgb_array', n_envs=1):
     """Initialize environment and start training process. Assumes the player is already in the game
     and playing the level, as this method will attempt to press the reset key so training can start
     from a fresh level.
@@ -273,7 +271,8 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
     """
 
     try:
-        env = NPlusPlus(render_mode=render_mode, enable_frame_stack=True)
+        env = BasicLevelNoGold(render_mode=render_mode,
+                               enable_frame_stack=True)
         # check if the environment is valid
         check_env(env)
 
@@ -283,21 +282,21 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human', enable_frame_stack=True), n_envs=1,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=True), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 4 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array', enable_frame_stack=True), n_envs=4,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=True), n_envs=n_envs,
                                    vec_env_cls=SubprocVecEnv)
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, n_steps=2048, total_timesteps=1000000, load_model_path=load_model_path)
+            wrapped_env, log_dir, total_timesteps=1e7, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
-        model.save("npp_ppo_sim")
+        model.save("npp_recurrent_ppo_sim")
 
         # Record gameplay video
         # First, press the reset key to start a new episode

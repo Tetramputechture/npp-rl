@@ -64,9 +64,9 @@ GAME_STATE_FEATURES = 177993
 # Total: 12 + 258 + 18,976 + 1 = 19247
 GAME_STATE_FEATURES_ONLY_EXIT_AND_SWITCH = 19247
 
-# Only ninja and 1 exit and 1 switch, no tile data (to be used in conjunction with frame stacking) = 24
+# Only ninja and 1 exit and 1 switch, no tile data (to be used in conjunction with frame stacking) = 22
 # + 1 time remaining
-GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH = 25
+GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH = 23
 
 TILE_SIZE = 24
 TILE_COUNT_X = 42

@@ -23,7 +23,6 @@ class PPOTrainingCallback(BaseCallback):
     def __init__(self,
                  check_freq: int,
                  log_dir: Path,
-                 n_steps: int,
                  verbose: int = 1,
                  save_freq: int = 10000,
                  min_ent_coef: float = 0.005,
@@ -36,7 +35,6 @@ class PPOTrainingCallback(BaseCallback):
             check_freq: How often to check training metrics
             log_dir: Directory for saving logs and models
             game_controller: GameController instance for pausing/unpausing the game
-            n_steps: Number of steps to take before training
             verbose: Verbosity level
             save_freq: How often to save model checkpoints
             min_ent_coef: Minimum entropy coefficient
@@ -45,7 +43,6 @@ class PPOTrainingCallback(BaseCallback):
         """
         super().__init__(verbose)
 
-        self.n_steps = n_steps
         self.is_training = False
 
         # Basic configuration

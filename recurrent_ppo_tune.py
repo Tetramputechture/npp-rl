@@ -18,17 +18,17 @@ import torch
 from pathlib import Path
 import json
 import datetime
-from npp_rl.environments.nplusplus import NPlusPlus
+from nclone.environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 
 # Tuning constants
 N_TRIALS = 100  # Number of trials to run
 N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
-N_TIMESTEPS = int(1e7)  # Total timesteps per trial
+N_TIMESTEPS = int(2e6)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 32  # Number of parallel environments
+N_ENVS = 64  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
@@ -40,10 +40,10 @@ DEFAULT_HYPERPARAMS = {
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     if n_envs == 1:
-        env = DummyVecEnv([lambda: NPlusPlus(render_mode=render_mode)])
+        env = DummyVecEnv([lambda: BasicLevelNoGold(render_mode=render_mode)])
     else:
         env = SubprocVecEnv(
-            [lambda: NPlusPlus(render_mode=render_mode) for _ in range(n_envs)])
+            [lambda: BasicLevelNoGold(render_mode=render_mode) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
@@ -80,12 +80,12 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         )
 
     # Batch size and n_steps
-    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
+    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 7, 11)  # 128 to 2048
     batch_size = min(
         2 ** trial.suggest_int("exponent_batch_size", 5, 9), n_steps)  # 32 to 512
 
     # Number of epochs
-    n_epochs = trial.suggest_int("n_epochs", 5, 15)
+    n_epochs = trial.suggest_int("n_epochs", 4, 12)
 
     # Entropy coefficient
     ent_coef = trial.suggest_float("ent_coef", 0.0001, 0.01, log=True)
