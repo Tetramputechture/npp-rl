@@ -121,9 +121,12 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1e7, load_mo
         print("Creating new model")
         model = create_ppo_agent(env, str(tensorboard_log))
 
-    # Configure callback for monitoring and saving
+    # Configure callback for monitoring and saving,
+    # save best model in new directory saved_models/
+    if not Path('./saved_models').exists():
+        Path('./saved_models').mkdir(exist_ok=True)
     callback = EvalCallback(env, n_eval_episodes=5,
-                            eval_freq=10000, deterministic=True, verbose=1, log_path=log_dir)
+                            eval_freq=10000, deterministic=True, verbose=1, log_path=log_dir, best_model_save_path='./saved_models')
 
     # Train the model
     model.learn(
