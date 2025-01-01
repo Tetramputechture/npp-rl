@@ -124,6 +124,12 @@ Results are saved in:
 
 ## Dependencies
 
+Cairo:
+
+```sh
+sudo apt install libcairo2-dev pkg-config python3-dev
+```
+
 Required packages:
 
 - numpy>=1.21.0
