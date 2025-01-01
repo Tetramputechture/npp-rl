@@ -13,7 +13,8 @@ import subprocess
 import threading
 from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from stable_baselines3.common.callbacks import EvalCallback
-# from npp_rl.agents.cnn_lstm_feature_extractor import CNNLSTMFeatureExtractor
+from .hyperparameters.recurrent_ppo_hyperparameters import HYPERPARAMETERS
+from npp_rl.agents.npp_feature_extractor_impala import NPPFeatureExtractorImpala
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -54,7 +55,6 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPP
 
     Args:
         env: The N++ environment instance
-        n_steps: Number of steps to run for each environment per update
         tensorboard_log: Directory for Tensorboard logs
 
     Returns:
@@ -67,37 +67,19 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPP
         end_fraction=0.85
     )
 
-    # policy_kwargs = dict(
-    #     features_extractor_class=CNNLSTMFeatureExtractor,
-    #     net_arch=dict(
-    #         pi=[256, 128, 64],
-    #         vf=[256, 128, 64]
-    #     ),
-    #     normalize_images=True,
-    #     activation_fn=nn.ReLU,
-    # )
-
-    n_steps = 2048
-    batch_size = 128
+    policy_kwargs = {
+        "features_extractor_class": NPPFeatureExtractorImpala,
+        "features_extractor_kwargs": {
+            "features_dim": 512
+        }
+    }
 
     model = RecurrentPPO(
-        # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
-        policy="MultiInputLstmPolicy",  # Expects a Dict, with
-        # policy_kwargs=policy_kwargs,
+        policy="MultiInputLstmPolicy",
+        policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
-        n_steps=n_steps,
-        batch_size=batch_size,
-        n_epochs=9,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        clip_range_vf=0.2,
-        ent_coef=0.005,  # Should be between 0.001 and 0.01
-        vf_coef=0.75,
-        max_grad_norm=0.7,
-        normalize_advantage=True,
-        verbose=1,
+        **HYPERPARAMETERS,
         tensorboard_log=tensorboard_log,
         device=device,
         seed=42

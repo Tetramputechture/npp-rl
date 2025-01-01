@@ -2,7 +2,10 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch
 from torch import nn
 import gymnasium
-from npp_rl.environments.constants import TEMPORAL_FRAMES
+from nclone_environments.basic_level_no_gold.constants import (
+    TEMPORAL_FRAMES,
+    GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
+)
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -57,11 +60,10 @@ class ImpalaCNN(nn.Module):
         ])
 
         # Calculate the output size based on input dimensions
-        # For player frame (50x60):
-        # After 3 ConvSequences with stride 2: 50x60 -> 25x30 -> 13x15 -> 7x8
-        # Final feature map will be 32 x 7 x 8 = 1792
-        # Changed from 32 * 7 * 8 to match actual flattened size
-        self.final_dense = nn.Linear(1792, 256)
+        # For 84x84 input:
+        # After 3 ConvSequences with stride 2: 84x84 -> 42x42 -> 21x21 -> 11x11
+        # Final feature map will be 32 x 11 x 11 = 3,872
+        self.final_dense = nn.Linear(3872, 256)
 
     def forward(self, x):
         # Initial scaling
@@ -70,9 +72,6 @@ class ImpalaCNN(nn.Module):
         # Process through conv sequences
         for conv_sequence in self.conv_sequences:
             x = conv_sequence(x)
-
-        # Print the shape of the tensor after conv sequences for debugging
-        print('Shape after conv sequences:', x.shape)
 
         # Flatten and process through dense layer
         # Flatten all dimensions except batch
@@ -92,29 +91,22 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
 
         # IMPALA CNN for player frame processing
         self.player_frame_cnn = ImpalaCNN(
-            input_channels=4,  # Four stacked frames when frame stacking is enabled
+            input_channels=TEMPORAL_FRAMES,  # Three stacked frames
             depths=[16, 32, 32]  # As per IMPALA paper
-        )
-
-        # IMPALA CNN for base frame processing
-        self.base_frame_cnn = ImpalaCNN(
-            input_channels=1,  # Single grayscale frame
-            depths=[16, 32, 32]
         )
 
         # MLP for game state processing
         self.game_state_mlp = nn.Sequential(
-            nn.Linear(29, 64),
+            nn.Linear(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH, 64),
             nn.ReLU(),
-            nn.Linear(64, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128)
+            nn.Linear(64, 64),
+            nn.ReLU()
         )
 
         # Final fusion layer
         self.fusion_layer = nn.Sequential(
-            # 256 from each CNN + 128 from MLP
-            nn.Linear(256 + 256 + 128, self.features_dim),
+            # 256 from CNN + 64 from MLP
+            nn.Linear(256 + 64, self.features_dim),
             nn.ReLU(),
             nn.Linear(self.features_dim, self.features_dim)
         )
@@ -126,11 +118,6 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
             0, 3, 1, 2)  # (batch, channels, height, width)
         player_features = self.player_frame_cnn(player_frames)
 
-        # Process base frame
-        base_frames = observations['base_frame'].float()
-        base_frames = base_frames.permute(0, 3, 1, 2)
-        base_features = self.base_frame_cnn(base_frames)
-
         # Process game state
         game_state = observations['game_state'].float()
         game_state_features = self.game_state_mlp(game_state)
@@ -138,7 +125,6 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
         # Concatenate all features
         combined_features = torch.cat([
             player_features,
-            base_features,
             game_state_features
         ], dim=1)
 
