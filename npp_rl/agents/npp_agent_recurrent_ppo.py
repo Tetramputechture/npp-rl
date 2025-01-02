@@ -63,7 +63,7 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPP
 
     learning_rate = get_linear_fn(
         start=3e-4,
-        end=5e-5,
+        end=0,
         end_fraction=0.85
     )
 
@@ -76,7 +76,7 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> RecurrentPP
 
     model = RecurrentPPO(
         policy="MultiInputLstmPolicy",
-        policy_kwargs=policy_kwargs,
+        # policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
         **HYPERPARAMETERS,

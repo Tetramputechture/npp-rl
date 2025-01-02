@@ -28,7 +28,7 @@ N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(2e6)  # Total timesteps per trial
 EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 64  # Number of parallel environments
+N_ENVS = 32  # Number of parallel environments
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
@@ -65,6 +65,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     net_arch = {
         "tiny": [64, 64],
         "small": [128, 128],
+        "medium": [256, 256],
     }[net_arch_type]
 
     # Learning rate
@@ -201,7 +202,7 @@ def objective(trial: optuna.Trial) -> float:
         trial=trial,
         n_eval_episodes=N_EVAL_EPISODES,
         eval_freq=EVAL_FREQ,
-        deterministic=True,
+        deterministic=False,
         callback_after_eval=stop_callback,
     )
 
