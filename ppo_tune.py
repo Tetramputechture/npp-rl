@@ -1,12 +1,11 @@
-"""Optuna script for optimizing the hyperparameters of a PPO agent
-from Stable-Baselines3 for the N++ environment.
+"""Optuna script for optimizing the hyperparameters of a RecurrentPPO agent
+from Stable-Baselines3-Contrib for the N++ environment.
 
-This script uses Optuna to perform hyperparameter optimization for the PPO
-agent with frame stacking. It includes pruning of bad trials and proper handling 
-of the evaluation environment.
+This script uses Optuna to perform hyperparameter optimization for the RecurrentPPO
+agent. It includes pruning of bad trials and proper handling of the evaluation
+environment.
 """
 
-import gc
 from typing import Any, Dict, Optional
 import optuna
 from optuna.pruners import MedianPruner
@@ -19,47 +18,39 @@ import torch
 from pathlib import Path
 import json
 import datetime
-from npp_rl.environments.nplusplus import NPlusPlus
+from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Tuning constants
 N_TRIALS = 100  # Number of trials to run
 N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
-N_TIMESTEPS = int(1e6)  # Total timesteps per trial
-EVAL_FREQ = 10000  # Evaluation frequency
+N_TIMESTEPS = int(2e6)  # Total timesteps per trial
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 4  # Number of parallel environments
+N_ENVS = 32  # Number of parallel environments
+EVAL_FREQ = max(10000 // N_ENVS, 1)  # Evaluation frequency
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
     "policy": "MultiInputPolicy",
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
+    "device": device,
 }
 
-
-# On cherche tous les objets dont le nom du type contient tqdm
-tqdm_objects = [obj for obj in gc.get_objects()
-                if 'tqdm' in type(obj).__name__]
-
-# On affiche leur type
-for tqdm_object in tqdm_objects:
-    print(type(tqdm_object).__name__)
-
-# On ferme ceux qu'on veut
-for tqdm_object in tqdm_objects:
-    if 'tqdm_rich' in type(tqdm_object).__name__:
-        tqdm_object.close()
+# If we want to use past 3 frames along with the current frame
+# in our input
+ENABLE_FRAME_STACK = False
 
 
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     if n_envs == 1:
-        env = DummyVecEnv(
-            [lambda: NPlusPlus(render_mode=render_mode, enable_frame_stack=True)])
+        env = DummyVecEnv([lambda: BasicLevelNoGold(
+            render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK)])
     else:
         env = SubprocVecEnv(
-            [lambda: NPlusPlus(render_mode=render_mode, enable_frame_stack=True) for _ in range(n_envs)])
+            [lambda: BasicLevelNoGold(render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
@@ -77,8 +68,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     gae_lambda = 1.0 - trial.suggest_float("gae_lambda", 0.001, 0.2, log=True)
 
     # Neural network architecture
-    net_arch_type = trial.suggest_categorical(
-        "net_arch", ["tiny", "small", "medium"])
+    net_arch_type = trial.suggest_categorical("net_arch", ["tiny", "small"])
     net_arch = {
         "tiny": [64, 64],
         "small": [128, 128],
@@ -86,7 +76,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     }[net_arch_type]
 
     # Learning rate
-    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
     lr_schedule = trial.suggest_categorical(
         "lr_schedule", ["linear", "constant"])
 
@@ -98,12 +88,12 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         )
 
     # Batch size and n_steps
-    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 8, 12)  # 256 to 4096
+    n_steps = 2 ** trial.suggest_int("exponent_n_steps", 7, 11)  # 128 to 2048
     batch_size = min(
-        2 ** trial.suggest_int("exponent_batch_size", 6, 10), n_steps)  # 64 to 1024
+        2 ** trial.suggest_int("exponent_batch_size", 5, 9), n_steps)  # 32 to 512
 
     # Number of epochs
-    n_epochs = trial.suggest_int("n_epochs", 5, 20)
+    n_epochs = trial.suggest_int("n_epochs", 4, 12)
 
     # Entropy coefficient
     ent_coef = trial.suggest_float("ent_coef", 0.0001, 0.01, log=True)
@@ -137,8 +127,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "clip_range": clip_range,
         "clip_range_vf": clip_range_vf,
         "policy_kwargs": {
-            "net_arch": dict(pi=net_arch, vf=net_arch),
-            "normalize_images": True,
+            "net_arch": net_arch,
         },
     }
 
@@ -153,7 +142,8 @@ class TrialEvalCallback(EvalCallback):
         n_eval_episodes: int = 5,
         eval_freq: int = 10000,
         deterministic: bool = True,
-        verbose: int = 0,
+        verbose: int = 1,
+        log_path: Optional[str] = None,
         callback_after_eval: Optional[BaseCallback] = None,
     ):
         super().__init__(
@@ -163,6 +153,7 @@ class TrialEvalCallback(EvalCallback):
             deterministic=deterministic,
             verbose=verbose,
             callback_after_eval=callback_after_eval,
+            log_path=log_path,
         )
         self.trial = trial
         self.eval_idx = 0
@@ -179,14 +170,6 @@ class TrialEvalCallback(EvalCallback):
                 self.is_pruned = True
                 return False
         return True
-
-    def _on_training_start(self) -> None:
-        super()._on_training_start()
-        tqdm_objects = [obj for obj in gc.get_objects()
-                        if 'tqdm' in type(obj).__name__]
-        for tqdm_object in tqdm_objects:
-            if 'tqdm_rich' in type(tqdm_object).__name__:
-                tqdm_object.close()
 
 
 def objective(trial: optuna.Trial) -> float:
@@ -205,11 +188,11 @@ def objective(trial: optuna.Trial) -> float:
     env = create_env(n_envs=N_ENVS)
     eval_env = create_env(n_envs=1)
 
-    # Create the PPO model
+    # Create the RecurrentPPO model
     model = PPO(
         env=env,
         tensorboard_log=str(log_dir / "tensorboard"),
-        verbose=0,
+        verbose=1,
         **kwargs
     )
 
@@ -222,7 +205,8 @@ def objective(trial: optuna.Trial) -> float:
         trial=trial,
         n_eval_episodes=N_EVAL_EPISODES,
         eval_freq=EVAL_FREQ,
-        deterministic=True,
+        deterministic=False,
+        log_path=str(log_dir),
         callback_after_eval=stop_callback,
     )
 
@@ -278,7 +262,7 @@ def optimize_agent():
         sampler=sampler,
         pruner=pruner,
         direction="maximize",
-        study_name=f"ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        study_name=f"recurrent_ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
     try:
