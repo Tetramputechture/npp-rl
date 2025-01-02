@@ -20,6 +20,8 @@ import json
 import datetime
 from nclone.environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Tuning constants
 N_TRIALS = 100  # Number of trials to run
 N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
@@ -33,11 +35,12 @@ EVAL_FREQ = min(10000 // N_ENVS, 1)  # Evaluation frequency
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
     "policy": "MultiInputLstmPolicy",
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
+    "device": device,
 }
 
 # Default policy kwargs that won't be tuned
 DEFAULT_POLICY_KWARGS = {
+    # This speeds up training and, from research, doesn't seem to hurt model performance
     "enable_critic_lstm": False
 }
 
@@ -153,6 +156,7 @@ class TrialEvalCallback(EvalCallback):
         eval_freq: int = 10000,
         deterministic: bool = True,
         verbose: int = 1,
+        log_path: Optional[str] = None,
         callback_after_eval: Optional[BaseCallback] = None,
     ):
         super().__init__(
@@ -162,6 +166,7 @@ class TrialEvalCallback(EvalCallback):
             deterministic=deterministic,
             verbose=verbose,
             callback_after_eval=callback_after_eval,
+            log_path=log_path,
         )
         self.trial = trial
         self.eval_idx = 0
@@ -214,6 +219,7 @@ def objective(trial: optuna.Trial) -> float:
         n_eval_episodes=N_EVAL_EPISODES,
         eval_freq=EVAL_FREQ,
         deterministic=False,
+        log_path=str(log_dir),
         callback_after_eval=stop_callback,
     )
 
