@@ -26,9 +26,9 @@ N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(2e6)  # Total timesteps per trial
-EVAL_FREQ = 10000  # Evaluation frequency
 N_EVAL_EPISODES = 5  # Episodes per evaluation
 N_ENVS = 32  # Number of parallel environments
+EVAL_FREQ = min(10000 // N_ENVS, 1)  # Evaluation frequency
 
 # Default hyperparameters that won't be tuned
 DEFAULT_HYPERPARAMS = {
@@ -36,14 +36,24 @@ DEFAULT_HYPERPARAMS = {
     "device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 
+# Default policy kwargs that won't be tuned
+DEFAULT_POLICY_KWARGS = {
+    "enable_critic_lstm": False
+}
+
+# If we want to use past 3 frames along with the current frame
+# in our input
+ENABLE_FRAME_STACK = False
+
 
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     if n_envs == 1:
-        env = DummyVecEnv([lambda: BasicLevelNoGold(render_mode=render_mode)])
+        env = DummyVecEnv([lambda: BasicLevelNoGold(
+            render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK)])
     else:
         env = SubprocVecEnv(
-            [lambda: BasicLevelNoGold(render_mode=render_mode) for _ in range(n_envs)])
+            [lambda: BasicLevelNoGold(render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
@@ -127,6 +137,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "policy_kwargs": {
             "net_arch": net_arch,
             "lstm_hidden_size": lstm_hidden_size,
+            **DEFAULT_POLICY_KWARGS
         },
     }
 
