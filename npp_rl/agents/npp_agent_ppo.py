@@ -13,12 +13,12 @@ import datetime
 import imageio
 import subprocess
 import threading
-from npp_rl.environments.nplusplus import NPlusPlus
+from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TRAIN_N_ENVS = 32
+TRAIN_N_ENVS = 64
 TRAIN_EVAL_FREQ = max(10000 // TRAIN_N_ENVS, 1)
 
 
@@ -51,7 +51,7 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: NPlusPlus, tensorboard_log: str) -> PPO:
+def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
     Memory-optimized version with smaller network architecture.
@@ -100,14 +100,14 @@ def create_ppo_agent(env: NPlusPlus, tensorboard_log: str) -> PPO:
         normalize_advantage=HYPERPARAMETERS["normalize_advantage"],
         verbose=HYPERPARAMETERS["verbose"],
         tensorboard_log=tensorboard_log,
-        device='cuda:0' if torch.cuda.is_available() else 'cpu',
+        device=device,
         seed=42
     )
 
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000, load_model_path=None) -> PPO:
+def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, load_model_path=None) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
@@ -164,7 +164,7 @@ def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000, load_model
     return model
 
 
-def evaluate_agent(env: NPlusPlus, policy: PPO, n_episodes):
+def evaluate_agent(env: BasicLevelNoGold, policy: PPO, n_episodes):
     """Evaluate the agent without computing gradients."""
     scores = []
 
@@ -188,7 +188,7 @@ def evaluate_agent(env: NPlusPlus, policy: PPO, n_episodes):
     return np.mean(scores), np.std(scores)
 
 
-def record_video(env: NPlusPlus, policy: PPO, video_path, num_episodes=1):
+def record_video(env: BasicLevelNoGold, policy: PPO, video_path, num_episodes=1):
     """Record a video of the trained agent playing."""
     images = []
     for _ in range(num_episodes):
@@ -206,7 +206,7 @@ def record_video(env: NPlusPlus, policy: PPO, video_path, num_episodes=1):
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
 
 
-def record_agent_training(env: NPlusPlus, model: PPO,
+def record_agent_training(env: BasicLevelNoGold, model: PPO,
                           hyperparameters):
     """
     Evaluate, Generate a video and save the model locally
@@ -267,16 +267,17 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
     """
 
     try:
-        env = NPlusPlus(render_mode=render_mode, enable_frame_stack=True)
+        env = BasicLevelNoGold(render_mode=render_mode,
+                               enable_frame_stack=False)
         check_env(env)
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='human', enable_frame_stack=True), n_envs=1,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=False), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print('Rendering in rgb_array mode with 8 environments')
-            vec_env = make_vec_env(lambda: NPlusPlus(render_mode='rgb_array', enable_frame_stack=True), n_envs=4,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=False), n_envs=TRAIN_N_ENVS,
                                    vec_env_cls=SubprocVecEnv)
 
         wrapped_env, log_dir = setup_training_env(vec_env)
