@@ -2,6 +2,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
 from torch import nn
@@ -13,10 +14,12 @@ import imageio
 import subprocess
 import threading
 from npp_rl.environments.nplusplus import NPlusPlus
-from npp_rl.agents.ppo_training_callback import PPOTrainingCallback
-from npp_rl.agents.npp_feature_extractor import NPPFeatureExtractor
+from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+TRAIN_N_ENVS = 32
+TRAIN_EVAL_FREQ = max(10000 // TRAIN_N_ENVS, 1)
 
 
 def setup_training_env(vec_env):
@@ -48,7 +51,7 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
+def create_ppo_agent(env: NPlusPlus, tensorboard_log: str) -> PPO:
     """
     Creates a PPO agent with optimized hyperparameters for the N++ environment.
     Memory-optimized version with smaller network architecture.
@@ -63,42 +66,39 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     """
 
     learning_rate = get_linear_fn(
-        start=3e-4,
-        end=5e-5,
+        start=0.000117,
+        end=0.000001,
         end_fraction=0.85
     )
 
     policy_kwargs = dict(
         # features_extractor_class=NPPFeatureExtractor,
         net_arch=dict(
-            pi=[128, 128],
-            vf=[128, 128]
+            pi=NET_ARCH_SIZE,
+            vf=NET_ARCH_SIZE
         ),
         normalize_images=True,
         activation_fn=nn.ReLU,
     )
 
-    # Reduced batch size for lower memory usage
-    batch_size = min(512, n_steps // 4)
-
+    # Use hyperparameters from config file
     model = PPO(
-        # See https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html for custom policy info
-        policy="MultiInputPolicy",  # Shouldn't matter since we're using policy_kwargs
+        policy="MultiInputPolicy",
         policy_kwargs=policy_kwargs,
         env=env,
         learning_rate=learning_rate,
-        n_steps=n_steps,
-        batch_size=batch_size,
-        n_epochs=6,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        clip_range_vf=0.2,
-        ent_coef=0.01,  # Should be between 0.001 and 0.01
-        vf_coef=0.75,
-        max_grad_norm=0.7,
-        normalize_advantage=True,
-        verbose=1,
+        n_steps=HYPERPARAMETERS["n_steps"],
+        batch_size=HYPERPARAMETERS["batch_size"],
+        n_epochs=HYPERPARAMETERS["n_epochs"],
+        gamma=HYPERPARAMETERS["gamma"],
+        gae_lambda=HYPERPARAMETERS["gae_lambda"],
+        clip_range=HYPERPARAMETERS["clip_range"],
+        clip_range_vf=HYPERPARAMETERS["clip_range_vf"],
+        ent_coef=HYPERPARAMETERS["ent_coef"],
+        vf_coef=HYPERPARAMETERS["vf_coef"],
+        max_grad_norm=HYPERPARAMETERS["max_grad_norm"],
+        normalize_advantage=HYPERPARAMETERS["normalize_advantage"],
+        verbose=HYPERPARAMETERS["verbose"],
         tensorboard_log=tensorboard_log,
         device='cuda:0' if torch.cuda.is_available() else 'cpu',
         seed=42
@@ -107,7 +107,7 @@ def create_ppo_agent(env: NPlusPlus, n_steps: int, tensorboard_log: str) -> PPO:
     return model
 
 
-def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=1000000, load_model_path=None) -> PPO:
+def train_ppo_agent(env: NPlusPlus, log_dir, total_timesteps=1000000, load_model_path=None) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
@@ -132,21 +132,24 @@ def train_ppo_agent(env: NPlusPlus, log_dir, n_steps=1024, total_timesteps=10000
         model = PPO.load(load_model_path, env=env)
         # Update the learning rate schedule
         model.learning_rate = get_linear_fn(
-            start=2.5e-4,
-            end=5e-5,
+            start=0.000117,
+            end=0.000001,
             end_fraction=0.8
         )
     else:
         print("Creating new model")
-        model = create_ppo_agent(env, n_steps, str(tensorboard_log))
+        model = create_ppo_agent(env, str(tensorboard_log))
 
     # Configure callback for monitoring and saving
-    callback = PPOTrainingCallback(
-        check_freq=200,
-        log_dir=log_dir,
-        n_steps=n_steps,
-        min_ent_coef=0.0005,
-        max_ent_coef=0.005
+    callback = EvalCallback(
+        eval_env=env,
+        eval_freq=TRAIN_EVAL_FREQ,
+        n_eval_episodes=5,
+        deterministic=True,
+        render=False,
+        verbose=1,
+        log_path=str(log_dir / "eval"),
+        best_model_save_path=str(log_dir / "best_model"),
     )
 
     # Train the model
@@ -280,7 +283,7 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, n_steps=2048, total_timesteps=2000000, load_model_path=load_model_path)
+            wrapped_env, log_dir, total_timesteps=2000000, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
