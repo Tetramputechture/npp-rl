@@ -32,7 +32,6 @@ def setup_training_env(vec_env):
 
     # Wrap environment with Monitor for logging
     env = VecMonitor(vec_env, str(log_dir))
-
     env = VecCheckNan(env, raise_exception=True)
     env = VecNormalize(env, norm_obs=True, norm_reward=True)
 
@@ -66,8 +65,8 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
     """
 
     learning_rate = get_linear_fn(
-        start=0.000117,
-        end=0.000001,
+        start=0.00047032591206943436,
+        end=5e-6,
         end_fraction=0.85
     )
 
