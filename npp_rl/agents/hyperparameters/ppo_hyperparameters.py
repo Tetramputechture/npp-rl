@@ -25,19 +25,19 @@ HYPERPARAMETERS = {
     # Range: 0.0 to 1.0
     # Higher values -> agent cares more about long-term rewards
     # Lower values -> agent focuses more on immediate rewards
-    "gamma": 0.9991,
+    "gamma": 0.999138,
 
     # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
     # Range: 0.0 to 1.0
     # Higher values -> less bias, more variance
     # Lower values -> more bias, less variance
-    "gae_lambda": 0.9986,
+    "gae_lambda": 0.998625,
 
     # Clipping parameter for PPO loss
     # Limits the amount the policy can change in one update
     # Smaller values -> more conservative updates
     # Typical range: 0.1 to 0.3
-    "clip_range": 0.18,
+    "clip_range": 0.3892025290555702,
 
     # Clipping parameter for value function
     # Similar to clip_range but for value function
@@ -49,17 +49,17 @@ HYPERPARAMETERS = {
     # Encourages exploration by penalizing deterministic policies
     # Higher values -> more exploration
     # Lower values -> more exploitation
-    "ent_coef": 0.0002,
+    "ent_coef": 0.002720504247658009,
 
     # Value function coefficient for the loss calculation
     # Controls importance of value function loss vs policy loss
     # Higher values -> agent focuses more on getting value estimates right
-    "vf_coef": 0.88633,
+    "vf_coef": 0.46935642684352785,
 
     # Maximum value for gradient clipping
     # Prevents too large policy updates
     # Helps stability by limiting the magnitude of parameter changes
-    "max_grad_norm": 1.6558,
+    "max_grad_norm": 2.5658831600273806,
 
     # Whether to normalize the advantage
     # Normalizing advantages can help stabilize training

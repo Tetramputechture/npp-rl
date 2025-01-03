@@ -284,7 +284,7 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, total_timesteps=2000000, load_model_path=load_model_path)
+            wrapped_env, log_dir, total_timesteps=1e7, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
