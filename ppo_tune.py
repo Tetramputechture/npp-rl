@@ -23,13 +23,13 @@ from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLev
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Tuning constants
-N_TRIALS = 100  # Number of trials to run
-N_STARTUP_TRIALS = 10  # Number of trials before pruning starts
+N_TRIALS = 50  # Number of trials to run
+N_STARTUP_TRIALS = 5  # Number of trials before pruning starts
 N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
-N_TIMESTEPS = int(2e6)  # Total timesteps per trial
+N_TIMESTEPS = int(4e6)  # Total timesteps per trial
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 32  # Number of parallel environments
+N_ENVS = 128  # Number of parallel environments
 EVAL_FREQ = max(10000 // N_ENVS, 1)  # Evaluation frequency
 
 # Default hyperparameters that won't be tuned
@@ -144,6 +144,7 @@ class TrialEvalCallback(EvalCallback):
         deterministic: bool = True,
         verbose: int = 1,
         log_path: Optional[str] = None,
+        best_model_save_path: Optional[str] = None,
         callback_after_eval: Optional[BaseCallback] = None,
     ):
         super().__init__(
@@ -154,6 +155,7 @@ class TrialEvalCallback(EvalCallback):
             verbose=verbose,
             callback_after_eval=callback_after_eval,
             log_path=log_path,
+            best_model_save_path=best_model_save_path,
         )
         self.trial = trial
         self.eval_idx = 0
@@ -179,6 +181,10 @@ def objective(trial: optuna.Trial) -> float:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = Path(f'training_logs/tune_logs/trial_{trial.number}_{timestamp}')
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    best_model_save_path = Path(
+        f'training_logs/tune_logs/best_model_{timestamp}')
+    best_model_save_path.mkdir(parents=True, exist_ok=True)
 
     # Initialize hyperparameters
     kwargs = DEFAULT_HYPERPARAMS.copy()
@@ -207,6 +213,7 @@ def objective(trial: optuna.Trial) -> float:
         eval_freq=EVAL_FREQ,
         deterministic=False,
         log_path=str(log_dir),
+        best_model_save_path=str(best_model_save_path),
         callback_after_eval=stop_callback,
     )
 

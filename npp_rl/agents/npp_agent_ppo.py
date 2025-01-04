@@ -2,7 +2,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
 from torch import nn
@@ -139,6 +139,9 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, loa
         print("Creating new model")
         model = create_ppo_agent(env, str(tensorboard_log))
 
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=30, min_evals=50, verbose=1)
+
     # Configure callback for monitoring and saving
     callback = EvalCallback(
         eval_env=env,
@@ -149,6 +152,7 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, loa
         verbose=1,
         log_path=str(log_dir / "eval"),
         best_model_save_path=str(log_dir / "best_model"),
+        callback_after_eval=stop_callback
     )
 
     # Train the model
@@ -275,7 +279,8 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
             vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=False), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
-            print('Rendering in rgb_array mode with 8 environments')
+            print(
+                f'Rendering in rgb_array mode with {TRAIN_N_ENVS} environments')
             vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=False), n_envs=TRAIN_N_ENVS,
                                    vec_env_cls=SubprocVecEnv)
 
