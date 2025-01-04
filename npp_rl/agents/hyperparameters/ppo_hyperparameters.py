@@ -25,13 +25,13 @@ HYPERPARAMETERS = {
     # Range: 0.0 to 1.0
     # Higher values -> agent cares more about long-term rewards
     # Lower values -> agent focuses more on immediate rewards
-    "gamma": 0.999138,
+    "gamma": 0.996797,
 
     # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
     # Range: 0.0 to 1.0
     # Higher values -> less bias, more variance
     # Lower values -> more bias, less variance
-    "gae_lambda": 0.998625,
+    "gae_lambda": 0.998801,
 
     # Clipping parameter for PPO loss
     # Limits the amount the policy can change in one update

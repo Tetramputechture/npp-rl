@@ -287,7 +287,10 @@ def start_training(load_model_path=None, render_mode='rgb_array'):
 
         # Save final model
         print("Training completed. Saving model...")
-        model.save("npp_ppo_sim")
+        # Create a new directory for the model
+        model_dir = Path('./agent_eval_data/ppo_sim')
+        model_dir.mkdir(exist_ok=True)
+        model.save(model_dir / "model")
 
         # Record gameplay video
         # First, press the reset key to start a new episode
