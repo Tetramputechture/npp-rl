@@ -56,7 +56,7 @@ if __name__ == "__main__":
                 continue
             print(f"Processing folder: {folder}")
             # Load the model
-            model = PPO.load(folder / "best_model", env=env)
+            model = PPO.load(folder / "best_model")
             video_path = BASE_VIDEOS_PATH / folder.name / "video.mp4"
             # Record a video of the agent playing
             record_video(env, model, video_path)
