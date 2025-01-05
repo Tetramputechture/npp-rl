@@ -1,17 +1,18 @@
 import imageio
 import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import VecNormalize, SubprocVecEnv
+from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv, VecMonitor, VecCheckNan
 from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from pathlib import Path
 
 
 def create_env(render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
-    env = SubprocVecEnv([lambda: BasicLevelNoGold(
+    env = DummyVecEnv([lambda: BasicLevelNoGold(
         render_mode=render_mode, enable_frame_stack=False)])
 
+    env = VecMonitor(env)
+    env = VecCheckNan(env, raise_exception=True)
     env = VecNormalize(env, norm_obs=True, norm_reward=True)
 
     return env
