@@ -27,9 +27,8 @@ def record_video(env: BasicLevelNoGold, policy: PPO, video_path, num_episodes=1)
 
         while not done:
             images.append(env.render())
-            action, _ = policy.predict(state, deterministic=True)
-            action = action.item()
-            state, _, done, _ = env.step(action)
+            actions, _ = policy.predict(state, deterministic=True)
+            state, _, done, _ = env.step(actions)
 
     # Save video
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
@@ -59,5 +58,7 @@ if __name__ == "__main__":
             # Load the model
             model = PPO.load(folder / "best_model")
             video_path = BASE_VIDEOS_PATH / folder.name / "video.mp4"
+            # Create the folder if it doesn't exist
+            video_path.parent.mkdir(parents=True, exist_ok=True)
             # Record a video of the agent playing
             record_video(env, model, video_path)

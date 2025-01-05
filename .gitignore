@@ -45,3 +45,10 @@ anim_data_line_new.txt.bin
 
 # Benchmarking
 benchmark_data/
+
+# Videos
+videos/
+
+# Tune logs
+tune_logs/
+
