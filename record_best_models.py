@@ -18,8 +18,7 @@ def record_video(env: BasicLevelNoGold, policy: PPO, video_path, num_episodes=1)
             images.append(env.render())
             action, _ = policy.predict(state, deterministic=True)
             action = action.item()
-            state, _, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+            state, _, done, _ = env.step(action)
 
     # Save video
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
