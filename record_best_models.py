@@ -84,5 +84,6 @@ if __name__ == "__main__":
             actions_path = ACTIONS_PATH / folder_name / "actions.txt"
             # Create the folder if it doesn't exist
             video_path.parent.mkdir(parents=True, exist_ok=True)
+            actions_path.parent.mkdir(parents=True, exist_ok=True)
             # Record a video of the agent playing
             record_video(env, model, video_path, actions_path)
