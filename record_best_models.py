@@ -9,7 +9,7 @@ from pathlib import Path
 def create_env(render_mode: str = 'rgb_array') -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     env = DummyVecEnv([lambda: BasicLevelNoGold(
-        render_mode=render_mode, enable_frame_stack=False)])
+        render_mode=render_mode, enable_frame_stack=False, enable_animation=True)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
