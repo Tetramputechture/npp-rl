@@ -34,7 +34,7 @@ def action_to_string(action: int) -> str:
 def record_video(env: BasicLevelNoGold, policy: PPO, video_path, actions_path, num_episodes=1):
     """Record a video of the trained agent playing."""
     images = []
-    actions = []
+    actions_to_write = []
     for _ in range(num_episodes):
         state = env.reset()
         done = False
@@ -42,12 +42,12 @@ def record_video(env: BasicLevelNoGold, policy: PPO, video_path, actions_path, n
         while not done:
             images.append(env.render())
             actions, _ = policy.predict(state, deterministic=True)
-            actions.append(actions[0])
+            actions_to_write.append(actions[0])
             state, _, done, _ = env.step(actions)
 
     # Save actions as their string representation
     actions_path.write_text(
-        ",".join([action_to_string(action) for action in actions]))
+        ",".join([action_to_string(action) for action in actions_to_write]))
 
     # Save video
     imageio.mimsave(video_path, [np.array(img) for img in images], fps=30)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     # Create a new directory for the actions
     ACTIONS_PATH.mkdir(parents=True, exist_ok=True)
 
-    for folder, idx in enumerate(BEST_MODELS_PATH.iterdir()):
+    for idx, folder in enumerate(BEST_MODELS_PATH.iterdir()):
         if folder.is_dir() and folder.name.startswith("best_model_"):
             # Check if the best_model.zip file exists
             if not (folder / "best_model.zip").exists():
