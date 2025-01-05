@@ -6,6 +6,12 @@ A Deep Reinforcement Learning Agent for the game N++, implementing Recurrent PPO
 
 This project aims to train an agent to play [N++](https://en.wikipedia.org/wiki/N%2B%2B). The game features a physically simulated movement model where the player can move continuously in any direction within a grid-based level. The agent must learn to navigate the environment, avoid hazards, collect gold, activate switches to open doors, and reach the exit.
 
+## Example Agent Level Completion
+
+This is an example of a trained agent completing a non-trivial level.
+
+![Example Level Completion](example_completion.gif)
+
 ## Environment
 
 The environment uses a custom fork of community-built simulator ([nclone](https://github.com/Tetramputechture/nclone)) rather than controlling the actual game process. This allows for faster training and headless operation.
