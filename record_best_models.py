@@ -2,9 +2,19 @@ import imageio
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import VecNormalize, SubprocVecEnv
+from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
 from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from pathlib import Path
+
+
+def create_env(render_mode: str = 'rgb_array') -> VecNormalize:
+    """Create a vectorized environment for training or evaluation."""
+    env = DummyVecEnv([lambda: BasicLevelNoGold(
+        render_mode=render_mode, enable_frame_stack=False)])
+
+    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+
+    return env
 
 
 def record_video(env: BasicLevelNoGold, policy: PPO, video_path, num_episodes=1):
@@ -31,9 +41,7 @@ BASE_VIDEOS_PATH = Path('./videos/')
 # the folder will contain a best_model.zip file.
 # For each of these folders, we want to record a video of the agent playing.
 
-env = make_vec_env(lambda: BasicLevelNoGold(
-    render_mode='rgb_array', enable_frame_stack=False), n_envs=1, vec_env_cls=SubprocVecEnv)
-env = VecNormalize(env, norm_obs=True, norm_reward=True)
+env = create_env()
 
 # Create a new directory for the videos
 BASE_VIDEOS_PATH.mkdir(parents=True, exist_ok=True)
