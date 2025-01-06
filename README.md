@@ -28,7 +28,7 @@ includes our Gym environment, reward calculation, and frame augmentation.
 The observation space consists of two components:
 
 1. **Player Frame** - A localized view centered on the player
-   - Dimensions: 84 x 84 x (1, or 3 with frame stacking)
+   - Dimensions: 84 x 84 x (1, or 4 with frame stacking)
    - Provides detailed information about the immediate surroundings
    - If frame stacking is enabled:
      - Current frame (most recent)
