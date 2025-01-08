@@ -13,7 +13,7 @@ def create_env(render_mode: str = 'rgb_array') -> VecNormalize:
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
-    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, training=False)
 
     return env
 

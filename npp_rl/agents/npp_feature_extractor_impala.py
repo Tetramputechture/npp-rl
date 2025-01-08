@@ -5,6 +5,11 @@ import gymnasium
 from nclone_environments.basic_level_no_gold.constants import (
     TEMPORAL_FRAMES,
     GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
+    PLAYER_FRAME_HEIGHT,
+    PLAYER_FRAME_WIDTH,
+    RENDERED_VIEW_CHANNELS,
+    RENDERED_VIEW_HEIGHT,
+    RENDERED_VIEW_WIDTH,
 )
 
 torch.autograd.set_detect_anomaly(True)
@@ -99,23 +104,24 @@ class ImpalaCNN(nn.Module):
 class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
     """Feature extractor using IMPALA CNN for visual processing and MLP for game state."""
 
-    def __init__(self, observation_space: gymnasium.spaces.Dict, features_dim: int = 512):
+    def __init__(self, observation_space: gymnasium.spaces.Dict, features_dim: int = 512, frame_stack: bool = False):
         super().__init__(observation_space, features_dim)
 
+        player_frame_channels = TEMPORAL_FRAMES if frame_stack else 1
         # IMPALA CNN for player frame processing
         self.player_frame_cnn = ImpalaCNN(
-            input_channels=1,  # No frame stacking
-            input_height=84,  # Player frame dimensions
-            input_width=84,
+            input_channels=player_frame_channels,  # Frame stacking channels
+            input_height=PLAYER_FRAME_HEIGHT,
+            input_width=PLAYER_FRAME_WIDTH,
             depths=[16, 32, 32],  # As per IMPALA paper
             output_dim=256
         )
 
-        # IMPALA CNN for global map processing
-        self.global_map_cnn = ImpalaCNN(
-            input_channels=4,  # Four channels for different map information
-            input_height=23,  # Full resolution map dimensions
-            input_width=42,
+        # IMPALA CNN for global view processing
+        self.global_view_cnn = ImpalaCNN(
+            input_channels=RENDERED_VIEW_CHANNELS,  # Single channel grayscale
+            input_height=RENDERED_VIEW_HEIGHT,
+            input_width=RENDERED_VIEW_WIDTH,
             depths=[16, 32, 32],
             output_dim=256
         )
@@ -150,14 +156,14 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
                 0, 3, 1, 2)  # (batch, channels, height, width)
         player_features = self.player_frame_cnn(player_frames)
 
-        # Process global map
-        global_map = observations['global_map'].float()
-        if len(global_map.shape) == 3:  # If no batch dimension
-            global_map = global_map.unsqueeze(0)
-        if len(global_map.shape) == 4:
+        # Process global view
+        global_view = observations['global_view'].float()
+        if len(global_view.shape) == 3:  # If no batch dimension
+            global_view = global_view.unsqueeze(0)
+        if len(global_view.shape) == 4:
             # (batch, channels, height, width)
-            global_map = global_map.permute(0, 3, 1, 2)
-        global_features = self.global_map_cnn(global_map)
+            global_view = global_view.permute(0, 3, 1, 2)
+        global_features = self.global_view_cnn(global_view)
 
         # Process game state
         game_state = observations['game_state'].float()

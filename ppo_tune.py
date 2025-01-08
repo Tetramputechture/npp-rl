@@ -19,6 +19,8 @@ from pathlib import Path
 import json
 import datetime
 from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+from npp_rl.agents.npp_feature_extractor_impala import NPPFeatureExtractorImpala
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -54,7 +56,7 @@ def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
-    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, training=True)
 
     return env
 
@@ -74,6 +76,13 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "small": [128, 128],
         "medium": [256, 256],
     }[net_arch_type]
+
+    # Whether to use IMPALA CNN
+    use_impala_cnn = trial.suggest_categorical("use_impala_cnn", [True, False])
+
+    # Features dimension for the feature extractor (only used if IMPALA CNN is enabled)
+    features_dim = trial.suggest_categorical(
+        "features_dim", [256, 512]) if use_impala_cnn else None
 
     # Learning rate
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
@@ -113,6 +122,22 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     trial.set_user_attr("gamma_", gamma)
     trial.set_user_attr("gae_lambda_", gae_lambda)
     trial.set_user_attr("n_steps", n_steps)
+    trial.set_user_attr("use_impala_cnn", use_impala_cnn)
+
+    # Base policy kwargs
+    policy_kwargs = {
+        "net_arch": net_arch,
+    }
+
+    # Add IMPALA CNN settings if enabled
+    if use_impala_cnn:
+        policy_kwargs.update({
+            "features_extractor_class": NPPFeatureExtractorImpala,
+            "features_extractor_kwargs": {
+                "features_dim": features_dim,
+                "frame_stack": ENABLE_FRAME_STACK
+            }
+        })
 
     return {
         "n_steps": n_steps,
@@ -126,9 +151,7 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
         "max_grad_norm": max_grad_norm,
         "clip_range": clip_range,
         "clip_range_vf": clip_range_vf,
-        "policy_kwargs": {
-            "net_arch": net_arch,
-        },
+        "policy_kwargs": policy_kwargs,
     }
 
 

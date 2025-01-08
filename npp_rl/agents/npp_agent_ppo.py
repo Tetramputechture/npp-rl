@@ -33,7 +33,7 @@ def setup_training_env(vec_env):
     # Wrap environment with Monitor for logging
     env = VecMonitor(vec_env, str(log_dir))
     env = VecCheckNan(env, raise_exception=True)
-    env = VecNormalize(env, norm_obs=True, norm_reward=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, training=True)
 
     return env, log_dir
 
