@@ -48,6 +48,7 @@ benchmark_data/
 
 # Videos
 videos/
+actions/
 
 # Tune logs
 tune_logs/

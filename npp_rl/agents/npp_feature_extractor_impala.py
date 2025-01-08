@@ -16,13 +16,17 @@ class ResidualBlock(nn.Module):
     def __init__(self, depth):
         super().__init__()
         self.conv1 = nn.Conv2d(depth, depth, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(depth)
         self.conv2 = nn.Conv2d(depth, depth, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(depth)
 
     def forward(self, x):
         out = nn.functional.relu(x)
         out = self.conv1(out)
+        out = self.bn1(out)
         out = nn.functional.relu(out)
         out = self.conv2(out)
+        out = self.bn2(out)
         return out + x
 
 
@@ -32,12 +36,14 @@ class ConvSequence(nn.Module):
     def __init__(self, input_depth, output_depth):
         super().__init__()
         self.conv = nn.Conv2d(input_depth, output_depth, 3, padding=1)
+        self.bn = nn.BatchNorm2d(output_depth)
         self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.res1 = ResidualBlock(output_depth)
         self.res2 = ResidualBlock(output_depth)
 
     def forward(self, x):
         x = self.conv(x)
+        x = self.bn(x)
         x = self.max_pool(x)
         x = self.res1(x)
         x = self.res2(x)
@@ -47,7 +53,7 @@ class ConvSequence(nn.Module):
 class ImpalaCNN(nn.Module):
     """IMPALA CNN architecture."""
 
-    def __init__(self, input_channels, depths=[16, 32, 32]):
+    def __init__(self, input_channels, input_height, input_width, depths=[16, 32, 32], output_dim=256):
         super().__init__()
         self.depths = depths
 
@@ -59,11 +65,18 @@ class ImpalaCNN(nn.Module):
             ) for i, depth in enumerate(depths)
         ])
 
-        # Calculate the output size based on input dimensions
-        # For 84x84 input:
-        # After 3 ConvSequences with stride 2: 84x84 -> 42x42 -> 21x21 -> 11x11
-        # Final feature map will be 32 x 11 x 11 = 3,872
-        self.final_dense = nn.Linear(3872, 256)
+        # Calculate output dimensions after conv sequences
+        h, w = input_height, input_width
+        for _ in depths:
+            # Each ConvSequence halves dimensions due to stride 2 max pooling
+            h = (h + 1) // 2  # +1 for odd dimensions
+            w = (w + 1) // 2
+
+        final_channels = depths[-1]
+        flattened_dim = final_channels * h * w
+
+        self.final_dense = nn.Linear(flattened_dim, output_dim)
+        self.final_bn = nn.BatchNorm1d(output_dim)
 
     def forward(self, x):
         # Initial scaling
@@ -74,10 +87,10 @@ class ImpalaCNN(nn.Module):
             x = conv_sequence(x)
 
         # Flatten and process through dense layer
-        # Flatten all dimensions except batch
         x = torch.flatten(x, start_dim=1)
         x = nn.functional.relu(x)
         x = self.final_dense(x)
+        x = self.final_bn(x)
         x = nn.functional.relu(x)
 
         return x
@@ -91,40 +104,71 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
 
         # IMPALA CNN for player frame processing
         self.player_frame_cnn = ImpalaCNN(
-            input_channels=TEMPORAL_FRAMES,  # Three stacked frames
-            depths=[16, 32, 32]  # As per IMPALA paper
+            input_channels=1,  # No frame stacking
+            input_height=84,  # Player frame dimensions
+            input_width=84,
+            depths=[16, 32, 32],  # As per IMPALA paper
+            output_dim=256
         )
 
-        # MLP for game state processing
+        # IMPALA CNN for global map processing
+        self.global_map_cnn = ImpalaCNN(
+            input_channels=4,  # Four channels for different map information
+            input_height=23,  # Full resolution map dimensions
+            input_width=42,
+            depths=[16, 32, 32],
+            output_dim=256
+        )
+
+        # MLP for game state processing with batch norm
         self.game_state_mlp = nn.Sequential(
             nn.Linear(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(64, 128),
+            nn.BatchNorm1d(128),
             nn.ReLU()
         )
 
-        # Final fusion layer
+        # Final fusion layer with batch norm
         self.fusion_layer = nn.Sequential(
-            # 256 from CNN + 64 from MLP
-            nn.Linear(256 + 64, self.features_dim),
+            # 256 from player CNN + 256 from global map CNN + 128 from MLP
+            nn.Linear(256 + 256 + 128, self.features_dim),
+            nn.BatchNorm1d(self.features_dim),
             nn.ReLU(),
-            nn.Linear(self.features_dim, self.features_dim)
+            nn.Linear(self.features_dim, self.features_dim),
+            nn.BatchNorm1d(self.features_dim)
         )
 
     def forward(self, observations) -> torch.Tensor:
         # Process player frame stack
         player_frames = observations['player_frame'].float()
-        player_frames = player_frames.permute(
-            0, 3, 1, 2)  # (batch, channels, height, width)
+        if len(player_frames.shape) == 3:  # If no batch dimension
+            player_frames = player_frames.unsqueeze(0)
+        if len(player_frames.shape) == 4:
+            player_frames = player_frames.permute(
+                0, 3, 1, 2)  # (batch, channels, height, width)
         player_features = self.player_frame_cnn(player_frames)
+
+        # Process global map
+        global_map = observations['global_map'].float()
+        if len(global_map.shape) == 3:  # If no batch dimension
+            global_map = global_map.unsqueeze(0)
+        if len(global_map.shape) == 4:
+            # (batch, channels, height, width)
+            global_map = global_map.permute(0, 3, 1, 2)
+        global_features = self.global_map_cnn(global_map)
 
         # Process game state
         game_state = observations['game_state'].float()
+        if len(game_state.shape) == 1:  # If no batch dimension
+            game_state = game_state.unsqueeze(0)
         game_state_features = self.game_state_mlp(game_state)
 
         # Concatenate all features
         combined_features = torch.cat([
             player_features,
+            global_features,
             game_state_features
         ], dim=1)
 

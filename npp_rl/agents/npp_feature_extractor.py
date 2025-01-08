@@ -58,10 +58,23 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
             features_dim=256
         )
 
-        # Nature CNN for base frame processing
-        self.base_frame_cnn = NatureCNN(
-            input_channels=1,  # Single grayscale frame
-            features_dim=256
+        # CNN for global map processing - now handling full 42x23 resolution
+        self.global_map_cnn = nn.Sequential(
+            # Input: 23x42x4 (HxWxC)
+            nn.Conv2d(4, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            # 23x42x16
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            # 12x21x32
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            # 6x11x64
+            nn.Flatten(),
+            nn.Linear(6 * 11 * 64, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU()
         )
 
         # MLP for game state processing
@@ -75,8 +88,8 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
 
         # Final fusion layer
         self.fusion_layer = nn.Sequential(
-            # 256 from each CNN + 128 from MLP
-            nn.Linear(256 + 256 + 128, self.features_dim),
+            # 256 from player CNN + 128 from global map CNN + 128 from MLP
+            nn.Linear(256 + 128 + 128, self.features_dim),
             nn.ReLU(),
             nn.Linear(self.features_dim, self.features_dim)
         )
@@ -84,29 +97,20 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, observations) -> torch.Tensor:
         # Process player frame stack
         player_frames = observations['player_frame'].float()
-
-        # Debug print for input shape
-        print(f"Initial player_frames shape: {player_frames.shape}")
-
-        # Ensure shape is [batch, channels, height, width]
         if len(player_frames.shape) == 3:  # If no batch dimension
             player_frames = player_frames.unsqueeze(0)  # Add batch dimension
-
-        # Always permute to ensure correct order, regardless of input shape
         if len(player_frames.shape) == 4:
-            # If shape is [batch, height, width, channels] or similar
             player_frames = player_frames.permute(0, 3, 1, 2)
-
-        print(f"Final player_frames shape: {player_frames.shape}")
         player_features = self.player_frame_cnn(player_frames)
 
-        # Process base frame
-        base_frames = observations['base_frame'].float()
-        if len(base_frames.shape) == 3:  # If no batch dimension
-            base_frames = base_frames.unsqueeze(0)  # Add batch dimension
-        if len(base_frames.shape) == 4:
-            base_frames = base_frames.permute(0, 3, 1, 2)
-        base_features = self.base_frame_cnn(base_frames)
+        # Process global map
+        global_map = observations['global_map'].float()
+        if len(global_map.shape) == 3:  # If no batch dimension
+            global_map = global_map.unsqueeze(0)
+        if len(global_map.shape) == 4:
+            # (batch, channels, height, width)
+            global_map = global_map.permute(0, 3, 1, 2)
+        global_features = self.global_map_cnn(global_map)
 
         # Process game state
         game_state = observations['game_state'].float()
@@ -117,7 +121,7 @@ class NPPFeatureExtractor(BaseFeaturesExtractor):
         # Concatenate all features
         combined_features = torch.cat([
             player_features,
-            base_features,
+            global_features,
             game_state_features
         ], dim=1)
 
