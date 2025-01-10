@@ -128,10 +128,26 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
 
         # MLP for game state processing with batch norm
         self.game_state_mlp = nn.Sequential(
-            nn.Linear(GAME_STATE_FEATURES, 64),
-            nn.BatchNorm1d(64),
+            # First reduce by ~factor of 10
+            nn.Linear(GAME_STATE_FEATURES, 16384),
+            nn.BatchNorm1d(16384),
             nn.ReLU(),
-            nn.Linear(64, 128),
+            nn.Dropout(0.2),
+
+            # Further reduce by ~factor of 8
+            nn.Linear(16384, 2048),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+
+            # Further reduce by ~factor of 4
+            nn.Linear(2048, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+
+            # Final reduction to match other features
+            nn.Linear(512, 128),
             nn.BatchNorm1d(128),
             nn.ReLU()
         )
