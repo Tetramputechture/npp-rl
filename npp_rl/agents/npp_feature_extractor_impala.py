@@ -4,7 +4,7 @@ from torch import nn
 import gymnasium
 from nclone_environments.basic_level_no_gold.constants import (
     TEMPORAL_FRAMES,
-    GAME_STATE_FEATURES,
+    GAME_STATE_FEATURES_MAX_ENTITY_COUNT_128,
     PLAYER_FRAME_HEIGHT,
     PLAYER_FRAME_WIDTH,
     RENDERED_VIEW_CHANNELS,
@@ -128,26 +128,26 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
 
         # MLP for game state processing with batch norm
         self.game_state_mlp = nn.Sequential(
-            # First reduce by ~factor of 10
-            nn.Linear(GAME_STATE_FEATURES, 16384),
-            nn.BatchNorm1d(16384),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-
-            # Further reduce by ~factor of 8
-            nn.Linear(16384, 2048),
-            nn.BatchNorm1d(2048),
+            # First reduce by ~factor of 4
+            nn.Linear(GAME_STATE_FEATURES_MAX_ENTITY_COUNT_128, 4096),
+            nn.BatchNorm1d(4096),
             nn.ReLU(),
             nn.Dropout(0.2),
 
             # Further reduce by ~factor of 4
-            nn.Linear(2048, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(4096, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+
+            # Further reduce by ~factor of 4
+            nn.Linear(1024, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(0.2),
 
             # Final reduction to match other features
-            nn.Linear(512, 128),
+            nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU()
         )
