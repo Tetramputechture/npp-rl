@@ -45,18 +45,14 @@ DEFAULT_HYPERPARAMS = {
 ENABLE_FRAME_STACK = False
 
 
-def create_env(n_envs: int = 1, render_mode: str = 'rgb_array') -> VecNormalize:
+def create_env(n_envs: int = 1, render_mode: str = 'rgb_array', enable_short_episode_truncation: bool = False, training: bool = True) -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
-    if n_envs == 1:
-        env = DummyVecEnv([lambda: BasicLevelNoGold(
-            render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK)])
-    else:
-        env = SubprocVecEnv(
-            [lambda: BasicLevelNoGold(render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK) for _ in range(n_envs)])
+    env = SubprocVecEnv(
+        [lambda: BasicLevelNoGold(render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK, enable_short_episode_truncation=enable_short_episode_truncation) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, training=True)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, training=training)
 
     return env
 
@@ -214,12 +210,13 @@ def objective(trial: optuna.Trial) -> float:
     kwargs.update(sample_ppo_params(trial))
 
     # Create environments
-    env = create_env(n_envs=N_ENVS)
-    eval_env = create_env(n_envs=1)
+    train_env = create_env(n_envs=N_ENVS, training=True)
+    eval_env = create_env(
+        n_envs=1, enable_short_episode_truncation=True, training=False)
 
     # Create the PPO model
     model = PPO(
-        env=env,
+        env=train_env,
         tensorboard_log=str(log_dir / "tensorboard"),
         verbose=1,
         seed=42,
@@ -254,7 +251,7 @@ def objective(trial: optuna.Trial) -> float:
         nan_encountered = True
     finally:
         # Clean up environments
-        env.close()
+        train_env.close()
         eval_env.close()
 
     # Save trial results
@@ -293,13 +290,15 @@ def optimize_agent():
         sampler=sampler,
         pruner=pruner,
         direction="maximize",
-        study_name=f"recurrent_ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        study_name=f"ppo_optimization_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
     try:
         study.optimize(objective, n_trials=N_TRIALS, n_jobs=4)
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user.")
+    except Exception as e:
+        print(f"Optimization failed with error: {e}")
 
     print("\nOptimization Results:")
     print(f"Number of finished trials: {len(study.trials)}")
