@@ -1,7 +1,7 @@
-"""Optuna script for optimizing the hyperparameters of a RecurrentPPO agent
-from Stable-Baselines3-Contrib for the N++ environment.
+"""Optuna script for optimizing the hyperparameters of our PPO agent
+for the N++ environment.
 
-This script uses Optuna to perform hyperparameter optimization for the RecurrentPPO
+This script uses Optuna to perform hyperparameter optimization for the PPO
 agent. It includes pruning of bad trials and proper handling of the evaluation
 environment.
 """
@@ -31,7 +31,7 @@ N_EVALUATIONS = 4  # Number of evaluations per trial
 N_WARMUP_STEPS = 10
 N_TIMESTEPS = int(4e6)  # Total timesteps per trial
 N_EVAL_EPISODES = 5  # Episodes per evaluation
-N_ENVS = 128  # Number of parallel environments
+N_ENVS = 64  # Number of parallel environments
 EVAL_FREQ = max(10000 // N_ENVS, 1)  # Evaluation frequency
 
 # Default hyperparameters that won't be tuned
@@ -40,7 +40,7 @@ DEFAULT_HYPERPARAMS = {
     "device": device,
 }
 
-# If we want to use past 3 frames along with the current frame
+# If we want to use past 4 frames along with the current frame
 # in our input
 ENABLE_FRAME_STACK = False
 
@@ -217,11 +217,12 @@ def objective(trial: optuna.Trial) -> float:
     env = create_env(n_envs=N_ENVS)
     eval_env = create_env(n_envs=1)
 
-    # Create the RecurrentPPO model
+    # Create the PPO model
     model = PPO(
         env=env,
         tensorboard_log=str(log_dir / "tensorboard"),
         verbose=1,
+        seed=42,
         **kwargs
     )
 
