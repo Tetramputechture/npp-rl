@@ -44,11 +44,17 @@ DEFAULT_HYPERPARAMS = {
 # in our input
 ENABLE_FRAME_STACK = False
 
+SEED = 42
+
 
 def create_env(n_envs: int = 1, render_mode: str = 'rgb_array', enable_short_episode_truncation: bool = False, training: bool = True) -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     env = SubprocVecEnv(
-        [lambda: BasicLevelNoGold(render_mode=render_mode, enable_frame_stack=ENABLE_FRAME_STACK, enable_short_episode_truncation=enable_short_episode_truncation) for _ in range(n_envs)])
+        [lambda: BasicLevelNoGold(
+            render_mode=render_mode,
+            enable_frame_stack=ENABLE_FRAME_STACK,
+            enable_short_episode_truncation=enable_short_episode_truncation,
+            seed=SEED) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
