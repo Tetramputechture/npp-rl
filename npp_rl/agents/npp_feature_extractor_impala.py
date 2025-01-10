@@ -4,7 +4,7 @@ from torch import nn
 import gymnasium
 from nclone_environments.basic_level_no_gold.constants import (
     TEMPORAL_FRAMES,
-    GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH,
+    GAME_STATE_FEATURES,
     PLAYER_FRAME_HEIGHT,
     PLAYER_FRAME_WIDTH,
     RENDERED_VIEW_CHANNELS,
@@ -128,7 +128,7 @@ class NPPFeatureExtractorImpala(BaseFeaturesExtractor):
 
         # MLP for game state processing with batch norm
         self.game_state_mlp = nn.Sequential(
-            nn.Linear(GAME_STATE_FEATURES_ONLY_NINJA_AND_EXIT_AND_SWITCH, 64),
+            nn.Linear(GAME_STATE_FEATURES, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Linear(64, 128),
