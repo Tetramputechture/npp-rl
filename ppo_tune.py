@@ -47,14 +47,15 @@ ENABLE_FRAME_STACK = False
 SEED = 42
 
 
-def create_env(n_envs: int = 1, render_mode: str = 'rgb_array', enable_short_episode_truncation: bool = False, training: bool = True) -> VecNormalize:
+def create_env(n_envs: int = 1, render_mode: str = 'rgb_array', enable_short_episode_truncation: bool = False, training: bool = True, eval_mode: bool = False) -> VecNormalize:
     """Create a vectorized environment for training or evaluation."""
     env = SubprocVecEnv(
         [lambda: BasicLevelNoGold(
             render_mode=render_mode,
             enable_frame_stack=ENABLE_FRAME_STACK,
             enable_short_episode_truncation=enable_short_episode_truncation,
-            seed=SEED) for _ in range(n_envs)])
+            seed=SEED,
+            eval_mode=eval_mode) for _ in range(n_envs)])
 
     env = VecMonitor(env)
     env = VecCheckNan(env, raise_exception=True)
@@ -218,7 +219,7 @@ def objective(trial: optuna.Trial) -> float:
     # Create environments
     train_env = create_env(n_envs=N_ENVS, training=True)
     eval_env = create_env(
-        n_envs=1, enable_short_episode_truncation=True, training=False)
+        n_envs=1, enable_short_episode_truncation=True, training=False, eval_mode=True)
 
     # Create the PPO model
     model = PPO(
