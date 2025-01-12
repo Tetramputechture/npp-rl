@@ -81,7 +81,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     }[net_arch_type]
 
     # Whether to use IMPALA CNN
-    use_impala_cnn = trial.suggest_categorical("use_impala_cnn", [True, False])
+    # use_impala_cnn = trial.suggest_categorical("use_impala_cnn", [True, False])
+    use_impala_cnn = False
 
     # Features dimension for the feature extractor (only used if IMPALA CNN is enabled)
     features_dim = trial.suggest_categorical(
