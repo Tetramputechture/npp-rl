@@ -13,13 +13,13 @@ import datetime
 import imageio
 import subprocess
 import threading
-from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
+from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TRAIN_N_ENVS = 64
-TRAIN_EVAL_FREQ = max(10000 // TRAIN_N_ENVS, 1)
+TRAIN_EVAL_FREQ_BASE = 10000
 
 
 def setup_training_env(vec_env):
@@ -50,33 +50,44 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
+def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str, n_envs: int, use_3d_conv: bool = True) -> PPO:
     """
-    Creates a PPO agent with optimized hyperparameters for the N++ environment.
-    Memory-optimized version with smaller network architecture.
+    Creates a PPO agent with enhanced architecture for the N++ environment.
+    Now includes state-of-the-art improvements based on recent research.
 
     Args:
         env: The N++ environment instance
-        n_steps: Number of steps to run for each environment per update
         tensorboard_log: Directory for Tensorboard logs
+        n_envs: Number of parallel environments
+        use_3d_conv: Whether to use 3D convolutions for temporal modeling
 
     Returns:
         PPO: Configured PPO model instance
     """
 
+    # Enhanced learning rate schedule based on research
     learning_rate = get_linear_fn(
-        start=0.00047032591206943436,
-        end=5e-6,
-        end_fraction=0.85
+        start=3e-4,  # Higher starting LR for larger networks
+        end=1e-6,    # Lower end LR for fine-tuning
+        end_fraction=0.9
     )
 
+    # Choose feature extractor based on 3D conv preference
+    if use_3d_conv:
+        features_extractor_class = Enhanced3DFeatureExtractor
+        print("Using Enhanced 3D Feature Extractor with temporal modeling")
+    else:
+        features_extractor_class = EnhancedCNNFeatureExtractor
+        print("Using Enhanced CNN Feature Extractor")
+
     policy_kwargs = dict(
-        # features_extractor_class=NPPFeatureExtractor,
+        features_extractor_class=features_extractor_class,
+        features_extractor_kwargs=dict(features_dim=512),
         net_arch=dict(
             pi=NET_ARCH_SIZE,
             vf=NET_ARCH_SIZE
         ),
-        normalize_images=True,
+        normalize_images=False,  # We normalize in the feature extractor
         activation_fn=nn.ReLU,
     )
 
@@ -106,14 +117,14 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
     return model
 
 
-def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, load_model_path=None) -> PPO:
+def train_ppo_agent(env: BasicLevelNoGold, log_dir, n_envs: int, total_timesteps=1000000, load_model_path=None) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
     Args:
         env: The N++ environment instance
         log_dir: Directory for saving logs and models
-        n_steps: Number of steps per update
+        n_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model_path: Optional path to a previously saved model to continue training from
     """
@@ -137,15 +148,17 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, loa
         )
     else:
         print("Creating new model")
-        model = create_ppo_agent(env, str(tensorboard_log))
+        model = create_ppo_agent(env, str(tensorboard_log), n_envs, use_3d_conv=True)
 
     stop_callback = StopTrainingOnNoModelImprovement(
         max_no_improvement_evals=30, min_evals=50, verbose=1)
 
     # Configure callback for monitoring and saving
+    # Adjust eval_freq based on the number of environments
+    eval_freq = max(TRAIN_EVAL_FREQ_BASE // n_envs, 1)
     callback = EvalCallback(
         eval_env=env,
-        eval_freq=TRAIN_EVAL_FREQ,
+        eval_freq=eval_freq,
         n_eval_episodes=5,
         deterministic=True,
         render=False,
@@ -261,34 +274,35 @@ def record_agent_training(env: BasicLevelNoGold, model: PPO,
     return local_directory
 
 
-def start_training(load_model_path=None, render_mode='rgb_array'):
+def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64):
     """Initialize environment and start training process.
 
     Args:
         load_model_path: Optional path to a previously saved model to continue training from
         render_mode: 'human' or 'rgb_array'
+        num_envs: Number of parallel environments to use for training.
     """
 
     try:
         env = BasicLevelNoGold(render_mode=render_mode,
-                               enable_frame_stack=False)
+                               enable_frame_stack=True)  # Enable frame stacking for enhanced temporal modeling
         check_env(env)
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=False), n_envs=1,
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=True), n_envs=1,
                                    vec_env_cls=DummyVecEnv)
         else:
             print(
-                f'Rendering in rgb_array mode with {TRAIN_N_ENVS} environments')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=False), n_envs=TRAIN_N_ENVS,
+                f'Rendering in rgb_array mode with {num_envs} environments')
+            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=True), n_envs=num_envs,
                                    vec_env_cls=SubprocVecEnv)
 
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
         model = train_ppo_agent(
-            wrapped_env, log_dir, total_timesteps=1e7, load_model_path=load_model_path)
+            wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
