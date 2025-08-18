@@ -95,9 +95,28 @@ The extrinsic reward signal from the environment is designed to guide the agent 
 *   Large negative penalty for dying.
 *   Exploration rewards at multiple spatial scales.
 
+## Project Structure
+
+Current layout focused on Phase 1:
+
+- `npp_rl/`
+  - `agents/`
+    - `enhanced_training.py`: Main training entrypoint with CLI; uses PPO, 3D/2D extractors, vec envs, logging.
+    - `enhanced_feature_extractor.py`: `Enhanced3DFeatureExtractor` and `EnhancedCNNFeatureExtractor` for multi-input observations.
+    - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
+    - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
+    - `npp_agent_ppo.py`: Secondary training utilities (create/train/eval/record) kept for compatibility.
+  - (other subpackages may be added in later phases)
+- Top-level scripts
+  - `ppo_train.py`: Thin wrapper to launch PPO via `npp_rl.agents.npp_agent_ppo.start_training`.
+  - `tools/`: Small utilities (e.g., `convert_actions.py`, `rotate_videos.py`).
+  - `archive/`: Deprecated/experimental scripts kept for reference; not used in Phase 1.
+
+See `archive/README.md` for details on what was moved and why.
+
 ## Training the Agent
 
-The primary script for training the agent with all features is `agents/enhanced_training.py`.
+The primary script for training the agent with all features is `npp_rl/agents/enhanced_training.py`.
 
 ### Prerequisites: Setting up the `nclone` Environment
 
@@ -141,7 +160,7 @@ Key options include:
 python -m npp_rl.agents.enhanced_training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32
 ```
 
-The original training script `agents/npp_agent_ppo.py` is also available and has been updated to incorporate some of the newer features by default.
+The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `enhanced_training.py` going forward.
 
 ### Hyperparameter Tuning
 
