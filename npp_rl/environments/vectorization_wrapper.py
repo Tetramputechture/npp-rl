@@ -83,6 +83,8 @@ def make_vectorizable_env(env_kwargs=None):
         env_kwargs: Dictionary of environment configuration parameters
         
     Returns:
-        VectorizationWrapper instance
+        Callable that returns VectorizationWrapper instance
     """
-    return VectorizationWrapper(env_kwargs)
+    def _make_env():
+        return VectorizationWrapper(env_kwargs)
+    return _make_env
