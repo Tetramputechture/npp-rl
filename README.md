@@ -1,161 +1,233 @@
-# NPP-RL
+# NPP-RL Agent
 
-A Deep Reinforcement Learning Agent for the game N++, implementing both PPO and Recurrent PPO (Proximal Policy Optimization) via Stable Baselines 3 with a simulated game environment.
+A Deep Reinforcement Learning Agent for the game N++, implementing PPO (Proximal Policy Optimization) using Stable Baselines3 with a custom N++ simulation environment.
 
 ## Project Overview
 
-This project aims to train an agent to play [N++](https://en.wikipedia.org/wiki/N%2B%2B). The game features a physically simulated movement model where the player can move continuously in any direction within a grid-based level. The agent must learn to navigate the environment, avoid hazards, collect gold, activate switches to open doors, and reach the exit.
+This project trains an agent to play the game [N++](https://en.wikipedia.org/wiki/N%2B%2B). The agent learns to navigate complex, physics-based levels, collect gold, activate switches, and reach exits by interacting with a custom Gym-compatible environment derived from the `nclone` simulator.
 
-The project supports both standard PPO and Recurrent PPO architectures, with optional frame stacking in the environment. We have found success training on simple levels using just a single frame plus our game state vector, suggesting that frame stacking or recurrent architectures may only be necessary for longer or more complex levels requiring temporal reasoning.
+The agent architecture incorporates several features informed by recent deep reinforcement learning research to enhance performance, generalization, and sample efficiency.
 
-## Example Agent Level Completion
+## Core Agent Features & Architecture
 
-This is an example of a trained agent completing a non-trivial level.
+The PPO agent leverages a multi-input policy capable of processing visual and vector-based game state information. Key architectural components include:
 
-![Example Level Completion](example_completion.gif)
+### 1. Observation Space & Processing
 
-This agent was trained on this single level with no frame stacking or LSTM on 4 million frames, and achieved a non-zero success rate at around 2 million frames.
+The agent receives multi-modal observations:
 
-Work on a generalized agent to play through any level is ongoing.
+*   **Player-Centric Visual Frames**:
+    *   Dimensions: 84x84 pixels.
+    *   Temporal Stacking: 12 consecutive frames are stacked to provide temporal context.
+        *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/nclone_environments/basic_level_no_gold/constants.py`).
+    *   Preprocessing: Grayscale conversion, centering on the player, cropping, and normalization.
+    *   Augmentation: Random cutout is applied to player frames with a 50% chance to improve generalization (inspired by DeVries & Taylor, 2017, "Improved Regularization of Convolutional Neural Networks with Cutout").
 
-## Environment
+*   **Global View**:
+    *   A downsampled 176x100 pixel grayscale view of the entire level.
 
-The environment uses a custom fork of community-built simulator ([nclone](https://github.com/Tetramputechture/nclone)) rather than controlling the actual game process. This allows for faster training and headless operation. This fork also
-includes our Gym environment, reward calculation, and frame augmentation.
+*   **Game State Vector**: A low-dimensional vector containing:
+    *   Ninja physics state (position, velocity, airborne/walled status, jump duration, applied forces).
+    *   Status of critical entities (e.g., exit door, switches).
+    *   Normalized vectors from the ninja to key objectives (e.g., active switch, exit).
+    *   Time remaining in the episode.
 
-### Observation Space
+### 2. Feature Extraction
 
-The observation space consists of two components:
+Two primary feature extractor architectures are available, located in `agents/enhanced_feature_extractor.py`:
 
-1. **Player Frame** - A localized view centered on the player
-   - Dimensions: 84 x 84 x (1, or 4 with frame stacking)
-   - Provides detailed information about the immediate surroundings
-   - If frame stacking is enabled:
-     - Current frame (most recent)
-     - Last, second to last, and third to last frame
-   - Each frame is preprocessed:
-     - Converted to grayscale
-     - Centered on player position
-     - Cropped to focus on local area
-     - Normalized to [0, 255] range
+*   **`Enhanced3DFeatureExtractor` (Recommended for temporal data)**:
+    *   Employs 3D convolutions over the 12 stacked player-centric frames to directly model spatiotemporal patterns.
+        *   Input shape: `(Batch, 1, TemporalFrames, Height, Width)`.
+    *   Uses varied 3D convolutional kernel sizes (e.g., `(4,7,7)`, `(3,5,5)`) and strides to capture features at multiple temporal and spatial scales.
+    *   Processes the global view with a separate 2D CNN.
+    *   Includes adaptive pooling layers to ensure fixed-size outputs before fusion.
 
-2. **Game State** - A vector containing:
-   - Ninja state:
-     - Position X
-     - Position Y
-     - Speed X
-     - Speed Y
-     - Airborn
-     - Walled
-     - Jump duration
-     - Applied gravity
-     - Applied drag
-     - Applied friction
-   - Exit and switch entity states
-   - Vectors between ninja and objectives (switch/exit)
-   - Time remaining
+*   **`EnhancedCNNFeatureExtractor` (Alternative)**:
+    *   Utilizes 2D convolutions, where the 12 stacked frames are treated as input channels to the first convolutional layer.
+    *   Also processes the global view with a separate 2D CNN.
 
-### Observation Augmentations
+Both extractors process the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs and the game state vector are then fused and passed to the policy and value networks.
 
-We apply random cutout augmentations to the player frame, with a 50% chance of applying the cutout. Cutout has shown to be effective at improving generalization in other domains, and we hypothesize that it may be useful for improving generalization in this domain as well. See more details [in this paper](https://arxiv.org/abs/2004.14990).
+### 3. Network Architecture & Hyperparameters
 
-### Action Space
+*   **Policy and Value Networks**:
+    *   The PPO agent uses separate MLP heads for the policy (actor) and value (critic) functions, following the feature extraction stage.
+    *   Network Size: Hidden layers are configured as `[256, 256, 128]` (`NET_ARCH_SIZE` in `agents/hyperparameters/ppo_hyperparameters.py`).
+*   **Key PPO Hyperparameters** (tuned values in `agents/hyperparameters/ppo_hyperparameters.py`):
+    *   `n_steps`: 1024 (Number of steps per environment per update)
+    *   `batch_size`: 256 (Minibatch size for optimization)
+    *   `gamma`: 0.999 (Discount factor)
+    *   `learning_rate`: Linearly decayed, typically from `3e-4` to `1e-6`.
+    *   Other parameters such as `gae_lambda`, `clip_range`, `ent_coef`, and `vf_coef` are also defined.
 
-The agent can perform 6 discrete actions:
+### 4. Adaptive Exploration Strategies
 
-- NOOP (No action)
-- Left
-- Right
-- Jump
-- Jump + Left
-- Jump + Right
+To encourage efficient exploration and improve learning in sparse reward environments, the agent can utilize an `AdaptiveExplorationManager` (from `agents/adaptive_exploration.py`). This system combines:
 
-### Training Architecture
+*   **Intrinsic Curiosity Module (ICM)**:
+    *   Based on Pathak et al. (2017), "Curiosity-driven Exploration by Self-supervised Prediction."
+    *   The module consists of a forward model (predicting the next state's feature representation given the current state and action) and an inverse model (predicting the action taken between two consecutive states).
+    *   The prediction error of the forward model serves as an intrinsic reward signal, encouraging the agent to visit states where its understanding of the environment dynamics is poor.
+*   **Novelty Detection**:
+    *   Employs a count-based approach where states (discretized player positions) are tracked.
+    *   A novelty bonus is awarded for visiting less frequently encountered states, decaying over time. This is inspired by classic count-based exploration algorithms.
+*   **Adaptive Scaling**:
+    *   The overall magnitude of the exploration bonus (combined from ICM and novelty) is dynamically adjusted based on the agent's training progress (e.g., rate of extrinsic reward improvement).
 
-The implementation supports both PPO and RecurrentPPO from Stable-Baselines3 and Stable-Baselines3-Contrib with the following components:
+### 5. Action Space
 
-1. **Policies**:
-   - PPO: MultiInputPolicy
-   - RecurrentPPO: MultiInputLstmPolicy
-   - Both process multiple input types (frames and state vectors)
-   - LSTM variant adds temporal dependencies for more complex tasks or longer levels.
+The agent interacts with the environment using a discrete action set:
+*   NOOP (No action)
+*   Left
+*   Right
+*   Jump
+*   Jump + Left
+*   Jump + Right
 
-2. **Hyperparameter Optimization**
-   - Utilizes Optuna for automated hyperparameter tuning
-   - Optimizes key parameters including:
-     - Learning rate
-     - Network architecture
-     - LSTM hidden size (for RecurrentPPO)
-     - Batch size
-     - GAE parameters
-     - PPO clip range
+### 6. Reward System
 
-3. **Training Infrastructure**
-   - Vectorized environment support
-   - Tensorboard integration for monitoring
-   - Checkpointing and model saving
-   - Video recording of agent performance
+The extrinsic reward signal from the environment is designed to guide the agent towards completing levels efficiently. It typically includes:
+*   Small penalty for each time step (encouraging speed).
+*   Positive reward for collecting gold (if applicable to the specific environment variant).
+*   Positive reward for activating switches.
+*   Large positive reward for reaching the exit.
+*   Large negative penalty for dying.
+*   Exploration rewards at multiple spatial scales.
 
-### Reward System
+## Project Structure
 
-The reward system includes:
+Current layout focused on Phase 1:
 
-- Time-based penalties
-- Navigation rewards
-- Switch activation bonuses
-- Terminal rewards for level completion
-- Death penalties
+- `npp_rl/`
+  - `agents/`
+    - `enhanced_training.py`: Main training entrypoint with CLI; uses PPO, 3D/2D extractors, vec envs, logging.
+    - `enhanced_feature_extractor.py`: `Enhanced3DFeatureExtractor` and `EnhancedCNNFeatureExtractor` for multi-input observations.
+    - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
+    - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
+    - `npp_agent_ppo.py`: Secondary training utilities (create/train/eval/record) kept for compatibility.
+  - (other subpackages may be added in later phases)
+- Top-level scripts
+  - `ppo_train.py`: Thin wrapper to launch PPO via `npp_rl.agents.npp_agent_ppo.start_training`.
+  - `tools/`: Small utilities (e.g., `convert_actions.py`, `rotate_videos.py`).
+  - `archive/`: Deprecated/experimental scripts kept for reference; not used in Phase 1.
+
+See `archive/README.md` for details on what was moved and why.
+
+## Training the Agent
+
+The primary script for training the agent with all features is `npp_rl/agents/enhanced_training.py`.
+
+### Prerequisites: Setting up the `nclone` Environment
+
+This RL agent relies on the `nclone` N++ simulator and Gym environment. Ensure `nclone` is cloned as a sibling directory to `npp-rl` and installed:
+
+```bash
+# Navigate to the directory *containing* npp-rl
+# (e.g., if npp-rl is in /home/user/projects/npp-rl, cd /home/user/projects)
+git clone https://github.com/tetramputechture/nclone.git
+cd nclone
+pip install -e .
+cd ../npp-rl # Or navigate back to your npp-rl directory
+```
+
+### Starting a Training Run
+
+**Recommended Quick Start:**
+This command starts training using the `Enhanced3DFeatureExtractor`, 12-frame stacking, adaptive exploration, and optimized hyperparameters, utilizing 64 parallel environments.
+
+```bash
+python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000
+```
+
+**Command-Line Options for `enhanced_training.py`:**
+The `enhanced_training.py` script offers various options:
+
+```bash
+python -m npp_rl.agents.enhanced_training --help
+```
+
+Key options include:
+*   `--num_envs`: Number of parallel simulation environments (default: 64).
+*   `--total_timesteps`: Total number of training steps (default: 10,000,000).
+*   `--use_3d_conv` / `--no_3d_conv`: Enable or disable 3D convolutions (defaults to enabled). If disabled, `EnhancedCNNFeatureExtractor` is used.
+*   `--load_model`: Path to a previously saved model checkpoint to resume training.
+*   `--render_mode`: Set to `human` for visual rendering (forces `num_envs=1`). Default is `rgb_array`.
+*   `--disable_exploration`: Turn off the adaptive exploration system.
+
+**Example - Resuming Training:**
+```bash
+python -m npp_rl.agents.enhanced_training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32
+```
+
+The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `enhanced_training.py` going forward.
 
 ### Hyperparameter Tuning
 
-The project includes automated hyperparameter optimization using Optuna. To run the tuning process for either architecture:
+Automated hyperparameter optimization is available via Optuna. Scripts `ppo_tune.py` (for standard PPO features) and `recurrent_ppo_tune.py` (if a recurrent version is being tested) can be used. These scripts typically optimize:
+*   Learning rate and schedule
+*   Network architecture choices (within predefined options)
+*   LSTM hidden size (for recurrent policies)
+*   PPO-specific parameters (`batch_size`, `n_steps`, GAE, clip ranges, coefficients).
 
-```bash
-# For standard PPO
-python ppo_tune.py
+Tuning results are saved in `training_logs/tune_logs/` and `training_logs/tune_results_<timestamp>/`.
 
-# For RecurrentPPO
-python recurrent_ppo_tune.py
-```
+## Monitoring and Logging
 
-The tuning process:
+*   **Tensorboard**: Training progress, including rewards, losses, and exploration metrics, can be monitored using Tensorboard:
+    ```bash
+    tensorboard --logdir ./training_logs/enhanced_ppo_training/
+    ```
+    (Adjust log directory path based on the session timestamp).
+*   **Log Files**: Detailed logs, training configurations, and model checkpoints are saved under:
+    `./training_logs/enhanced_ppo_training/session-<timestamp>/`
+    This includes:
+    *   `training_config.json`: Hyperparameters and settings for the run.
+    *   `eval/`: Logs from evaluation callbacks.
+    *   `tensorboard/`: Tensorboard event files.
+    *   `best_model/`: The best model saved during training based on evaluation performance.
+    *   `final_model/`: The model saved at the very end of training.
 
-- Runs 100 trials using Optuna's TPE sampler
-- Uses median pruning to stop underperforming trials early
-- Runs for up to 24 hours on a 1-2x NVIDIA H100 instance
-- Optimizes key hyperparameters including:
-  - Learning rate and schedule
-  - Network architecture (tiny vs small)
-  - LSTM hidden size (128 to 512, RecurrentPPO only)
-  - Batch size (32 to 512)
-  - N-steps (256 to 4096)
-  - GAE lambda and gamma
-  - PPO clip ranges
-  - Entropy and value function coefficients
+## Example Agent Performance
 
-Results are saved in:
+(This section can be updated with new GIFs or performance metrics as the agent develops further)
 
-- `training_logs/tune_logs/` - Individual trial logs and Tensorboard data
-- `training_logs/tune_results_<timestamp>/` - Final optimization results
+This is an example of a trained agent completing a non-trivial level:
+![Example Level Completion](example_completion.gif)
+*This agent was trained on a specific level configuration.*
+
+Work on a generalized agent capable of playing a wide variety of N++ levels is an ongoing focus.
+
+## Key Research References
+
+The architecture and training procedures are informed by principles and findings from various research papers, including:
+
+*   Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017). Proximal Policy Optimization Algorithms.
+*   Pathak, D., Agrawal, P., Efros, A. A., & Darrell, T. (2017). Curiosity-driven Exploration by Self-supervised Prediction.
+*   Cobbe, K., Hesse, C., Hilton, J., & Schulman, J. (2020). Leveraging Procedural Generation to Benchmark Reinforcement Learning. (Influenced choices for network scaling and temporal modeling).
+*   Ji, S., Xu, W., Yang, M., & Yu, K. (2013). 3D convolutional neural networks for human action recognition. (Early work on 3D CNNs relevant to spatiotemporal feature learning).
+*   DeVries, T., & Taylor, G. W. (2017). Improved Regularization of Convolutional Neural Networks with Cutout.
+*   Ecoffet, A., Huizinga, J., Lehman, J., Stanley, K. O., & Clune, J. (2019). Go-Explore: a New Approach for Hard-Exploration Problems. (Inspired adaptive novelty components).
+*   Mnih, V., et al. (2013). Playing Atari with Deep Reinforcement Learning. (Foundation for CNNs in RL).
+*   Kaplan, J., et al. (2020). Scaling Laws for Neural Language Models. (General insights into model scaling).
 
 ## Dependencies
 
-Cairo:
+Ensure the `nclone` environment is installed from a local sibling directory as described in the "Prerequisites" section.
 
+System dependencies (for PyCairo, a dependency of `nclone`):
 ```sh
 sudo apt install libcairo2-dev pkg-config python3-dev
 ```
 
-Required packages:
-
-- numpy>=1.21.0
-- torch>=2.0.0
-- opencv-python>=4.8.0
-- pillow>=10.0.0
-- gymnasium>=0.29.0
-- sb3-contrib>=2.0.0
-- stable-baselines3>=2.1.0
-- optuna>=3.3.0
-- tensorboard>=2.14.0
-- imageio>=2.31.0
-- meson>=1.6.1
+Python packages (managed via `pyproject.toml` in `nclone` and potentially a `requirements.txt` or `pyproject.toml` in `npp-rl`):
+*   `stable-baselines3>=2.1.0`
+*   `sb3-contrib>=2.0.0` (for RecurrentPPO, if used)
+*   `torch>=2.0.0`
+*   `gymnasium>=0.29.0`
+*   `numpy`
+*   `opencv-python`
+*   `optuna` (for hyperparameter tuning)
+*   `tensorboard`
+*   `imageio` (for video recording)
+*   `albumentations` (if used for more advanced augmentations, primarily for `Cutout` in `nclone`)

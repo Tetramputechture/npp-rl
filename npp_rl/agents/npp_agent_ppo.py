@@ -2,7 +2,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement, CallbackList
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
 from torch import nn
@@ -13,13 +13,16 @@ import datetime
 import imageio
 import subprocess
 import threading
-from nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
+from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
+from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
+from npp_rl.optimization.h100_optimization import enable_h100_optimizations, get_recommended_batch_size, H100OptimizedTraining
+from npp_rl.callbacks import create_pbrs_callbacks
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TRAIN_N_ENVS = 64
-TRAIN_EVAL_FREQ = max(10000 // TRAIN_N_ENVS, 1)
+TRAIN_EVAL_FREQ_BASE = 10000
 
 
 def setup_training_env(vec_env):
@@ -50,33 +53,60 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
+def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool = None) -> PPO:
     """
-    Creates a PPO agent with optimized hyperparameters for the N++ environment.
-    Memory-optimized version with smaller network architecture.
+    Creates a PPO agent with enhanced architecture for the N++ environment.
+    Now includes state-of-the-art improvements based on recent research.
 
     Args:
         env: The N++ environment instance
-        n_steps: Number of steps to run for each environment per update
         tensorboard_log: Directory for Tensorboard logs
+        n_envs: Number of parallel environments
+        use_3d_conv: Whether to use 3D convolutions for temporal modeling
 
     Returns:
         PPO: Configured PPO model instance
     """
 
+    # Enhanced learning rate schedule based on research
     learning_rate = get_linear_fn(
-        start=0.00047032591206943436,
-        end=5e-6,
-        end_fraction=0.85
+        start=3e-4,  # Higher starting LR for larger networks
+        end=1e-6,    # Lower end LR for fine-tuning
+        end_fraction=0.9
     )
 
+    # Auto-detect frame stacking if use_3d_conv is not specified
+    if use_3d_conv is None:
+        # Check if environment has frame stacking enabled
+        sample_obs = env.reset()
+        if isinstance(sample_obs, tuple):
+            sample_obs = sample_obs[0]
+        
+        # Handle vectorized environment case - check if it's a list/array of observations
+        if isinstance(sample_obs, (list, np.ndarray)) and len(sample_obs) > 0:
+            sample_obs = sample_obs[0]  # Take first environment's observation
+        
+        player_frame_shape = sample_obs['player_frame'].shape
+        has_temporal_frames = len(player_frame_shape) == 3 and player_frame_shape[2] > 1
+        use_3d_conv = has_temporal_frames
+        print(f"Auto-detected frame stacking: {has_temporal_frames}, using 3D conv: {use_3d_conv}")
+    
+    # Choose feature extractor based on 3D conv preference
+    if use_3d_conv:
+        features_extractor_class = Enhanced3DFeatureExtractor
+        print("Using Enhanced 3D Feature Extractor with temporal modeling")
+    else:
+        features_extractor_class = EnhancedCNNFeatureExtractor
+        print("Using Enhanced CNN Feature Extractor")
+
     policy_kwargs = dict(
-        # features_extractor_class=NPPFeatureExtractor,
+        features_extractor_class=features_extractor_class,
+        features_extractor_kwargs=dict(features_dim=512),
         net_arch=dict(
             pi=NET_ARCH_SIZE,
             vf=NET_ARCH_SIZE
         ),
-        normalize_images=True,
+        normalize_images=False,  # We normalize in the feature extractor
         activation_fn=nn.ReLU,
     )
 
@@ -106,14 +136,14 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str) -> PPO:
     return model
 
 
-def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, load_model_path=None) -> PPO:
+def train_ppo_agent(env: BasicLevelNoGold, log_dir, n_envs: int, total_timesteps=1000000, load_model_path=None) -> PPO:
     """
     Trains the PPO agent with Tensorboard integration
 
     Args:
         env: The N++ environment instance
         log_dir: Directory for saving logs and models
-        n_steps: Number of steps per update
+        n_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model_path: Optional path to a previously saved model to continue training from
     """
@@ -137,15 +167,17 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, loa
         )
     else:
         print("Creating new model")
-        model = create_ppo_agent(env, str(tensorboard_log))
+        model = create_ppo_agent(env, str(tensorboard_log), n_envs)
 
     stop_callback = StopTrainingOnNoModelImprovement(
         max_no_improvement_evals=30, min_evals=50, verbose=1)
 
     # Configure callback for monitoring and saving
-    callback = EvalCallback(
+    # Adjust eval_freq based on the number of environments
+    eval_freq = max(TRAIN_EVAL_FREQ_BASE // n_envs, 1)
+    eval_callback = EvalCallback(
         eval_env=env,
-        eval_freq=TRAIN_EVAL_FREQ,
+        eval_freq=eval_freq,
         n_eval_episodes=5,
         deterministic=True,
         render=False,
@@ -154,6 +186,12 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, total_timesteps=1000000, loa
         best_model_save_path=str(log_dir / "best_model"),
         callback_after_eval=stop_callback
     )
+    
+    # Create PBRS logging callbacks
+    pbrs_callbacks = create_pbrs_callbacks(verbose=1)
+    
+    # Combine all callbacks
+    callback = CallbackList([eval_callback] + pbrs_callbacks)
 
     # Train the model
     model.learn(
@@ -261,34 +299,87 @@ def record_agent_training(env: BasicLevelNoGold, model: PPO,
     return local_directory
 
 
-def start_training(load_model_path=None, render_mode='rgb_array'):
+def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, env_kwargs=None, enable_h100_optimization=True):
     """Initialize environment and start training process.
 
     Args:
         load_model_path: Optional path to a previously saved model to continue training from
         render_mode: 'human' or 'rgb_array'
+        num_envs: Number of parallel environments to use for training.
+        env_kwargs: Dictionary of environment configuration parameters
+        enable_h100_optimization: Whether to enable H100/GPU optimizations (TF32, memory management)
     """
+    
+    # Enable H100/GPU optimizations at the start of training
+    optimization_status = None
+    if enable_h100_optimization:
+        optimization_status = enable_h100_optimizations(
+            enable_tf32=True,
+            enable_memory_optimization=True,
+            log_optimizations=True
+        )
+        
+        # Adjust batch size based on GPU capabilities if using CUDA
+        if optimization_status['cuda_available']:
+            recommended_batch_size = get_recommended_batch_size(
+                device_name=optimization_status['device_name'],
+                base_batch_size=HYPERPARAMETERS.get('batch_size', 2048)
+            )
+            print(f"Recommended batch size for {optimization_status['device_name']}: {recommended_batch_size}")
+    
+    # Default environment configuration with Phase 1 enhancements
+    if env_kwargs is None:
+        env_kwargs = {
+            'enable_frame_stack': True,
+            'observation_profile': 'rich',
+            'enable_pbrs': True,
+            'pbrs_weights': {
+                'objective_weight': 1.0,
+                'hazard_weight': 0.5, 
+                'impact_weight': 0.3,
+                'exploration_weight': 0.2
+            },
+            'pbrs_gamma': 0.99
+        }
+    
+    print(f"Environment configuration: {env_kwargs}")
 
     try:
-        env = BasicLevelNoGold(render_mode=render_mode,
-                               enable_frame_stack=False)
+        # Test environment creation and compliance
+        test_env_kwargs = env_kwargs.copy()
+        test_env_kwargs['render_mode'] = render_mode
+        env = make_vectorizable_env(test_env_kwargs)
         check_env(env)
+        env.close()
+        print("✅ Environment passed Gymnasium compliance check")
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=False), n_envs=1,
-                                   vec_env_cls=DummyVecEnv)
+            def make_env():
+                kwargs = env_kwargs.copy()
+                kwargs['render_mode'] = 'human'
+                return make_vectorizable_env(kwargs)
+            vec_env = make_vec_env(make_env, n_envs=1, vec_env_cls=DummyVecEnv)
         else:
-            print(
-                f'Rendering in rgb_array mode with {TRAIN_N_ENVS} environments')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=False), n_envs=TRAIN_N_ENVS,
-                                   vec_env_cls=SubprocVecEnv)
+            print(f'Rendering in rgb_array mode with {num_envs} environments using SubprocVecEnv')
+            def make_env():
+                kwargs = env_kwargs.copy()
+                kwargs['render_mode'] = 'rgb_array'
+                return make_vectorizable_env(kwargs)
+            vec_env = make_vec_env(make_env, n_envs=num_envs, vec_env_cls=SubprocVecEnv)
 
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
-        model = train_ppo_agent(
-            wrapped_env, log_dir, total_timesteps=1e7, load_model_path=load_model_path)
+        
+        # Use H100 optimization context if enabled
+        if enable_h100_optimization and optimization_status and optimization_status['cuda_available']:
+            with H100OptimizedTraining(enable_tf32=True, enable_memory_optimization=True, log_memory_usage=True):
+                model = train_ppo_agent(
+                    wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
+        else:
+            model = train_ppo_agent(
+                wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")

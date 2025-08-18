@@ -6,15 +6,19 @@ with detailed documentation for each parameter explaining its purpose and impact
 
 HYPERPARAMETERS = {
     # Number of steps to run for each environment per update
+    # Increased from 512 to 1024 based on research showing better performance
+    # (e.g., "Scaling Laws for Neural Language Models", OpenAI, 2020; general trend in RL)
     # This is the batch size = n_steps * n_env where n_env is number of environment copies running in parallel
     # Larger values -> more stable training but slower convergence
-    "n_steps": 512,
+    "n_steps": 1024,
 
     # Minibatch size for each optimization step
+    # Increased from 128 to 256 for better gradient estimates with larger networks
+    # (Matches trends in large-scale RL training, e.g., IMPALA, DeepMind, 2018)
     # This is the number of samples processed in each optimization iteration
     # Smaller batch sizes -> more noisy updates but faster training
     # Should be <= n_steps
-    "batch_size": 128,
+    "batch_size": 256,
 
     # Number of epochs when optimizing the surrogate loss
     # More epochs -> more optimization steps on the same data
@@ -22,10 +26,12 @@ HYPERPARAMETERS = {
     "n_epochs": 5,
 
     # Discount factor for future rewards
+    # Increased slightly from 0.996797 to 0.999 for better long-term planning
+    # (Commonly used in complex environments requiring longer-term credit assignment)
     # Range: 0.0 to 1.0
     # Higher values -> agent cares more about long-term rewards
     # Lower values -> agent focuses more on immediate rewards
-    "gamma": 0.996797,
+    "gamma": 0.999,
 
     # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
     # Range: 0.0 to 1.0
@@ -73,4 +79,7 @@ HYPERPARAMETERS = {
     "verbose": 1
 }
 
-NET_ARCH_SIZE = [128, 128]
+# Scaled up network architecture based on research findings
+# (e.g., ProcGen benchmark results showing benefits of larger networks)
+# Increased from [128, 128] to [256, 256, 128] for better feature extraction
+NET_ARCH_SIZE = [256, 256, 128]
