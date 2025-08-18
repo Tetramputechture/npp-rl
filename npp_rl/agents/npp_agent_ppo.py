@@ -17,6 +17,7 @@ from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import B
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
 from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
 from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
+from npp_rl.optimization.h100_optimization import enable_h100_optimizations, get_recommended_batch_size, H100OptimizedTraining
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -291,7 +292,7 @@ def record_agent_training(env: BasicLevelNoGold, model: PPO,
     return local_directory
 
 
-def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, env_kwargs=None):
+def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, env_kwargs=None, enable_h100_optimization=True):
     """Initialize environment and start training process.
 
     Args:
@@ -299,7 +300,25 @@ def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, e
         render_mode: 'human' or 'rgb_array'
         num_envs: Number of parallel environments to use for training.
         env_kwargs: Dictionary of environment configuration parameters
+        enable_h100_optimization: Whether to enable H100/GPU optimizations (TF32, memory management)
     """
+    
+    # Enable H100/GPU optimizations at the start of training
+    optimization_status = None
+    if enable_h100_optimization:
+        optimization_status = enable_h100_optimizations(
+            enable_tf32=True,
+            enable_memory_optimization=True,
+            log_optimizations=True
+        )
+        
+        # Adjust batch size based on GPU capabilities if using CUDA
+        if optimization_status['cuda_available']:
+            recommended_batch_size = get_recommended_batch_size(
+                device_name=optimization_status['device_name'],
+                base_batch_size=HYPERPARAMETERS.get('batch_size', 2048)
+            )
+            print(f"Recommended batch size for {optimization_status['device_name']}: {recommended_batch_size}")
     
     # Default environment configuration with Phase 1 enhancements
     if env_kwargs is None:
@@ -345,8 +364,15 @@ def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, e
         wrapped_env, log_dir = setup_training_env(vec_env)
 
         print("Starting PPO training...")
-        model = train_ppo_agent(
-            wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
+        
+        # Use H100 optimization context if enabled
+        if enable_h100_optimization and optimization_status and optimization_status['cuda_available']:
+            with H100OptimizedTraining(enable_tf32=True, enable_memory_optimization=True, log_memory_usage=True):
+                model = train_ppo_agent(
+                    wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
+        else:
+            model = train_ppo_agent(
+                wrapped_env, log_dir, n_envs=num_envs, total_timesteps=1e7, load_model_path=load_model_path)
 
         # Save final model
         print("Training completed. Saving model...")
