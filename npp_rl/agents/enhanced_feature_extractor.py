@@ -339,8 +339,8 @@ class EnhancedCNNFeatureExtractor(BaseFeaturesExtractor):
             player_pooled = self.player_pool(player_features)
             global_pooled = self.global_pool(global_features)
             
-            player_flat_dim = player_pooled.view(1, -1).shape[1]
-            global_flat_dim = global_pooled.view(1, -1).shape[1]
+            player_flat_dim = player_pooled.reshape(1, -1).shape[1]
+            global_flat_dim = global_pooled.reshape(1, -1).shape[1]
         
         # Final fusion network
         total_features = player_flat_dim + global_flat_dim + 64
@@ -365,13 +365,13 @@ class EnhancedCNNFeatureExtractor(BaseFeaturesExtractor):
         player_frame = observations['player_frame'].permute(0, 3, 1, 2).float() / 255.0
         player_features = self.player_conv2d(player_frame)
         player_features = self.player_pool(player_features)
-        player_features = player_features.view(player_features.size(0), -1)
+        player_features = player_features.reshape(player_features.size(0), -1)
         
         # Process global view
         global_view = observations['global_view'].permute(0, 3, 1, 2).float() / 255.0
         global_features = self.global_conv2d(global_view)
         global_features = self.global_pool(global_features)
-        global_features = global_features.view(global_features.size(0), -1)
+        global_features = global_features.reshape(global_features.size(0), -1)
         
         # Process game state
         game_state = observations['game_state'].float()

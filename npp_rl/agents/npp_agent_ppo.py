@@ -16,6 +16,7 @@ import threading
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
 from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
+from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -50,7 +51,7 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str, n_envs: int, use_3d_conv: bool = True) -> PPO:
+def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool = None) -> PPO:
     """
     Creates a PPO agent with enhanced architecture for the N++ environment.
     Now includes state-of-the-art improvements based on recent research.
@@ -72,6 +73,22 @@ def create_ppo_agent(env: BasicLevelNoGold, tensorboard_log: str, n_envs: int, u
         end_fraction=0.9
     )
 
+    # Auto-detect frame stacking if use_3d_conv is not specified
+    if use_3d_conv is None:
+        # Check if environment has frame stacking enabled
+        sample_obs = env.reset()
+        if isinstance(sample_obs, tuple):
+            sample_obs = sample_obs[0]
+        
+        # Handle vectorized environment case - check if it's a list/array of observations
+        if isinstance(sample_obs, (list, np.ndarray)) and len(sample_obs) > 0:
+            sample_obs = sample_obs[0]  # Take first environment's observation
+        
+        player_frame_shape = sample_obs['player_frame'].shape
+        has_temporal_frames = len(player_frame_shape) == 3 and player_frame_shape[2] > 1
+        use_3d_conv = has_temporal_frames
+        print(f"Auto-detected frame stacking: {has_temporal_frames}, using 3D conv: {use_3d_conv}")
+    
     # Choose feature extractor based on 3D conv preference
     if use_3d_conv:
         features_extractor_class = Enhanced3DFeatureExtractor
@@ -148,7 +165,7 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, n_envs: int, total_timesteps
         )
     else:
         print("Creating new model")
-        model = create_ppo_agent(env, str(tensorboard_log), n_envs, use_3d_conv=True)
+        model = create_ppo_agent(env, str(tensorboard_log), n_envs)
 
     stop_callback = StopTrainingOnNoModelImprovement(
         max_no_improvement_evals=30, min_evals=50, verbose=1)
@@ -274,29 +291,56 @@ def record_agent_training(env: BasicLevelNoGold, model: PPO,
     return local_directory
 
 
-def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64):
+def start_training(load_model_path=None, render_mode='rgb_array', num_envs=64, env_kwargs=None):
     """Initialize environment and start training process.
 
     Args:
         load_model_path: Optional path to a previously saved model to continue training from
         render_mode: 'human' or 'rgb_array'
         num_envs: Number of parallel environments to use for training.
+        env_kwargs: Dictionary of environment configuration parameters
     """
+    
+    # Default environment configuration with Phase 1 enhancements
+    if env_kwargs is None:
+        env_kwargs = {
+            'enable_frame_stack': True,
+            'observation_profile': 'rich',
+            'enable_pbrs': True,
+            'pbrs_weights': {
+                'objective_weight': 1.0,
+                'hazard_weight': 0.5, 
+                'impact_weight': 0.3,
+                'exploration_weight': 0.2
+            },
+            'pbrs_gamma': 0.99
+        }
+    
+    print(f"Environment configuration: {env_kwargs}")
 
     try:
-        env = BasicLevelNoGold(render_mode=render_mode,
-                               enable_frame_stack=True)  # Enable frame stacking for enhanced temporal modeling
+        # Test environment creation and compliance
+        test_env_kwargs = env_kwargs.copy()
+        test_env_kwargs['render_mode'] = render_mode
+        env = make_vectorizable_env(test_env_kwargs)
         check_env(env)
+        env.close()
+        print("✅ Environment passed Gymnasium compliance check")
 
         if render_mode == 'human':
             print('Rendering in human mode with 1 environment')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='human', enable_frame_stack=True), n_envs=1,
-                                   vec_env_cls=DummyVecEnv)
+            def make_env():
+                kwargs = env_kwargs.copy()
+                kwargs['render_mode'] = 'human'
+                return make_vectorizable_env(kwargs)
+            vec_env = make_vec_env(make_env, n_envs=1, vec_env_cls=DummyVecEnv)
         else:
-            print(
-                f'Rendering in rgb_array mode with {num_envs} environments')
-            vec_env = make_vec_env(lambda: BasicLevelNoGold(render_mode='rgb_array', enable_frame_stack=True), n_envs=num_envs,
-                                   vec_env_cls=SubprocVecEnv)
+            print(f'Rendering in rgb_array mode with {num_envs} environments using SubprocVecEnv')
+            def make_env():
+                kwargs = env_kwargs.copy()
+                kwargs['render_mode'] = 'rgb_array'
+                return make_vectorizable_env(kwargs)
+            vec_env = make_vec_env(make_env, n_envs=num_envs, vec_env_cls=SubprocVecEnv)
 
         wrapped_env, log_dir = setup_training_env(vec_env)
 
