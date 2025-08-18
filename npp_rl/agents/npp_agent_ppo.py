@@ -2,7 +2,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement, CallbackList
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
 import torch
 from torch import nn
@@ -18,6 +18,7 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, N
 from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
 from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
 from npp_rl.optimization.h100_optimization import enable_h100_optimizations, get_recommended_batch_size, H100OptimizedTraining
+from npp_rl.callbacks import create_pbrs_callbacks
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -174,7 +175,7 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, n_envs: int, total_timesteps
     # Configure callback for monitoring and saving
     # Adjust eval_freq based on the number of environments
     eval_freq = max(TRAIN_EVAL_FREQ_BASE // n_envs, 1)
-    callback = EvalCallback(
+    eval_callback = EvalCallback(
         eval_env=env,
         eval_freq=eval_freq,
         n_eval_episodes=5,
@@ -185,6 +186,12 @@ def train_ppo_agent(env: BasicLevelNoGold, log_dir, n_envs: int, total_timesteps
         best_model_save_path=str(log_dir / "best_model"),
         callback_after_eval=stop_callback
     )
+    
+    # Create PBRS logging callbacks
+    pbrs_callbacks = create_pbrs_callbacks(verbose=1)
+    
+    # Combine all callbacks
+    callback = CallbackList([eval_callback] + pbrs_callbacks)
 
     # Train the model
     model.learn(
