@@ -98,7 +98,7 @@ Input Streams:
 
 ## Implementation Roadmap
 
-### Phase 1: Foundation (Months 1-3)
+### Phase 1: Foundation
 **Deliverable**: Enhanced observation agent with human data integration
 
 **Tasks**:
@@ -120,7 +120,7 @@ Input Streams:
    - Implement Behavioral Cloning pre-training
    - Create state-action pair extraction pipeline
 
-### Phase 2: Advanced Exploration (Months 4-6) 
+### Phase 2: Advanced Exploration
 **Deliverable**: Agent with improved exploration and structural understanding
 
 **Tasks**:
@@ -137,7 +137,7 @@ Input Streams:
    - Test on moderately complex levels
    - Measure exploration improvements
 
-### Phase 3: Hierarchical Control (Months 7-9)
+### Phase 3: Hierarchical Control
 **Deliverable**: HRL agent with curriculum learning
 
 **Tasks**:
@@ -160,7 +160,7 @@ Input Streams:
    - Train reward model from human data
    - Replace/augment sparse environmental rewards
 
-### Phase 4: Full Integration (Months 10-12)
+### Phase 4: Full Integration
 **Deliverable**: Production-ready robust N++ agent
 
 **Tasks**:
