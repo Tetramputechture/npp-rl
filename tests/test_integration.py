@@ -10,10 +10,9 @@ Tests the complete integration of Phase 1 features including:
 
 import unittest
 import numpy as np
-import torch
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Add project roots to path
 npp_rl_root = Path(__file__).parents[1]

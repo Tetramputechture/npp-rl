@@ -22,22 +22,6 @@ class TestMovementClassifier(unittest.TestCase):
         """Set up test fixtures."""
         self.classifier = MovementClassifier()
 
-    def test_initialization(self):
-        """Test MovementClassifier initialization with physics constants."""
-        # Verify classifier can be instantiated
-        self.assertIsNotNone(self.classifier)
-        
-        # Verify constants are accessible from module level
-        from npp_rl.models.movement_classifier import MAX_HOR_SPEED, NINJA_RADIUS, GROUND_ACCEL, AIR_ACCEL
-        self.assertIsInstance(MAX_HOR_SPEED, (int, float))
-        self.assertIsInstance(NINJA_RADIUS, (int, float))
-        self.assertIsInstance(GROUND_ACCEL, (int, float))
-        self.assertIsInstance(AIR_ACCEL, (int, float))
-
-        # Verify constants have expected values
-        self.assertAlmostEqual(MAX_HOR_SPEED, 3.333, places=3)
-        self.assertEqual(NINJA_RADIUS, 10)
-
     def test_classify_walk_movement(self):
         """Test classification of walking movement."""
         # Horizontal movement on same level

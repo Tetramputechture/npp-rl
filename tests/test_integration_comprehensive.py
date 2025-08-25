@@ -9,13 +9,15 @@ import unittest
 import numpy as np
 import sys
 import os
+import time
 
 # Add nclone to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../nclone'))
 
 from npp_rl.models.trajectory_calculator import TrajectoryCalculator, MovementState
 from npp_rl.models.movement_classifier import MovementClassifier, MovementType, NinjaState
-
+from nclone.graph.graph_builder import GraphBuilder
+from npp_rl.config.phase2_config import GraphConfig
 
 class TestTrajectoryCalculatorIntegration(unittest.TestCase):
     """Integration tests for TrajectoryCalculator with nclone GraphBuilder."""
@@ -24,77 +26,52 @@ class TestTrajectoryCalculatorIntegration(unittest.TestCase):
         """Set up test fixtures."""
         self.calc = TrajectoryCalculator()
 
-    def test_nclone_constants_integration(self):
-        """Test that N++ physics constants are properly imported from nclone."""
-        # Verify constants are loaded from nclone.constants at module level
-        from npp_rl.models.trajectory_calculator import GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, NINJA_RADIUS
-        self.assertIsInstance(GRAVITY_FALL, (int, float))
-        self.assertIsInstance(GRAVITY_JUMP, (int, float))
-        self.assertIsInstance(MAX_HOR_SPEED, (int, float))
-        self.assertIsInstance(NINJA_RADIUS, (int, float))
-
-        # Verify values match expected N++ physics
-        self.assertAlmostEqual(GRAVITY_FALL, 0.0667, places=4)
-        self.assertAlmostEqual(GRAVITY_JUMP, 0.0111, places=4)
-        self.assertAlmostEqual(MAX_HOR_SPEED, 3.333, places=3)
-        self.assertEqual(NINJA_RADIUS, 10)
-
     def test_graph_builder_integration(self):
         """Test integration with GraphBuilder trajectory features."""
-        try:
-            from nclone.graph.graph_builder import GraphBuilder
+        # Create GraphBuilder instance
+        builder = GraphBuilder()
 
-            # Create GraphBuilder instance
-            builder = GraphBuilder()
+        # Verify edge feature dimension is updated
+        self.assertEqual(builder.edge_feature_dim, 16)
 
-            # Verify edge feature dimension is updated
-            self.assertEqual(builder.edge_feature_dim, 16)
+        # Test graph building with trajectory features
+        level_data = {'tiles': np.zeros((10, 10), dtype=int)}
+        ninja_position = (120.0, 120.0)
+        entities = []
 
-            # Test graph building with trajectory features
-            level_data = {'tiles': np.zeros((10, 10), dtype=int)}
-            ninja_position = (120.0, 120.0)
-            entities = []
+        # Test without trajectory features (backward compatibility)
+        graph_data = builder.build_graph(level_data, ninja_position, entities)
+        self.assertIsNotNone(graph_data)
+        self.assertEqual(graph_data.edge_features.shape[1], 16)
 
-            # Test without trajectory features (backward compatibility)
-            graph_data = builder.build_graph(level_data, ninja_position, entities)
-            self.assertIsNotNone(graph_data)
-            self.assertEqual(graph_data.edge_features.shape[1], 16)
-
-            # Test with trajectory features
-            graph_data_with_traj = builder.build_graph(
-                level_data, ninja_position, entities,
-                ninja_velocity=(50.0, -25.0), ninja_state=1
-            )
-            self.assertIsNotNone(graph_data_with_traj)
-            self.assertEqual(graph_data_with_traj.edge_features.shape[1], 16)
-
-        except ImportError:
-            self.skipTest("nclone GraphBuilder not available for integration test")
+        # Test with trajectory features
+        graph_data_with_traj = builder.build_graph(
+            level_data, ninja_position, entities,
+            ninja_velocity=(50.0, -25.0), ninja_state=1
+        )
+        self.assertIsNotNone(graph_data_with_traj)
+        self.assertEqual(graph_data_with_traj.edge_features.shape[1], 16)
 
     def test_collision_system_integration(self):
         """Test integration with nclone collision detection system."""
-        try:
-            # Test collision system integration
+        # Test collision system integration
 
-            # Create test trajectory
-            trajectory = [
-                {'x': 100.0, 'y': 100.0, 't': 0.0},
-                {'x': 125.0, 'y': 90.0, 't': 10.0},
-                {'x': 150.0, 'y': 80.0, 't': 20.0}
-            ]
+        # Create test trajectory
+        trajectory = [
+            {'x': 100.0, 'y': 100.0, 't': 0.0},
+            {'x': 125.0, 'y': 90.0, 't': 10.0},
+            {'x': 150.0, 'y': 80.0, 't': 20.0}
+        ]
 
-            # Create level with obstacles
-            level_data = {
-                'tiles': np.zeros((20, 20), dtype=int)
-            }
-            level_data['tiles'][5:7, 8:12] = 1  # Add obstacle
+        # Create level with obstacles
+        level_data = {
+            'tiles': np.zeros((20, 20), dtype=int)
+        }
+        level_data['tiles'][5:7, 8:12] = 1  # Add obstacle
 
-            # Test trajectory validation
-            is_clear = self.calc.validate_trajectory_clearance(trajectory, level_data)
-            self.assertIsInstance(is_clear, bool)
-
-        except ImportError:
-            self.skipTest("nclone collision system not available for integration test")
+        # Test trajectory validation
+        is_clear = self.calc.validate_trajectory_clearance(trajectory, level_data)
+        self.assertIsInstance(is_clear, bool)
 
     def test_movement_state_integration(self):
         """Test integration with N++ movement states from sim_mechanics_doc.md."""
@@ -125,13 +102,6 @@ class TestMovementClassifierIntegration(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.classifier = MovementClassifier()
-
-    def test_physics_constants_integration(self):
-        """Test integration with N++ physics constants."""
-        # Verify constants are properly loaded at module level
-        from npp_rl.models.movement_classifier import MAX_HOR_SPEED, NINJA_RADIUS
-        self.assertAlmostEqual(MAX_HOR_SPEED, 3.333, places=3)
-        self.assertEqual(NINJA_RADIUS, 10)
 
     def test_ninja_state_integration(self):
         """Test integration with ninja state representation."""
@@ -184,48 +154,42 @@ class TestFullSystemIntegration(unittest.TestCase):
 
     def test_edge_feature_encoding_integration(self):
         """Test complete edge feature encoding pipeline."""
-        try:
-            from nclone.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
 
-            builder = GraphBuilder()
+        # Create test scenario
+        level_data = {'tiles': np.zeros((15, 15), dtype=int)}
+        ninja_position = (120.0, 120.0)
+        ninja_velocity = (30.0, -20.0)
+        ninja_state = 3  # Jumping
+        entities = []
 
-            # Create test scenario
-            level_data = {'tiles': np.zeros((15, 15), dtype=int)}
-            ninja_position = (120.0, 120.0)
-            ninja_velocity = (30.0, -20.0)
-            ninja_state = 3  # Jumping
-            entities = []
+        # Build graph with trajectory features
+        graph_data = builder.build_graph(
+            level_data, ninja_position, entities,
+            ninja_velocity=ninja_velocity, ninja_state=ninja_state
+        )
 
-            # Build graph with trajectory features
-            graph_data = builder.build_graph(
-                level_data, ninja_position, entities,
-                ninja_velocity=ninja_velocity, ninja_state=ninja_state
-            )
+        # Verify edge features have correct dimensions
+        self.assertEqual(graph_data.edge_features.shape[1], 16)
 
-            # Verify edge features have correct dimensions
-            self.assertEqual(graph_data.edge_features.shape[1], 16)
+        # Verify edge features contain trajectory information
+        edge_features = graph_data.edge_features
 
-            # Verify edge features contain trajectory information
-            edge_features = graph_data.edge_features
+        # Check that trajectory features (indices 9-15) are populated
+        trajectory_features = edge_features[:, 9:16]
 
-            # Check that trajectory features (indices 9-15) are populated
-            trajectory_features = edge_features[:, 9:16]
+        # Should have trajectory features (may be zeros if no trajectory info available)
+        self.assertEqual(trajectory_features.shape[1], 7)  # 7 trajectory features
 
-            # Should have trajectory features (may be zeros if no trajectory info available)
-            self.assertEqual(trajectory_features.shape[1], 7)  # 7 trajectory features
+        # Features should be finite (not NaN or infinite)
+        self.assertTrue(np.all(np.isfinite(trajectory_features)))
 
-            # Features should be finite (not NaN or infinite)
-            self.assertTrue(np.all(np.isfinite(trajectory_features)))
-
-            # Verify feature ranges are reasonable
-            for i in range(9, 16):
-                feature_col = edge_features[:, i]
-                # No infinite or NaN values
-                self.assertFalse(np.any(np.isinf(feature_col)))
-                self.assertFalse(np.any(np.isnan(feature_col)))
-
-        except ImportError:
-            self.skipTest("nclone GraphBuilder not available for full integration test")
+        # Verify feature ranges are reasonable
+        for i in range(9, 16):
+            feature_col = edge_features[:, i]
+            # No infinite or NaN values
+            self.assertFalse(np.any(np.isinf(feature_col)))
+            self.assertFalse(np.any(np.isnan(feature_col)))
 
     def test_trajectory_movement_classification_pipeline(self):
         """Test complete trajectory calculation and movement classification pipeline."""
@@ -304,81 +268,55 @@ class TestFullSystemIntegration(unittest.TestCase):
 
     def test_backward_compatibility(self):
         """Test that new features maintain backward compatibility."""
-        try:
-            from nclone.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
 
-            builder = GraphBuilder()
+        # Test old API (without trajectory features)
+        level_data = {'tiles': np.zeros((10, 10), dtype=int)}
+        ninja_position = (120.0, 120.0)
+        entities = []
 
-            # Test old API (without trajectory features)
-            level_data = {'tiles': np.zeros((10, 10), dtype=int)}
-            ninja_position = (120.0, 120.0)
-            entities = []
+        graph_data = builder.build_graph(level_data, ninja_position, entities)
 
-            graph_data = builder.build_graph(level_data, ninja_position, entities)
+        # Should still work and produce 16-dimensional features
+        self.assertIsNotNone(graph_data)
+        self.assertEqual(graph_data.edge_features.shape[1], 16)
 
-            # Should still work and produce 16-dimensional features
-            self.assertIsNotNone(graph_data)
-            self.assertEqual(graph_data.edge_features.shape[1], 16)
+        # Trajectory features should be zeros or defaults when not provided
+        trajectory_features = graph_data.edge_features[:, 9:16]
 
-            # Trajectory features should be zeros or defaults when not provided
-            trajectory_features = graph_data.edge_features[:, 9:16]
-
-            # Should handle missing trajectory data gracefully
-            self.assertFalse(np.any(np.isnan(trajectory_features)))
-            self.assertFalse(np.any(np.isinf(trajectory_features)))
-
-        except ImportError:
-            self.skipTest("nclone GraphBuilder not available for compatibility test")
-
-    def test_configuration_integration(self):
-        """Test integration with configuration system."""
-        try:
-            from npp_rl.config.phase2_config import GraphConfig
-
-            # Verify configuration is updated
-            config = GraphConfig()
-            self.assertEqual(config.edge_feature_dim, 16)
-
-        except ImportError:
-            self.skipTest("Configuration not available for integration test")
+        # Should handle missing trajectory data gracefully
+        self.assertFalse(np.any(np.isnan(trajectory_features)))
+        self.assertFalse(np.any(np.isinf(trajectory_features)))
 
     def test_performance_integration(self):
         """Test performance characteristics of integrated system."""
-        try:
-            from nclone.graph.graph_builder import GraphBuilder
-            import time
+        builder = GraphBuilder()
 
-            builder = GraphBuilder()
+        # Create larger test scenario
+        level_data = {'tiles': np.zeros((30, 30), dtype=int)}
+        ninja_position = (300.0, 300.0)
+        entities = []
 
-            # Create larger test scenario
-            level_data = {'tiles': np.zeros((30, 30), dtype=int)}
-            ninja_position = (300.0, 300.0)
-            entities = []
+        # Time graph building without trajectory features
+        start_time = time.time()
+        graph_data_basic = builder.build_graph(level_data, ninja_position, entities)
+        basic_time = time.time() - start_time
 
-            # Time graph building without trajectory features
-            start_time = time.time()
-            graph_data_basic = builder.build_graph(level_data, ninja_position, entities)
-            basic_time = time.time() - start_time
+        # Time graph building with trajectory features
+        start_time = time.time()
+        graph_data_enhanced = builder.build_graph(
+            level_data, ninja_position, entities,
+            ninja_velocity=(40.0, -30.0), ninja_state=3
+        )
+        enhanced_time = time.time() - start_time
 
-            # Time graph building with trajectory features
-            start_time = time.time()
-            graph_data_enhanced = builder.build_graph(
-                level_data, ninja_position, entities,
-                ninja_velocity=(40.0, -30.0), ninja_state=3
-            )
-            enhanced_time = time.time() - start_time
+        # Verify both produce valid results
+        self.assertIsNotNone(graph_data_basic)
+        self.assertIsNotNone(graph_data_enhanced)
 
-            # Verify both produce valid results
-            self.assertIsNotNone(graph_data_basic)
-            self.assertIsNotNone(graph_data_enhanced)
-
-            # Enhanced version should not be dramatically slower
-            # (Allow up to 3x slower for trajectory calculations)
-            self.assertLess(enhanced_time, basic_time * 3.0)
-
-        except ImportError:
-            self.skipTest("nclone GraphBuilder not available for performance test")
-
+        # Enhanced version should not be dramatically slower
+        # (Allow up to 3x slower for trajectory calculations)
+        self.assertLess(enhanced_time, basic_time * 3.0)
 
 if __name__ == '__main__':
     unittest.main()

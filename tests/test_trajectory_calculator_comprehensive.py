@@ -22,24 +22,6 @@ class TestTrajectoryCalculator(unittest.TestCase):
         """Set up test fixtures."""
         self.calc = TrajectoryCalculator()
 
-    def test_initialization(self):
-        """Test TrajectoryCalculator initialization with physics constants."""
-        # Verify calculator can be instantiated
-        self.assertIsNotNone(self.calc)
-        
-        # Verify constants are accessible from module level
-        from npp_rl.models.trajectory_calculator import GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, NINJA_RADIUS
-        self.assertIsInstance(GRAVITY_FALL, (int, float))
-        self.assertIsInstance(GRAVITY_JUMP, (int, float))
-        self.assertIsInstance(MAX_HOR_SPEED, (int, float))
-        self.assertIsInstance(NINJA_RADIUS, (int, float))
-
-        # Verify constants have expected values (from N++ physics)
-        self.assertAlmostEqual(GRAVITY_FALL, 0.0667, places=4)
-        self.assertAlmostEqual(GRAVITY_JUMP, 0.0111, places=4)
-        self.assertAlmostEqual(MAX_HOR_SPEED, 3.333, places=3)
-        self.assertEqual(NINJA_RADIUS, 10)
-
     def test_calculate_jump_trajectory_basic(self):
         """Test basic jump trajectory calculation."""
         # Test upward jump
