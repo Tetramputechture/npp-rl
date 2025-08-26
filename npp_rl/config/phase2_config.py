@@ -33,7 +33,7 @@ class ICMConfig:
 class GraphConfig:
     """Configuration for Graph Neural Network observations."""
     enabled: bool = False
-    node_feature_dim: int = 67  # From GraphBuilder
+    node_feature_dim: int = 85  # From GraphBuilder (67 + 18 physics features)
     edge_feature_dim: int = 16  # From GraphBuilder (updated for trajectory features)
     hidden_dim: int = 128
     num_layers: int = 3
