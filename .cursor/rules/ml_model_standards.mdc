@@ -16,7 +16,7 @@ alwaysApply: false
 - Reference research papers that inform the design
 
 ```python
-class Enhanced3DFeatureExtractor(BaseFeaturesExtractor):
+class 3DFeatureExtractor(BaseFeaturesExtractor):
     """
     Enhanced feature extractor using 3D convolutions for temporal modeling.
     
@@ -83,7 +83,7 @@ def test_enhanced_3d_feature_extractor_forward_pass(self):
         'game_state': Box(low=-np.inf, high=np.inf, shape=(32,))
     })
     
-    extractor = Enhanced3DFeatureExtractor(obs_space, features_dim=512)
+    extractor = 3DFeatureExtractor(obs_space, features_dim=512)
     
     # Test forward pass with realistic batch
     batch_size = 4

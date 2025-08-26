@@ -10,8 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Tuple, Optional, Any
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from typing import Dict
 
 
 class ICMNetwork(nn.Module):
@@ -91,8 +90,6 @@ class ICMNetwork(nn.Module):
                 - inverse_loss: Inverse model loss
                 - forward_loss: Forward model loss
         """
-        batch_size = features_current.shape[0]
-        
         # Inverse model: predict action from state features
         inverse_input = torch.cat([features_current, features_next], dim=1)
         predicted_actions = self.inverse_model(inverse_input)

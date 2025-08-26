@@ -27,8 +27,7 @@ from torch.cuda.amp import autocast, GradScaler
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3 import PPO
 import logging
-from typing import Optional, Dict, Any, Tuple
-import warnings
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 

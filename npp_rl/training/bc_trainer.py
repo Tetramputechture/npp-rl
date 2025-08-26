@@ -5,7 +5,6 @@ This module provides the BCTrainer class which implements supervised learning
 on human replay data to provide good initialization for subsequent RL training.
 """
 
-import json
 from pathlib import Path
 from typing import Dict, Optional
 

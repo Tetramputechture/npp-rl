@@ -17,12 +17,11 @@ Key improvements:
 
 import torch
 import torch.nn as nn
-import numpy as np
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 
 
-class Enhanced3DFeatureExtractor(BaseFeaturesExtractor):
+class FeatureExtractor(BaseFeaturesExtractor):
     """
     Enhanced feature extractor using 3D convolutions for temporal modeling.
     
@@ -210,7 +209,7 @@ class Enhanced3DFeatureExtractor(BaseFeaturesExtractor):
         return output
 
 
-class EnhancedCNNFeatureExtractor(BaseFeaturesExtractor):
+class CNNFeatureExtractor(BaseFeaturesExtractor):
     """
     Enhanced CNN feature extractor with improved 2D convolutions as fallback.
     

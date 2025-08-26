@@ -7,8 +7,7 @@ motivation methods like ICM.
 """
 
 import numpy as np
-import torch
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any
 from collections import defaultdict, deque
 import math
 
@@ -362,7 +361,7 @@ def create_exploration_callback(
             # Check for episode end
             if self.locals.get('dones', [False])[0]:
                 success = info.get('success', False)
-                episode_metrics = self.exploration_metrics.end_episode(success)
+                self.exploration_metrics.end_episode(success)
                 
                 # Log episode metrics
                 if self.num_timesteps % self.log_freq == 0:

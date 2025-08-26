@@ -8,8 +8,7 @@ graph-based observations of N++ levels.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict
 
 
 class GraphSAGELayer(nn.Module):
@@ -244,9 +243,7 @@ class GraphEncoder(nn.Module):
         edge_index = graph_obs['graph_edge_index']
         node_mask = graph_obs['graph_node_mask']
         edge_mask = graph_obs['graph_edge_mask']
-        
-        batch_size = node_features.shape[0]
-        
+                
         # Input projection
         x = self.input_projection(node_features)
         x = F.relu(x)
