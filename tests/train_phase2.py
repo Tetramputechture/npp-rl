@@ -9,19 +9,16 @@ This script integrates all Phase 2 components:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 import torch
-import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))

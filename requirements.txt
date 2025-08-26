@@ -9,5 +9,6 @@ optuna>=3.3.0
 tensorboard>=2.14.0
 imageio>=2.31.0
 albumentations>=2.0.0
+pytest>=8.4.1
 # nclone is expected to be installed locally from a sibling directory.
 # See README.md for installation instructions.

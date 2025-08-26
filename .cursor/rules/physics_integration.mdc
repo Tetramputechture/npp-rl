@@ -1,0 +1,296 @@
+---
+description: Guidelines for integrating with N++ physics system and nclone constants
+globs: ["**/models/**", "**/agents/**", "**/environments/**"]
+alwaysApply: false
+---
+
+# Physics Integration Guidelines
+
+## Always Use nclone Physics Constants
+
+The N++ game simulation has well-defined physics constants in `nclone.constants`. **Always import and use these instead of defining your own versions.**
+
+### Import Pattern
+```python
+from nclone.constants import (
+    # Ninja physics
+    NINJA_RADIUS,
+    GRAVITY_FALL,
+    GRAVITY_JUMP,
+    MAX_HOR_SPEED,
+    GROUND_ACCEL,
+    AIR_ACCEL,
+    
+    # Jump mechanics
+    JUMP_FLAT_GROUND_Y,
+    JUMP_WALL_SLIDE_X,
+    JUMP_WALL_SLIDE_Y,
+    JUMP_WALL_REGULAR_X,
+    JUMP_WALL_REGULAR_Y,
+    
+    # Collision and damage
+    MAX_SURVIVABLE_IMPACT,
+    MIN_SURVIVABLE_CRUSHING
+)
+```
+
+### Movement State Integration
+
+Use the established movement states from the physics system:
+
+```python
+# From npp_rl.models.trajectory_calculator
+class MovementState(IntEnum):
+    IMMOBILE = 0
+    RUNNING = 1
+    GROUND_SLIDING = 2
+    JUMPING = 3
+    FALLING = 4
+    WALL_SLIDING = 5
+    WALL_JUMPING = 6
+    LAUNCH_PAD = 7
+    AIRBORNE = 8
+```
+
+These correspond directly to the ninja's movement state in the simulation.
+
+## Physics-Aware Calculations
+
+### Trajectory Calculations
+
+When calculating movement trajectories, use the actual physics constants:
+
+```python
+def calculate_jump_trajectory(self, src_pos, tgt_pos):
+    """Calculate jump trajectory using N++ physics constants."""
+    dx = tgt_pos[0] - src_pos[0]
+    dy = tgt_pos[1] - src_pos[1]
+    
+    # Use actual gravity values from the game
+    if dy < 0:  # Upward movement
+        gravity = GRAVITY_JUMP  # Lower gravity while jumping
+        initial_velocity_y = JUMP_FLAT_GROUND_Y
+    else:  # Falling
+        gravity = GRAVITY_FALL  # Higher gravity when falling
+        initial_velocity_y = 0
+    
+    # Calculate using real physics
+    time_of_flight = self._calculate_flight_time(dy, initial_velocity_y, gravity)
+    horizontal_velocity = dx / time_of_flight if time_of_flight > 0 else 0
+    
+    return TrajectoryResult(
+        feasible=abs(horizontal_velocity) <= MAX_HOR_SPEED,
+        time_of_flight=time_of_flight,
+        ...
+    )
+```
+
+### Collision Detection
+
+Use the ninja radius for spatial calculations:
+
+```python
+def check_wall_contact(self, ninja_pos, wall_segments):
+    """Check if ninja is in contact with wall using actual ninja radius."""
+    for segment in wall_segments:
+        distance = self._point_to_segment_distance(ninja_pos, segment)
+        if distance <= NINJA_RADIUS:
+            return True
+    return False
+```
+
+### Movement Energy Calculations
+
+Base energy costs on actual movement mechanics:
+
+```python
+def calculate_movement_energy(self, movement_type, distance, velocity):
+    """Calculate energy cost based on N++ movement mechanics."""
+    if movement_type == MovementType.WALK:
+        # Ground movement uses GROUND_ACCEL
+        base_energy = distance * GROUND_ACCEL
+    elif movement_type == MovementType.JUMP:
+        # Jumping fights gravity
+        base_energy = distance * GRAVITY_JUMP * 10  # Scale appropriately
+    elif movement_type == MovementType.WALL_SLIDE:
+        # Wall sliding has friction
+        base_energy = distance * 0.5  # Lower energy due to gravity assist
+    
+    # Factor in velocity limits
+    if velocity > MAX_HOR_SPEED:
+        base_energy *= 2  # Penalty for exceeding speed limits
+    
+    return base_energy
+```
+
+## Integration with Game State
+
+### Ninja State Processing
+
+When processing ninja state information, use the actual state values:
+
+```python
+def classify_movement_from_state(self, ninja_state, target_pos):
+    """Classify movement based on current ninja state."""
+    current_movement = ninja_state.movement_state
+    
+    # Use actual movement state values
+    if current_movement == MovementState.WALL_SLIDING:
+        return self._classify_wall_movement(ninja_state, target_pos)
+    elif current_movement == MovementState.JUMPING:
+        return self._classify_jump_movement(ninja_state, target_pos)
+    elif current_movement in [MovementState.RUNNING, MovementState.GROUND_SLIDING]:
+        return self._classify_ground_movement(ninja_state, target_pos)
+    else:
+        return self._classify_generic_movement(ninja_state, target_pos)
+```
+
+### Velocity and Acceleration
+
+Use proper velocity calculations:
+
+```python
+def calculate_required_velocity(self, src_pos, tgt_pos, movement_type):
+    """Calculate velocity needed for movement using physics constants."""
+    distance = np.linalg.norm(np.array(tgt_pos) - np.array(src_pos))
+    
+    if movement_type == MovementType.WALK:
+        # Use ground acceleration to calculate time
+        # v = sqrt(2 * a * d) for constant acceleration
+        required_velocity = min(np.sqrt(2 * GROUND_ACCEL * distance), MAX_HOR_SPEED)
+    elif movement_type == MovementType.JUMP:
+        # Consider air acceleration and gravity
+        horizontal_component = abs(tgt_pos[0] - src_pos[0])
+        required_velocity = min(horizontal_component / self._estimate_jump_time(src_pos, tgt_pos), MAX_HOR_SPEED)
+    
+    return required_velocity
+```
+
+## Wall Jump Mechanics
+
+Implement wall jump physics using the defined constants:
+
+```python
+def calculate_wall_jump_velocity(self, wall_normal):
+    """Calculate wall jump velocity using N++ constants."""
+    # N++ has specific wall jump velocities
+    if abs(wall_normal[0]) > 0.7:  # Mostly vertical wall
+        velocity_x = JUMP_WALL_REGULAR_X * np.sign(wall_normal[0])
+        velocity_y = JUMP_WALL_REGULAR_Y
+    else:  # Sloped wall or wall slide
+        velocity_x = JUMP_WALL_SLIDE_X * np.sign(wall_normal[0])
+        velocity_y = JUMP_WALL_SLIDE_Y
+    
+    return (velocity_x, velocity_y)
+```
+
+## Launch Pad Physics
+
+Handle launch pad boost mechanics:
+
+```python
+def calculate_launch_pad_boost(self, ninja_velocity, launch_pad_direction):
+    """Calculate launch pad boost using N++ physics."""
+    # Apply launch pad boost factor
+    boost_scalar = JUMP_LAUNCH_PAD_BOOST_SCALAR
+    boost_factor = JUMP_LAUNCH_PAD_BOOST_FACTOR
+    
+    # Boost is applied in the launch pad direction
+    boosted_velocity = (
+        ninja_velocity[0] + launch_pad_direction[0] * boost_scalar * boost_factor,
+        ninja_velocity[1] + launch_pad_direction[1] * boost_scalar * boost_factor
+    )
+    
+    # Still respect speed limits
+    speed = np.linalg.norm(boosted_velocity)
+    if speed > MAX_HOR_SPEED * 2:  # Launch pads can exceed normal speed
+        boosted_velocity = tuple(v * (MAX_HOR_SPEED * 2) / speed for v in boosted_velocity)
+    
+    return boosted_velocity
+```
+
+## Validation Against Simulation
+
+### Cross-Reference with nclone
+
+When implementing physics calculations, validate against the actual simulation:
+
+```python
+def validate_physics_calculation(self, calculated_result, simulation_result):
+    """Validate our physics calculations against nclone simulation."""
+    # Allow for small numerical differences
+    position_tolerance = NINJA_RADIUS * 0.1
+    velocity_tolerance = 0.1
+    
+    pos_diff = np.linalg.norm(calculated_result.final_pos - simulation_result.final_pos)
+    vel_diff = np.linalg.norm(calculated_result.final_vel - simulation_result.final_vel)
+    
+    if pos_diff > position_tolerance:
+        logger.warning(f"Position calculation differs from simulation: {pos_diff}")
+    if vel_diff > velocity_tolerance:
+        logger.warning(f"Velocity calculation differs from simulation: {vel_diff}")
+    
+    return pos_diff <= position_tolerance and vel_diff <= velocity_tolerance
+```
+
+## Documentation of Physics Assumptions
+
+Always document the physics assumptions and limitations:
+
+```python
+def calculate_trajectory_simple(self, src_pos, tgt_pos):
+    """
+    Calculate simplified trajectory for movement planning.
+    
+    Physics assumptions:
+    - Uses GRAVITY_FALL for all falling motion
+    - Uses GRAVITY_JUMP for upward motion phases
+    - Ignores air resistance and complex collision shapes
+    - Assumes flat ground for walking calculations
+    - Does not account for tile-specific physics (slopes, bounce blocks)
+    
+    For precise trajectory prediction, use the full nclone simulation.
+    """
+```
+
+## Constants Module Organization
+
+If you need additional physics-derived constants, create them in a separate module and clearly document their derivation:
+
+```python
+# npp_rl/physics/derived_constants.py
+"""
+Physics constants derived from nclone base constants.
+These are calculated values, not redefinitions of existing constants.
+"""
+
+from nclone.constants import GRAVITY_FALL, JUMP_FLAT_GROUND_Y, MAX_HOR_SPEED
+
+# Derived time constants for common movements
+TYPICAL_JUMP_TIME = abs(2 * JUMP_FLAT_GROUND_Y / GRAVITY_FALL)
+MAX_HORIZONTAL_DISTANCE_PER_JUMP = MAX_HOR_SPEED * TYPICAL_JUMP_TIME
+
+# Movement difficulty scaling factors (our additions to the physics)
+DIFFICULTY_SCALE_JUMP = 1.5
+DIFFICULTY_SCALE_WALL_JUMP = 2.0
+DIFFICULTY_SCALE_LAUNCH_PAD = 0.4
+```
+
+## Testing Physics Integration
+
+Test your physics calculations against known game behaviors:
+
+```python
+def test_physics_constants_match_game_behavior(self):
+    """Test that our physics calculations match expected game behavior."""
+    # Test basic jump
+    jump_time = self._calculate_jump_duration(JUMP_FLAT_GROUND_Y, GRAVITY_FALL)
+    
+    # Should match known game behavior (approximately 30 frames at 60fps)
+    expected_time = 30 / 60  # 0.5 seconds
+    self.assertAlmostEqual(jump_time, expected_time, places=1)
+    
+    # Test maximum horizontal speed
+    max_distance_per_frame = MAX_HOR_SPEED
+    self.assertLess(max_distance_per_frame, 5.0)  # Reasonable pixel distance
+```

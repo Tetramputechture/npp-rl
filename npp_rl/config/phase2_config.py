@@ -34,7 +34,7 @@ class GraphConfig:
     """Configuration for Graph Neural Network observations."""
     enabled: bool = False
     node_feature_dim: int = 67  # From GraphBuilder
-    edge_feature_dim: int = 9   # From GraphBuilder
+    edge_feature_dim: int = 16  # From GraphBuilder (updated for trajectory features)
     hidden_dim: int = 128
     num_layers: int = 3
     output_dim: int = 256
