@@ -336,3 +336,20 @@ pytest -s tests/
 ### Coding Standards
 
 Standards are documented in the `.cursor/rules` directory. When you are writing code, you should follow these standards.
+
+### Linting
+
+Linting is done using ruff. You can run the following command to lint the code:
+```bash
+make lint
+```
+
+You can also run the following command to fix linting issues:
+```bash
+make fix
+```
+
+You can also run the following command to remove unused imports:
+```bash
+make imports
+```
