@@ -8,8 +8,7 @@ import os
 import time
 import numpy as np
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
 
 # Set headless mode

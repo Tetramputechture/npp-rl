@@ -1,0 +1,445 @@
+---
+description: Reinforcement learning specific guidelines for NPP-RL training and evaluation
+globs: ["**/agents/**", "**/callbacks/**", "**/environments/**", "**/eval/**"]
+alwaysApply: false
+---
+
+# Reinforcement Learning Guidelines
+
+## Training Configuration and Hyperparameters
+
+### Hyperparameter Organization
+
+Store hyperparameters in dedicated modules with clear documentation:
+
+```python
+# npp_rl/agents/hyperparameters/ppo_hyperparameters.py
+HYPERPARAMETERS = {
+    # Document the rationale for each parameter
+    "n_steps": 1024,  # Increased from 512 based on scaling research
+    "batch_size": 256,  # Should be <= n_steps for proper batching
+    "gamma": 0.999,   # High gamma for long-term credit assignment in N++
+    
+    # Include references to tuning studies when available
+    "clip_range": 0.3892025290555702,  # Optuna-tuned value
+    "ent_coef": 0.002720504247658009,   # Encourages exploration
+}
+
+# Separate architecture parameters
+NET_ARCH_SIZE = [256, 256, 128]  # Scaled up for complex observations
+```
+
+### Environment Configuration
+
+Use consistent environment setup patterns:
+
+```python
+def create_training_environment(num_envs: int, render_mode: str = 'rgb_array'):
+    """Create vectorized training environment with standard configuration."""
+    def make_env():
+        env = BasicLevelNoGold(render_mode=render_mode)
+        # Apply standard wrappers consistently
+        env = SomeStandardWrapper(env)
+        return env
+    
+    # Use SubprocVecEnv for CPU parallelism
+    vec_env = SubprocVecEnv([make_env for _ in range(num_envs)])
+    
+    # Apply vectorized wrappers
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+    
+    return vec_env
+```
+
+## Model Architecture for RL
+
+### Feature Extractor Design
+
+Design feature extractors specifically for RL observations:
+
+```python
+class Enhanced3DFeatureExtractor(BaseFeaturesExtractor):
+    """
+    Feature extractor optimized for N++ multi-modal observations.
+    
+    Processes:
+    - Player-centric visual frames (84x84x12) with 3D convolutions
+    - Global view (176x100x1) with 2D convolutions  
+    - Game state vector (physics state, objectives)
+    
+    Architecture based on:
+    - ProcGen research (Cobbe et al., 2020)
+    - 3D CNN for temporal modeling (Ji et al., 2013)
+    """
+    
+    def __init__(self, observation_space: SpacesDict, features_dim: int = 512):
+        super().__init__(observation_space, features_dim)
+        
+        # Extract observation dimensions
+        player_shape = observation_space['player_frame'].shape
+        global_shape = observation_space['global_view'].shape
+        state_dim = observation_space['game_state'].shape[0]
+        
+        # Design networks for each modality
+        self._build_player_cnn(player_shape)
+        self._build_global_cnn(global_shape)
+        self._build_state_mlp(state_dim)
+        self._build_fusion_network(features_dim)
+```
+
+### Policy Network Integration
+
+Ensure compatibility with Stable Baselines3:
+
+```python
+def create_ppo_agent(env, policy_kwargs: dict) -> PPO:
+    """Create PPO agent with custom feature extractor."""
+    
+    # Configure policy network
+    policy_kwargs = {
+        'features_extractor_class': Enhanced3DFeatureExtractor,
+        'features_extractor_kwargs': {'features_dim': 512},
+        'net_arch': {
+            'pi': NET_ARCH_SIZE,  # Policy network architecture
+            'vf': NET_ARCH_SIZE   # Value network architecture  
+        },
+        'activation_fn': torch.nn.ReLU,
+    }
+    
+    # Create agent with hyperparameters
+    model = PPO(
+        'MultiInputPolicy',
+        env,
+        policy_kwargs=policy_kwargs,
+        **HYPERPARAMETERS,
+        tensorboard_log=log_dir,
+        verbose=1
+    )
+    
+    return model
+```
+
+## Training Loops and Callbacks
+
+### Training Pipeline Structure
+
+Organize training with clear phases and monitoring:
+
+```python
+def train_agent(
+    env,
+    total_timesteps: int,
+    eval_freq: int = 10000,
+    save_freq: int = 50000
+):
+    """Main training loop with evaluation and checkpointing."""
+    
+    # Create model
+    model = create_ppo_agent(env)
+    
+    # Set up callbacks
+    callbacks = [
+        EvalCallback(
+            eval_env=create_eval_env(),
+            eval_freq=eval_freq,
+            best_model_save_path=save_path,
+            log_path=log_path
+        ),
+        CheckpointCallback(
+            save_freq=save_freq,
+            save_path=checkpoint_path
+        ),
+        TensorboardCallback(),
+    ]
+    
+    # Train with monitoring
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callbacks,
+        progress_bar=True
+    )
+    
+    return model
+```
+
+### Custom Callbacks for N++ Specific Metrics
+
+Create callbacks to track game-specific metrics:
+
+```python
+class NPPMetricsCallback(BaseCallback):
+    """Track N++ specific training metrics."""
+    
+    def _on_step(self) -> bool:
+        # Track game-specific metrics
+        if 'level_completed' in self.locals.get('infos', [{}])[0]:
+            completion_rate = self._calculate_completion_rate()
+            self.logger.record('npp/completion_rate', completion_rate)
+        
+        if 'gold_collected' in self.locals.get('infos', [{}])[0]:
+            gold_efficiency = self._calculate_gold_efficiency()
+            self.logger.record('npp/gold_efficiency', gold_efficiency)
+        
+        return True
+    
+    def _calculate_completion_rate(self) -> float:
+        """Calculate level completion rate over recent episodes."""
+        # Implementation specific to N++ environment
+        pass
+```
+
+## Exploration and Intrinsic Motivation
+
+### Intrinsic Curiosity Module (ICM)
+
+Implement ICM for exploration in sparse reward environments:
+
+```python
+class IntrinsicCuriosityModule(nn.Module):
+    """
+    ICM implementation based on Pathak et al. (2017).
+    
+    Provides intrinsic reward for exploration by predicting
+    state transitions and encouraging visitation of states
+    where prediction error is high.
+    """
+    
+    def __init__(self, feature_dim: int, action_dim: int):
+        super().__init__()
+        
+        # Inverse model: predicts action from state transition
+        self.inverse_model = nn.Sequential(
+            nn.Linear(feature_dim * 2, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_dim)
+        )
+        
+        # Forward model: predicts next state features from current state and action
+        self.forward_model = nn.Sequential(
+            nn.Linear(feature_dim + action_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, feature_dim)
+        )
+    
+    def compute_intrinsic_reward(self, state_features, next_state_features, actions):
+        """Compute intrinsic reward from prediction error."""
+        # Forward model prediction error is the intrinsic reward
+        predicted_next_state = self.forward_model(
+            torch.cat([state_features, actions], dim=1)
+        )
+        
+        prediction_error = F.mse_loss(
+            predicted_next_state, 
+            next_state_features, 
+            reduction='none'
+        ).mean(dim=1)
+        
+        return prediction_error
+```
+
+### Adaptive Exploration Management
+
+Combine multiple exploration strategies:
+
+```python
+class AdaptiveExplorationManager:
+    """
+    Manages multiple exploration strategies and adapts their influence.
+    
+    Combines:
+    - ICM-based curiosity
+    - Count-based novelty detection
+    - Adaptive scaling based on training progress
+    """
+    
+    def __init__(self, icm_weight: float = 0.5, novelty_weight: float = 0.3):
+        self.icm = IntrinsicCuriosityModule(...)
+        self.novelty_detector = NoveltyDetector()
+        self.icm_weight = icm_weight
+        self.novelty_weight = novelty_weight
+    
+    def compute_exploration_bonus(self, observations, actions, next_observations):
+        """Compute combined exploration bonus."""
+        # ICM curiosity bonus
+        icm_bonus = self.icm.compute_intrinsic_reward(
+            observations, next_observations, actions
+        )
+        
+        # Novelty bonus
+        novelty_bonus = self.novelty_detector.compute_novelty(observations)
+        
+        # Adaptive weighting
+        total_bonus = (
+            self.icm_weight * icm_bonus + 
+            self.novelty_weight * novelty_bonus
+        )
+        
+        return total_bonus
+```
+
+## Evaluation and Analysis
+
+### Systematic Evaluation Protocol
+
+Implement consistent evaluation procedures:
+
+```python
+def evaluate_agent_performance(
+    model: PPO, 
+    eval_env, 
+    n_episodes: int = 100,
+    render: bool = False
+) -> Dict[str, float]:
+    """Comprehensive agent evaluation."""
+    
+    episode_rewards = []
+    completion_rates = []
+    episode_lengths = []
+    
+    for episode in range(n_episodes):
+        obs = eval_env.reset()
+        episode_reward = 0
+        episode_length = 0
+        
+        while True:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, done, info = eval_env.step(action)
+            
+            episode_reward += reward
+            episode_length += 1
+            
+            if done:
+                episode_rewards.append(episode_reward)
+                episode_lengths.append(episode_length)
+                completion_rates.append(info.get('level_completed', False))
+                break
+    
+    return {
+        'mean_reward': np.mean(episode_rewards),
+        'std_reward': np.std(episode_rewards),
+        'completion_rate': np.mean(completion_rates),
+        'mean_episode_length': np.mean(episode_lengths),
+    }
+```
+
+### Performance Logging and Visualization
+
+Track training progress with detailed logging:
+
+```python
+class DetailedLoggingCallback(BaseCallback):
+    """Enhanced logging for training analysis."""
+    
+    def _on_rollout_end(self) -> None:
+        # Log learning metrics
+        if len(self.model.ep_info_buffer) > 0:
+            mean_reward = safe_mean([ep_info['r'] for ep_info in self.model.ep_info_buffer])
+            mean_length = safe_mean([ep_info['l'] for ep_info in self.model.ep_info_buffer])
+            
+            self.logger.record('rollout/ep_rew_mean', mean_reward)
+            self.logger.record('rollout/ep_len_mean', mean_length)
+        
+        # Log policy metrics
+        if hasattr(self.model, 'policy'):
+            for name, param in self.model.policy.named_parameters():
+                if param.grad is not None:
+                    grad_norm = param.grad.norm().item()
+                    self.logger.record(f'gradients/{name}', grad_norm)
+```
+
+## Multi-Environment Training
+
+### Curriculum Learning
+
+Implement progressive difficulty:
+
+```python
+class CurriculumManager:
+    """Manages curriculum progression for N++ levels."""
+    
+    def __init__(self, initial_difficulty: float = 0.1):
+        self.current_difficulty = initial_difficulty
+        self.performance_history = deque(maxlen=100)
+    
+    def update_difficulty(self, recent_performance: float):
+        """Adjust difficulty based on agent performance."""
+        self.performance_history.append(recent_performance)
+        
+        if len(self.performance_history) >= 20:
+            avg_performance = np.mean(list(self.performance_history)[-20:])
+            
+            # Increase difficulty if agent is performing well
+            if avg_performance > 0.8:
+                self.current_difficulty = min(1.0, self.current_difficulty + 0.1)
+            # Decrease if struggling
+            elif avg_performance < 0.3:
+                self.current_difficulty = max(0.1, self.current_difficulty - 0.05)
+    
+    def get_level_config(self) -> Dict:
+        """Get level configuration for current difficulty."""
+        return {
+            'difficulty': self.current_difficulty,
+            'enable_hazards': self.current_difficulty > 0.3,
+            'complex_geometry': self.current_difficulty > 0.6,
+        }
+```
+
+## Model Saving and Loading
+
+### Comprehensive Model Checkpoints
+
+Save complete training state:
+
+```python
+def save_training_checkpoint(
+    model: PPO,
+    save_path: str,
+    metadata: Dict[str, Any]
+):
+    """Save complete training checkpoint with metadata."""
+    
+    checkpoint = {
+        'model_state_dict': model.policy.state_dict(),
+        'optimizer_state_dict': model.policy.optimizer.state_dict(),
+        'hyperparameters': HYPERPARAMETERS,
+        'training_metadata': metadata,
+        'timestamp': datetime.now().isoformat(),
+        'git_commit': get_git_commit_hash(),  # For reproducibility
+    }
+    
+    # Save model using SB3's method
+    model.save(f"{save_path}/model")
+    
+    # Save additional metadata
+    with open(f"{save_path}/checkpoint_metadata.json", 'w') as f:
+        json.dump(checkpoint, f, indent=2)
+```
+
+### Model Loading with Validation
+
+```python
+def load_model_checkpoint(
+    checkpoint_path: str,
+    env,
+    validate: bool = True
+) -> PPO:
+    """Load model checkpoint with validation."""
+    
+    # Load model
+    model = PPO.load(f"{checkpoint_path}/model", env=env)
+    
+    if validate:
+        # Quick validation that model works
+        obs = env.reset()
+        action, _ = model.predict(obs)
+        assert action is not None, "Model prediction failed"
+    
+    # Load metadata for analysis
+    metadata_path = f"{checkpoint_path}/checkpoint_metadata.json"
+    if os.path.exists(metadata_path):
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+            logger.info(f"Loaded model from {metadata['timestamp']}")
+    
+    return model
+```

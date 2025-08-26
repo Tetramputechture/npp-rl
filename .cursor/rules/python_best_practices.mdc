@@ -1,0 +1,222 @@
+---
+description: Python coding standards and best practices for the NPP-RL project
+globs:
+alwaysApply: true
+---
+
+# Python Coding Standards for NPP-RL
+
+## File Size and Module Organization
+
+- **NEVER create files larger than 500 lines**
+- When a file approaches 500 lines, split it into smaller, domain-driven modules
+- Prefer composition over large monolithic classes
+- Group related functionality into logical modules within subpackages
+
+Examples of good module organization:
+- `npp_rl/models/gnn.py` (346 lines) - good size
+- `npp_rl/agents/enhanced_feature_extractor.py` (388 lines) - approaching limit, consider splitting
+- Break large files like `bc_pretrain.py` (510 lines) into smaller modules
+
+## Constants and Configuration
+
+### Use Existing Constants from nclone
+
+**ALWAYS prefer importing and using existing physics constants from `nclone.constants` rather than redefining them:**
+
+```python
+# GOOD: Use existing constants
+from nclone.constants import (
+    NINJA_RADIUS,
+    GRAVITY_FALL, 
+    GRAVITY_JUMP,
+    MAX_HOR_SPEED,
+    JUMP_FLAT_GROUND_Y
+)
+
+# BAD: Redefining existing constants
+NINJA_RADIUS = 10  # Don't redefine what already exists in nclone.constants
+```
+
+### Constants Definition Pattern
+
+When you must define new constants:
+- Use ALL_CAPS for module-level constants
+- Group related constants together
+- Add clear documentation for complex constants
+- Place constants at the top of the module, after imports
+
+```python
+# Physics calculation constants specific to this module
+MOVEMENT_THRESHOLD = 1e-6
+WALK_SPEED_THRESHOLD = 0.5
+JUMP_VELOCITY_THRESHOLD = 0.3
+```
+
+### Avoid Class Variable Redefinition
+
+**DO NOT redefine class variables that duplicate existing constants:**
+
+```python
+# BAD: Redefining constants as class variables
+class MovementClassifier:
+    NINJA_RADIUS = 10  # This exists in nclone.constants
+    GRAVITY = 0.067    # Use GRAVITY_FALL from nclone.constants
+
+# GOOD: Use existing constants directly
+from nclone.constants import NINJA_RADIUS, GRAVITY_FALL
+
+class MovementClassifier:
+    def calculate_movement(self):
+        radius = NINJA_RADIUS  # Use imported constant
+        gravity = GRAVITY_FALL
+```
+
+## Documentation and Code Clarity
+
+### Inline Documentation
+
+- **ALWAYS include readable inline documentation for complex algorithms**
+- Explain the "why" behind physics calculations and ML model decisions
+- Reference research papers or game mechanics when relevant
+- Use docstrings for all public methods and classes
+
+```python
+def _aggregate_neighbors(self, node_features, edge_index, node_mask, edge_mask):
+    """
+    Aggregate neighbor features using GraphSAGE-style message passing.
+    
+    This implements the aggregation scheme from Hamilton et al. (2017)
+    for inductive representation learning on large graphs. The method
+    handles variable-sized graphs through masking.
+    
+    Args:
+        node_features: Node features [batch_size, num_nodes, in_dim]
+        edge_index: Edge connectivity [batch_size, 2, num_edges]
+        node_mask: Valid node indicators [batch_size, num_nodes]
+        edge_mask: Valid edge indicators [batch_size, num_edges]
+    """
+```
+
+### Domain-Driven Code Organization
+
+- Organize code by domain concepts (e.g., `models/`, `agents/`, `environments/`)
+- Keep related functionality together
+- Use clear, descriptive module and class names
+- Separate concerns (physics, ML models, training logic)
+
+## Testing Standards
+
+### Prefer Functional Tests Over Static Validation
+
+**AVOID using `assertIsInstance`, `assertEqual`, or `assertAlmostEqual` to test static/constant values:**
+
+```python
+# BAD: Testing static enum values
+def test_movement_type_enum_values(self):
+    self.assertEqual(MovementType.WALK, 0)
+    self.assertEqual(MovementType.JUMP, 1)
+    self.assertIsInstance(MovementType.WALK, int)
+
+# GOOD: Test actual behavior and functionality
+def test_walk_movement_classification(self):
+    """Test that horizontal movement is correctly classified as walking."""
+    movement_type, params = self.classifier.classify_movement(
+        src_pos=(100.0, 100.0),
+        tgt_pos=(150.0, 100.0)  # Horizontal movement
+    )
+    
+    # Test the behavior, not the constant value
+    self.assertEqual(movement_type, MovementType.WALK)
+    self.assertGreater(params['time_estimate'], 0)
+    self.assertLess(params['energy_cost'], params['max_energy'])
+```
+
+### Focus on Behavioral Testing
+
+- Test that methods produce correct outputs for given inputs
+- Test edge cases and boundary conditions
+- Test integration between components
+- Verify that physics calculations are reasonable
+- Test that ML models can be instantiated and run forward passes
+
+```python
+# GOOD: Testing actual behavior
+def test_trajectory_calculation_upward_movement(self):
+    """Test that upward movements require jumping and have reasonable physics."""
+    result = self.calculator.calculate_trajectory(
+        src_pos=(100.0, 100.0),
+        tgt_pos=(150.0, 50.0)  # Upward movement
+    )
+    
+    self.assertTrue(result.requires_jump)
+    self.assertGreater(result.energy_cost, 0)
+    self.assertBetween(result.success_probability, 0.0, 1.0)
+```
+
+## Import Organization
+
+### Import Order
+1. Standard library imports
+2. Third-party library imports  
+3. Local project imports (nclone)
+4. Local module imports (npp_rl)
+
+```python
+import math
+import numpy as np
+import torch
+import torch.nn as nn
+
+from nclone.constants import NINJA_RADIUS, GRAVITY_FALL
+from npp_rl.models.base import BaseModel
+```
+
+## Type Hints and Modern Python
+
+- Use type hints for function parameters and return values
+- Use `from typing import` for complex types
+- Prefer modern Python patterns (f-strings, dataclasses, etc.)
+
+```python
+from typing import Dict, Tuple, Optional
+from dataclasses import dataclass
+
+@dataclass
+class TrajectoryResult:
+    feasible: bool
+    time_of_flight: float
+    energy_cost: float
+    success_probability: float
+
+def classify_movement(
+    self, 
+    src_pos: Tuple[float, float], 
+    tgt_pos: Tuple[float, float],
+    ninja_state: Optional[NinjaState] = None
+) -> Tuple[MovementType, Dict[str, float]]:
+```
+
+## Performance Considerations
+
+- Use vectorized operations with NumPy/PyTorch when possible
+- Avoid Python loops for heavy computational tasks
+- Profile code when dealing with large datasets or real-time constraints
+- Consider memory usage for batch processing
+
+## Error Handling
+
+- Use appropriate exception types
+- Provide meaningful error messages
+- Handle edge cases gracefully
+- Validate inputs when necessary
+
+```python
+def calculate_trajectory(self, src_pos, tgt_pos):
+    if src_pos == tgt_pos:
+        return TrajectoryResult(feasible=True, time_of_flight=0.0, ...)
+    
+    distance = np.linalg.norm(np.array(tgt_pos) - np.array(src_pos))
+    if distance > MAX_REASONABLE_DISTANCE:
+        return TrajectoryResult(feasible=False, time_of_flight=0.0, ...)
+```
