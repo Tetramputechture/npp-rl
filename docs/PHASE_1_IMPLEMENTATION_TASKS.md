@@ -49,7 +49,7 @@ Goal: Expand symbolic features to bridge the Physics-Awareness Gap and support P
     - In `_get_observation()`, keep returning `game_state` from `NPlayHeadless.get_state_vector(only_exit_and_switch=...)` but ensure it now includes the enriched feature set when the flag is disabled.
     - In `ObservationProcessor.process_game_state`: append `time_remaining` and vectors to objectives as today; validate dimension equals constants.
     - Ensure `observation_space` shapes (Dict with `player_frame`, `global_view`, `game_state`) match the enriched sizes.
-  - Acceptance: `check_env` passes; SB3 `MultiInputPolicy` builds; `Enhanced3DFeatureExtractor` infers the new `game_state` dimension at runtime.
+  - Acceptance: `check_env` passes; SB3 `MultiInputPolicy` builds; `3DFeatureExtractor` infers the new `game_state` dimension at runtime.
 
 - **1.4 Player- and global-view image stability**
   - Files: `nclone/nclone/nplay_headless.py`, `.../observation_processor.py`.

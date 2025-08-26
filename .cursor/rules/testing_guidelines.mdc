@@ -112,7 +112,7 @@ def test_gnn_forward_pass_with_realistic_graphs(self):
 ```python
 def test_feature_extractor_handles_different_input_ranges(self):
     """Test that feature extractor works with various input value ranges."""
-    extractor = Enhanced3DFeatureExtractor(self.obs_space)
+    extractor = 3DFeatureExtractor(self.obs_space)
     
     # Test with different value ranges
     test_cases = [

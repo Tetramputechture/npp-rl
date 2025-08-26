@@ -32,13 +32,13 @@ from stable_baselines3.common.logger import configure
 
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
+from npp_rl.agents.feature_extractor import FeatureExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class EnhancedLoggingCallback(BaseCallback):
+class LoggingCallback(BaseCallback):
     """Enhanced callback for logging training metrics and exploration statistics."""
     
     def __init__(self, exploration_manager: AdaptiveExplorationManager, log_freq: int = 1000):
@@ -69,10 +69,10 @@ class EnhancedLoggingCallback(BaseCallback):
                     self.logger.record("rollout/avg_episode_reward", avg_reward)
                     
                 if episode_lengths and episode_lengths[0]:
-                    avg_length = np.mean([l for env_lengths in episode_lengths for l in env_lengths])
+                    avg_length = np.mean([length for env_lengths in episode_lengths for length in env_lengths])
                     self.logger.record("rollout/avg_episode_length", avg_length)
                     
-            except Exception as e:
+            except Exception:
                 # Gracefully handle any logging errors
                 pass
 
@@ -102,14 +102,9 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
         end_fraction=0.9
     )
     
-    # Choose feature extractor based on 3D conv preference
-    if use_3d_conv:
-        features_extractor_class = Enhanced3DFeatureExtractor
-        print("🚀 Using Enhanced 3D Feature Extractor with temporal modeling")
-    else:
-        features_extractor_class = EnhancedCNNFeatureExtractor
-        print("🚀 Using Enhanced CNN Feature Extractor")
-    
+    features_extractor_class = FeatureExtractor
+    print("🚀 Using Enhanced 3D Feature Extractor with temporal modeling")
+
     policy_kwargs = dict(
         features_extractor_class=features_extractor_class,
         features_extractor_kwargs=dict(features_dim=512),
@@ -207,11 +202,11 @@ def train_enhanced_agent(num_envs: int = 64,
     """
     
     print("🚀 Starting Enhanced N++ Agent Training")
-    print(f"📊 Configuration:")
+    print("📊 Configuration:")
     print(f"   - Environments: {num_envs}")
     print(f"   - Total timesteps: {total_timesteps:,}")
     print(f"   - 3D Convolutions: {use_3d_conv}")
-    print(f"   - Temporal frames: 12")
+    print("   - Temporal frames: 12")
     print(f"   - Network architecture: {NET_ARCH_SIZE}")
     print(f"   - Adaptive exploration: {enable_exploration}")
     print(f"   - Device: {device}")
@@ -249,10 +244,8 @@ def train_enhanced_agent(num_envs: int = 64,
         # Set up callbacks
         callbacks = []
         
-        # Enhanced logging callback
         if exploration_manager:
-            enhanced_logging = EnhancedLoggingCallback(exploration_manager, log_freq=1000)
-            callbacks.append(enhanced_logging)
+            callbacks.append(LoggingCallback(exploration_manager, log_freq=1000))
         
         # Early stopping callback
         # (Common practice to prevent overfitting and save computational resources)
@@ -317,7 +310,7 @@ def train_enhanced_agent(num_envs: int = 64,
             for key, value in stats.items():
                 print(f"   - {key}: {value:.4f}")
         
-        print(f"✅ Training completed successfully!")
+        print("✅ Training completed successfully!")
         print(f"📁 Logs saved to: {log_dir}")
         
         return model, log_dir

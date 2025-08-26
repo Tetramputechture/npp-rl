@@ -58,7 +58,7 @@ def create_training_environment(num_envs: int, render_mode: str = 'rgb_array'):
 Design feature extractors specifically for RL observations:
 
 ```python
-class Enhanced3DFeatureExtractor(BaseFeaturesExtractor):
+class 3DFeatureExtractor(BaseFeaturesExtractor):
     """
     Feature extractor optimized for N++ multi-modal observations.
     
@@ -97,7 +97,7 @@ def create_ppo_agent(env, policy_kwargs: dict) -> PPO:
     
     # Configure policy network
     policy_kwargs = {
-        'features_extractor_class': Enhanced3DFeatureExtractor,
+        'features_extractor_class': 3DFeatureExtractor,
         'features_extractor_kwargs': {'features_dim': 512},
         'net_arch': {
             'pi': NET_ARCH_SIZE,  # Policy network architecture

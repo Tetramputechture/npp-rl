@@ -7,12 +7,11 @@ structural observations alongside visual and symbolic features.
 
 import torch
 import torch.nn as nn
-import numpy as np
-from typing import Dict, Optional, Any
+from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 
-from npp_rl.models.gnn import GraphEncoder, create_graph_encoder
+from npp_rl.models.gnn import create_graph_encoder
 
 
 class NppMultimodalGraphExtractor(BaseFeaturesExtractor):

@@ -131,12 +131,12 @@ class MovementClassifier:
 
         # Classify based on movement characteristics
         movement_type = self._determine_movement_type(
-            dx, dy, distance, ninja_state, level_data
+            dx, dy, ninja_state, level_data
         )
 
         # Calculate type-specific physics parameters
         physics_params.update(
-            self._calculate_physics_parameters(movement_type, dx, dy, distance, ninja_state)
+            self._calculate_physics_parameters(movement_type, dx, dy, ninja_state)
         )
 
         return movement_type, physics_params
@@ -145,7 +145,6 @@ class MovementClassifier:
         self,
         dx: float,
         dy: float,
-        distance: float,
         ninja_state: Optional[NinjaState],
         level_data: Optional[Dict[str, Any]]
     ) -> MovementType:
@@ -183,7 +182,6 @@ class MovementClassifier:
         movement_type: MovementType,
         dx: float,
         dy: float,
-        distance: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
         """Calculate physics parameters specific to movement type."""

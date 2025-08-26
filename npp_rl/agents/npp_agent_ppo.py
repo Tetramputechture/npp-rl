@@ -15,7 +15,7 @@ import subprocess
 import threading
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.agents.enhanced_feature_extractor import Enhanced3DFeatureExtractor, EnhancedCNNFeatureExtractor
+from npp_rl.agents.feature_extractor import FeatureExtractor
 from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
 from npp_rl.optimization.h100_optimization import enable_h100_optimizations, get_recommended_batch_size, H100OptimizedTraining
 from npp_rl.callbacks import create_pbrs_callbacks
@@ -91,13 +91,9 @@ def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool =
         use_3d_conv = has_temporal_frames
         print(f"Auto-detected frame stacking: {has_temporal_frames}, using 3D conv: {use_3d_conv}")
     
-    # Choose feature extractor based on 3D conv preference
-    if use_3d_conv:
-        features_extractor_class = Enhanced3DFeatureExtractor
+        features_extractor_class = FeatureExtractor
         print("Using Enhanced 3D Feature Extractor with temporal modeling")
-    else:
-        features_extractor_class = EnhancedCNNFeatureExtractor
-        print("Using Enhanced CNN Feature Extractor")
+
 
     policy_kwargs = dict(
         features_extractor_class=features_extractor_class,

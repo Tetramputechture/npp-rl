@@ -9,7 +9,7 @@ the agent's learning process.
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import TensorBoardOutputFormat
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import warnings
 
 
