@@ -118,18 +118,47 @@ See `archive/README.md` for details on what was moved and why.
 
 The primary script for training the agent with all features is `npp_rl/agents/enhanced_training.py`.
 
-### Prerequisites: Setting up the `nclone` Environment
+### Prerequisites
 
-This RL agent relies on the `nclone` N++ simulator and Gym environment. Ensure `nclone` is cloned as a sibling directory to `npp-rl` and installed:
+#### System Requirements
 
-```bash
-# Navigate to the directory *containing* npp-rl
-# (e.g., if npp-rl is in /home/user/projects/npp-rl, cd /home/user/projects)
-git clone https://github.com/tetramputechture/nclone.git
-cd nclone
-pip install -e .
-cd ../npp-rl # Or navigate back to your npp-rl directory
-```
+Before starting, ensure you have:
+- Python 3.8 or higher
+- Git
+- pip (Python package installer)
+- System dependencies for PyCairo:
+  ```bash
+  sudo apt install libcairo2-dev pkg-config python3-dev
+  ```
+
+#### Setting up the Development Environment
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/tetramputechture/npp-rl.git
+   cd npp-rl
+   ```
+
+2. (Optional but recommended) Create a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+   ```
+
+3. Install the `nclone` simulator:
+   ```bash
+   # Navigate to the directory containing npp-rl
+   cd ..
+   git clone https://github.com/tetramputechture/nclone.git
+   cd nclone
+   pip install -e .
+   cd ../npp-rl
+   ```
+
+4. Install project dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ### Starting a Training Run
 
@@ -211,23 +240,99 @@ The architecture and training procedures are informed by principles and findings
 *   Mnih, V., et al. (2013). Playing Atari with Deep Reinforcement Learning. (Foundation for CNNs in RL).
 *   Kaplan, J., et al. (2020). Scaling Laws for Neural Language Models. (General insights into model scaling).
 
-## Dependencies
+## Dependencies and Installation
 
-Ensure the `nclone` environment is installed from a local sibling directory as described in the "Prerequisites" section.
+### System Requirements
 
-System dependencies (for PyCairo, a dependency of `nclone`):
-```sh
-sudo apt install libcairo2-dev pkg-config python3-dev
+- Python 3.8 or higher
+- System dependencies for PyCairo (a dependency of `nclone`):
+  ```sh
+  sudo apt install libcairo2-dev pkg-config python3-dev
+  ```
+
+### Installing Dependencies
+
+1. First, ensure the `nclone` environment is installed from a local sibling directory:
+   ```bash
+   # Navigate to the directory containing npp-rl
+   cd /path/to/parent/directory
+   git clone https://github.com/tetramputechture/nclone.git
+   cd nclone
+   pip install -e .
+   cd ../npp-rl
+   ```
+
+2. Install Python dependencies using pip:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+The `requirements.txt` file includes all necessary Python packages:
+- `numpy`: For numerical computations
+- `torch`: Deep learning framework
+- `opencv-python`: Image processing
+- `pillow`: Image handling
+- `gymnasium`: Environment interface
+- `stable-baselines3` and `sb3-contrib`: RL algorithms
+- `optuna`: Hyperparameter tuning
+- `tensorboard`: Training visualization
+- `imageio`: Video recording
+- `albumentations`: Image augmentations
+- `pytest`: Testing framework
+
+## Testing
+
+The project uses pytest for testing. Tests are organized in the `tests/` directory and cover various aspects of the codebase including:
+- Movement classification and trajectory calculations
+- Phase 2 training components
+- Vectorization utilities
+- Integration tests
+
+### Running Tests
+
+To run all tests:
+```bash
+pytest tests/
 ```
 
-Python packages (managed via `pyproject.toml` in `nclone` and potentially a `requirements.txt` or `pyproject.toml` in `npp-rl`):
-*   `stable-baselines3>=2.1.0`
-*   `sb3-contrib>=2.0.0` (for RecurrentPPO, if used)
-*   `torch>=2.0.0`
-*   `gymnasium>=0.29.0`
-*   `numpy`
-*   `opencv-python`
-*   `optuna` (for hyperparameter tuning)
-*   `tensorboard`
-*   `imageio` (for video recording)
-*   `albumentations` (if used for more advanced augmentations, primarily for `Cutout` in `nclone`)
+To run a specific test file:
+```bash
+pytest tests/test_vectorization.py
+```
+
+To run tests with more detailed output:
+```bash
+pytest -v tests/
+```
+
+To run tests and show print statements (useful for debugging):
+```bash
+pytest -s tests/
+```
+
+### Test Categories
+
+1. **Basic Tests** (`test_phase2_basic.py`):
+   - Core functionality tests
+   - Basic environment interactions
+   - Simple reward calculations
+
+2. **Integration Tests** (`test_phase2_integration.py`):
+   - End-to-end training scenarios
+   - Environment-agent interactions
+   - Multi-component functionality
+
+3. **Movement and Physics** (`test_movement_classifier_comprehensive.py`, `test_trajectory_calculator_comprehensive.py`):
+   - Movement classification accuracy
+   - Trajectory calculations
+   - Physics system integration
+
+4. **Vectorization** (`test_vectorization.py`):
+   - Parallel environment handling
+   - State vectorization
+   - Performance optimizations
+
+
+### Coding Standards
+
+Standards are documented in the `.cursor/rules` directory. When you are writing code, you should follow these standards.
