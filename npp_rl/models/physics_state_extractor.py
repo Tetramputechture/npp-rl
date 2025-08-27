@@ -9,27 +9,17 @@ information for better pathfinding and movement prediction.
 import math
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
+from nclone.constants import (
+    MAX_HOR_SPEED, MAP_TILE_HEIGHT, TILE_PIXEL_SIZE,
+    GRAVITY_FALL, GRAVITY_JUMP
+)
 
-# Import physics constants from nclone
-import sys
-import os
-nclone_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nclone')
-if os.path.exists(nclone_path) and nclone_path not in sys.path:
-    sys.path.insert(0, nclone_path)
+GROUND_STATES = {0, 1, 2}
+AIR_STATES = {3, 4}
+WALL_STATES = {5}
+INACTIVE_STATES = {6, 7, 8, 9}
 
-try:
-    from nclone.constants import (
-        MAX_HOR_SPEED, MAP_TILE_HEIGHT, TILE_PIXEL_SIZE,
-        GRAVITY_FALL, GRAVITY_JUMP
-    )
-except ImportError:
-    # Fallback constants if import fails
-    MAX_HOR_SPEED = 3.333333333333333
-    MAP_TILE_HEIGHT = 23
-    TILE_PIXEL_SIZE = 24
-    GRAVITY_FALL = 0.06666666666666665
-    GRAVITY_JUMP = 0.01111111111111111
-
+NORMALIZED_HEIGHT_DIVISOR = MAP_TILE_HEIGHT * TILE_PIXEL_SIZE
 
 class PhysicsStateExtractor:
     """
@@ -40,20 +30,7 @@ class PhysicsStateExtractor:
     The extracted features include velocity components, energy calculations,
     contact states, and movement capabilities.
     """
-    
-    def __init__(self):
-        """Initialize the physics state extractor with N++ constants."""
-        self.max_hor_speed = MAX_HOR_SPEED  # 3.333 pixels/frame
-        self.level_height = MAP_TILE_HEIGHT * TILE_PIXEL_SIZE  # 552 pixels
-        self.gravity_fall = GRAVITY_FALL
-        self.gravity_jump = GRAVITY_JUMP
-        
-        # Movement state mappings based on sim_mechanics_doc.md
-        self.ground_states = {0, 1, 2}  # Immobile, Running, Ground Sliding
-        self.air_states = {3, 4}        # Jumping, Falling
-        self.wall_states = {5}          # Wall Sliding
-        self.inactive_states = {6, 7, 8, 9}  # Dead, Awaiting Death, Celebrating, Disabled
-    
+
     def extract_ninja_physics_state(
         self,
         ninja_position: Tuple[float, float],
@@ -91,34 +68,34 @@ class PhysicsStateExtractor:
             movement_state = movement_state[0] if len(movement_state) > 0 else 0
         
         # Normalize velocity components
-        vx_norm = np.clip(vx / self.max_hor_speed, -1.0, 1.0)
-        vy_norm = np.clip(vy / self.max_hor_speed, -1.0, 1.0)
+        vx_norm = np.clip(vx / MAX_HOR_SPEED, -1.0, 1.0)
+        vy_norm = np.clip(vy / MAX_HOR_SPEED, -1.0, 1.0)
         
         # Calculate velocity magnitude (normalized)
-        vel_magnitude = math.sqrt(vx*vx + vy*vy) / self.max_hor_speed
+        vel_magnitude = math.sqrt(vx*vx + vy*vy) / MAX_HOR_SPEED
         vel_magnitude = np.clip(vel_magnitude, 0.0, 2.0)  # Allow some overspeed
         
         # Movement state (normalized to [0,1])
         movement_state_norm = np.clip(movement_state / 9.0, 0.0, 1.0)
         
         # Contact state detection based on movement state
-        ground_contact = 1.0 if movement_state in self.ground_states else 0.0
-        wall_contact = 1.0 if movement_state in self.wall_states else 0.0
-        airborne = 1.0 if movement_state in self.air_states else 0.0
+        ground_contact = 1.0 if movement_state in GROUND_STATES else 0.0
+        wall_contact = 1.0 if movement_state in WALL_STATES else 0.0
+        airborne = 1.0 if movement_state in AIR_STATES else 0.0
         
         # Momentum direction (normalized)
         if vel_magnitude > 0.01:
-            momentum_x = vx / (vel_magnitude * self.max_hor_speed)
-            momentum_y = vy / (vel_magnitude * self.max_hor_speed)
+            momentum_x = vx / (vel_magnitude * MAX_HOR_SPEED)
+            momentum_y = vy / (vel_magnitude * MAX_HOR_SPEED)
         else:
             momentum_x = momentum_y = 0.0
         
         # Energy calculations (normalized)
-        kinetic_energy = 0.5 * (vx*vx + vy*vy) / (self.max_hor_speed * self.max_hor_speed)
+        kinetic_energy = 0.5 * (vx*vx + vy*vy) / (MAX_HOR_SPEED * MAX_HOR_SPEED)
         kinetic_energy = np.clip(kinetic_energy, 0.0, 2.0)  # Allow some overspeed
         
         # Potential energy (normalized height from bottom)
-        potential_energy = np.clip((self.level_height - y) / self.level_height, 0.0, 1.0)
+        potential_energy = np.clip((NORMALIZED_HEIGHT_DIVISOR - y) / NORMALIZED_HEIGHT_DIVISOR, 0.0, 1.0)
         
         # Input buffers from ninja state (normalized)
         # These may not always be available, so provide defaults

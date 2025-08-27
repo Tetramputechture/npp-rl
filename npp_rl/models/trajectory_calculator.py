@@ -10,10 +10,9 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from enum import IntEnum
 
-from nclone.constants import (  # noqa: F401
-    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, NINJA_RADIUS,
-    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
-    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y, MAX_JUMP_DURATION
+from nclone.constants import (
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED,
+    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION
 )
 
 # Physics calculation constants
