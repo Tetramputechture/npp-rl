@@ -6,9 +6,8 @@ ensuring that planned paths are physically feasible given ninja capabilities.
 """
 
 import math
-from typing import List, Tuple, Dict, Any, Optional, NamedTuple
+from typing import List, Tuple, NamedTuple
 from dataclasses import dataclass
-from enum import IntEnum
 
 # Import physics constants
 from nclone.constants import (

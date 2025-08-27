@@ -7,7 +7,7 @@ and movement capabilities, enabling more realistic pathfinding decisions.
 
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import logging
 
 # Import EdgeType from nclone graph builder
@@ -31,11 +31,6 @@ class ConditionalEdgeMasker(nn.Module):
     def __init__(self):
         """Initialize conditional edge masker with physics constraints."""
         super().__init__()
-        
-        self.min_wall_jump_speed = MIN_WALL_JUMP_SPEED
-        self.min_jump_energy = MIN_JUMP_ENERGY
-        self.min_velocity_threshold = MIN_VELOCITY_THRESHOLD
-        self.physics_threshold = PHYSICS_STATE_THRESHOLD
         
         # Register buffers for device compatibility
         self.register_buffer('_device_check', torch.tensor(0.0))
@@ -125,30 +120,30 @@ class ConditionalEdgeMasker(nn.Module):
             should_disable = False
             
             # Check jump capability constraints
-            if edge_type == EdgeType.JUMP and can_jump < self.physics_threshold:
+            if edge_type == EdgeType.JUMP and can_jump < PHYSICS_STATE_THRESHOLD:
                 should_disable = True
             
             # Check wall slide constraints
             elif edge_type == EdgeType.WALL_SLIDE:
-                if wall_contact < self.physics_threshold:
+                if wall_contact < PHYSICS_STATE_THRESHOLD:
                     should_disable = True
                 # Wall sliding requires some horizontal velocity to maintain contact
-                elif vel_magnitude < self.min_velocity_threshold:
+                elif vel_magnitude < MIN_VELOCITY_THRESHOLD:
                     should_disable = True
             
             # Check velocity requirements for trajectory-based edges
-            elif requires_jump > self.physics_threshold:
-                if can_jump < self.physics_threshold:
+            elif requires_jump > PHYSICS_STATE_THRESHOLD:
+                if can_jump < PHYSICS_STATE_THRESHOLD:
                     should_disable = True
                 elif vel_magnitude < min_velocity:
                     should_disable = True
             
             # Check wall contact requirements
-            elif requires_wall_contact > self.physics_threshold:
-                if wall_contact < self.physics_threshold:
+            elif requires_wall_contact > PHYSICS_STATE_THRESHOLD:
+                if wall_contact < PHYSICS_STATE_THRESHOLD:
                     should_disable = True
                 # Wall jumps require sufficient horizontal velocity
-                if can_wall_jump < self.physics_threshold and vel_magnitude < self.min_wall_jump_speed:
+                if can_wall_jump < PHYSICS_STATE_THRESHOLD and vel_magnitude < MIN_WALL_JUMP_SPEED:
                     should_disable = True
             
             # Check energy requirements for high-cost movements
@@ -156,7 +151,7 @@ class ConditionalEdgeMasker(nn.Module):
                 # Extract energy cost from trajectory parameters
                 if edge_features.shape[1] >= 11:
                     energy_cost = edge_features[edge_idx, 10]  # energy_cost from trajectory
-                    if kinetic_energy < energy_cost * self.min_jump_energy:
+                    if kinetic_energy < energy_cost * MIN_JUMP_ENERGY:
                         should_disable = True
             
             # Check velocity bounds (only if max_velocity is set)
@@ -225,10 +220,10 @@ class ConditionalEdgeMasker(nn.Module):
         # Extract ninja state for summary
         if ninja_physics_state.numel() >= 18:
             vel_magnitude = ninja_physics_state[2].item()
-            ground_contact = ninja_physics_state[4].item() > self.physics_threshold
-            wall_contact = ninja_physics_state[5].item() > self.physics_threshold
-            can_jump = ninja_physics_state[16].item() > self.physics_threshold
-            can_wall_jump = ninja_physics_state[17].item() > self.physics_threshold
+            ground_contact = ninja_physics_state[4].item() > PHYSICS_STATE_THRESHOLD
+            wall_contact = ninja_physics_state[5].item() > PHYSICS_STATE_THRESHOLD
+            can_jump = ninja_physics_state[16].item() > PHYSICS_STATE_THRESHOLD
+            can_wall_jump = ninja_physics_state[17].item() > PHYSICS_STATE_THRESHOLD
         else:
             vel_magnitude = 0.0
             ground_contact = wall_contact = can_jump = can_wall_jump = False

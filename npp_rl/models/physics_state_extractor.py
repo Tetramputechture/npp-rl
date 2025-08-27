@@ -10,8 +10,7 @@ import math
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
 from nclone.constants import (
-    MAX_HOR_SPEED, MAP_TILE_HEIGHT, TILE_PIXEL_SIZE,
-    GRAVITY_FALL, GRAVITY_JUMP
+    MAX_HOR_SPEED, MAP_TILE_HEIGHT, TILE_PIXEL_SIZE
 )
 
 GROUND_STATES = {0, 1, 2}
