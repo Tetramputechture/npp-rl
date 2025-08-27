@@ -21,6 +21,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 
 from npp_rl.models.gnn import create_graph_encoder
+from npp_rl.models.hgt_gnn import create_hgt_encoder
 
 
 class MultimodalGraphExtractor(BaseFeaturesExtractor):
@@ -44,6 +45,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         observation_space: SpacesDict,
         features_dim: int = 512,
         use_graph_obs: bool = False,
+        use_hgt: bool = True,
         gnn_hidden_dim: int = 128,
         gnn_num_layers: int = 3,
         gnn_output_dim: int = 256,
@@ -56,6 +58,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             observation_space: Gym observation space dictionary
             features_dim: Final output feature dimension
             use_graph_obs: Whether to process graph observations
+            use_hgt: Whether to use HGT instead of basic GraphSAGE
             gnn_hidden_dim: Hidden dimension for GNN layers
             gnn_num_layers: Number of GNN layers
             gnn_output_dim: Output dimension of GNN encoder
@@ -64,6 +67,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
         
         self.use_graph_obs = use_graph_obs
+        self.use_hgt = use_hgt
         
         # Extract observation space components
         self.has_player_frame = 'player_frame' in observation_space.spaces
@@ -80,7 +84,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         self._init_visual_encoders(observation_space)
         self._init_symbolic_encoder(observation_space)
         if self.has_graph_obs:
-            self._init_graph_encoder(observation_space)
+            self._init_graph_encoder(observation_space, gnn_hidden_dim, gnn_num_layers, gnn_output_dim)
         
         # Calculate total feature dimension and create fusion network
         self._init_fusion_network()
@@ -125,7 +129,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             )
             self.symbolic_feature_dim = 64
     
-    def _init_graph_encoder(self, observation_space: SpacesDict):
+    def _init_graph_encoder(self, observation_space: SpacesDict, hidden_dim: int, num_layers: int, output_dim: int):
         """Initialize GNN encoder for graph observations."""
         if not self.has_graph_obs:
             self.graph_feature_dim = 0
@@ -134,16 +138,29 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         node_feat_dim = observation_space['graph_node_feats'].shape[1]
         edge_feat_dim = observation_space['graph_edge_feats'].shape[1]
         
-        self.graph_encoder = create_graph_encoder(
-            node_feature_dim=node_feat_dim,
-            edge_feature_dim=edge_feat_dim,
-            hidden_dim=128,
-            num_layers=3,
-            output_dim=256,
-            aggregator='mean',
-            global_pool='mean_max'
-        )
-        self.graph_feature_dim = 256
+        if self.use_hgt:
+            # Use Heterogeneous Graph Transformer
+            self.graph_encoder = create_hgt_encoder(
+                node_feature_dim=node_feat_dim,
+                edge_feature_dim=edge_feat_dim,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                output_dim=output_dim,
+                num_heads=8,
+                global_pool='mean_max'
+            )
+        else:
+            # Use basic GraphSAGE
+            self.graph_encoder = create_graph_encoder(
+                node_feature_dim=node_feat_dim,
+                edge_feature_dim=edge_feat_dim,
+                hidden_dim=hidden_dim,
+                num_layers=num_layers,
+                output_dim=output_dim,
+                aggregator='mean',
+                global_pool='mean_max'
+            )
+        self.graph_feature_dim = output_dim
     
     def _init_fusion_network(self):
         """Initialize fusion network to combine all modalities."""
@@ -420,6 +437,43 @@ def create_multimodal_extractor(
             features_dim=features_dim,
             **kwargs
         )
+
+
+def create_hgt_multimodal_extractor(
+    observation_space: SpacesDict,
+    features_dim: int = 512,
+    gnn_hidden_dim: int = 256,
+    gnn_num_layers: int = 3,
+    gnn_output_dim: int = 512,
+    **kwargs
+) -> MultimodalGraphExtractor:
+    """
+    Factory function to create HGT-enabled multimodal feature extractor.
+    
+    This function creates a multimodal extractor specifically configured
+    to use Heterogeneous Graph Transformers for graph processing.
+    
+    Args:
+        observation_space: Gym observation space dictionary
+        features_dim: Output feature dimension
+        gnn_hidden_dim: Hidden dimension for HGT layers
+        gnn_num_layers: Number of HGT layers
+        gnn_output_dim: Output dimension of HGT encoder
+        **kwargs: Additional arguments passed to the extractor
+        
+    Returns:
+        Configured HGT multimodal feature extractor
+    """
+    return MultimodalGraphExtractor(
+        observation_space=observation_space,
+        features_dim=features_dim,
+        use_graph_obs=True,
+        use_hgt=True,
+        gnn_hidden_dim=gnn_hidden_dim,
+        gnn_num_layers=gnn_num_layers,
+        gnn_output_dim=gnn_output_dim,
+        **kwargs
+    )
 
 
 # Backward compatibility aliases
