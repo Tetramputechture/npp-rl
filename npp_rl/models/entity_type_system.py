@@ -47,10 +47,11 @@ class EntityType(IntEnum):
 class EntityCategory(IntEnum):
     """Entity categories for specialized processing."""
     COLLECTIBLE = 0    # Gold, rewards
-    MOVEMENT = 1       # Platforms, launch pads, boost pads
+    MOVEMENT = 1       # Platforms, launch pads, boost pads, traversable entities
     HAZARD = 2         # Enemies, mines, dangerous elements
     INTERACTIVE = 3    # Doors, switches, exits
     GRID_TILE = 4      # Regular grid cells
+    CONDITIONAL = 5    # Conditionally hazardous/traversable entities
 
 
 class EntityTypeSystem:
@@ -75,7 +76,7 @@ class EntityTypeSystem:
         for entity_type in collectibles:
             mapping[entity_type] = EntityCategory.COLLECTIBLE
         
-        # Movement aids
+        # Movement aids (always safe to traverse)
         movement_aids = {
             EntityType.LAUNCH_PAD, EntityType.ONE_WAY_PLATFORM, 
             EntityType.BOUNCE_BLOCK, EntityType.BOOST_PAD
@@ -83,14 +84,24 @@ class EntityTypeSystem:
         for entity_type in movement_aids:
             mapping[entity_type] = EntityCategory.MOVEMENT
         
-        # Hazards
+        # Conditional entities (directionally hazardous/traversable)
+        conditional = {
+            EntityType.THWUMP, EntityType.SHOVE_THWUMP
+        }
+        for entity_type in conditional:
+            mapping[entity_type] = EntityCategory.CONDITIONAL
+        
+        # Hazards (fully dangerous entities)
         hazards = {
-            EntityType.DRONE_ZAP, EntityType.DRONE_CHASER, EntityType.THWUMP,
-            EntityType.DEATH_BALL, EntityType.MINI_DRONE, EntityType.SHOVE_THWUMP,
-            EntityType.TOGGLE_MINE, EntityType.ACTIVE_MINE, EntityType.LASER
+            EntityType.DRONE_ZAP, EntityType.DRONE_CHASER, EntityType.DEATH_BALL, 
+            EntityType.MINI_DRONE, EntityType.TOGGLE_MINE, EntityType.ACTIVE_MINE, 
+            EntityType.LASER
         }
         for entity_type in hazards:
             mapping[entity_type] = EntityCategory.HAZARD
+        
+        # Note: THWUMP and SHOVE_THWUMP are now in MOVEMENT category due to 
+        # their conditional traversability (safe from sides/back)
         
         # Interactive elements
         interactive = {
@@ -109,31 +120,46 @@ class EntityTypeSystem:
                 'attention_weight': 1.2,  # Higher attention for rewards
                 'hazard_level': 0.0,
                 'interaction_range': 1.0,
-                'movement_impact': False
+                'movement_impact': False,
+                'traversable': True
             },
             EntityCategory.MOVEMENT: {
                 'attention_weight': 1.1,
                 'hazard_level': 0.0,
                 'interaction_range': 2.0,  # Larger interaction range
-                'movement_impact': True
+                'movement_impact': True,
+                'traversable': True,
+                'platform_capable': True  # Movement entities can be platforms
             },
             EntityCategory.HAZARD: {
                 'attention_weight': 1.5,  # Highest attention for dangers
                 'hazard_level': 1.0,
                 'interaction_range': 1.5,
-                'movement_impact': True
+                'movement_impact': True,
+                'traversable': False
             },
             EntityCategory.INTERACTIVE: {
                 'attention_weight': 1.0,
                 'hazard_level': 0.0,
                 'interaction_range': 1.0,
-                'movement_impact': False
+                'movement_impact': False,
+                'traversable': True
             },
             EntityCategory.GRID_TILE: {
                 'attention_weight': 0.8,  # Lower attention for basic tiles
                 'hazard_level': 0.0,
                 'interaction_range': 0.5,
-                'movement_impact': False
+                'movement_impact': False,
+                'traversable': True
+            },
+            EntityCategory.CONDITIONAL: {
+                'attention_weight': 1.3,  # High attention for complex entities
+                'hazard_level': 0.5,  # Partially hazardous
+                'interaction_range': 2.0,  # Large range due to directional effects
+                'movement_impact': True,
+                'traversable': True,  # Conditionally traversable
+                'directional_hazard': True,  # Special property for directional entities
+                'platform_capable': True   # Can be used as platforms
             }
         }
     
@@ -159,6 +185,26 @@ class EntityTypeSystem:
         """Check if an entity type affects movement."""
         category = self.get_entity_category(entity_type)
         return self._category_properties[category]['movement_impact']
+    
+    def is_traversable(self, entity_type: int) -> bool:
+        """Check if an entity type is generally traversable."""
+        category = self.get_entity_category(entity_type)
+        return self._category_properties[category]['traversable']
+    
+    def is_directional_hazard(self, entity_type: int) -> bool:
+        """Check if an entity type has directional hazard properties."""
+        category = self.get_entity_category(entity_type)
+        return self._category_properties[category].get('directional_hazard', False)
+    
+    def is_platform_capable(self, entity_type: int) -> bool:
+        """Check if an entity type can be used as a platform."""
+        category = self.get_entity_category(entity_type)
+        return self._category_properties[category].get('platform_capable', False)
+    
+    def get_interaction_range(self, entity_type: int) -> float:
+        """Get the interaction range for an entity type."""
+        category = self.get_entity_category(entity_type)
+        return self._category_properties[category]['interaction_range']
 
 
 class EntitySpecializedEmbedding(nn.Module):
