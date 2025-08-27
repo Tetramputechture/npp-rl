@@ -123,7 +123,7 @@ Combines visual, symbolic, and structural observations:
 - **Fusion Network**: Combine all modalities
 
 ```python
-from npp_rl.models.feature_extractors import create_feature_extractor
+from npp_rl.feature_extractors import create_feature_extractor
 
 extractor = create_feature_extractor(
     observation_space=env.observation_space,

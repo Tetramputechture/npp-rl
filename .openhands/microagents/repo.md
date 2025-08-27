@@ -89,7 +89,6 @@ python bc_pretrain.py --dataset_dir datasets/shards --epochs 20
 ### Training Configurations
 - **num_envs**: 64 parallel environments (adjust based on CPU cores)
 - **total_timesteps**: 10M for substantial training (adjust based on time/resources)
-- **use_3d_conv**: Enabled by default (37.9% performance improvement)
 - **enable_exploration**: ICM and novelty detection enabled
 
 ## Development Guidelines

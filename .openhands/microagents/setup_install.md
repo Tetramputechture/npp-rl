@@ -291,8 +291,7 @@ pytest tests/ -v
 # Adjust based on your hardware
 python -m npp_rl.agents.enhanced_training \
     --num_envs $(nproc)  \  # Use all CPU cores
-    --total_timesteps 10000000 \
-    --use_3d_conv  # Enable 3D convolutions for better performance
+    --total_timesteps 10000000
 ```
 
 ### For Development

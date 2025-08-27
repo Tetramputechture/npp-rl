@@ -34,18 +34,14 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-Two primary feature extractor architectures are available, located in `agents/enhanced_feature_extractor.py`:
+Multiple feature extractor architectures are available in the consolidated `npp_rl/feature_extractors/` package:
 
-*   **`3DFeatureExtractor` (Recommended for temporal data)**:
+*   **`FeatureExtractor` (Recommended for temporal data)**:
     *   Employs 3D convolutions over the 12 stacked player-centric frames to directly model spatiotemporal patterns.
         *   Input shape: `(Batch, 1, TemporalFrames, Height, Width)`.
     *   Uses varied 3D convolutional kernel sizes (e.g., `(4,7,7)`, `(3,5,5)`) and strides to capture features at multiple temporal and spatial scales.
     *   Processes the global view with a separate 2D CNN.
     *   Includes adaptive pooling layers to ensure fixed-size outputs before fusion.
-
-*   **`CNNFeatureExtractor` (Alternative)**:
-    *   Utilizes 2D convolutions, where the 12 stacked frames are treated as input channels to the first convolutional layer.
-    *   Also processes the global view with a separate 2D CNN.
 
 Both extractors process the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs and the game state vector are then fused and passed to the policy and value networks.
 
@@ -102,7 +98,10 @@ Current layout focused on Phase 1:
 - `npp_rl/`
   - `agents/`
     - `enhanced_training.py`: Main training entrypoint with CLI; uses PPO, 3D/2D extractors, vec envs, logging.
-    - `enhanced_feature_extractor.py`: `3DFeatureExtractor` and `CNNFeatureExtractor` for multi-input observations.
+  - `feature_extractors/`
+    - `temporal.py`: `TemporalFeatureExtractor` with 3D CNNs for temporal modeling.
+    - `multimodal.py`: `MultimodalExtractor` and `MultimodalGraphExtractor` for complex observations.
+    - `__init__.py`: Unified interface with factory functions for easy extractor selection.
     - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
     - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
     - `npp_agent_ppo.py`: Secondary training utilities (create/train/eval/record) kept for compatibility.
@@ -179,7 +178,6 @@ python -m npp_rl.agents.enhanced_training --help
 Key options include:
 *   `--num_envs`: Number of parallel simulation environments (default: 64).
 *   `--total_timesteps`: Total number of training steps (default: 10,000,000).
-*   `--use_3d_conv` / `--no_3d_conv`: Enable or disable 3D convolutions (defaults to enabled). If disabled, `CNNFeatureExtractor` is used.
 *   `--load_model`: Path to a previously saved model checkpoint to resume training.
 *   `--render_mode`: Set to `human` for visual rendering (forces `num_envs=1`). Default is `rgb_array`.
 *   `--disable_exploration`: Turn off the adaptive exploration system.

@@ -58,15 +58,12 @@ NET_ARCH_SIZE = [256, 256, 128]  # Scaled for complex multi-modal observations
 ### PPO Agent Creation Pattern
 
 ```python
-def create_enhanced_ppo_agent(env, use_3d_conv: bool = True) -> PPO:
+def create_enhanced_ppo_agent(env) -> PPO:
     """Create PPO agent with NPP-RL optimizations."""
     
-    # Configure feature extractor
-    if use_3d_conv:
-        features_extractor_class = 3DFeatureExtractor
-    else:
-        features_extractor_class = CNNFeatureExtractor
-    
+
+    features_extractor_class = 3DFeatureExtractor
+
     policy_kwargs = {
         'features_extractor_class': features_extractor_class,
         'features_extractor_kwargs': {'features_dim': 512},

@@ -66,7 +66,6 @@ class FeatureExtractorConfig:
     """Configuration for multimodal feature extractor."""
     type: str = 'multimodal'  # 'multimodal', 'enhanced_3d', 'enhanced_cnn'
     features_dim: int = 512
-    use_3d_conv: bool = True
     use_graph_obs: bool = False
     gnn_hidden_dim: int = 128
     gnn_num_layers: int = 3

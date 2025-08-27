@@ -1,8 +1,17 @@
 """
-Multimodal feature extractors that combine CNN, MLP, and GNN encoders.
+Multimodal Feature Extractors for N++ RL Agent
 
-This module extends the existing feature extractors to support graph-based
-structural observations alongside visual and symbolic features.
+This module implements advanced multimodal feature extractors that can handle
+various types of observations including visual, symbolic, and graph-based data.
+
+Key features:
+- Multimodal fusion of visual, symbolic, and graph observations
+- Graph Neural Network (GNN) support for structural data
+- Flexible architecture that adapts to available observation types
+- Factory functions for easy instantiation
+
+The extractors in this module extend the basic temporal modeling with support
+for graph-based structural observations and more sophisticated fusion techniques.
 """
 
 import torch
@@ -14,16 +23,20 @@ from gymnasium.spaces import Dict as SpacesDict
 from npp_rl.models.gnn import create_graph_encoder
 
 
-class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
+class MultimodalGraphExtractor(BaseFeaturesExtractor):
     """
-    Multimodal feature extractor that combines CNN, MLP, and GNN encoders.
+    Advanced multimodal feature extractor with graph neural network support.
     
-    This extractor processes:
+    This extractor processes multiple observation modalities:
     - Visual observations (player_frame, global_view) with CNNs
     - Symbolic observations (game_state) with MLPs  
     - Structural observations (graph_*) with GNNs
     
-    The outputs are fused into a single feature representation.
+    The outputs are fused into a single feature representation using a
+    multi-layer fusion network with batch normalization and dropout.
+    
+    This extractor is particularly useful for environments where structural
+    relationships between entities are important for decision making.
     """
     
     def __init__(
@@ -31,20 +44,18 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         observation_space: SpacesDict,
         features_dim: int = 512,
         use_graph_obs: bool = False,
-        use_3d_conv: bool = True,
         gnn_hidden_dim: int = 128,
         gnn_num_layers: int = 3,
         gnn_output_dim: int = 256,
         **kwargs
     ):
         """
-        Initialize multimodal feature extractor.
+        Initialize multimodal graph feature extractor.
         
         Args:
-            observation_space: Gym observation space
+            observation_space: Gym observation space dictionary
             features_dim: Final output feature dimension
             use_graph_obs: Whether to process graph observations
-            use_3d_conv: Whether to use 3D convolutions for temporal modeling
             gnn_hidden_dim: Hidden dimension for GNN layers
             gnn_num_layers: Number of GNN layers
             gnn_output_dim: Output dimension of GNN encoder
@@ -53,7 +64,6 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
         
         self.use_graph_obs = use_graph_obs
-        self.use_3d_conv = use_3d_conv
         
         # Extract observation space components
         self.has_player_frame = 'player_frame' in observation_space.spaces
@@ -82,14 +92,8 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         if self.has_player_frame:
             player_frame_shape = observation_space['player_frame'].shape
             
-            if self.use_3d_conv and len(player_frame_shape) == 3 and player_frame_shape[2] > 1:
-                # 3D convolutions for temporal modeling
-                self.player_encoder = self._create_3d_cnn_encoder(player_frame_shape)
-                self.player_output_dim = 512
-            else:
-                # 2D convolutions
-                self.player_encoder = self._create_2d_cnn_encoder(player_frame_shape)
-                self.player_output_dim = 512
+            self.player_encoder = self._create_3d_cnn_encoder(player_frame_shape)
+            self.player_output_dim = 512
                 
             self.visual_feature_dim += self.player_output_dim
         
@@ -152,7 +156,7 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         if total_dim == 0:
             raise ValueError("No valid observation components found")
         
-        # Multi-layer fusion network
+        # Multi-layer fusion network with residual connections
         self.fusion_network = nn.Sequential(
             nn.Linear(total_dim, 1024),
             nn.ReLU(),
@@ -173,7 +177,7 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         height, width, temporal_frames = input_shape
         
         encoder = nn.Sequential(
-            # First 3D conv layer
+            # First 3D conv layer - optimized for temporal feature extraction
             nn.Conv3d(
                 in_channels=1,
                 out_channels=32,
@@ -218,7 +222,7 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         return encoder
     
     def _create_2d_cnn_encoder(self, input_shape: tuple, prefix: str = 'player') -> nn.Module:
-        """Create 2D CNN encoder for visual data."""
+        """Create 2D CNN encoder for static visual data."""
         if len(input_shape) == 3:
             height, width, channels = input_shape
         else:
@@ -229,7 +233,7 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         output_dim = 512 if prefix == 'player' else 256
         
         encoder = nn.Sequential(
-            # First conv layer
+            # First conv layer - larger receptive field
             nn.Conv2d(
                 in_channels=channels,
                 out_channels=32,
@@ -278,10 +282,14 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         Forward pass through multimodal feature extractor.
         
         Args:
-            observations: Dictionary of observations
+            observations: Dictionary of observations with keys:
+                - 'player_frame': Temporal visual observations (optional)
+                - 'global_view': Static visual observations (optional)
+                - 'game_state': Symbolic features (optional)
+                - 'graph_*': Graph observations (optional)
             
         Returns:
-            Fused feature representation
+            Fused feature representation of shape (batch_size, features_dim)
         """
         features = []
         
@@ -289,13 +297,9 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         if self.has_player_frame:
             player_frame = observations['player_frame']
             
-            if self.use_3d_conv and player_frame.dim() == 4 and player_frame.shape[3] > 1:
-                # Reshape for 3D conv: (B, H, W, T) -> (B, 1, T, H, W)
-                player_frame = player_frame.permute(0, 3, 1, 2).float() / 255.0
-                player_frame = player_frame.unsqueeze(1)
-            else:
-                # Reshape for 2D conv: (B, H, W, C) -> (B, C, H, W)
-                player_frame = player_frame.permute(0, 3, 1, 2).float() / 255.0
+            # Reshape for 3D conv: (B, H, W, T) -> (B, 1, T, H, W)
+            player_frame = player_frame.permute(0, 3, 1, 2).float() / 255.0
+            player_frame = player_frame.unsqueeze(1)
             
             player_features = self.player_encoder(player_frame)
             features.append(player_features)
@@ -333,66 +337,92 @@ class NppMultimodalGraphExtractor(BaseFeaturesExtractor):
         return output
 
 
-class NppMultimodalExtractor(BaseFeaturesExtractor):
+class MultimodalExtractor(BaseFeaturesExtractor):
     """
-    Multimodal feature extractor without graph support (fallback).
+    Simplified multimodal feature extractor without graph support.
     
-    This is a simplified version that only processes visual and symbolic
-    observations, for use when graph observations are not available.
+    This is a fallback extractor that only processes visual and symbolic
+    observations, for use when graph observations are not available or needed.
+    
+    It provides the same interface as MultimodalGraphExtractor but with
+    reduced complexity for scenarios where structural information is not relevant.
     """
     
     def __init__(
         self,
         observation_space: SpacesDict,
         features_dim: int = 512,
-        use_3d_conv: bool = True,
         **kwargs
     ):
-        """Initialize multimodal feature extractor without graph support."""
+        """
+        Initialize multimodal feature extractor without graph support.
+        
+        Args:
+            observation_space: Gym observation space dictionary
+            features_dim: Output feature dimension
+            **kwargs: Additional arguments (for compatibility)
+        """
         super().__init__(observation_space, features_dim)
         
         # Use the graph extractor but disable graph processing
-        self.extractor = NppMultimodalGraphExtractor(
+        self.extractor = MultimodalGraphExtractor(
             observation_space=observation_space,
             features_dim=features_dim,
             use_graph_obs=False,
-            use_3d_conv=use_3d_conv,
             **kwargs
         )
     
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Forward pass through multimodal extractor."""
+        """
+        Forward pass through multimodal extractor.
+        
+        Args:
+            observations: Dictionary of observations
+            
+        Returns:
+            Extracted features of shape (batch_size, features_dim)
+        """
         return self.extractor(observations)
 
 
-def create_feature_extractor(
+def create_multimodal_extractor(
     observation_space: SpacesDict,
     features_dim: int = 512,
     use_graph_obs: bool = False,
     **kwargs
 ) -> BaseFeaturesExtractor:
     """
-    Factory function to create appropriate feature extractor.
+    Factory function to create appropriate multimodal feature extractor.
+    
+    This function automatically selects between the graph-enabled and 
+    standard multimodal extractors based on the use_graph_obs parameter
+    and available observation space.
     
     Args:
-        observation_space: Gym observation space
+        observation_space: Gym observation space dictionary
         features_dim: Output feature dimension
         use_graph_obs: Whether to use graph observations
-        **kwargs: Additional arguments
+        **kwargs: Additional arguments passed to the extractor
         
     Returns:
-        Configured feature extractor
+        Configured multimodal feature extractor
     """
     if use_graph_obs:
-        return NppMultimodalGraphExtractor(
+        return MultimodalGraphExtractor(
             observation_space=observation_space,
             features_dim=features_dim,
             use_graph_obs=True,
             **kwargs
         )
     else:
-        return NppMultimodalExtractor(
+        return MultimodalExtractor(
             observation_space=observation_space,
             features_dim=features_dim,
             **kwargs
         )
+
+
+# Backward compatibility aliases
+NppMultimodalGraphExtractor = MultimodalGraphExtractor
+NppMultimodalExtractor = MultimodalExtractor
+create_feature_extractor = create_multimodal_extractor

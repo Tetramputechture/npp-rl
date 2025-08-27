@@ -13,7 +13,7 @@ import shutil
 
 from npp_rl.config.phase2_config import Phase2Config, create_full_phase2_config
 from npp_rl.data.bc_dataset import create_mock_replay_data, create_bc_dataloader
-from npp_rl.models.feature_extractors import create_feature_extractor
+from npp_rl.feature_extractors import create_feature_extractor
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
 from npp_rl.wrappers.intrinsic_reward_wrapper import IntrinsicRewardWrapper
 from npp_rl.eval.exploration_metrics import ExplorationMetrics
