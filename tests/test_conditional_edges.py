@@ -17,22 +17,7 @@ from npp_rl.models.physics_constraints import (
 )
 
 # Import EdgeType for testing
-try:
-    import sys
-    import os
-    nclone_path = os.path.join(os.path.dirname(__file__), '..', '..', 'nclone')
-    if os.path.exists(nclone_path) and nclone_path not in sys.path:
-        sys.path.insert(0, nclone_path)
-    from nclone.graph.graph_builder import EdgeType
-except ImportError:
-    from enum import IntEnum
-    class EdgeType(IntEnum):
-        WALK = 0
-        JUMP = 1
-        WALL_SLIDE = 2
-        FALL = 3
-        ONE_WAY = 4
-        FUNCTIONAL = 5
+from nclone.graph.graph_builder import EdgeType
 
 
 class TestConditionalEdgeMasker:

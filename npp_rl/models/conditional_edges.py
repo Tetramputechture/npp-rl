@@ -11,24 +11,7 @@ from typing import Dict, Any, Optional
 import logging
 
 # Import EdgeType from nclone graph builder
-try:
-    import sys
-    import os
-    nclone_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nclone')
-    if os.path.exists(nclone_path) and nclone_path not in sys.path:
-        sys.path.insert(0, nclone_path)
-    from nclone.graph.graph_builder import EdgeType
-except ImportError as e:
-    logging.warning(f"Could not import EdgeType: {e}")
-    # Fallback EdgeType definition
-    from enum import IntEnum
-    class EdgeType(IntEnum):
-        WALK = 0
-        JUMP = 1
-        WALL_SLIDE = 2
-        FALL = 3
-        ONE_WAY = 4
-        FUNCTIONAL = 5
+from nclone.graph.graph_builder import EdgeType
 
 # Physics constraint constants
 MIN_WALL_JUMP_SPEED = 1.0  # Minimum horizontal speed for wall jumps
