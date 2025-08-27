@@ -8,22 +8,17 @@ decision making in the reinforcement learning agent.
 
 import numpy as np
 from collections import deque
-from typing import Tuple, Optional, List
+from typing import Tuple
+from nclone.constants import GRAVITY_FALL, MAX_HOR_SPEED
 
-# Import physics constants
-import sys
-import os
-nclone_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nclone')
-if os.path.exists(nclone_path) and nclone_path not in sys.path:
-    sys.path.insert(0, nclone_path)
-
-try:
-    from nclone.constants import GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED
-except ImportError:
-    # Fallback constants
-    GRAVITY_FALL = 0.06666666666666665
-    GRAVITY_JUMP = 0.01111111111111111
-    MAX_HOR_SPEED = 3.333333333333333
+VELOCITY_CLAMP_MULTIPLIER = 1.5
+VELOCITY_CLAMP_BOUND = MAX_HOR_SPEED * VELOCITY_CLAMP_MULTIPLIER
+STABILITY_VARIANCE_DENOMINATOR = MAX_HOR_SPEED ** 2 * 0.5
+NORMALIZATION_CLAMP_BOUND = 2.0
+PREDICTION_FRAMES_FOR_POSITION_NORM = 5
+POSITION_CHANGE_NORM_DIVISOR = PREDICTION_FRAMES_FOR_POSITION_NORM * MAX_HOR_SPEED
+SPEED_TREND_WINDOW = 3
+SPEED_TREND_DIVISOR = 2.0
 
 
 class MomentumTracker:
@@ -46,11 +41,6 @@ class MomentumTracker:
         self.velocity_history = deque(maxlen=history_length)
         self.position_history = deque(maxlen=history_length)
         self.timestamp_history = deque(maxlen=history_length)
-        
-        # Physics constants
-        self.gravity_fall = GRAVITY_FALL
-        self.gravity_jump = GRAVITY_JUMP
-        self.max_hor_speed = MAX_HOR_SPEED
         
         # Current frame counter
         self.frame_count = 0
@@ -145,7 +135,7 @@ class MomentumTracker:
         # Apply gravity if requested
         if use_gravity:
             # Use fall gravity as default (more conservative)
-            gravity_accel = (0.0, self.gravity_fall)
+            gravity_accel = (0.0, GRAVITY_FALL)
             acceleration = (acceleration[0] + gravity_accel[0], 
                           acceleration[1] + gravity_accel[1])
         
@@ -175,7 +165,7 @@ class MomentumTracker:
         
         # Apply gravity if requested
         if use_gravity:
-            gravity_accel = (0.0, self.gravity_fall)
+            gravity_accel = (0.0, GRAVITY_FALL)
             acceleration = (acceleration[0] + gravity_accel[0], 
                           acceleration[1] + gravity_accel[1])
         
@@ -185,7 +175,7 @@ class MomentumTracker:
         future_vy = current_vel[1] + acceleration[1] * t
         
         # Clamp horizontal velocity to reasonable bounds
-        future_vx = np.clip(future_vx, -self.max_hor_speed * 1.5, self.max_hor_speed * 1.5)
+        future_vx = np.clip(future_vx, -VELOCITY_CLAMP_BOUND, VELOCITY_CLAMP_BOUND)
         
         return (future_vx, future_vy)
     
@@ -208,7 +198,7 @@ class MomentumTracker:
         
         # Convert to stability score (lower variance = higher stability)
         # Use exponential decay to map variance to [0,1], with more sensitivity
-        stability = np.exp(-total_variance / (self.max_hor_speed ** 2 * 0.5))
+        stability = np.exp(-total_variance / STABILITY_VARIANCE_DENOMINATOR)
         
         return float(np.clip(stability, 0.0, 1.0))
     
@@ -246,23 +236,23 @@ class MomentumTracker:
         stability = self.get_movement_stability()
         
         # Speed trend (positive = accelerating, negative = decelerating)
-        if len(self.velocity_history) >= 3:
-            recent_speeds = [np.sqrt(vx*vx + vy*vy) for vx, vy in list(self.velocity_history)[-3:]]
-            speed_trend = (recent_speeds[-1] - recent_speeds[0]) / 2.0
-            speed_trend = np.clip(speed_trend / self.max_hor_speed, -1.0, 1.0)
+        if len(self.velocity_history) >= SPEED_TREND_WINDOW:
+            recent_speeds = [np.sqrt(vx*vx + vy*vy) for vx, vy in list(self.velocity_history)[-SPEED_TREND_WINDOW:]]
+            speed_trend = (recent_speeds[-1] - recent_speeds[0]) / SPEED_TREND_DIVISOR
+            speed_trend = np.clip(speed_trend / MAX_HOR_SPEED, -1.0, 1.0)
         else:
             speed_trend = 0.0
         
         # Normalize features with proper clamping
         features = np.array([
-            np.clip(curr_accel[0] / self.max_hor_speed, -2.0, 2.0),  # Normalized acceleration x
-            np.clip(curr_accel[1] / self.max_hor_speed, -2.0, 2.0),  # Normalized acceleration y
-            np.clip(avg_accel[0] / self.max_hor_speed, -2.0, 2.0),   # Normalized avg acceleration x
-            np.clip(avg_accel[1] / self.max_hor_speed, -2.0, 2.0),   # Normalized avg acceleration y
-            np.clip(pos_change[0] / (5 * self.max_hor_speed), -2.0, 2.0),  # Normalized position change x
-            np.clip(pos_change[1] / (5 * self.max_hor_speed), -2.0, 2.0),  # Normalized position change y
-            np.clip(future_vel[0] / self.max_hor_speed, -2.0, 2.0),  # Normalized future velocity x
-            np.clip(future_vel[1] / self.max_hor_speed, -2.0, 2.0),  # Normalized future velocity y
+            np.clip(curr_accel[0] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized acceleration x
+            np.clip(curr_accel[1] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized acceleration y
+            np.clip(avg_accel[0] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),   # Normalized avg acceleration x
+            np.clip(avg_accel[1] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),   # Normalized avg acceleration y
+            np.clip(pos_change[0] / POSITION_CHANGE_NORM_DIVISOR, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized position change x
+            np.clip(pos_change[1] / POSITION_CHANGE_NORM_DIVISOR, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized position change y
+            np.clip(future_vel[0] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized future velocity x
+            np.clip(future_vel[1] / MAX_HOR_SPEED, -NORMALIZATION_CLAMP_BOUND, NORMALIZATION_CLAMP_BOUND),  # Normalized future velocity y
             stability,                           # Movement stability [0,1]
             speed_trend                          # Speed trend [-1,1]
         ], dtype=np.float32)
