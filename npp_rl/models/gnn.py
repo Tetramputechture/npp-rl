@@ -63,28 +63,46 @@ class GraphSAGELayer(nn.Module):
         node_features: torch.Tensor,
         edge_index: torch.Tensor,
         node_mask: torch.Tensor,
-        edge_mask: torch.Tensor
+        edge_mask: torch.Tensor,
+        ninja_physics_state: torch.Tensor = None,
+        edge_features: torch.Tensor = None
     ) -> torch.Tensor:
         """
-        Forward pass through GraphSAGE layer.
+        Forward pass through GraphSAGE layer with conditional edge masking.
         
         Args:
             node_features: Node features [batch_size, num_nodes, in_dim]
             edge_index: Edge indices [batch_size, 2, num_edges]
             node_mask: Node mask [batch_size, num_nodes]
             edge_mask: Edge mask [batch_size, num_edges]
+            ninja_physics_state: Optional ninja physics state [batch_size, 18] or [18]
+            edge_features: Optional edge features [batch_size, num_edges, edge_feat_dim]
             
         Returns:
             Updated node features [batch_size, num_nodes, out_dim]
         """
         batch_size, num_nodes, _ = node_features.shape
         
+        # Apply dynamic edge masking if physics state available
+        if ninja_physics_state is not None and edge_features is not None:
+            if not hasattr(self, 'edge_masker'):
+                from .conditional_edges import ConditionalEdgeMasker
+                self.edge_masker = ConditionalEdgeMasker()
+                # Move to same device as node_features
+                self.edge_masker = self.edge_masker.to(node_features.device)
+            
+            dynamic_edge_mask = self.edge_masker.compute_dynamic_edge_mask(
+                edge_features, ninja_physics_state, edge_mask
+            )
+        else:
+            dynamic_edge_mask = edge_mask
+        
         # Self transformation
         self_features = self.self_linear(node_features)
         
-        # Neighbor aggregation
+        # Neighbor aggregation with dynamic edge mask
         neighbor_features = self._aggregate_neighbors(
-            node_features, edge_index, node_mask, edge_mask
+            node_features, edge_index, node_mask, dynamic_edge_mask
         )
         neighbor_features = self.neighbor_linear(neighbor_features)
         
@@ -226,7 +244,7 @@ class GraphEncoder(nn.Module):
     
     def forward(self, graph_obs: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        Forward pass through graph encoder.
+        Forward pass through graph encoder with conditional edge masking.
         
         Args:
             graph_obs: Dictionary containing:
@@ -235,6 +253,7 @@ class GraphEncoder(nn.Module):
                 - graph_edge_feats: [batch_size, num_edges, edge_feat_dim]
                 - graph_node_mask: [batch_size, num_nodes]
                 - graph_edge_mask: [batch_size, num_edges]
+                - ninja_physics_state: Optional [batch_size, 18] ninja physics state
                 
         Returns:
             Graph embedding [batch_size, output_dim]
@@ -243,14 +262,18 @@ class GraphEncoder(nn.Module):
         edge_index = graph_obs['graph_edge_index']
         node_mask = graph_obs['graph_node_mask']
         edge_mask = graph_obs['graph_edge_mask']
+        
+        # Extract optional physics state and edge features for conditional masking
+        ninja_physics_state = graph_obs.get('ninja_physics_state', None)
+        edge_features = graph_obs.get('graph_edge_feats', None)
                 
         # Input projection
         x = self.input_projection(node_features)
         x = F.relu(x)
         
-        # Apply GraphSAGE layers
+        # Apply GraphSAGE layers with conditional edge masking
         for layer in self.gnn_layers:
-            x = layer(x, edge_index, node_mask, edge_mask)
+            x = layer(x, edge_index, node_mask, edge_mask, ninja_physics_state, edge_features)
         
         # Global pooling
         graph_embedding = self._global_pool(x, node_mask)
