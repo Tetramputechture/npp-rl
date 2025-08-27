@@ -45,6 +45,14 @@ Multiple feature extractor architectures are available in the consolidated `npp_
 
 Both extractors process the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs and the game state vector are then fused and passed to the policy and value networks.
 
+*   **`HierarchicalMultimodalExtractor` (Advanced - Task 2.1)**:
+    *   Implements multi-resolution graph neural networks for structural level understanding.
+    *   **Three resolution levels**: Sub-cell (6px), Tile (24px), Region (96px) for both local precision and strategic planning.
+    *   **DiffPool GNN**: Differentiable graph pooling with learnable hierarchical representations.
+    *   **Multi-scale fusion**: Context-aware attention mechanisms that adapt to ninja physics state.
+    *   **Auxiliary losses**: Link prediction, entropy, and orthogonality regularization for stable training.
+    *   Integrates seamlessly with existing CNN/MLP processing for comprehensive multimodal understanding.
+
 ### 3. Network Architecture & Hyperparameters
 
 *   **Policy and Value Networks**:
@@ -237,6 +245,74 @@ The architecture and training procedures are informed by principles and findings
 *   Ecoffet, A., Huizinga, J., Lehman, J., Stanley, K. O., & Clune, J. (2019). Go-Explore: a New Approach for Hard-Exploration Problems. (Inspired adaptive novelty components).
 *   Mnih, V., et al. (2013). Playing Atari with Deep Reinforcement Learning. (Foundation for CNNs in RL).
 *   Kaplan, J., et al. (2020). Scaling Laws for Neural Language Models. (General insights into model scaling).
+*   Ying, R., et al. (2018). Hierarchical Graph Representation Learning with Differentiable Pooling. (DiffPool implementation for hierarchical GNNs).
+*   Hamilton, W., Ying, Z., & Leskovec, J. (2017). Inductive Representation Learning on Large Graphs. (GraphSAGE foundation for graph neural networks).
+
+## Advanced Features: Hierarchical Graph Processing (Task 2.1)
+
+The project now includes state-of-the-art hierarchical graph neural networks for structural level understanding, implementing multi-resolution processing that enables both precise local movement decisions and strategic global planning.
+
+### Multi-Resolution Graph Architecture
+
+The hierarchical graph system processes N++ levels at three resolution levels:
+
+*   **Sub-cell Level (6px resolution)**: Fine-grained movement precision with ~15,456 nodes
+*   **Tile Level (24px resolution)**: Standard game mechanics with ~966 nodes  
+*   **Region Level (96px resolution)**: Strategic planning with ~60 nodes
+
+### Key Components
+
+*   **Hierarchical Graph Builder** (`nclone/graph/hierarchical_builder.py`):
+    *   Creates multi-resolution representations through graph coarsening
+    *   Maintains cross-scale connectivity for information flow
+    *   Aggregates features from fine to coarse levels with statistical summaries
+
+*   **DiffPool GNN** (`npp_rl/models/diffpool_gnn.py`):
+    *   Implements differentiable graph pooling with soft cluster assignments
+    *   Enables end-to-end training of hierarchical representations
+    *   Includes auxiliary losses (link prediction, entropy, orthogonality) for stable training
+
+*   **Multi-Scale Fusion** (`npp_rl/models/multi_scale_fusion.py`):
+    *   Context-aware attention mechanisms that adapt to ninja physics state
+    *   Learned routing between resolution levels
+    *   Dynamic scale selection based on current task requirements
+
+*   **Hierarchical Multimodal Extractor** (`npp_rl/feature_extractors/hierarchical_multimodal.py`):
+    *   Integrates hierarchical graph processing with existing CNN/MLP architectures
+    *   Supports auxiliary loss training for improved representations
+    *   Graceful fallback when hierarchical graph data is unavailable
+
+### Usage Example
+
+```python
+from npp_rl.feature_extractors.hierarchical_multimodal import create_hierarchical_multimodal_extractor
+
+# Create hierarchical feature extractor
+extractor = create_hierarchical_multimodal_extractor(
+    observation_space=env.observation_space,
+    features_dim=512,
+    use_hierarchical_graph=True
+)
+
+# Use in PPO training with auxiliary losses
+policy_kwargs = {
+    'features_extractor_class': type(extractor),
+    'features_extractor_kwargs': {
+        'enable_auxiliary_losses': True,
+        'hierarchical_hidden_dim': 128,
+        'fusion_dim': 256
+    }
+}
+
+model = PPO(
+    policy="MultiInputPolicy",
+    env=env,
+    policy_kwargs=policy_kwargs,
+    # ... other parameters
+)
+```
+
+For detailed implementation information, see `TASK_2_1_IMPLEMENTATION_SUMMARY.md`.
 
 ## Dependencies and Installation
 
