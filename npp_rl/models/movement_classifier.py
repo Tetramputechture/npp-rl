@@ -9,8 +9,8 @@ import math
 from typing import Tuple, Optional, Dict, Any
 from enum import IntEnum
 
-from nclone.constants import (  # noqa: F401
-    MAX_HOR_SPEED, NINJA_RADIUS, GROUND_ACCEL, AIR_ACCEL,
+from nclone.constants import (
+    MAX_HOR_SPEED, GROUND_ACCEL,
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y
 )
 
