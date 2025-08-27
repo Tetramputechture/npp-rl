@@ -11,7 +11,7 @@ from gymnasium.spaces import Box, Dict as SpacesDict
 
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
 from npp_rl.models.gnn import GraphEncoder, create_graph_encoder
-from npp_rl.models.feature_extractors import NppMultimodalGraphExtractor
+from npp_rl.feature_extractors import NppMultimodalGraphExtractor
 from nclone.graph.graph_builder import GraphBuilder, N_MAX_NODES, E_MAX_EDGES
 
 
@@ -146,7 +146,6 @@ def test_multimodal_extractor():
         observation_space=observation_space,
         features_dim=512,
         use_graph_obs=True,
-        use_3d_conv=False  # Use 2D for simplicity
     )
     
     # Create mock observations
@@ -186,7 +185,6 @@ def test_without_graph():
         observation_space=observation_space,
         features_dim=512,
         use_graph_obs=False,
-        use_3d_conv=False
     )
     
     # Create mock observations

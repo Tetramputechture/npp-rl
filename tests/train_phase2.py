@@ -24,7 +24,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 sys.path.append(str(Path(__file__).parent))
 
 from npp_rl.config.phase2_config import Phase2Config, get_config_presets, validate_config
-from npp_rl.models.feature_extractors import create_feature_extractor
+from npp_rl.feature_extractors import create_feature_extractor
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
 from npp_rl.wrappers.intrinsic_reward_wrapper import IntrinsicRewardWrapper
 from npp_rl.eval.exploration_metrics import ExplorationMetrics, create_exploration_callback
@@ -125,7 +125,6 @@ class Phase2Trainer:
         feature_extractor_kwargs = {
             'features_dim': self.config.feature_extractor.features_dim,
             'use_graph_obs': self.config.feature_extractor.use_graph_obs,
-            'use_3d_conv': self.config.feature_extractor.use_3d_conv,
             'gnn_hidden_dim': self.config.feature_extractor.gnn_hidden_dim,
             'gnn_num_layers': self.config.feature_extractor.gnn_num_layers,
             'gnn_output_dim': self.config.feature_extractor.gnn_output_dim

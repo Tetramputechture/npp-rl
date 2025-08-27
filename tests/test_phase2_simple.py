@@ -11,7 +11,7 @@ from gymnasium.spaces import Box, Dict as SpacesDict
 
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
 from npp_rl.models.gnn import GraphEncoder, create_graph_encoder
-from npp_rl.models.feature_extractors import NppMultimodalGraphExtractor
+from npp_rl.feature_extractors import NppMultimodalGraphExtractor
 from npp_rl.eval.exploration_metrics import ExplorationMetrics
 from npp_rl.config.phase2_config import Phase2Config, create_full_phase2_config
 from nclone.graph.graph_builder import GraphBuilder, N_MAX_NODES, E_MAX_EDGES
@@ -132,8 +132,7 @@ def test_feature_extractor_standalone():
     extractor = NppMultimodalGraphExtractor(
         observation_space=observation_space,
         features_dim=512,
-        use_graph_obs=True,
-        use_3d_conv=False
+        use_graph_obs=True
     )
     
     # Create mock observations
@@ -163,8 +162,7 @@ def test_feature_extractor_standalone():
     extractor_no_graph = NppMultimodalGraphExtractor(
         observation_space=obs_space_no_graph,
         features_dim=512,
-        use_graph_obs=False,
-        use_3d_conv=False
+        use_graph_obs=False
     )
     
     obs_no_graph = {
@@ -280,8 +278,7 @@ def test_integration_without_env():
     extractor = NppMultimodalGraphExtractor(
         observation_space=observation_space,
         features_dim=512,
-        use_graph_obs=True,
-        use_3d_conv=False
+        use_graph_obs=True
     )
     
     # Create ICM

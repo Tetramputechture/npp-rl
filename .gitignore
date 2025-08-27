@@ -53,3 +53,5 @@ actions/
 # Tune logs
 tune_logs/
 
+# Ruff
+.ruff_cache/
