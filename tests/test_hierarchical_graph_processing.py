@@ -657,5 +657,89 @@ class TestIntegrationBehavior:
         assert fused_features.device == device
 
 
+class TestErrorHandling:
+    """Test error handling and edge cases."""
+    
+    def test_invalid_input_handling(self):
+        """Test that components handle invalid inputs gracefully."""
+        scale_dims = {'level_0': 32}
+        
+        fusion = AdaptiveScaleFusion(
+            scale_dims=scale_dims,
+            fusion_dim=64,
+            context_dim=18
+        )
+        
+        # Test with empty scale features
+        with pytest.raises(ValueError, match="scale_features cannot be empty"):
+            fusion({}, torch.randn(2, 18))
+        
+        # Test with invalid tensor
+        with pytest.raises(ValueError, match="must be a torch.Tensor"):
+            fusion({'level_0': "not_a_tensor"}, torch.randn(2, 18))
+        
+        # Test with empty tensor
+        with pytest.raises(ValueError, match="cannot be empty"):
+            fusion({'level_0': torch.empty(0)}, torch.randn(2, 18))
+    
+    def test_hierarchical_builder_validation(self):
+        """Test hierarchical builder input validation."""
+        try:
+            from nclone.graph.hierarchical_builder import HierarchicalGraphBuilder
+            builder = HierarchicalGraphBuilder()
+            
+            # Test with invalid level_data
+            with pytest.raises(ValueError, match="level_data must be a dictionary"):
+                builder.build_hierarchical_graph("not_a_dict", (0, 0), [])
+            
+            # Test with invalid ninja_position
+            with pytest.raises(ValueError, match="ninja_position must be a tuple/list of length 2"):
+                builder.build_hierarchical_graph({}, (0,), [])
+            
+            # Test with invalid entities
+            with pytest.raises(ValueError, match="entities must be a list"):
+                builder.build_hierarchical_graph({}, (0, 0), "not_a_list")
+                
+        except ImportError:
+            pytest.skip("HierarchicalGraphBuilder not available")
+    
+    def test_numerical_stability(self):
+        """Test numerical stability with extreme values."""
+        layer = DiffPoolLayer(
+            input_dim=16,
+            hidden_dim=8,
+            output_dim=8,
+            num_clusters=4,
+            gnn_layers=1,
+            dropout=0.0
+        )
+        
+        # Test with very large values
+        large_features = torch.randn(1, 8, 16) * 1000
+        edge_index = torch.randint(0, 8, (1, 2, 16))
+        node_mask = torch.ones(1, 8)
+        edge_mask = torch.ones(1, 16)
+        
+        pooled_features, _, _, _, aux_losses = layer(
+            large_features, edge_index, node_mask, edge_mask
+        )
+        
+        # Should still produce finite outputs
+        assert torch.isfinite(pooled_features).all()
+        assert torch.isfinite(aux_losses['link_loss'])
+        assert torch.isfinite(aux_losses['entropy_loss'])
+        
+        # Test with very small values
+        small_features = torch.randn(1, 8, 16) * 1e-6
+        
+        pooled_features, _, _, _, aux_losses = layer(
+            small_features, edge_index, node_mask, edge_mask
+        )
+        
+        assert torch.isfinite(pooled_features).all()
+        assert torch.isfinite(aux_losses['link_loss'])
+        assert torch.isfinite(aux_losses['entropy_loss'])
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

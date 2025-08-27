@@ -4,6 +4,16 @@ Multi-scale feature fusion for hierarchical graph neural networks.
 This module implements advanced fusion mechanisms that combine features
 from multiple resolution levels with attention-based weighting and
 context-aware processing for N++ level understanding.
+
+Key Components:
+- AdaptiveScaleFusion: Context-aware weighting based on ninja physics state
+- HierarchicalFeatureAggregator: Learned routing between resolution levels  
+- ContextAwareScaleSelector: Dynamic attention to appropriate scales
+- UnifiedMultiScaleFusion: Integrated fusion combining all mechanisms
+
+The fusion mechanisms enable the model to dynamically focus on the most
+relevant resolution level based on the current task requirements and
+ninja state, improving both local precision and strategic planning.
 """
 
 import torch
@@ -125,7 +135,21 @@ class AdaptiveScaleFusion(nn.Module):
             
         Returns:
             Tuple of (fused_features, attention_weights)
+            
+        Raises:
+            ValueError: If scale_features is empty or contains invalid tensors
         """
+        # Input validation
+        if not scale_features:
+            raise ValueError("scale_features cannot be empty")
+        
+        # Check that all scale features are valid tensors
+        for scale_name, features in scale_features.items():
+            if not isinstance(features, torch.Tensor):
+                raise ValueError(f"Features for scale '{scale_name}' must be a torch.Tensor")
+            if features.numel() == 0:
+                raise ValueError(f"Features for scale '{scale_name}' cannot be empty")
+        
         batch_size = next(iter(scale_features.values())).shape[0]
         device = next(iter(scale_features.values())).device
         

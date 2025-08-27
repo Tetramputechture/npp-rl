@@ -212,7 +212,22 @@ class HierarchicalMultimodalExtractor(BaseFeaturesExtractor):
             
         Returns:
             Tuple of (hierarchical_features, fusion_info)
+            
+        Raises:
+            KeyError: If required hierarchical graph observations are missing
+            RuntimeError: If hierarchical graph processing fails
         """
+        # Validate required keys are present
+        required_keys = [
+            'sub_cell_node_features', 'sub_cell_edge_index', 'sub_cell_node_mask', 'sub_cell_edge_mask',
+            'tile_node_features', 'tile_edge_index', 'tile_node_mask', 'tile_edge_mask',
+            'region_node_features', 'region_edge_index', 'region_node_mask', 'region_edge_mask'
+        ]
+        
+        missing_keys = [key for key in required_keys if key not in observations]
+        if missing_keys:
+            raise KeyError(f"Missing required hierarchical graph observations: {missing_keys}")
+        
         # Extract ninja physics state if available
         ninja_physics_state = observations.get('ninja_physics_state', None)
         

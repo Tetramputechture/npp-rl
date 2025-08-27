@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List, Any, Union
 
 from .gnn import GraphSAGELayer
 
@@ -128,11 +128,16 @@ class DiffPoolLayer(nn.Module):
             )
             assignments = self.dropout(assignments)
         
-        # Apply softmax to get soft cluster assignments
+        # Apply softmax to get soft cluster assignments with numerical stability
         assignments = F.softmax(assignments, dim=-1)  # [batch_size, num_nodes, num_clusters]
         
-        # Apply node mask to assignments
+        # Apply node mask to assignments and ensure numerical stability
         assignments = assignments * node_mask.unsqueeze(-1)
+        
+        # Normalize assignments to ensure they sum to 1 for valid nodes
+        assignment_sums = torch.sum(assignments, dim=-1, keepdim=True)
+        assignment_sums = torch.clamp(assignment_sums, min=1e-8)  # Prevent division by zero
+        assignments = assignments / assignment_sums
         
         # Pool node features: X_pooled = S^T * Z
         pooled_node_features = torch.bmm(
