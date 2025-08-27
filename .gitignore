@@ -55,3 +55,6 @@ tune_logs/
 
 # Ruff
 .ruff_cache/
+
+# OpenHands tasks
+.openhands/TASKS.md
