@@ -135,8 +135,21 @@ class TestConditionalEdgeMasker:
         # High velocity requirement edge should be disabled
         assert dynamic_mask[4] == 0.0  # Edge with min_velocity = 1.2
         
-        # Lower velocity requirement edges should remain enabled
-        assert dynamic_mask[1] == 1.0  # Edge with min_velocity = 0.5 (but ninja can't jump)
+        # Edge with min_velocity = 0.5 should also be disabled (ninja only has 0.2 velocity)
+        assert dynamic_mask[1] == 0.0  # Edge with min_velocity = 0.5, ninja has 0.2
+        
+        # Test with sufficient velocity
+        ninja_state_fast = self.ninja_physics_state.clone()
+        ninja_state_fast[2] = 0.8  # vel_magnitude = 0.8 (sufficient for edge 1)
+        
+        dynamic_mask_fast = self.masker.compute_dynamic_edge_mask(
+            self.edge_features, ninja_state_fast, self.base_edge_mask
+        )
+        
+        # Edge 1 should now be enabled (has sufficient velocity and can jump)
+        assert dynamic_mask_fast[1] == 1.0  # Edge with min_velocity = 0.5, ninja has 0.8
+        # Edge 4 should still be disabled (requires 1.2 velocity, ninja has 0.8)
+        assert dynamic_mask_fast[4] == 0.0
     
     def test_batched_input(self):
         """Test masker with batched input."""
@@ -361,6 +374,20 @@ class TestPhysicsConstraintValidator:
     
     def test_movement_chain_validation(self):
         """Test validation of movement chains."""
+        # Create a ninja state suitable for walking (needs ground contact)
+        walking_ninja_state = NinjaPhysicsState(
+            position=(100.0, 200.0),
+            velocity=(1.0, -0.5),
+            movement_state=1,  # Running (suitable for walking)
+            ground_contact=True,  # Required for walking
+            wall_contact=False,
+            airborne=False,
+            kinetic_energy=1.5,
+            potential_energy=0.8,
+            can_jump=True,
+            can_wall_jump=False
+        )
+        
         # Create a chain of movements
         walk_trajectory = TrajectoryParams(
             edge_type=EdgeType.WALK,
@@ -390,7 +417,7 @@ class TestPhysicsConstraintValidator:
         
         movement_chain = [walk_trajectory, jump_trajectory]
         
-        result = self.validator.validate_movement_sequence(movement_chain, self.ninja_state)
+        result = self.validator.validate_movement_sequence(movement_chain, walking_ninja_state)
         
         assert result.is_valid
         assert result.energy_used == 1.0  # 0.3 + 0.7
