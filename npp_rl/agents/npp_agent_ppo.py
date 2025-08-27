@@ -15,7 +15,7 @@ import subprocess
 import threading
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.agents.feature_extractor import FeatureExtractor
+from npp_rl.feature_extractors import FeatureExtractor
 from npp_rl.environments.vectorization_wrapper import make_vectorizable_env
 from npp_rl.optimization.h100_optimization import enable_h100_optimizations, get_recommended_batch_size, H100OptimizedTraining
 from npp_rl.callbacks import create_pbrs_callbacks
@@ -53,7 +53,7 @@ def start_tensorboard(logdir):
     print("Tensorboard started. View at http://localhost:6006")
 
 
-def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool = None) -> PPO:
+def create_ppo_agent(env, tensorboard_log: str, n_envs: int) -> PPO:
     """
     Creates a PPO agent with enhanced architecture for the N++ environment.
     Now includes state-of-the-art improvements based on recent research.
@@ -62,7 +62,6 @@ def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool =
         env: The N++ environment instance
         tensorboard_log: Directory for Tensorboard logs
         n_envs: Number of parallel environments
-        use_3d_conv: Whether to use 3D convolutions for temporal modeling
 
     Returns:
         PPO: Configured PPO model instance
@@ -75,28 +74,8 @@ def create_ppo_agent(env, tensorboard_log: str, n_envs: int, use_3d_conv: bool =
         end_fraction=0.9
     )
 
-    # Auto-detect frame stacking if use_3d_conv is not specified
-    if use_3d_conv is None:
-        # Check if environment has frame stacking enabled
-        sample_obs = env.reset()
-        if isinstance(sample_obs, tuple):
-            sample_obs = sample_obs[0]
-        
-        # Handle vectorized environment case - check if it's a list/array of observations
-        if isinstance(sample_obs, (list, np.ndarray)) and len(sample_obs) > 0:
-            sample_obs = sample_obs[0]  # Take first environment's observation
-        
-        player_frame_shape = sample_obs['player_frame'].shape
-        has_temporal_frames = len(player_frame_shape) == 3 and player_frame_shape[2] > 1
-        use_3d_conv = has_temporal_frames
-        print(f"Auto-detected frame stacking: {has_temporal_frames}, using 3D conv: {use_3d_conv}")
-    
-        features_extractor_class = FeatureExtractor
-        print("Using Enhanced 3D Feature Extractor with temporal modeling")
-
-
     policy_kwargs = dict(
-        features_extractor_class=features_extractor_class,
+        features_extractor_class=FeatureExtractor,
         features_extractor_kwargs=dict(features_dim=512),
         net_arch=dict(
             pi=NET_ARCH_SIZE,

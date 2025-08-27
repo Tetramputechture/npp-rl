@@ -14,7 +14,7 @@ Key improvements implemented:
 5. Improved monitoring and logging
 
 Usage:
-    python enhanced_training.py --use_3d_conv --num_envs 64 --total_timesteps 10000000
+    python enhanced_training.py --num_envs 64 --total_timesteps 10000000
 """
 
 import argparse
@@ -32,7 +32,7 @@ from stable_baselines3.common.logger import configure
 
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.agents.feature_extractor import FeatureExtractor
+from npp_rl.feature_extractors import FeatureExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,7 +78,6 @@ class LoggingCallback(BaseCallback):
 
 
 def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int, 
-                              use_3d_conv: bool = True, 
                               exploration_manager: AdaptiveExplorationManager = None) -> PPO:
     """
     Creates an enhanced PPO agent with all research-backed improvements.
@@ -87,7 +86,6 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
         env: The N++ environment instance
         tensorboard_log: Directory for Tensorboard logs
         n_envs: Number of parallel environments
-        use_3d_conv: Whether to use 3D convolutions for temporal modeling
         exploration_manager: Adaptive exploration manager
         
     Returns:
@@ -185,7 +183,6 @@ def setup_enhanced_training_env(num_envs: int, render_mode: str = 'rgb_array'):
 
 def train_enhanced_agent(num_envs: int = 64,
                          total_timesteps: int = 10_000_000,
-                         use_3d_conv: bool = True,
                          load_model_path: str = None,
                          render_mode: str = 'rgb_array',
                          enable_exploration: bool = True):
@@ -195,7 +192,6 @@ def train_enhanced_agent(num_envs: int = 64,
     Args:
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
-        use_3d_conv: Whether to use 3D convolutions
         load_model_path: Path to load existing model
         render_mode: Rendering mode ('rgb_array' or 'human')
         enable_exploration: Whether to enable adaptive exploration
@@ -205,7 +201,6 @@ def train_enhanced_agent(num_envs: int = 64,
     print("📊 Configuration:")
     print(f"   - Environments: {num_envs}")
     print(f"   - Total timesteps: {total_timesteps:,}")
-    print(f"   - 3D Convolutions: {use_3d_conv}")
     print("   - Temporal frames: 12")
     print(f"   - Network architecture: {NET_ARCH_SIZE}")
     print(f"   - Adaptive exploration: {enable_exploration}")
@@ -238,7 +233,7 @@ def train_enhanced_agent(num_envs: int = 64,
         else:
             print("🆕 Creating new enhanced model")
             model = create_enhanced_ppo_agent(
-                env, str(tensorboard_log), num_envs, use_3d_conv, exploration_manager
+                env, str(tensorboard_log), num_envs, exploration_manager
             )
         
         # Set up callbacks
@@ -292,7 +287,6 @@ def train_enhanced_agent(num_envs: int = 64,
         config = {
             "num_envs": num_envs,
             "total_timesteps": total_timesteps,
-            "use_3d_conv": use_3d_conv,
             "enable_exploration": enable_exploration,
             "hyperparameters": HYPERPARAMETERS,
             "net_arch": NET_ARCH_SIZE,
@@ -330,10 +324,6 @@ def main():
                         help="Number of parallel environments")
     parser.add_argument("--total_timesteps", type=int, default=10_000_000,
                         help="Total training timesteps")
-    parser.add_argument("--use_3d_conv", action="store_true", default=True,
-                        help="Use 3D convolutions for temporal modeling")
-    parser.add_argument("--no_3d_conv", action="store_true",
-                        help="Disable 3D convolutions (use enhanced 2D instead)")
     parser.add_argument("--load_model", type=str, default=None,
                         help="Path to load existing model")
     parser.add_argument("--render_mode", type=str, default="rgb_array",
@@ -344,15 +334,12 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle 3D conv flag
-    use_3d_conv = args.use_3d_conv and not args.no_3d_conv
     enable_exploration = not args.disable_exploration
     
     # Start training
     model, log_dir = train_enhanced_agent(
         num_envs=args.num_envs,
         total_timesteps=args.total_timesteps,
-        use_3d_conv=use_3d_conv,
         load_model_path=args.load_model,
         render_mode=args.render_mode,
         enable_exploration=enable_exploration

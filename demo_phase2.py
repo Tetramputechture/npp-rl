@@ -12,7 +12,7 @@ from pathlib import Path
 from npp_rl.config.phase2_config import Phase2Config, get_config_presets
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
 from npp_rl.models.gnn import create_graph_encoder
-from npp_rl.models.feature_extractors import create_feature_extractor
+from npp_rl.feature_extractors import create_feature_extractor
 from npp_rl.eval.exploration_metrics import ExplorationMetrics
 from npp_rl.data.bc_dataset import create_mock_replay_data, create_bc_dataloader
 from nclone.graph.graph_builder import GraphBuilder
