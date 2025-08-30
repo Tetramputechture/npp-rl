@@ -1,11 +1,11 @@
 """
 Test suite for Task 3.1: Hybrid CNN-GNN Architecture Enhancement
 
-This module tests the enhanced multimodal fusion architecture with
+This module tests the multimodal fusion architecture with
 cross-modal attention, spatial attention, and transformer-based fusion.
 
 Tests cover:
-- Enhanced multimodal feature extractor functionality
+- Multimodal feature extractor functionality
 - Cross-modal attention mechanisms
 - Graph-informed spatial attention
 - Transformer-based fusion layers
@@ -15,15 +15,12 @@ Tests cover:
 
 import pytest
 import torch
-import torch.nn as nn
 import numpy as np
 from gymnasium.spaces import Dict as SpacesDict, Box
-from unittest.mock import Mock, patch
 
 from npp_rl.feature_extractors.multimodal import (
     MultimodalGraphExtractor,
-    create_hgt_multimodal_extractor,
-    create_multimodal_extractor
+    create_hgt_multimodal_extractor
 )
 from npp_rl.models.spatial_attention import (
     SpatialAttentionModule,

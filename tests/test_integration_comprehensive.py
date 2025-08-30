@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../nclone'))
 from npp_rl.models.trajectory_calculator import TrajectoryCalculator, MovementState
 from npp_rl.models.movement_classifier import MovementClassifier, MovementType, NinjaState
 from nclone.graph.graph_builder import GraphBuilder
-from npp_rl.config.phase2_config import GraphConfig
 
 class TestTrajectoryCalculatorIntegration(unittest.TestCase):
     """Integration tests for TrajectoryCalculator with nclone GraphBuilder."""

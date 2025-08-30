@@ -312,8 +312,6 @@ class TestEndToEndIntegration(unittest.TestCase):
         """Test compatibility with training pipeline components."""
         # Test that all components can be imported and initialized
         try:
-            from npp_rl.agents.npp_agent_ppo import create_ppo_agent, setup_training_env
-            from stable_baselines3 import PPO
             
             # Should be able to import training components
             import_success = True

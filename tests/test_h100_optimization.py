@@ -6,7 +6,6 @@ This script tests the H100 optimization module to ensure it works correctly
 both with and without CUDA availability.
 """
 
-import os
 import sys
 import logging
 from pathlib import Path
@@ -77,7 +76,7 @@ def test_h100_optimization_module():
             enable_memory_optimization=True,
             log_memory_usage=True
         ) as optimization_status:
-            print(f"   Context entered successfully")
+            print("   Context entered successfully")
             print(f"   Optimization status: {optimization_status}")
             # Simulate some work
             import time
@@ -133,18 +132,18 @@ def test_cuda_simulation():
     print("\nExpected optimization behavior on CUDA systems:")
     for gpu in gpu_types:
         print(f"\n   {gpu}:")
-        print(f"   - TF32 would be enabled: torch.backends.cuda.matmul.allow_tf32 = True")
-        print(f"   - Float32 precision: torch.set_float32_matmul_precision('high')")
-        print(f"   - Memory optimizations: Flash attention, memory pool, 90% memory fraction")
+        print("   - TF32 would be enabled: torch.backends.cuda.matmul.allow_tf32 = True")
+        print("   - Float32 precision: torch.set_float32_matmul_precision('high')")
+        print("   - Memory optimizations: Flash attention, memory pool, 90% memory fraction")
         
         if "H100" in gpu:
-            print(f"   - Expected speedup: 1.5-2x for large matrix operations")
+            print("   - Expected speedup: 1.5-2x for large matrix operations")
             print(f"   - Recommended batch size: {get_recommended_batch_size(gpu, 2048)}")
         elif "A100" in gpu:
-            print(f"   - Expected speedup: Moderate improvement")
+            print("   - Expected speedup: Moderate improvement")
             print(f"   - Recommended batch size: {get_recommended_batch_size(gpu, 2048)}")
         else:
-            print(f"   - Expected speedup: Some improvement")
+            print("   - Expected speedup: Some improvement")
             print(f"   - Recommended batch size: {get_recommended_batch_size(gpu, 2048)}")
     
     print("\n   ✅ CUDA simulation completed")

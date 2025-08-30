@@ -13,11 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 from enum import IntEnum
 
 from .entity_type_system import (
-    NodeType, EntityType, EntityCategory, EntityTypeSystem,
     EntitySpecializedEmbedding, HazardAwareAttention,
     create_entity_type_system
 )

@@ -10,7 +10,7 @@ import numpy as np
 from gymnasium.spaces import Box, Dict as SpacesDict
 
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
-from npp_rl.models.gnn import GraphEncoder, create_graph_encoder
+from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.feature_extractors import NppMultimodalGraphExtractor
 from npp_rl.eval.exploration_metrics import ExplorationMetrics
 from npp_rl.config.phase2_config import Phase2Config, create_full_phase2_config

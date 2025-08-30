@@ -11,15 +11,13 @@ Tests the multi-resolution graph processing implementation including:
 import pytest
 import torch
 import numpy as np
-from typing import Dict, Any
-from unittest.mock import Mock, patch
 
 # Import modules under test
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'nclone'))
 
-from npp_rl.models.diffpool_gnn import DiffPoolLayer, HierarchicalDiffPoolGNN, MultiScaleGraphAttention
+from npp_rl.models.diffpool_gnn import DiffPoolLayer, HierarchicalDiffPoolGNN
 from npp_rl.models.multi_scale_fusion import (
     AdaptiveScaleFusion, HierarchicalFeatureAggregator, 
     ContextAwareScaleSelector, UnifiedMultiScaleFusion

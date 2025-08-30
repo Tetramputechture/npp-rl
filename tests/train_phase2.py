@@ -59,7 +59,7 @@ class Phase2Trainer:
         self.icm_trainer = None
         self.exploration_metrics = None
         
-        print(f"Phase 2 Trainer initialized")
+        print("Phase 2 Trainer initialized")
         print(f"Output directory: {self.output_dir}")
         print(f"Device: {self.device}")
     

@@ -1,20 +1,12 @@
 """
-Enhanced Training Script for N++ RL Agent
+Training Script for N++ RL Agent
 
 This script implements state-of-the-art improvements for training an RL agent
 to play N++ based on recent research in procedural environments (e.g., ProcGen benchmarks),
 large-scale RL (e.g., OpenAI Five, IMPALA), and exploration strategies (e.g., ICM, Go-Explore).
 
-Key improvements implemented:
-1. 3D Convolutions for temporal modeling (12-frame stacks)
-   (Cobbe et al., "Phasic Policy Gradient", 2021; Ji et al. on 3D convs)
-2. Scaled network architecture (Inspired by scaling laws research, e.g., Kaplan et al., 2020)
-3. Adaptive exploration strategies (Pathak et al., 2017; Ecoffet et al., 2019)
-4. Enhanced hyperparameters (Reflecting best practices from PPO and its variants)
-5. Improved monitoring and logging
-
 Usage:
-    python enhanced_training.py --num_envs 64 --total_timesteps 10000000
+    python training.py --num_envs 64 --total_timesteps 10000000
 """
 
 import argparse
@@ -39,7 +31,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class LoggingCallback(BaseCallback):
-    """Enhanced callback for logging training metrics and exploration statistics."""
+    """Callback for logging training metrics and exploration statistics."""
     
     def __init__(self, exploration_manager: AdaptiveExplorationManager, log_freq: int = 1000):
         super().__init__()
@@ -77,10 +69,10 @@ class LoggingCallback(BaseCallback):
                 pass
 
 
-def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int, 
+def create_ppo_agent(env, tensorboard_log: str, n_envs: int, 
                               exploration_manager: AdaptiveExplorationManager = None) -> PPO:
     """
-    Creates an enhanced PPO agent with all research-backed improvements.
+    Creates a PPO agent
     
     Args:
         env: The N++ environment instance
@@ -89,11 +81,9 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
         exploration_manager: Adaptive exploration manager
         
     Returns:
-        PPO: Enhanced PPO model instance
+        PPO: PPO model instance
     """
     
-    # Enhanced learning rate schedule
-    # (Inspired by schedules used in large model training, e.g., linear decay)
     learning_rate = get_linear_fn(
         start=3e-4,  # Higher starting LR for larger networks
         end=1e-6,    # Lower end LR for fine-tuning
@@ -101,7 +91,7 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
     )
     
     features_extractor_class = FeatureExtractor
-    print("🚀 Using Enhanced 3D Feature Extractor with temporal modeling")
+    print("🚀 Using 3D Feature Extractor with temporal modeling")
 
     policy_kwargs = dict(
         features_extractor_class=features_extractor_class,
@@ -114,8 +104,6 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
         activation_fn=torch.nn.ReLU,
     )
     
-    # Create PPO model with enhanced hyperparameters
-    # (Hyperparameters tuned based on PPO best practices and empirical results from similar environments)
     model = PPO(
         policy="MultiInputPolicy",
         policy_kwargs=policy_kwargs,
@@ -146,12 +134,12 @@ def create_enhanced_ppo_agent(env, tensorboard_log: str, n_envs: int,
     return model
 
 
-def setup_enhanced_training_env(num_envs: int, render_mode: str = 'rgb_array'):
-    """Set up enhanced training environment with monitoring."""
+def setup_training_env(num_envs: int, render_mode: str = 'rgb_array'):
+    """Set up training environment with monitoring."""
     
     # Create timestamp for logging
     timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
-    log_dir = Path(f'./training_logs/enhanced_ppo_training/session-{timestamp}')
+    log_dir = Path(f'./training_logs/ppo_training/session-{timestamp}')
     log_dir.mkdir(exist_ok=True, parents=True)
     
     # Create environment factory
@@ -181,13 +169,13 @@ def setup_enhanced_training_env(num_envs: int, render_mode: str = 'rgb_array'):
     return env, log_dir
 
 
-def train_enhanced_agent(num_envs: int = 64,
+def train_agent(num_envs: int = 64,
                          total_timesteps: int = 10_000_000,
                          load_model_path: str = None,
                          render_mode: str = 'rgb_array',
                          enable_exploration: bool = True):
     """
-    Train the enhanced N++ agent with all improvements.
+    Train the N++ agent with all improvements.
     
     Args:
         num_envs: Number of parallel environments
@@ -197,7 +185,7 @@ def train_enhanced_agent(num_envs: int = 64,
         enable_exploration: Whether to enable adaptive exploration
     """
     
-    print("🚀 Starting Enhanced N++ Agent Training")
+    print("🚀 Starting N++ Agent Training")
     print("📊 Configuration:")
     print(f"   - Environments: {num_envs}")
     print(f"   - Total timesteps: {total_timesteps:,}")
@@ -208,7 +196,7 @@ def train_enhanced_agent(num_envs: int = 64,
     
     try:
         # Set up environment
-        env, log_dir = setup_enhanced_training_env(num_envs, render_mode)
+        env, log_dir = setup_training_env(num_envs, render_mode)
         
         # Set up tensorboard logging
         tensorboard_log = log_dir / "tensorboard"
@@ -231,8 +219,8 @@ def train_enhanced_agent(num_envs: int = 64,
             # Update learning rate for continued training
             model.learning_rate = get_linear_fn(start=1e-4, end=1e-6, end_fraction=0.8)
         else:
-            print("🆕 Creating new enhanced model")
-            model = create_enhanced_ppo_agent(
+            print("🆕 Creating new model")
+            model = create_ppo_agent(
                 env, str(tensorboard_log), num_envs, exploration_manager
             )
         
@@ -318,7 +306,7 @@ def train_enhanced_agent(num_envs: int = 64,
 
 def main():
     """Main training function with command line arguments."""
-    parser = argparse.ArgumentParser(description="Enhanced N++ RL Agent Training")
+    parser = argparse.ArgumentParser(description="N++ RL Agent Training")
     
     parser.add_argument("--num_envs", type=int, default=64,
                         help="Number of parallel environments")
@@ -337,7 +325,7 @@ def main():
     enable_exploration = not args.disable_exploration
     
     # Start training
-    model, log_dir = train_enhanced_agent(
+    model, log_dir = train_agent(
         num_envs=args.num_envs,
         total_timesteps=args.total_timesteps,
         load_model_path=args.load_model,

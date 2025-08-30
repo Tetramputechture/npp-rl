@@ -7,18 +7,11 @@ spatial attention modules after the code review improvements.
 
 import pytest
 import torch
-import torch.nn as nn
-from gymnasium.spaces import Dict as SpacesDict, Box
 
 from npp_rl.models.spatial_attention import (
     GraphSpatialGuidance,
     SpatialAttentionModule,
     MultiScaleSpatialAttention
-)
-from npp_rl.models.attention_constants import (
-    MIN_ATTENTION_HEADS,
-    MIN_SPATIAL_DIM,
-    MIN_FEATURE_DIM
 )
 
 

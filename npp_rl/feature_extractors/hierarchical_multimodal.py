@@ -389,7 +389,7 @@ class HierarchicalGraphObservationWrapper:
             ninja_state: Ninja movement state
             
         Returns:
-            Enhanced observations with hierarchical graph data
+            Observations with hierarchical graph data
         """
         if not self.enable_hierarchical or self.hierarchical_builder is None:
             return observations

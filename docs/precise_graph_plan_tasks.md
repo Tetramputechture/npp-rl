@@ -15,11 +15,11 @@ This document breaks down the high-level graph neural network concepts from `gra
 
 ## Architecture Overview
 
-Our enhanced system builds on the existing multimodal architecture:
+Our system builds on the existing multimodal architecture:
 
 ```
 Current: CNN (visual) + MLP (symbolic) + GNN (structural) → Fusion → Policy/Value
-Enhanced: CNN + MLP + Physics-GNN + Hierarchical-GNN + Temporal-GNN → Advanced Fusion
+Planned: CNN + MLP + Physics-GNN + Hierarchical-GNN + Temporal-GNN → Advanced Fusion
 ```
 
 ## Task Breakdown
@@ -272,7 +272,7 @@ def _extract_sub_cell_features(self, level_data, sub_row, sub_col, ninja_positio
 4. **Update Graph Builder Interface** (`nclone/graph/graph_builder.py` lines 98-103):
 ```python
 def build_graph(self, level_data, ninja_position, entities, ninja_velocity=None, ninja_state=None):
-    """Build graph representation with enhanced physics state."""
+    """Build graph representation with physics state."""
     # Add ninja_velocity and ninja_state parameters
     # Pass these to _extract_sub_cell_features calls
     
@@ -497,13 +497,11 @@ class PhysicsConstraintValidator:
 #### Task 3.1: Hybrid CNN-GNN Architecture Enhancement
 **Priority**: High | **Complexity**: Medium | **Dependencies**: Phases 1-2 | **Files**: 1 modified
 
-**Objective**: Enhance existing multimodal fusion in `feature_extractors.py` with advanced graph processing.
-
 **Current Gap**: Basic concatenation fusion. Need sophisticated cross-modal attention as described in graph plan.
 
 **Key Implementation Points**:
 
-1. **Modify Fusion Network** (`npp_rl/models/feature_extractors.py` lines 146-170):
+1. **Modify Fusion Network**:
 ```python
 # Replace simple concatenation with cross-modal attention
 self.cross_modal_attention = nn.MultiheadAttention(embed_dim=512, num_heads=8)

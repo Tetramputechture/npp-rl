@@ -5,7 +5,6 @@ This module tests the integration of physics state features into graph node
 representations for Task 1.2 of the graph plan.
 """
 
-import pytest
 import numpy as np
 import sys
 import os

@@ -16,14 +16,13 @@ for graph-based structural observations and more sophisticated fusion techniques
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, Tuple, Optional
+from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 
 from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.models.hgt_gnn import create_hgt_encoder
-from npp_rl.models.spatial_attention import SpatialAttentionModule, MultiScaleSpatialAttention
+from npp_rl.models.spatial_attention import SpatialAttentionModule
 from npp_rl.models.attention_constants import (
     DEFAULT_EMBED_DIM,
     DEFAULT_NUM_ATTENTION_HEADS,
@@ -105,8 +104,8 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         if self.has_graph_obs:
             self._init_graph_encoder(observation_space, gnn_hidden_dim, gnn_num_layers, gnn_output_dim)
         
-        # Calculate total feature dimension and create enhanced fusion network
-        self._init_enhanced_fusion_network(observation_space)
+        # Calculate total feature dimension and create fusion network
+        self._init_fusion_network(observation_space)
     
     def _init_visual_encoders(self, observation_space: SpacesDict):
         """Initialize CNN encoders for visual observations."""
@@ -181,8 +180,8 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             )
         self.graph_feature_dim = output_dim
     
-    def _init_enhanced_fusion_network(self, observation_space: SpacesDict):
-        """Initialize enhanced fusion network with cross-modal attention and transformers."""
+    def _init_fusion_network(self, observation_space: SpacesDict):
+        """Initialize fusion network with cross-modal attention and transformers."""
         total_dim = (
             self.visual_feature_dim + 
             self.symbolic_feature_dim + 
@@ -250,7 +249,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             self.has_graph_obs
         ])
         
-        # Enhanced fusion network
+        # fusion network
         if self.use_cross_modal_attention:
             fusion_input_dim = self.embed_dim * num_modalities
         else:
@@ -271,7 +270,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
         )
         
-        # Residual connection for enhanced features
+        # Residual connection for features
         if self.use_cross_modal_attention:
             self.residual_projection = nn.Linear(fusion_input_dim, self.features_dim)
             self.residual_weight = nn.Parameter(torch.tensor(0.3))
@@ -383,7 +382,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
     
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        Forward pass through enhanced multimodal feature extractor.
+        Forward pass through multimodal feature extractor.
         
         Args:
             observations: Dictionary of observations with keys:
@@ -474,33 +473,33 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             # Use raw graph node features for spatial attention (not aggregated features)
             graph_node_features = observations.get('graph_node_feats')
             if graph_node_features is not None:
-                enhanced_visual, attention_map = self.spatial_attention(
+                new_visual, attention_map = self.spatial_attention(
                     visual_features, graph_node_features
                 )
             else:
-                enhanced_visual = visual_features
+                new_visual = visual_features
             
             # Update visual features with spatial attention
-            visual_features = enhanced_visual
+            visual_features = new_visual    
             
             # Update raw features
             for i, feat in enumerate(raw_features):
                 if feat.shape == visual_features.shape:  # Find visual features by shape
-                    raw_features[i] = enhanced_visual
+                    raw_features[i] = new_visual
                     break
             
             # Update projected features if using cross-modal attention
             if self.use_cross_modal_attention and len(projected_features) > 0:
-                # Re-project the enhanced visual features
+                # Re-project the visual features
                 if self.has_player_frame and self.has_global_view:
                     # For combined visual features, use the combined projection
-                    projected_features[0] = self.visual_projection(enhanced_visual)
+                    projected_features[0] = self.visual_projection(new_visual)
                 elif self.has_player_frame:
-                    projected_features[0] = self.player_projection(enhanced_visual)
+                    projected_features[0] = self.player_projection(new_visual)
                 elif self.has_global_view:
-                    projected_features[0] = self.global_projection(enhanced_visual)
+                    projected_features[0] = self.global_projection(new_visual)
         
-        # Enhanced fusion with cross-modal attention
+        # fusion with cross-modal attention
         if self.use_cross_modal_attention and len(projected_features) > 1:
             # Stack features for attention
             stacked_features = torch.stack(projected_features, dim=1)  # [B, num_modalities, embed_dim]
@@ -634,7 +633,7 @@ def create_hgt_multimodal_extractor(
     **kwargs
 ) -> MultimodalGraphExtractor:
     """
-    Factory function to create HGT-enabled multimodal feature extractor with enhanced fusion.
+    Factory function to create HGT-enabled multimodal feature extractor with fusion.
     
     This function creates a multimodal extractor specifically configured
     to use Heterogeneous Graph Transformers for graph processing with
@@ -652,7 +651,7 @@ def create_hgt_multimodal_extractor(
         **kwargs: Additional arguments passed to the extractor
         
     Returns:
-        Configured HGT multimodal feature extractor with enhanced fusion
+        Configured HGT multimodal feature extractor with fusion
     """
     return MultimodalGraphExtractor(
         observation_space=observation_space,
