@@ -24,6 +24,14 @@ from gymnasium.spaces import Dict as SpacesDict
 from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.models.hgt_gnn import create_hgt_encoder
 from npp_rl.models.spatial_attention import SpatialAttentionModule, MultiScaleSpatialAttention
+from npp_rl.models.attention_constants import (
+    DEFAULT_EMBED_DIM,
+    DEFAULT_NUM_ATTENTION_HEADS,
+    DEFAULT_DROPOUT_RATE,
+    DEFAULT_SPATIAL_HEIGHT,
+    DEFAULT_SPATIAL_WIDTH,
+    FEATURE_EXPANSION_FACTOR
+)
 
 
 class MultimodalGraphExtractor(BaseFeaturesExtractor):
@@ -53,7 +61,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         gnn_output_dim: int = 256,
         use_cross_modal_attention: bool = True,
         use_spatial_attention: bool = True,
-        num_attention_heads: int = 8,
+        num_attention_heads: int = DEFAULT_NUM_ATTENTION_HEADS,
         **kwargs
     ):
         """
@@ -185,7 +193,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             raise ValueError("No valid observation components found")
         
         # Common embedding dimension for cross-modal attention
-        self.embed_dim = 512
+        self.embed_dim = DEFAULT_EMBED_DIM
         
         # Project each modality to common embedding dimension
         if self.visual_feature_dim > 0:
@@ -208,7 +216,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             self.cross_modal_attention = nn.MultiheadAttention(
                 embed_dim=self.embed_dim,
                 num_heads=self.num_attention_heads,
-                dropout=0.1,
+                dropout=DEFAULT_DROPOUT_RATE,
                 batch_first=True
             )
         
@@ -217,8 +225,8 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             self.graph_visual_fusion = nn.TransformerEncoderLayer(
                 d_model=self.embed_dim,
                 nhead=self.num_attention_heads,
-                dim_feedforward=self.embed_dim * 2,
-                dropout=0.1,
+                dim_feedforward=self.embed_dim * FEATURE_EXPANSION_FACTOR,
+                dropout=DEFAULT_DROPOUT_RATE,
                 batch_first=True
             )
         
@@ -229,10 +237,10 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             self.spatial_attention = SpatialAttentionModule(
                 graph_dim=graph_node_dim,
                 visual_dim=self.visual_feature_dim,
-                spatial_height=16,
-                spatial_width=16,
+                spatial_height=DEFAULT_SPATIAL_HEIGHT,
+                spatial_width=DEFAULT_SPATIAL_WIDTH,
                 num_attention_heads=self.num_attention_heads,
-                dropout=0.1
+                dropout=DEFAULT_DROPOUT_RATE
             )
         
         # Calculate number of modalities for fusion
