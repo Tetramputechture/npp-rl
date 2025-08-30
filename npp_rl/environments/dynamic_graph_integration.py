@@ -11,58 +11,7 @@ import gymnasium as gym
 from gymnasium.spaces import Dict as SpacesDict
 
 from .dynamic_graph_wrapper import DynamicGraphWrapper, UpdateBudget
-
-# Try to import VectorizationWrapper, with fallback for testing
-try:
-    from .vectorization_wrapper import VectorizationWrapper
-except ImportError:
-    # Fallback for testing - create a mock wrapper
-    import gymnasium as gym
-    class VectorizationWrapper(gym.Wrapper):
-        def __init__(self, env_kwargs=None):
-            # Create a simple mock environment for testing
-            from gymnasium.spaces import Dict as SpacesDict, Box
-            import numpy as np
-            
-            class MockEnv(gym.Env):
-                def __init__(self):
-                    self.observation_space = SpacesDict({
-                        'ninja_position': Box(low=0, high=1000, shape=(2,), dtype=np.float32),
-                        'ninja_velocity': Box(low=-10, high=10, shape=(2,), dtype=np.float32),
-                        'entities': Box(low=0, high=1, shape=(10, 5), dtype=np.float32),
-                        'level_data': Box(low=0, high=1, shape=(100,), dtype=np.float32)
-                    })
-                    self.action_space = Box(low=-1, high=1, shape=(4,), dtype=np.float32)
-                
-                def reset(self, **kwargs):
-                    obs = {
-                        'ninja_position': np.array([100.0, 200.0], dtype=np.float32),
-                        'ninja_velocity': np.array([1.0, 0.0], dtype=np.float32),
-                        'entities': np.zeros((10, 5), dtype=np.float32),
-                        'level_data': np.random.random(100).astype(np.float32)
-                    }
-                    return obs, {}
-                
-                def step(self, action):
-                    obs = {
-                        'ninja_position': np.array([100.0, 200.0], dtype=np.float32),
-                        'ninja_velocity': np.array([1.0, 0.0], dtype=np.float32),
-                        'entities': np.zeros((10, 5), dtype=np.float32),
-                        'level_data': np.random.random(100).astype(np.float32)
-                    }
-                    return obs, 0.1, False, False, {}
-                
-                def get_current_state(self):
-                    return {
-                        'level_data': {'tiles': np.random.random(100)},
-                        'ninja_position': (100.0, 200.0),
-                        'ninja_velocity': (1.0, 0.0),
-                        'ninja_state': 1,
-                        'entities': []
-                    }
-            
-            env = MockEnv()
-            super().__init__(env)
+from .vectorization_wrapper import VectorizationWrapper
 
 
 def create_dynamic_graph_env(

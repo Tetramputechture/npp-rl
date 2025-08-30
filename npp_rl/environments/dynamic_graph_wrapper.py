@@ -15,44 +15,14 @@ Key Features:
 
 import time
 import logging
-from typing import Dict, List, Tuple, Optional, Any, Set
-from dataclasses import dataclass, field
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass
 from enum import IntEnum
 from collections import deque, defaultdict
 import numpy as np
 import gymnasium as gym
 
-# Try to import nclone components, with fallbacks for testing
-try:
-    from nclone.graph.graph_builder import GraphBuilder, GraphData, EdgeType, N_MAX_NODES, E_MAX_EDGES
-except ImportError:
-    # Fallback definitions for testing
-    class EdgeType(IntEnum):
-        WALK = 0
-        JUMP = 1
-        WALL_SLIDE = 2
-        FALL = 3
-        ONE_WAY = 4
-        FUNCTIONAL = 5
-    
-    class GraphData:
-        def __init__(self):
-            self.node_features = None
-            self.edge_index = None
-            self.edge_features = None
-            self.node_mask = None
-            self.edge_mask = None
-            self.num_nodes = 0
-            self.num_edges = 0
-    
-    class GraphBuilder:
-        def build_graph(self, *args, **kwargs):
-            return GraphData()
-    
-    N_MAX_NODES = 16256
-    E_MAX_EDGES = 130048
-
-
+from nclone.graph.graph_builder import GraphBuilder, GraphData, EdgeType, E_MAX_EDGES
 class EventType(IntEnum):
     """Types of events that can trigger graph updates."""
     ENTITY_MOVED = 0          # Entity position changed
