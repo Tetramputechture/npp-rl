@@ -8,14 +8,13 @@ with the multimodal feature extractors.
 import pytest
 import torch
 import numpy as np
-from typing import Dict
 
 from npp_rl.models.hgt_gnn import (
     HGTLayer, HGTEncoder, create_hgt_encoder,
-    NodeType, EntityType, EdgeType
+    EntityType
 )
 from npp_rl.models.entity_type_system import (
-    EntityTypeSystem, EntitySpecializedEmbedding, HazardAwareAttention,
+    EntitySpecializedEmbedding, HazardAwareAttention,
     EntityCategory, create_entity_type_system
 )
 from npp_rl.feature_extractors.multimodal import (

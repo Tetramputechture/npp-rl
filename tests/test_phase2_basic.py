@@ -10,7 +10,7 @@ import numpy as np
 from gymnasium.spaces import Box, Dict as SpacesDict
 
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
-from npp_rl.models.gnn import GraphEncoder, create_graph_encoder
+from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.feature_extractors import NppMultimodalGraphExtractor
 from nclone.graph.graph_builder import GraphBuilder, N_MAX_NODES, E_MAX_EDGES
 

@@ -5,7 +5,6 @@ This module tests the physics state extraction functionality for momentum-augmen
 node representations in the graph neural network.
 """
 
-import pytest
 import numpy as np
 from npp_rl.models.physics_state_extractor import PhysicsStateExtractor
 

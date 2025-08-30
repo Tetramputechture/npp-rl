@@ -9,7 +9,7 @@ NPP-RL is a Deep Reinforcement Learning project that trains an AI agent to play 
 The project implements a sophisticated multi-modal RL agent with:
 
 - **3D Feature Extraction**: 12-frame temporal stacking with 3D convolutions for spatiotemporal learning
-- **Multi-Input Observations**: Player-centric visual frames (84×84×12), global view (176×100), and physics state vectors
+- **Multi-Input Observations**: Player-centric visual frames (84*84*12), global view (176*100), and physics state vectors
 - **Advanced Exploration**: Intrinsic Curiosity Module (ICM) and novelty detection for sparse reward environments  
 - **Graph Neural Networks**: Structural level understanding through graph representations of game levels
 - **Behavioral Cloning**: Pretraining on human replay data for faster learning

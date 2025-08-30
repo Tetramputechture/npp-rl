@@ -1,7 +1,7 @@
 """
 Temporal Feature Extractor for N++ RL Agent
 
-This module implements the enhanced temporal feature extractor with 3D convolutions
+This module implements the temporal feature extractor with 3D convolutions
 for modeling temporal dynamics in frame-stacked observations.
 
 Key features:
@@ -22,7 +22,7 @@ from gymnasium.spaces import Dict as SpacesDict
 
 class TemporalFeatureExtractor(BaseFeaturesExtractor):
     """
-    Enhanced feature extractor using 3D convolutions for temporal modeling.
+    Feature extractor using 3D convolutions for temporal modeling.
     
     This extractor processes temporal sequences of visual observations alongside
     symbolic game state information. It uses 3D convolutions to capture temporal

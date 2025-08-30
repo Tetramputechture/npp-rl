@@ -5,7 +5,6 @@ This module tests the momentum tracking functionality for temporal physics reaso
 in the reinforcement learning agent.
 """
 
-import pytest
 import numpy as np
 from npp_rl.models.momentum_tracker import MomentumTracker
 

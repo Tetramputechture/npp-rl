@@ -6,10 +6,8 @@ they work together correctly before running full training.
 """
 
 import torch
-import numpy as np
 from pathlib import Path
 import tempfile
-import shutil
 
 from npp_rl.config.phase2_config import Phase2Config, create_full_phase2_config
 from npp_rl.data.bc_dataset import create_mock_replay_data, create_bc_dataloader

@@ -55,8 +55,7 @@ def start_tensorboard(logdir):
 
 def create_ppo_agent(env, tensorboard_log: str, n_envs: int) -> PPO:
     """
-    Creates a PPO agent with enhanced architecture for the N++ environment.
-    Now includes state-of-the-art improvements based on recent research.
+    Creates a PPO agent for the N++ environment.
 
     Args:
         env: The N++ environment instance
@@ -67,7 +66,6 @@ def create_ppo_agent(env, tensorboard_log: str, n_envs: int) -> PPO:
         PPO: Configured PPO model instance
     """
 
-    # Enhanced learning rate schedule based on research
     learning_rate = get_linear_fn(
         start=3e-4,  # Higher starting LR for larger networks
         end=1e-6,    # Lower end LR for fine-tuning

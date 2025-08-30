@@ -1,7 +1,7 @@
 """
 Callbacks module for N++ RL training.
 
-This module contains custom callbacks for enhanced logging and monitoring
+This module contains custom callbacks for logging and monitoring
 during reinforcement learning training sessions.
 """
 

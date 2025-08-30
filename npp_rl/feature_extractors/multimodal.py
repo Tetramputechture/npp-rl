@@ -22,6 +22,15 @@ from gymnasium.spaces import Dict as SpacesDict
 
 from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.models.hgt_gnn import create_hgt_encoder
+from npp_rl.models.spatial_attention import SpatialAttentionModule
+from npp_rl.models.attention_constants import (
+    DEFAULT_EMBED_DIM,
+    DEFAULT_NUM_ATTENTION_HEADS,
+    DEFAULT_DROPOUT_RATE,
+    DEFAULT_SPATIAL_HEIGHT,
+    DEFAULT_SPATIAL_WIDTH,
+    FEATURE_EXPANSION_FACTOR
+)
 
 
 class MultimodalGraphExtractor(BaseFeaturesExtractor):
@@ -49,6 +58,9 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         gnn_hidden_dim: int = 128,
         gnn_num_layers: int = 3,
         gnn_output_dim: int = 256,
+        use_cross_modal_attention: bool = True,
+        use_spatial_attention: bool = True,
+        num_attention_heads: int = DEFAULT_NUM_ATTENTION_HEADS,
         **kwargs
     ):
         """
@@ -62,12 +74,18 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             gnn_hidden_dim: Hidden dimension for GNN layers
             gnn_num_layers: Number of GNN layers
             gnn_output_dim: Output dimension of GNN encoder
+            use_cross_modal_attention: Whether to use cross-modal attention
+            use_spatial_attention: Whether to use graph-informed spatial attention
+            num_attention_heads: Number of attention heads for transformers
             **kwargs: Additional arguments
         """
         super().__init__(observation_space, features_dim)
         
         self.use_graph_obs = use_graph_obs
         self.use_hgt = use_hgt
+        self.use_cross_modal_attention = use_cross_modal_attention
+        self.use_spatial_attention = use_spatial_attention
+        self.num_attention_heads = num_attention_heads
         
         # Extract observation space components
         self.has_player_frame = 'player_frame' in observation_space.spaces
@@ -87,7 +105,7 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             self._init_graph_encoder(observation_space, gnn_hidden_dim, gnn_num_layers, gnn_output_dim)
         
         # Calculate total feature dimension and create fusion network
-        self._init_fusion_network()
+        self._init_fusion_network(observation_space)
     
     def _init_visual_encoders(self, observation_space: SpacesDict):
         """Initialize CNN encoders for visual observations."""
@@ -162,8 +180,8 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             )
         self.graph_feature_dim = output_dim
     
-    def _init_fusion_network(self):
-        """Initialize fusion network to combine all modalities."""
+    def _init_fusion_network(self, observation_space: SpacesDict):
+        """Initialize fusion network with cross-modal attention and transformers."""
         total_dim = (
             self.visual_feature_dim + 
             self.symbolic_feature_dim + 
@@ -173,21 +191,89 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         if total_dim == 0:
             raise ValueError("No valid observation components found")
         
-        # Multi-layer fusion network with residual connections
+        # Common embedding dimension for cross-modal attention
+        self.embed_dim = DEFAULT_EMBED_DIM
+        
+        # Project each modality to common embedding dimension
+        if self.visual_feature_dim > 0:
+            # Create separate projections for each visual component
+            if self.has_player_frame:
+                self.player_projection = nn.Linear(self.player_output_dim, self.embed_dim)
+            if self.has_global_view:
+                self.global_projection = nn.Linear(self.global_output_dim, self.embed_dim)
+            
+            # Combined visual projection for when both are present
+            self.visual_projection = nn.Linear(self.visual_feature_dim, self.embed_dim)
+            
+        if self.symbolic_feature_dim > 0:
+            self.symbolic_projection = nn.Linear(self.symbolic_feature_dim, self.embed_dim)
+        if self.has_graph_obs:
+            self.graph_projection = nn.Linear(self.graph_feature_dim, self.embed_dim)
+        
+        # Cross-modal attention mechanism
+        if self.use_cross_modal_attention:
+            self.cross_modal_attention = nn.MultiheadAttention(
+                embed_dim=self.embed_dim,
+                num_heads=self.num_attention_heads,
+                dropout=DEFAULT_DROPOUT_RATE,
+                batch_first=True
+            )
+        
+        # Graph-visual fusion transformer
+        if self.use_cross_modal_attention and self.has_graph_obs:
+            self.graph_visual_fusion = nn.TransformerEncoderLayer(
+                d_model=self.embed_dim,
+                nhead=self.num_attention_heads,
+                dim_feedforward=self.embed_dim * FEATURE_EXPANSION_FACTOR,
+                dropout=DEFAULT_DROPOUT_RATE,
+                batch_first=True
+            )
+        
+        # Spatial attention for visual features
+        if self.use_spatial_attention and self.has_graph_obs and self.visual_feature_dim > 0:
+            # Get raw graph node feature dimension
+            graph_node_dim = observation_space['graph_node_feats'].shape[1]
+            self.spatial_attention = SpatialAttentionModule(
+                graph_dim=graph_node_dim,
+                visual_dim=self.visual_feature_dim,
+                spatial_height=DEFAULT_SPATIAL_HEIGHT,
+                spatial_width=DEFAULT_SPATIAL_WIDTH,
+                num_attention_heads=self.num_attention_heads,
+                dropout=DEFAULT_DROPOUT_RATE
+            )
+        
+        # Calculate number of modalities for fusion
+        num_modalities = sum([
+            self.visual_feature_dim > 0,
+            self.symbolic_feature_dim > 0,
+            self.has_graph_obs
+        ])
+        
+        # fusion network
+        if self.use_cross_modal_attention:
+            fusion_input_dim = self.embed_dim * num_modalities
+        else:
+            fusion_input_dim = total_dim
+        
         self.fusion_network = nn.Sequential(
-            nn.Linear(total_dim, 1024),
+            nn.Linear(fusion_input_dim, 1024),
             nn.ReLU(),
-            nn.BatchNorm1d(1024),
+            nn.LayerNorm(1024),
             nn.Dropout(0.2),
             
             nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.BatchNorm1d(512),
+            nn.LayerNorm(512),
             nn.Dropout(0.1),
             
             nn.Linear(512, self.features_dim),
             nn.ReLU(),
         )
+        
+        # Residual connection for features
+        if self.use_cross_modal_attention:
+            self.residual_projection = nn.Linear(fusion_input_dim, self.features_dim)
+            self.residual_weight = nn.Parameter(torch.tensor(0.3))
     
     def _create_3d_cnn_encoder(self, input_shape: tuple) -> nn.Module:
         """Create 3D CNN encoder for temporal visual data."""
@@ -308,9 +394,13 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
         Returns:
             Fused feature representation of shape (batch_size, features_dim)
         """
-        features = []
+        raw_features = []
+        projected_features = []
         
         # Process visual observations
+        visual_features = None
+        visual_projected_features = []
+        
         if self.has_player_frame:
             player_frame = observations['player_frame']
             
@@ -319,21 +409,50 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
             player_frame = player_frame.unsqueeze(1)
             
             player_features = self.player_encoder(player_frame)
-            features.append(player_features)
+            raw_features.append(player_features)
+            visual_features = player_features
+            
+            if self.use_cross_modal_attention:
+                visual_projected_features.append(self.player_projection(player_features))
         
         if self.has_global_view:
             global_view = observations['global_view']
             global_view = global_view.permute(0, 3, 1, 2).float() / 255.0
             global_features = self.global_encoder(global_view)
-            features.append(global_features)
+            
+            if visual_features is None:
+                raw_features.append(global_features)
+                visual_features = global_features
+                if self.use_cross_modal_attention:
+                    visual_projected_features.append(self.global_projection(global_features))
+            else:
+                # Combine with existing visual features
+                combined_visual = torch.cat([visual_features, global_features], dim=1)
+                visual_features = combined_visual
+                raw_features[-1] = combined_visual  # Replace last visual features
+                if self.use_cross_modal_attention:
+                    visual_projected_features.append(self.global_projection(global_features))
+        
+        # Combine visual projected features if multiple visual modalities
+        if self.use_cross_modal_attention and len(visual_projected_features) > 0:
+            if len(visual_projected_features) == 1:
+                projected_features.append(visual_projected_features[0])
+            else:
+                # Average or sum multiple visual projections
+                combined_visual_proj = torch.stack(visual_projected_features, dim=0).mean(dim=0)
+                projected_features.append(combined_visual_proj)
         
         # Process symbolic observations
         if self.has_game_state:
             game_state = observations['game_state'].float()
             game_state_features = self.game_state_encoder(game_state)
-            features.append(game_state_features)
+            raw_features.append(game_state_features)
+            
+            if self.use_cross_modal_attention:
+                projected_features.append(self.symbolic_projection(game_state_features))
         
         # Process graph observations
+        graph_features = None
         if self.has_graph_obs:
             graph_obs = {
                 key: observations[key] for key in [
@@ -342,14 +461,77 @@ class MultimodalGraphExtractor(BaseFeaturesExtractor):
                 ]
             }
             graph_features = self.graph_encoder(graph_obs)
-            features.append(graph_features)
+            raw_features.append(graph_features)
+            
+            if self.use_cross_modal_attention:
+                projected_features.append(self.graph_projection(graph_features))
         
-        # Fuse all features
-        if len(features) == 0:
-            raise ValueError("No valid observations to process")
+        # Apply spatial attention if available
+        if (self.use_spatial_attention and visual_features is not None and 
+            graph_features is not None and hasattr(self, 'spatial_attention')):
+            
+            # Use raw graph node features for spatial attention (not aggregated features)
+            graph_node_features = observations.get('graph_node_feats')
+            if graph_node_features is not None:
+                new_visual, attention_map = self.spatial_attention(
+                    visual_features, graph_node_features
+                )
+            else:
+                new_visual = visual_features
+            
+            # Update visual features with spatial attention
+            visual_features = new_visual    
+            
+            # Update raw features
+            for i, feat in enumerate(raw_features):
+                if feat.shape == visual_features.shape:  # Find visual features by shape
+                    raw_features[i] = new_visual
+                    break
+            
+            # Update projected features if using cross-modal attention
+            if self.use_cross_modal_attention and len(projected_features) > 0:
+                # Re-project the visual features
+                if self.has_player_frame and self.has_global_view:
+                    # For combined visual features, use the combined projection
+                    projected_features[0] = self.visual_projection(new_visual)
+                elif self.has_player_frame:
+                    projected_features[0] = self.player_projection(new_visual)
+                elif self.has_global_view:
+                    projected_features[0] = self.global_projection(new_visual)
         
-        combined_features = torch.cat(features, dim=1)
+        # fusion with cross-modal attention
+        if self.use_cross_modal_attention and len(projected_features) > 1:
+            # Stack features for attention
+            stacked_features = torch.stack(projected_features, dim=1)  # [B, num_modalities, embed_dim]
+            
+            # Apply cross-modal attention
+            attended_features, attention_weights = self.cross_modal_attention(
+                query=stacked_features,
+                key=stacked_features,
+                value=stacked_features
+            )
+            
+            # Apply graph-visual fusion transformer if available
+            if (hasattr(self, 'graph_visual_fusion') and self.has_graph_obs and 
+                visual_features is not None):
+                attended_features = self.graph_visual_fusion(attended_features)
+            
+            # Flatten for fusion network
+            combined_features = attended_features.view(attended_features.shape[0], -1)
+            
+        else:
+            # Fallback to basic concatenation
+            if len(raw_features) == 0:
+                raise ValueError("No valid observations to process")
+            combined_features = torch.cat(raw_features, dim=1)
+        
+        # Final fusion
         output = self.fusion_network(combined_features)
+        
+        # Apply residual connection if using cross-modal attention
+        if self.use_cross_modal_attention and hasattr(self, 'residual_projection'):
+            residual = self.residual_projection(combined_features)
+            output = self.residual_weight * output + (1 - self.residual_weight) * residual
         
         return output
 
@@ -445,13 +627,17 @@ def create_hgt_multimodal_extractor(
     gnn_hidden_dim: int = 256,
     gnn_num_layers: int = 3,
     gnn_output_dim: int = 512,
+    use_cross_modal_attention: bool = True,
+    use_spatial_attention: bool = True,
+    num_attention_heads: int = 8,
     **kwargs
 ) -> MultimodalGraphExtractor:
     """
-    Factory function to create HGT-enabled multimodal feature extractor.
+    Factory function to create HGT-enabled multimodal feature extractor with fusion.
     
     This function creates a multimodal extractor specifically configured
-    to use Heterogeneous Graph Transformers for graph processing.
+    to use Heterogeneous Graph Transformers for graph processing with
+    cross-modal attention and spatial attention mechanisms.
     
     Args:
         observation_space: Gym observation space dictionary
@@ -459,10 +645,13 @@ def create_hgt_multimodal_extractor(
         gnn_hidden_dim: Hidden dimension for HGT layers
         gnn_num_layers: Number of HGT layers
         gnn_output_dim: Output dimension of HGT encoder
+        use_cross_modal_attention: Whether to use cross-modal attention
+        use_spatial_attention: Whether to use graph-informed spatial attention
+        num_attention_heads: Number of attention heads for transformers
         **kwargs: Additional arguments passed to the extractor
         
     Returns:
-        Configured HGT multimodal feature extractor
+        Configured HGT multimodal feature extractor with fusion
     """
     return MultimodalGraphExtractor(
         observation_space=observation_space,
@@ -472,6 +661,9 @@ def create_hgt_multimodal_extractor(
         gnn_hidden_dim=gnn_hidden_dim,
         gnn_num_layers=gnn_num_layers,
         gnn_output_dim=gnn_output_dim,
+        use_cross_modal_attention=use_cross_modal_attention,
+        use_spatial_attention=use_spatial_attention,
+        num_attention_heads=num_attention_heads,
         **kwargs
     )
 

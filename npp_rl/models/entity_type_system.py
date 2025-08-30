@@ -6,7 +6,7 @@ for different game elements in N++ levels.
 """
 
 from enum import IntEnum
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 

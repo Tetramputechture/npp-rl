@@ -6,7 +6,6 @@ and the overall GNN pipeline with physics-aware edge filtering.
 """
 
 import torch
-from typing import Dict
 
 from npp_rl.models.gnn import GraphSAGELayer, GraphEncoder
 from npp_rl.models.conditional_edges import ConditionalEdgeMasker

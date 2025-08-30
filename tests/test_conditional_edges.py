@@ -7,13 +7,11 @@ to ensure proper physics-aware edge filtering.
 
 import pytest
 import torch
-import numpy as np
-from typing import Dict, Any
 
 from npp_rl.models.conditional_edges import ConditionalEdgeMasker, create_conditional_edge_masker
 from npp_rl.models.physics_constraints import (
     PhysicsConstraintValidator, NinjaPhysicsState, TrajectoryParams,
-    ValidationResult, create_physics_validator
+    create_physics_validator
 )
 
 # Import EdgeType for testing

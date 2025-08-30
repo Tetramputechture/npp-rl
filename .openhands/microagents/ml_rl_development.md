@@ -58,7 +58,7 @@ NET_ARCH_SIZE = [256, 256, 128]  # Scaled for complex multi-modal observations
 ### PPO Agent Creation Pattern
 
 ```python
-def create_enhanced_ppo_agent(env) -> PPO:
+def create_ppo_agent(env) -> PPO:
     """Create PPO agent with NPP-RL optimizations."""
     
 
@@ -98,7 +98,7 @@ def train_agent_with_monitoring(
     """Standard training pipeline with proper monitoring."""
     
     # Create model
-    model = create_enhanced_ppo_agent(env)
+    model = create_ppo_agent(env)
     
     # Setup comprehensive callbacks
     callbacks = [

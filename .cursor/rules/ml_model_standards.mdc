@@ -18,7 +18,7 @@ alwaysApply: false
 ```python
 class 3DFeatureExtractor(BaseFeaturesExtractor):
     """
-    Enhanced feature extractor using 3D convolutions for temporal modeling.
+    Feature extractor using 3D convolutions for temporal modeling.
     
     Based on research showing 37.9% reduction in optimality gap with:
     - Frame stacking (12 frames)
@@ -74,7 +74,7 @@ def forward(self, observations: dict) -> torch.Tensor:
 Test that models can be instantiated and perform forward passes:
 
 ```python
-def test_enhanced_3d_feature_extractor_forward_pass(self):
+def test_3d_feature_extractor_forward_pass(self):
     """Test that the 3D feature extractor processes observations correctly."""
     # Create mock observation space matching environment
     obs_space = SpacesDict({
