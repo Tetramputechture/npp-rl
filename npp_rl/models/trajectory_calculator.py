@@ -11,9 +11,13 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 from nclone.constants import (
-    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED,
-    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
+    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
+    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
+    JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y
 )
+from nclone.physics import sweep_circle_vs_tiles
 
 # Physics calculation constants
 VERTICAL_MOVEMENT_THRESHOLD = 1e-6
@@ -190,10 +194,296 @@ class TrajectoryCalculator:
         Returns:
             True if trajectory is clear, False if blocked
         """
-        # This would integrate with nclone's collision system
-        # For now, return True as a placeholder
-        # In full implementation, would use sweep_circle_vs_tiles
+        if not trajectory_points or len(trajectory_points) < 2:
+            return True
+        
+        if level_data is None:
+            return True  # No level data, assume clear
+            
+        # Get simulation object from level_data if available
+        sim = level_data.get('sim', None)
+        if not sim:
+            # If no simulation object, try basic tile-based validation
+            return self._validate_trajectory_basic(trajectory_points, level_data)
+            
+        # Use nclone's sweep_circle_vs_tiles for accurate collision detection
+        for i in range(len(trajectory_points) - 1):
+            x0, y0 = trajectory_points[i]
+            x1, y1 = trajectory_points[i + 1]
+            
+            # Calculate movement vector
+            dx = x1 - x0
+            dy = y1 - y0
+            
+            # Use sweep_circle_vs_tiles to check for collisions
+            collision_result = sweep_circle_vs_tiles(sim, x0, y0, dx, dy, NINJA_RADIUS)
+            
+            # If collision_result indicates a collision, trajectory is blocked
+            if collision_result and collision_result.get('collision', False):
+                return False
+                
         return True
+        
+    def _validate_trajectory_basic(
+        self,
+        trajectory_points: List[Tuple[float, float]],
+        level_data: dict
+    ) -> bool:
+        """
+        Basic trajectory validation without full physics simulation.
+        
+        Args:
+            trajectory_points: List of (x, y) points along trajectory
+            level_data: Level data containing tile information
+            
+        Returns:
+            True if trajectory appears clear, False if likely blocked
+        """
+        # Get tile data from level_data
+        tiles = level_data.get('tiles', None)
+        if tiles is None:
+            return True  # No tile data available, assume clear
+        
+        # Handle numpy arrays properly
+        if hasattr(tiles, 'size') and tiles.size == 0:
+            return True  # Empty array, assume clear
+            
+        # Check each point along trajectory for tile collisions
+        for point in trajectory_points:
+            # Handle both tuple (x, y) and dict {'x': x, 'y': y} formats
+            if isinstance(point, dict):
+                x, y = point['x'], point['y']
+            else:
+                x, y = point
+            # Convert world coordinates to tile coordinates
+            tile_x = int(x // 24)  # TILE_PIXEL_SIZE = 24
+            tile_y = int(y // 24)
+            
+            # Check if tile exists and is solid
+            if self._is_solid_tile(tiles, tile_x, tile_y):
+                # Check if ninja circle overlaps with solid tile
+                tile_world_x = tile_x * 24 + 12  # Center of tile
+                tile_world_y = tile_y * 24 + 12
+                
+                # Distance from ninja center to tile center
+                dist_sq = (x - tile_world_x)**2 + (y - tile_world_y)**2
+                
+                # If ninja radius overlaps with tile (approximate as circle vs square)
+                if dist_sq < (NINJA_RADIUS + 12)**2:  # 12 is half tile size
+                    return False
+                    
+        return True
+        
+    def _is_solid_tile(self, tiles: any, tile_x: int, tile_y: int) -> bool:
+        """Check if a tile at given coordinates is solid."""
+        try:
+            # Handle different tile data formats
+            if hasattr(tiles, '__getitem__'):
+                if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
+                    # NumPy array format
+                    if 0 <= tile_y < tiles.shape[0] and 0 <= tile_x < tiles.shape[1]:
+                        return tiles[tile_y, tile_x] != 0  # 0 = empty, non-zero = solid
+                elif isinstance(tiles, (list, tuple)):
+                    # List format
+                    if 0 <= tile_y < len(tiles) and 0 <= tile_x < len(tiles[tile_y]):
+                        return tiles[tile_y][tile_x] != 0
+                elif isinstance(tiles, dict):
+                    # Dictionary format
+                    return tiles.get((tile_x, tile_y), 0) != 0
+            return False
+        except (IndexError, KeyError, AttributeError):
+            return False  # Assume empty if can't access
+
+    def calculate_momentum_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        initial_velocity: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory considering initial momentum and physics constraints.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            initial_velocity: Initial velocity (vx, vy)
+            ninja_state: Current ninja movement state
+            level_data: Level geometry data for collision detection
+            
+        Returns:
+            TrajectoryResult with momentum-dependent physics parameters
+        """
+        x0, y0 = start_pos
+        x1, y1 = end_pos
+        vx0, vy0 = initial_velocity
+        
+        dx = x1 - x0
+        dy = y1 - y0
+        
+        # Get appropriate physics constants based on ninja state
+        gravity = self._get_gravity_for_state(ninja_state)
+        drag = self._get_drag_for_state(ninja_state)
+        accel = self._get_acceleration_for_state(ninja_state)
+        
+        # Calculate trajectory with momentum conservation
+        trajectory_points = []
+        feasible = True
+        
+        # Simulate trajectory step by step
+        dt = 0.1  # Time step for simulation
+        max_time = 10.0  # Maximum simulation time
+        
+        x, y = x0, y0
+        vx, vy = vx0, vy0
+        t = 0.0
+        
+        trajectory_points.append((x, y))
+        
+        while t < max_time:
+            # Apply physics forces
+            # Gravity
+            vy += gravity * dt
+            
+            # Drag (air resistance)
+            speed = math.sqrt(vx*vx + vy*vy)
+            if speed > 0:
+                drag_force = drag * speed
+                vx -= (vx / speed) * drag_force * dt
+                vy -= (vy / speed) * drag_force * dt
+            
+            # Apply acceleration constraints
+            if ninja_state in [MovementState.RUNNING, MovementState.GROUND_SLIDING]:
+                # Ground movement - can accelerate horizontally
+                if abs(vx) < MAX_HOR_SPEED:
+                    target_vx = MAX_HOR_SPEED if dx > 0 else -MAX_HOR_SPEED
+                    accel_dir = 1 if target_vx > vx else -1
+                    vx += accel_dir * accel * dt
+                    vx = max(-MAX_HOR_SPEED, min(MAX_HOR_SPEED, vx))
+            elif ninja_state in [MovementState.JUMPING, MovementState.FALLING, MovementState.AIRBORNE]:
+                # Air movement - limited horizontal acceleration
+                if abs(vx) < MAX_HOR_SPEED:
+                    target_vx = MAX_HOR_SPEED if dx > 0 else -MAX_HOR_SPEED
+                    accel_dir = 1 if target_vx > vx else -1
+                    vx += accel_dir * AIR_ACCEL * dt
+                    vx = max(-MAX_HOR_SPEED, min(MAX_HOR_SPEED, vx))
+            
+            # Update position
+            x += vx * dt
+            y += vy * dt
+            t += dt
+            
+            trajectory_points.append((x, y))
+            
+            # Check if we've reached the target (within tolerance)
+            dist_to_target = math.sqrt((x - x1)**2 + (y - y1)**2)
+            if dist_to_target < NINJA_RADIUS:
+                break
+                
+            # Check if we've overshot significantly
+            if abs(x - x1) > abs(dx) * 2 or abs(y - y1) > abs(dy) * 2:
+                feasible = False
+                break
+        
+        # Validate trajectory against level geometry
+        if feasible and level_data:
+            feasible = self.validate_trajectory_clearance(trajectory_points, level_data)
+        
+        # Calculate physics parameters
+        time_of_flight = t
+        
+        # Energy cost based on required velocity changes and time
+        initial_speed = math.sqrt(vx0*vx0 + vy0*vy0)
+        final_speed = math.sqrt(vx*vx + vy*vy)
+        energy_cost = ENERGY_COST_BASE + abs(final_speed - initial_speed) * ENERGY_COST_JUMP_MULTIPLIER
+        
+        # Success probability based on trajectory complexity
+        success_probability = self._calculate_success_probability(
+            dx, dy, time_of_flight, initial_speed, ninja_state
+        )
+        
+        # Velocity requirements
+        max_velocity = max(initial_speed, final_speed)
+        min_velocity = min(initial_speed, final_speed)
+        
+        # Movement requirements
+        requires_jump = abs(dy) > JUMP_THRESHOLD_Y or ninja_state in [
+            MovementState.JUMPING, MovementState.WALL_JUMPING
+        ]
+        requires_wall_contact = ninja_state in [
+            MovementState.WALL_SLIDING, MovementState.WALL_JUMPING
+        ]
+        
+        return TrajectoryResult(
+            feasible=feasible,
+            time_of_flight=time_of_flight,
+            energy_cost=energy_cost,
+            success_probability=success_probability,
+            min_velocity=min_velocity,
+            max_velocity=max_velocity,
+            requires_jump=requires_jump,
+            requires_wall_contact=requires_wall_contact,
+            trajectory_points=trajectory_points
+        )
+
+    def calculate_wall_jump_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        wall_normal: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for wall jump movement with proper physics.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            wall_normal: Wall normal vector (nx, ny)
+            ninja_state: Current ninja movement state
+            level_data: Level geometry data
+            
+        Returns:
+            TrajectoryResult for wall jump movement
+        """
+        x0, y0 = start_pos
+        x1, y1 = end_pos
+        nx, ny = wall_normal
+        
+        dx = x1 - x0
+        dy = y1 - y0
+        
+        # Determine wall jump type based on movement direction
+        if abs(dy) > abs(dx) and dy < 0:
+            # Regular wall jump (away from wall, upward)
+            initial_vx = JUMP_WALL_REGULAR_X * (-nx)  # Away from wall
+            initial_vy = -abs(JUMP_WALL_REGULAR_Y)  # Upward
+        else:
+            # Wall slide jump (along wall)
+            initial_vx = JUMP_WALL_SLIDE_X * (-nx)
+            initial_vy = -abs(JUMP_WALL_SLIDE_Y)
+        
+        # Use momentum trajectory calculation with wall jump initial velocity
+        return self.calculate_momentum_trajectory(
+            start_pos, end_pos, (initial_vx, initial_vy),
+            MovementState.WALL_JUMPING, level_data
+        )
+
+    def _get_drag_for_state(self, ninja_state: Optional[MovementState]) -> float:
+        """Get appropriate drag constant based on ninja state."""
+        if ninja_state in [MovementState.GROUND_SLIDING, MovementState.WALL_SLIDING]:
+            return DRAG_SLOW
+        else:
+            return DRAG_REGULAR
+            
+    def _get_acceleration_for_state(self, ninja_state: Optional[MovementState]) -> float:
+        """Get appropriate acceleration constant based on ninja state."""
+        if ninja_state in [MovementState.RUNNING, MovementState.GROUND_SLIDING]:
+            return GROUND_ACCEL
+        else:
+            return AIR_ACCEL
 
     def _get_gravity_for_state(self, ninja_state: Optional[MovementState]) -> float:
         """Get appropriate gravity constant based on ninja state."""
@@ -243,28 +533,56 @@ class TrajectoryCalculator:
 
     def _calculate_success_probability(
         self,
-        distance: float,
-        height_diff: float,
-        velocity_magnitude: float,
-        time_of_flight: float
+        dx: float,
+        dy: float,
+        time_of_flight: float,
+        velocity: float,
+        ninja_state: Optional[MovementState] = None
     ) -> float:
-        """Calculate probability of successful trajectory execution."""
-        # Base probability starts high for simple movements
-        base_prob = SUCCESS_PROBABILITY_HIGH_BASE
-
-        # Reduce probability for longer distances
+        """
+        Calculate success probability based on movement complexity.
+        
+        Args:
+            dx: Horizontal displacement
+            dy: Vertical displacement
+            time_of_flight: Time required for movement
+            velocity: Required velocity
+            ninja_state: Current ninja state
+            
+        Returns:
+            Success probability between 0.0 and 1.0
+        """
+        # Base success probability
+        base_prob = SUCCESS_PROBABILITY_BASE
+        
+        # Adjust based on movement type
+        if ninja_state in [MovementState.WALL_JUMPING, MovementState.WALL_SLIDING]:
+            base_prob = SUCCESS_PROBABILITY_BASE * 0.8  # Wall movements are harder
+        elif ninja_state == MovementState.LAUNCH_PAD:
+            base_prob = SUCCESS_PROBABILITY_HIGH_BASE  # Launch pads are easier
+        
+        # Distance penalty
+        distance = math.sqrt(dx*dx + dy*dy)
         distance_penalty = min(distance / DISTANCE_PENALTY_DIVISOR, DISTANCE_PENALTY_MAX)
-
-        # Reduce probability for large height differences
-        height_penalty = min(abs(height_diff) / HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX)
-
-        # Reduce probability for high velocities
-        velocity_penalty = min(velocity_magnitude / MAX_HOR_SPEED, VELOCITY_PENALTY_MAX)
-
-        # Reduce probability for long flight times
-        time_penalty = min(time_of_flight / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
-
-        success_prob = (
-            base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty
-        )
-        return max(SUCCESS_PROBABILITY_MIN, min(1.0, success_prob))
+        
+        # Height penalty (upward movement is harder)
+        height_penalty = 0.0
+        if dy < 0:  # Upward movement
+            height_penalty = min(abs(dy) / HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX)
+        
+        # Velocity penalty (high velocity requirements are harder)
+        velocity_penalty = 0.0
+        if velocity > MAX_HOR_SPEED * 0.8:
+            velocity_penalty = min((velocity - MAX_HOR_SPEED * 0.8) / MAX_HOR_SPEED, VELOCITY_PENALTY_MAX)
+        
+        # Time penalty (very short or very long movements are harder)
+        time_penalty = 0.0
+        if time_of_flight < 1.0:
+            time_penalty = min((1.0 - time_of_flight) / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
+        elif time_of_flight > MAX_JUMP_DURATION:
+            time_penalty = min((time_of_flight - MAX_JUMP_DURATION) / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
+        
+        # Calculate final probability
+        final_prob = base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty
+        
+        return max(final_prob, SUCCESS_PROBABILITY_MIN)
