@@ -15,7 +15,8 @@ from nclone.constants import (
     JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
     DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
     JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
-    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
+    FULL_MAP_WIDTH, FULL_MAP_HEIGHT, TILE_PIXEL_SIZE
 )
 from nclone.physics import sweep_circle_vs_tiles
 from nclone.entity_classes.entity_exit import EntityExit
@@ -268,14 +269,14 @@ class TrajectoryCalculator:
             else:
                 x, y = point
             # Convert world coordinates to tile coordinates
-            tile_x = int(x // 24)  # TILE_PIXEL_SIZE = 24
-            tile_y = int(y // 24)
+            tile_x = int(x // TILE_PIXEL_SIZE)
+            tile_y = int(y // TILE_PIXEL_SIZE)
             
             # Check if tile is solid using cache (much faster lookup)
             if (tile_x, tile_y) in self._tile_cache:
                 # Check if ninja circle overlaps with solid tile
-                tile_world_x = tile_x * 24 + 12  # Center of tile
-                tile_world_y = tile_y * 24 + 12
+                tile_world_x = tile_x * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2  # Center of tile
+                tile_world_y = tile_y * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
                 
                 # Distance from ninja center to tile center
                 dist_sq = (x - tile_world_x)**2 + (y - tile_world_y)**2
@@ -312,9 +313,10 @@ class TrajectoryCalculator:
         # Handle different tile data formats and cache solid tiles
         if hasattr(tiles, '__getitem__'):
             if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
-                # NumPy array format
-                for tile_y in range(tiles.shape[0]):
-                    for tile_x in range(tiles.shape[1]):
+                # NumPy array format - use actual dimensions (but expect 25x44 for real levels)
+                height, width = tiles.shape
+                for tile_y in range(height):
+                    for tile_x in range(width):
                         if tiles[tile_y, tile_x] != 0:  # Solid tile
                             self._tile_cache[(tile_x, tile_y)] = True
             elif isinstance(tiles, (list, tuple)):
@@ -336,8 +338,9 @@ class TrajectoryCalculator:
             # Handle different tile data formats
             if hasattr(tiles, '__getitem__'):
                 if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
-                    # NumPy array format
-                    if 0 <= tile_y < tiles.shape[0] and 0 <= tile_x < tiles.shape[1]:
+                    # NumPy array format - use actual dimensions (but expect 25x44 for real levels)
+                    height, width = tiles.shape
+                    if 0 <= tile_y < height and 0 <= tile_x < width:
                         return tiles[tile_y, tile_x] != 0  # 0 = empty, non-zero = solid
                 elif isinstance(tiles, (list, tuple)):
                     # List format

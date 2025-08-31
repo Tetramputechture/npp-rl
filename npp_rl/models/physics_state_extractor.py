@@ -10,7 +10,7 @@ import math
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
 from nclone.constants import (
-    MAX_HOR_SPEED, MAP_TILE_HEIGHT, TILE_PIXEL_SIZE,
+    MAX_HOR_SPEED, FULL_MAP_HEIGHT_PX, TILE_PIXEL_SIZE,
     NINJA_RADIUS, GRAVITY_FALL, GRAVITY_JUMP,
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y
 )
@@ -29,12 +29,13 @@ AIR_STATES = {3, 4}
 WALL_STATES = {5}
 INACTIVE_STATES = {6, 7, 8, 9}
 
-# Level geometry constants
-TYPICAL_LEVEL_SIZE = 1000.0  # Pixels, for distance normalization
+# FIXED level geometry constants - all levels are exactly 1056x600 pixels
+LEVEL_WIDTH_PX = 1056.0  # Fixed level width in pixels
+LEVEL_HEIGHT_PX = 600.0  # Fixed level height in pixels
 PROXIMITY_THRESHOLD = 100.0  # Distance threshold for entity proximity
 HAZARD_PROXIMITY_THRESHOLD = 50.0  # Closer threshold for hazard detection
 
-NORMALIZED_HEIGHT_DIVISOR = MAP_TILE_HEIGHT * TILE_PIXEL_SIZE
+NORMALIZED_HEIGHT_DIVISOR = FULL_MAP_HEIGHT_PX  # 600 pixels
 
 class PhysicsStateExtractor:
     """
@@ -331,7 +332,9 @@ class PhysicsStateExtractor:
         """Safely check if a tile is solid without throwing exceptions."""
         try:
             if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
-                if 0 <= tile_y < tiles.shape[0] and 0 <= tile_x < tiles.shape[1]:
+                # Use actual dimensions (but expect 25x44 for real levels)
+                height, width = tiles.shape
+                if 0 <= tile_y < height and 0 <= tile_x < width:
                     return tiles[tile_y, tile_x] != 0
             elif isinstance(tiles, (list, tuple)):
                 if 0 <= tile_y < len(tiles) and 0 <= tile_x < len(tiles[tile_y]):
