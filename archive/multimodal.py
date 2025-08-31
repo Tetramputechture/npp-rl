@@ -23,7 +23,7 @@ from gymnasium.spaces import Dict as SpacesDict
 from npp_rl.models.gnn import create_graph_encoder
 from npp_rl.models.hgt_gnn import create_hgt_encoder
 from npp_rl.models.spatial_attention import SpatialAttentionModule
-from npp_rl.models.attention_constants import (
+from npp_rl.models.hgt_config import (
     DEFAULT_EMBED_DIM,
     DEFAULT_NUM_ATTENTION_HEADS,
     DEFAULT_DROPOUT_RATE,

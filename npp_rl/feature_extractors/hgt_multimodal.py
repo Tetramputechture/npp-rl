@@ -23,13 +23,12 @@ from gymnasium.spaces import Dict as SpacesDict
 
 from npp_rl.models.hgt_gnn import create_hgt_encoder
 from npp_rl.models.spatial_attention import SpatialAttentionModule
-from npp_rl.models.attention_constants import (
-    DEFAULT_EMBED_DIM,
-    DEFAULT_NUM_ATTENTION_HEADS,
-    DEFAULT_DROPOUT_RATE,
-    DEFAULT_SPATIAL_HEIGHT,
-    DEFAULT_SPATIAL_WIDTH,
-    FEATURE_EXPANSION_FACTOR
+from npp_rl.models.hgt_config import (
+    CNN_CONFIG,
+    POOLING_CONFIG,
+    DEFAULT_CONFIG,
+    FACTORY_CONFIG,
+    MULTIPLIER_CONFIG
 )
 
 
@@ -56,22 +55,22 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space: SpacesDict,
-        features_dim: int = 512,
+        features_dim: int = DEFAULT_CONFIG.embed_dim,
         # HGT parameters
-        hgt_hidden_dim: int = 256,
-        hgt_num_layers: int = 3,
-        hgt_output_dim: int = 256,
-        hgt_num_heads: int = 8,
+        hgt_hidden_dim: int = DEFAULT_CONFIG.hidden_dim,
+        hgt_num_layers: int = DEFAULT_CONFIG.num_layers,
+        hgt_output_dim: int = DEFAULT_CONFIG.output_dim,
+        hgt_num_heads: int = DEFAULT_CONFIG.num_attention_heads,
         # Visual processing parameters
-        visual_hidden_dim: int = 256,
-        global_hidden_dim: int = 128,
+        visual_hidden_dim: int = DEFAULT_CONFIG.visual_hidden_dim,
+        global_hidden_dim: int = DEFAULT_CONFIG.global_hidden_dim,
         # State processing parameters
-        state_hidden_dim: int = 128,
+        state_hidden_dim: int = DEFAULT_CONFIG.state_hidden_dim,
         # Fusion parameters
         use_cross_modal_attention: bool = True,
         use_spatial_attention: bool = True,
-        num_attention_heads: int = 8,
-        dropout: float = 0.1,
+        num_attention_heads: int = DEFAULT_CONFIG.num_attention_heads,
+        dropout: float = DEFAULT_CONFIG.dropout_rate,
         **kwargs
     ):
         """
@@ -102,15 +101,24 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
             visual_shape = observation_space['player_frame'].shape
             self.visual_cnn = nn.Sequential(
                 # 3D CNN for temporal modeling
-                nn.Conv3d(1, 32, kernel_size=(4, 7, 7), stride=(2, 2, 2), padding=(1, 3, 3)),
+                nn.Conv3d(CNN_CONFIG.conv3d_layer1.in_channels, CNN_CONFIG.conv3d_layer1.out_channels, 
+                         kernel_size=CNN_CONFIG.conv3d_layer1.kernel_size, 
+                         stride=CNN_CONFIG.conv3d_layer1.stride, 
+                         padding=CNN_CONFIG.conv3d_layer1.padding),
                 nn.ReLU(),
-                nn.Conv3d(32, 64, kernel_size=(3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2)),
+                nn.Conv3d(CNN_CONFIG.conv3d_layer2.in_channels, CNN_CONFIG.conv3d_layer2.out_channels, 
+                         kernel_size=CNN_CONFIG.conv3d_layer2.kernel_size, 
+                         stride=CNN_CONFIG.conv3d_layer2.stride, 
+                         padding=CNN_CONFIG.conv3d_layer2.padding),
                 nn.ReLU(),
-                nn.Conv3d(64, 128, kernel_size=(2, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1)),
+                nn.Conv3d(CNN_CONFIG.conv3d_layer3.in_channels, CNN_CONFIG.conv3d_layer3.out_channels, 
+                         kernel_size=CNN_CONFIG.conv3d_layer3.kernel_size, 
+                         stride=CNN_CONFIG.conv3d_layer3.stride, 
+                         padding=CNN_CONFIG.conv3d_layer3.padding),
                 nn.ReLU(),
-                nn.AdaptiveAvgPool3d((1, 4, 4)),
+                nn.AdaptiveAvgPool3d(POOLING_CONFIG.adaptive_pool3d_output_size),
                 nn.Flatten(),
-                nn.Linear(128 * 4 * 4, visual_hidden_dim),
+                nn.Linear(POOLING_CONFIG.cnn_flattened_size, visual_hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout)
             )
@@ -123,15 +131,24 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         if 'global_view' in observation_space.spaces:
             global_shape = observation_space['global_view'].shape
             self.global_cnn = nn.Sequential(
-                nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3),
+                nn.Conv2d(CNN_CONFIG.conv2d_layer1.in_channels, CNN_CONFIG.conv2d_layer1.out_channels, 
+                         kernel_size=CNN_CONFIG.conv2d_layer1.kernel_size[0], 
+                         stride=CNN_CONFIG.conv2d_layer1.stride[0], 
+                         padding=CNN_CONFIG.conv2d_layer1.padding[0]),
                 nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
+                nn.Conv2d(CNN_CONFIG.conv2d_layer2.in_channels, CNN_CONFIG.conv2d_layer2.out_channels, 
+                         kernel_size=CNN_CONFIG.conv2d_layer2.kernel_size[0], 
+                         stride=CNN_CONFIG.conv2d_layer2.stride[0], 
+                         padding=CNN_CONFIG.conv2d_layer2.padding[0]),
                 nn.ReLU(),
-                nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+                nn.Conv2d(CNN_CONFIG.conv2d_layer3.in_channels, CNN_CONFIG.conv2d_layer3.out_channels, 
+                         kernel_size=CNN_CONFIG.conv2d_layer3.kernel_size[0], 
+                         stride=CNN_CONFIG.conv2d_layer3.stride[0], 
+                         padding=CNN_CONFIG.conv2d_layer3.padding[0]),
                 nn.ReLU(),
-                nn.AdaptiveAvgPool2d((4, 4)),
+                nn.AdaptiveAvgPool2d(POOLING_CONFIG.adaptive_pool2d_output_size),
                 nn.Flatten(),
-                nn.Linear(128 * 4 * 4, global_hidden_dim),
+                nn.Linear(POOLING_CONFIG.cnn_flattened_size, global_hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout)
             )
@@ -170,8 +187,8 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
                 global_pool='mean_max'
             )
             self.has_graph = True
-            # HGT with mean_max pooling outputs 2 * hgt_output_dim
-            graph_output_dim = 2 * hgt_output_dim
+            # HGT with mean_max pooling outputs multiplier * hgt_output_dim
+            graph_output_dim = MULTIPLIER_CONFIG.hgt_output_multiplier * hgt_output_dim
         else:
             self.has_graph = False
             graph_output_dim = 0
@@ -181,8 +198,8 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
             self.spatial_attention = SpatialAttentionModule(
                 graph_dim=graph_output_dim,
                 visual_dim=visual_hidden_dim,
-                spatial_height=DEFAULT_SPATIAL_HEIGHT,
-                spatial_width=DEFAULT_SPATIAL_WIDTH,
+                spatial_height=DEFAULT_CONFIG.spatial_height,
+                spatial_width=DEFAULT_CONFIG.spatial_width,
                 num_heads=num_attention_heads
             )
         
@@ -201,10 +218,10 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         
         # Final fusion network
         self.fusion_network = nn.Sequential(
-            nn.Linear(total_dim, features_dim * 2),
+            nn.Linear(total_dim, features_dim * MULTIPLIER_CONFIG.fusion_expansion_factor),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(features_dim * 2, features_dim),
+            nn.Linear(features_dim * MULTIPLIER_CONFIG.fusion_expansion_factor, features_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(features_dim, features_dim)
@@ -307,10 +324,10 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
 
 def create_hgt_multimodal_extractor(
     observation_space: SpacesDict,
-    features_dim: int = 512,
-    hgt_hidden_dim: int = 256,
-    hgt_num_layers: int = 3,
-    hgt_output_dim: int = 256,
+    features_dim: int = FACTORY_CONFIG.features_dim,
+    hgt_hidden_dim: int = FACTORY_CONFIG.hgt_hidden_dim,
+    hgt_num_layers: int = FACTORY_CONFIG.hgt_num_layers,
+    hgt_output_dim: int = FACTORY_CONFIG.hgt_output_dim,
     **kwargs
 ) -> HGTMultimodalExtractor:
     """
