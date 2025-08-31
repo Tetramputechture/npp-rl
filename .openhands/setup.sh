@@ -275,7 +275,7 @@ declare -a MODULES=(
     "npp_rl.models.gnn:GraphEncoder"
     "npp_rl.models.conditional_edges:ConditionalEdgeMasker"
     "npp_rl.models.physics_constraints:PhysicsConstraintValidator"
-    "npp_rl.agents.enhanced_training:train_enhanced_agent"
+    "npp_rl.agents.training:train_enhanced_agent"
 )
 
 for module_import in "${MODULES[@]}"; do
@@ -428,7 +428,7 @@ echo "  ✓ Basic functionality tested"
 echo ""
 echo "🚀 Next Steps:"
 echo "  1. Run a quick training test:"
-echo "     python -m npp_rl.agents.enhanced_training --num_envs 4 --total_timesteps 10000"
+echo "     python -m npp_rl.agents.training --num_envs 4 --total_timesteps 10000"
 echo ""
 echo "  2. Start TensorBoard for monitoring:"
 echo "     tensorboard --logdir ./training_logs"

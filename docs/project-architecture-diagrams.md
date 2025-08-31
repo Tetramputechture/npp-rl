@@ -25,7 +25,7 @@ graph TB
     subgraph ECOSYSTEM ["🌐 NPP-RL Project Ecosystem"]
         subgraph NPP_RL_REPO ["🧠 NPP-RL Repository"]
             subgraph AGENTS ["🎯 Agent Components"]
-                ENHANCED_TRAINING["enhanced_training.py<br/>🌟 PRIMARY TRAINING<br/>HGT + Hierarchical Support"]
+                TRAINING["training.py<br/>🌟 PRIMARY TRAINING<br/>HGT + Hierarchical Support"]
                 EXPLORATION_MGR["adaptive_exploration.py<br/>ICM + Novelty Detection"]
                 HYPERPARAMS["hyperparameters/<br/>Optimized PPO Config"]
             end
@@ -76,17 +76,17 @@ graph TB
     
     %% Cross-Repository Connections
     NCLONE_REPO -.->|"Environment Interface"| NPP_RL_REPO
-    BASE_ENV --> ENHANCED_TRAINING
+    BASE_ENV --> TRAINING
     HIERARCHICAL_BUILDER --> HGT_EXTRACTOR
     HIERARCHICAL_BUILDER --> HIERARCHICAL_EXTRACTOR
     GRAPH_OBSERVATION --> HGT_EXTRACTOR
     HGT_GNN --> HGT_EXTRACTOR
     SPATIAL_ATTN --> HGT_EXTRACTOR
-    EXPLORATION_MGR --> ENHANCED_TRAINING
+    EXPLORATION_MGR --> TRAINING
     
     %% Architecture Hierarchy
     subgraph ARCHITECTURE_LEVELS ["🏗️ Architecture Hierarchy"]
-        PRIMARY_ARCH["PRIMARY: HGT-based<br/>State-of-the-art Performance<br/>Type-specific Attention"]
+        PRIMARY_ARCH["PRIMARY: HGT-based<br/>Type-specific Attention"]
         SECONDARY_ARCH["SECONDARY: Hierarchical<br/>Multi-resolution Processing<br/>DiffPool GNNs"]
         ARCHIVED_ARCH["ARCHIVED: Legacy<br/>Basic CNN/MLP<br/>Temporal Processing"]
     end
@@ -101,7 +101,7 @@ graph TB
     classDef archive fill:#9E9E9E,stroke:#616161,stroke-width:2px,color:#fff
     classDef system fill:#FF9800,stroke:#F57C00,stroke-width:2px,color:#fff
     
-    class HGT_EXTRACTOR,ENHANCED_TRAINING,HIERARCHICAL_BUILDER,PRIMARY_ARCH primary
+    class HGT_EXTRACTOR,TRAINING,HIERARCHICAL_BUILDER,PRIMARY_ARCH primary
     class HIERARCHICAL_EXTRACTOR,SECONDARY_ARCH secondary
     class ARCHIVE_NPP,ARCHIVE_NCLONE,LEGACY_EXTRACTORS,LEGACY_TRAINING,LEGACY_GRAPH,LEGACY_PATHFINDING,ARCHIVED_ARCH archive
     class SIMULATION_CORE,RL_ENVIRONMENTS,GRAPH_SYSTEM system
@@ -304,7 +304,7 @@ graph TB
         TYPE_SPECIALIZATION["Type Specialization<br/>Dedicated processing for<br/>different node/edge types<br/>Optimal feature learning"]
         ATTENTION_MECHANISMS["Advanced Attention<br/>Multi-head attention<br/>Type-aware processing<br/>Entity-specific focus"]
         SCALABILITY["Scalability<br/>Handles large graphs<br/>Efficient computation<br/>Parallel processing"]
-        PERFORMANCE["Superior Performance<br/>State-of-the-art results<br/>Complex spatial reasoning<br/>Robust generalization"]
+        PERFORMANCE["Superior Performance<br/>Complex spatial reasoning<br/>Robust generalization"]
     end
     
     %% Data Flow
@@ -840,7 +840,7 @@ graph TB
         MODULARITY["Modularity<br/>Configurable Components<br/>Swappable Architectures<br/>Flexible Design"]
         SCALABILITY_PROP["Scalability<br/>Parallel Processing<br/>Efficient Computation<br/>Large-scale Training"]
         ROBUSTNESS["Robustness<br/>Stable Training<br/>Error Handling<br/>Graceful Degradation"]
-        PERFORMANCE_PROP["Performance<br/>State-of-the-art Results<br/>Sample Efficiency<br/>Fast Convergence"]
+        PERFORMANCE_PROP["Performance<br/>Sample Efficiency<br/>Fast Convergence"]
     end
     
     %% Primary Data Flow (HGT Path)

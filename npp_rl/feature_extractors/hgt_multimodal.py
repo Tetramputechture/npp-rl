@@ -1,7 +1,7 @@
 """
 HGT-based Multimodal Feature Extractor - Primary Architecture
 
-This module implements the state-of-the-art Heterogeneous Graph Transformer (HGT)
+This module implements the Heterogeneous Graph Transformer (HGT)
 based multimodal feature extractor for N++ RL agents. This is the PRIMARY and
 RECOMMENDED architecture for the project.
 
@@ -34,7 +34,7 @@ from npp_rl.models.hgt_config import (
 
 class HGTMultimodalExtractor(BaseFeaturesExtractor):
     """
-    State-of-the-art HGT-based multimodal feature extractor.
+    HGT-based multimodal feature extractor.
     
     This is the PRIMARY and RECOMMENDED feature extractor for N++ RL agents.
     It combines Heterogeneous Graph Transformers with advanced multimodal fusion

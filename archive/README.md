@@ -2,7 +2,7 @@
 
 These files are retained for reference but are not part of the current, supported Phase 1 workflow. They have known issues (outdated imports, experimental code, or duplicate functionality) and should be revisited or deleted later.
 
-- benchmark_ppo.py: References a non-existent `npp_rl.environments.nplusplus` module. Use `npp_rl.agents.enhanced_training` instead for training/benchmarking.
+- benchmark_ppo.py: References a non-existent `npp_rl.environments.nplusplus` module. Use `npp_rl.agents.training` instead for training/benchmarking.
 - ppo_tune.py: Optuna tuner with outdated imports and legacy extractors. Needs environment import fixes before reuse.
 - recurrent_ppo_tune.py: Recurrent PPO tuner with outdated imports.
 - recurrent_ppo_train.py: Wrapper for recurrent training; relies on `npp_rl.agents.npp_agent_recurrent_ppo` which has outdated imports.

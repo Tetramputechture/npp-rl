@@ -43,7 +43,6 @@ The consolidated architecture uses **Heterogeneous Graph Transformers (HGT)** as
     *   **Multi-head attention**: Advanced attention mechanisms adapted for heterogeneous graph structures.
     *   **Entity-aware embeddings**: Specialized processing for different entity types with hazard-aware attention.
     *   **Advanced multimodal fusion**: Cross-modal attention with spatial awareness for optimal feature integration.
-    *   **State-of-the-art performance** on complex spatial reasoning tasks.
 
 *   **`HierarchicalMultimodalExtractor` (Secondary Architecture)**:
     *   Implements multi-resolution graph neural networks for structural level understanding.
@@ -107,7 +106,7 @@ Consolidated architecture focused on hierarchical multimodal processing:
 
 - `npp_rl/`
   - `agents/`
-    - `enhanced_training.py`: **Primary training entrypoint** with hierarchical multimodal architecture, CLI interface, PPO, vectorized environments, and comprehensive logging.
+    - `training.py`: **Primary training entrypoint** with hierarchical multimodal architecture, CLI interface, PPO, vectorized environments, and comprehensive logging.
     - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
     - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
   - `feature_extractors/`
@@ -127,7 +126,7 @@ See `archive/README.md` for details on what was moved and why.
 
 ## Training the Agent
 
-The primary script for training the agent with all features is `npp_rl/agents/enhanced_training.py`.
+The primary script for training the agent with all features is `npp_rl/agents/training.py`.
 
 ### Prerequisites
 
@@ -177,14 +176,14 @@ Before starting, ensure you have:
 This command starts training using the HGT-based multimodal extractor (PRIMARY), adaptive exploration, and optimized hyperparameters, utilizing 64 parallel environments.
 
 ```bash
-python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
 ```
 
-**Command-Line Options for `enhanced_training.py`:**
-The `enhanced_training.py` script offers various options:
+**Command-Line Options for `training.py`:**
+The `training.py` script offers various options:
 
 ```bash
-python -m npp_rl.agents.enhanced_training --help
+python -m npp_rl.agents.training --help
 ```
 
 Key options include:
@@ -197,15 +196,15 @@ Key options include:
 
 **Example - Resuming Training with HGT:**
 ```bash
-python -m npp_rl.agents.enhanced_training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32 --extractor_type hgt
+python -m npp_rl.agents.training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32 --extractor_type hgt
 ```
 
 **Example - Using Hierarchical Extractor (Secondary):**
 ```bash
-python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000 --extractor_type hierarchical
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hierarchical
 ```
 
-The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `enhanced_training.py` going forward.
+The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `training.py` going forward.
 
 ### Hyperparameter Tuning
 
@@ -257,10 +256,6 @@ The architecture and training procedures are informed by principles and findings
 *   Kaplan, J., et al. (2020). Scaling Laws for Neural Language Models. (General insights into model scaling).
 *   Ying, R., et al. (2018). Hierarchical Graph Representation Learning with Differentiable Pooling. (DiffPool implementation for hierarchical GNNs).
 *   Hamilton, W., Ying, Z., & Leskovec, J. (2017). Inductive Representation Learning on Large Graphs. (GraphSAGE foundation for graph neural networks).
-
-## Advanced Features: Hierarchical Graph Processing (Task 2.1)
-
-The project now includes state-of-the-art hierarchical graph neural networks for structural level understanding, implementing multi-resolution processing that enables both precise local movement decisions and strategic global planning.
 
 ### Multi-Resolution Graph Architecture
 

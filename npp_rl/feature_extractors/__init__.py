@@ -1,14 +1,14 @@
 """
 Feature Extractors Package for N++ RL Agent
 
-This package provides state-of-the-art feature extractors for the N++ RL environment,
+This package provides feature extractors for the N++ RL environment,
 with the primary architecture using Heterogeneous Graph Transformers (HGT) for
 optimal performance on complex spatial reasoning tasks.
 
 Key Components:
     
     Primary Extractor (RECOMMENDED):
-        - HGTMultimodalExtractor: State-of-the-art HGT-based extractor with:
+        - HGTMultimodalExtractor: HGT-based extractor with:
           * Heterogeneous Graph Transformers with type-specific attention
           * Specialized processing for different node/edge types
           * Advanced multimodal fusion with cross-modal attention

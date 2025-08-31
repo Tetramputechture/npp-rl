@@ -20,7 +20,7 @@ The project implements a sophisticated multi-modal RL agent with:
 npp-rl/
 ├── npp_rl/                    # Main package
 │   ├── agents/                # Training scripts and agent implementations
-│   │   ├── enhanced_training.py     # PRIMARY training script (recommended)
+│   │   ├── training.py     # PRIMARY training script (recommended)
 │   │   ├── enhanced_feature_extractor.py  # 3D/2D CNN feature extractors
 │   │   ├── adaptive_exploration.py        # ICM and exploration management
 │   │   ├── hyperparameters/              # PPO hyperparameters
@@ -77,7 +77,7 @@ pip install -r requirements.txt
 ### Recommended Training Command
 ```bash
 # Primary training with all enhancements (recommended)
-python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000
 
 # Phase 2 training with ICM and graph observations
 python train_phase2.py --preset full_phase2 --experiment_name full_experiment
