@@ -1,19 +1,20 @@
 """
 Enhanced Training Script for N++ RL Agent
 
-This script implements the state-of-the-art hierarchical multimodal architecture
-for training an RL agent to play N++. It uses the HierarchicalMultimodalExtractor
-with multi-resolution graph processing, DiffPool GNNs, and adaptive fusion.
+This script implements the state-of-the-art HGT-based multimodal architecture
+for training an RL agent to play N++. It uses the HGTMultimodalExtractor
+with Heterogeneous Graph Transformers, type-specific attention, and advanced fusion.
 
 Key Features:
-- Hierarchical multimodal feature extraction
-- Multi-resolution graph processing (6px, 24px, 96px)
-- DiffPool GNN with auxiliary losses
+- HGT-based multimodal feature extraction (PRIMARY)
+- Heterogeneous Graph Transformers with type-specific attention
+- Specialized processing for different node/edge types
+- Advanced multimodal fusion with cross-modal attention
 - Adaptive exploration with ICM and novelty detection
 - Comprehensive logging and evaluation
 
 Usage:
-    python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000
+    python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
 """
 
 import argparse
@@ -31,7 +32,7 @@ from stable_baselines3.common.logger import configure
 
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.feature_extractors import HierarchicalMultimodalExtractor
+from npp_rl.feature_extractors import create_feature_extractor, HGTMultimodalExtractor, HierarchicalMultimodalExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,15 +89,22 @@ def train_enhanced_agent(
     disable_exploration: bool = False,
     save_freq: int = 100_000,
     eval_freq: int = 50_000,
-    log_interval: int = 10
+    log_interval: int = 10,
+    extractor_type: str = 'hgt'
 ):
     """
-    Train the enhanced hierarchical multimodal agent.
+    Train the enhanced multimodal agent with HGT or hierarchical architecture.
     
     Args:
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model: Path to existing model to resume training
+        render_mode: Rendering mode for environments
+        disable_exploration: Whether to disable adaptive exploration
+        save_freq: Model save frequency
+        eval_freq: Evaluation frequency
+        log_interval: Logging interval
+        extractor_type: Type of feature extractor ('hgt' or 'hierarchical')
         render_mode: Rendering mode ('rgb_array' for headless, 'human' for visual)
         disable_exploration: Whether to disable adaptive exploration
         save_freq: Frequency of model saves
@@ -144,16 +152,34 @@ def train_enhanced_agent(
     else:
         print("Adaptive exploration disabled")
     
-    # Configure policy with hierarchical multimodal extractor
-    policy_kwargs = {
-        "features_extractor_class": HierarchicalMultimodalExtractor,
-        "features_extractor_kwargs": {
+    # Configure policy with selected feature extractor
+    if extractor_type == 'hgt':
+        print("Using HGT-based multimodal extractor (PRIMARY/RECOMMENDED)")
+        extractor_class = HGTMultimodalExtractor
+        extractor_kwargs = {
+            "features_dim": 512,
+            "hgt_hidden_dim": 256,
+            "hgt_num_layers": 3,
+            "hgt_output_dim": 256,
+            "use_cross_modal_attention": True,
+            "use_spatial_attention": True
+        }
+    elif extractor_type == 'hierarchical':
+        print("Using hierarchical multimodal extractor (SECONDARY)")
+        extractor_class = HierarchicalMultimodalExtractor
+        extractor_kwargs = {
             "features_dim": 512,
             "use_hierarchical_graph": True,
             "hierarchical_hidden_dim": 128,
             "fusion_dim": 256,
             "enable_auxiliary_losses": True
-        },
+        }
+    else:
+        raise ValueError(f"Unknown extractor type: {extractor_type}")
+    
+    policy_kwargs = {
+        "features_extractor_class": extractor_class,
+        "features_extractor_kwargs": extractor_kwargs,
         "net_arch": [dict(pi=NET_ARCH_SIZE, vf=NET_ARCH_SIZE)],
         "activation_fn": torch.nn.ReLU,
         "normalize_images": False  # We handle normalization in the extractor
@@ -289,6 +315,9 @@ def main():
                         help="Evaluation frequency (default: 50k)")
     parser.add_argument("--log_interval", type=int, default=10,
                         help="Logging interval (default: 10)")
+    parser.add_argument("--extractor_type", type=str, default="hgt",
+                        choices=["hgt", "hierarchical"],
+                        help="Feature extractor type: 'hgt' (recommended) or 'hierarchical' (default: hgt)")
     
     args = parser.parse_args()
     
@@ -301,7 +330,8 @@ def main():
         disable_exploration=args.disable_exploration,
         save_freq=args.save_freq,
         eval_freq=args.eval_freq,
-        log_interval=args.log_interval
+        log_interval=args.log_interval,
+        extractor_type=args.extractor_type
     )
 
 

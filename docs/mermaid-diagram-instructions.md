@@ -1,6 +1,6 @@
 # Mermaid Diagram Instructions: NPP-RL Agent Architecture
 
-This document provides instructions for generating Mermaid diagrams specifically focused on the NPP-RL agent architecture and its hierarchical multimodal feature extraction system.
+This document provides instructions for generating Mermaid diagrams specifically focused on the NPP-RL agent architecture and its HGT-based multimodal feature extraction system.
 
 ## Agent-Specific Architecture Diagrams
 
@@ -18,29 +18,29 @@ graph TB
         VISUAL_FRAMES["Visual Frames<br/>84x84x12 Stack<br/>Player-centric View"]
         GLOBAL_VIEW["Global View<br/>176x100 Downsampled<br/>Full Level"]
         GAME_STATE["Game State Vector<br/>Physics + Objectives<br/>Normalized Features"]
-        GRAPH_REPR["Hierarchical Graph<br/>Multi-resolution<br/>Structural Representation"]
+        GRAPH_REPR["Heterogeneous Graph<br/>Node/Edge Types<br/>Structural Representation"]
     end
     
-    subgraph FEATURE_EXTRACTION ["🔍 Hierarchical Multimodal Feature Extractor"]
+    subgraph FEATURE_EXTRACTION ["🔍 HGT Multimodal Feature Extractor (PRIMARY)"]
         subgraph VISUAL_PROC ["Visual Processing"]
             CNN_3D["3D CNN Branch<br/>Temporal Modeling<br/>Spatiotemporal Features"]
             CNN_2D["2D CNN Branch<br/>Global Context<br/>Spatial Features"]
         end
         
-        subgraph GRAPH_PROC ["Graph Processing"]
-            GNN_SUBCELL["Sub-cell GNN<br/>6px Resolution<br/>Fine Details"]
-            GNN_TILE["Tile GNN<br/>24px Resolution<br/>Navigation"]
-            GNN_REGION["Region GNN<br/>96px Resolution<br/>Strategy"]
-            DIFFPOOL["DiffPool Layers<br/>Hierarchical Pooling<br/>Learnable Coarsening"]
+        subgraph GRAPH_PROC ["HGT Graph Processing"]
+            HGT_ENCODER["Heterogeneous Graph Transformer<br/>Type-specific Attention<br/>Multi-head Processing"]
+            NODE_TYPES["Node Types<br/>Grid Cells, Entities<br/>Hazards, Switches"]
+            EDGE_TYPES["Edge Types<br/>Movement (walk/jump/fall)<br/>Functional Relations"]
+            ENTITY_EMBED["Entity Embeddings<br/>Specialized Processing<br/>Hazard-aware Attention"]
         end
         
         subgraph STATE_PROC ["State Processing"]
             MLP_STATE["MLP Branch<br/>Game State<br/>Physics Features"]
         end
         
-        subgraph FUSION ["Multi-scale Fusion"]
-            ATTENTION["Context-aware Attention<br/>Physics-adaptive Weighting"]
-            FUSION_LAYER["Feature Fusion<br/>Multimodal Integration"]
+        subgraph FUSION ["Advanced Multimodal Fusion"]
+            CROSS_MODAL["Cross-modal Attention<br/>Spatial Awareness<br/>Type-aware Integration"]
+            FUSION_LAYER["Feature Fusion<br/>HGT-enhanced Integration"]
         end
     end
     
@@ -103,7 +103,44 @@ graph TB
     class TRAINING,EXPLORATION training
 ```
 
-### 2. Hierarchical Graph Neural Network Detail
+### 2. Heterogeneous Graph Transformer (HGT) Detail - PRIMARY
+
+```mermaid
+graph TB
+    subgraph INPUT_GRAPH ["📊 Input: Heterogeneous Graph Data"]
+        NODE_TYPES_INPUT["Node Types<br/>Grid Cells, Entities<br/>Hazards, Switches, Exits"]
+        EDGE_TYPES_INPUT["Edge Types<br/>Movement: walk/jump/fall<br/>Functional: activate/trigger"]
+        NODE_FEATURES["Node Features<br/>Position, Type, State<br/>Physics Properties"]
+        EDGE_FEATURES["Edge Features<br/>Movement Cost<br/>Relationship Type"]
+    end
+
+    subgraph HGT_LAYERS ["🧠 Heterogeneous Graph Transformer Layers"]
+        subgraph TYPE_SPECIFIC ["Type-Specific Processing"]
+            NODE_PROJ["Node Type Projections<br/>Specialized Embeddings<br/>Per-type Linear Layers"]
+            EDGE_PROJ["Edge Type Projections<br/>Relationship Embeddings<br/>Per-type Linear Layers"]
+        end
+        
+        subgraph ATTENTION ["Multi-Head Attention"]
+            TYPE_ATTN["Type-aware Attention<br/>Node-type × Edge-type<br/>Specialized Attention Heads"]
+            ENTITY_ATTN["Entity-aware Attention<br/>Hazard Detection<br/>Goal-oriented Focus"]
+        end
+        
+        subgraph AGGREGATION ["Feature Aggregation"]
+            MSG_PASS["Message Passing<br/>Type-specific Messages<br/>Heterogeneous Aggregation"]
+            GLOBAL_POOL["Global Pooling<br/>Mean-Max Pooling<br/>Graph-level Features"]
+        end
+    end
+
+    subgraph OUTPUT ["🎯 HGT Output"]
+        GRAPH_FEATURES["Graph Features<br/>Type-aware Representations<br/>Spatial Understanding"]
+        ENTITY_FEATURES["Entity Features<br/>Hazard Awareness<br/>Goal Recognition"]
+    end
+
+    INPUT_GRAPH --> HGT_LAYERS
+    HGT_LAYERS --> OUTPUT
+```
+
+### 3. Hierarchical Graph Neural Network Detail - SECONDARY
 
 ```mermaid
 graph TB
