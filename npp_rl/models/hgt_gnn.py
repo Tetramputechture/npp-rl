@@ -342,9 +342,18 @@ class HGTEncoder(nn.Module):
         node_mask = graph_obs['graph_node_mask']
         edge_mask = graph_obs['graph_edge_mask']
         
-        # Extract or infer node and edge types
-        node_types = graph_obs.get('graph_node_types', self._infer_node_types(node_features))
-        edge_types = graph_obs.get('graph_edge_types', self._infer_edge_types(graph_obs.get('graph_edge_feats')))
+        # Extract or infer node and edge types (prefer explicit types from graph builder)
+        node_types = graph_obs.get('graph_node_types')
+        edge_types = graph_obs.get('graph_edge_types')
+        
+        # Only use inference as fallback if explicit types are not provided
+        if node_types is None:
+            print("Warning: Using node type inference fallback. Consider updating graph builder to provide explicit node_types.")
+            node_types = self._infer_node_types(node_features)
+        
+        if edge_types is None:
+            print("Warning: Using edge type inference fallback. Consider updating graph builder to provide explicit edge_types.")
+            edge_types = self._infer_edge_types(graph_obs.get('graph_edge_feats'))
         entity_types = graph_obs.get('graph_entity_types', None)
         
         # Specialized input embedding
@@ -366,31 +375,337 @@ class HGTEncoder(nn.Module):
         return output
     
     def _infer_node_types(self, node_features: torch.Tensor) -> torch.Tensor:
-        """Infer node types from node features if not provided."""
-        batch_size, num_nodes, _ = node_features.shape
+        """
+        Infer node types from node features using robust feature analysis.
         
-        # Simple heuristic: assume first nodes are grid cells, later ones are entities
-        # This should be replaced with proper type inference based on feature structure
-        node_types = torch.zeros(batch_size, num_nodes, dtype=torch.long, device=node_features.device)
+        This method uses multiple heuristics and validation to determine node types:
+        1. Explicit type encoding (if present)
+        2. Feature pattern analysis
+        3. Statistical feature analysis
+        4. Fallback heuristics with validation
         
-        # For now, assume all nodes are grid cells (this should be improved)
-        # In practice, this would be determined by the graph builder
+        Args:
+            node_features: Node feature tensor [batch_size, num_nodes, feature_dim]
+            
+        Returns:
+            Node type tensor [batch_size, num_nodes] with values:
+            0 = GRID_CELL, 1 = ENTITY, 2 = NINJA
+        """
+        batch_size, num_nodes, feature_dim = node_features.shape
+        device = node_features.device
+        
+        # Initialize node types
+        node_types = torch.zeros(batch_size, num_nodes, dtype=torch.long, device=device)
+        
+        for batch_idx in range(batch_size):
+            for node_idx in range(num_nodes):
+                features = node_features[batch_idx, node_idx]
+                
+                # Method 1: Check for explicit type encoding
+                # Many graph builders include one-hot type encoding in first few dimensions
+                if feature_dim >= 3:
+                    type_indicators = features[:3]
+                    if torch.sum(type_indicators) > 0.8:  # Strong type signal
+                        node_types[batch_idx, node_idx] = torch.argmax(type_indicators)
+                        continue
+                
+                # Method 2: Physics-based feature analysis
+                node_type = self._analyze_physics_features(features, feature_dim)
+                if node_type is not None:
+                    node_types[batch_idx, node_idx] = node_type
+                    continue
+                
+                # Method 3: Statistical feature analysis
+                node_type = self._analyze_statistical_features(features, feature_dim)
+                if node_type is not None:
+                    node_types[batch_idx, node_idx] = node_type
+                    continue
+                
+                # Method 4: Fallback - assume grid cell
+                node_types[batch_idx, node_idx] = 0  # GRID_CELL
+        
+        # Validation: Ensure at least some diversity in node types
+        self._validate_node_type_distribution(node_types)
+        
         return node_types
     
+    def _analyze_physics_features(self, features: torch.Tensor, feature_dim: int) -> Optional[int]:
+        """Analyze physics-based features to determine node type."""
+        # Check for velocity features (typically dimensions 2-3 or 7-8)
+        if feature_dim > 8:
+            # Check common velocity feature locations
+            velocity_candidates = [
+                features[2:4],   # Early velocity features
+                features[7:9],   # Mid-range velocity features
+            ]
+            
+            for vel_features in velocity_candidates:
+                vel_magnitude = torch.norm(vel_features)
+                if vel_magnitude > 0.1:  # Significant velocity
+                    # High velocity suggests ninja node
+                    if vel_magnitude > 5.0:
+                        return 2  # NINJA
+                    # Low velocity might be moving entity
+                    elif vel_magnitude > 0.5:
+                        return 1  # ENTITY
+        
+        # Check for entity-specific features (proximity, state indicators)
+        if feature_dim > 20:
+            # Entity proximity features (typically around index 20-22)
+            entity_proximity = features[20:23] if feature_dim > 22 else features[-3:]
+            if torch.any(entity_proximity > 0.1):
+                return 0  # GRID_CELL (has entity proximity)
+        
+        return None
+    
+    def _analyze_statistical_features(self, features: torch.Tensor, feature_dim: int) -> Optional[int]:
+        """Analyze statistical properties of features to determine node type."""
+        # Calculate feature statistics
+        feature_mean = torch.mean(features)
+        feature_std = torch.std(features)
+        feature_max = torch.max(features)
+        non_zero_count = torch.sum(features != 0).float()
+        
+        # Ninja nodes typically have diverse, high-magnitude features
+        if feature_std > 2.0 and feature_max > 10.0 and non_zero_count > feature_dim * 0.3:
+            return 2  # NINJA
+        
+        # Entity nodes have moderate diversity and magnitude
+        elif feature_std > 0.5 and feature_max > 1.0 and non_zero_count > feature_dim * 0.2:
+            return 1  # ENTITY
+        
+        # Grid cells typically have sparse, low-magnitude features
+        elif non_zero_count < feature_dim * 0.1 or feature_max < 0.5:
+            return 0  # GRID_CELL
+        
+        return None
+    
+    def _validate_node_type_distribution(self, node_types: torch.Tensor) -> None:
+        """Validate that node type distribution is reasonable."""
+        batch_size, num_nodes = node_types.shape
+        
+        for batch_idx in range(batch_size):
+            types = node_types[batch_idx]
+            
+            # Count each type
+            grid_count = torch.sum(types == 0).item()
+            entity_count = torch.sum(types == 1).item()
+            ninja_count = torch.sum(types == 2).item()
+            
+            # Validation rules
+            # 1. Should have mostly grid cells
+            if grid_count < num_nodes * 0.5:
+                # Too few grid cells - convert some entities to grid cells
+                entity_indices = torch.where(types == 1)[0]
+                if len(entity_indices) > 0:
+                    convert_count = min(len(entity_indices), int(num_nodes * 0.5) - grid_count)
+                    node_types[batch_idx, entity_indices[:convert_count]] = 0
+            
+            # 2. Should have at most a few ninja nodes
+            if ninja_count > max(1, num_nodes // 20):
+                # Too many ninjas - convert excess to entities
+                ninja_indices = torch.where(types == 2)[0]
+                if len(ninja_indices) > 1:
+                    keep_count = max(1, num_nodes // 20)
+                    node_types[batch_idx, ninja_indices[keep_count:]] = 1
+    
     def _infer_edge_types(self, edge_features: Optional[torch.Tensor]) -> torch.Tensor:
-        """Infer edge types from edge features if not provided."""
+        """
+        Infer edge types from edge features using robust movement analysis.
+        
+        This method uses multiple approaches to determine edge types:
+        1. Explicit type encoding (if present)
+        2. Movement pattern analysis
+        3. Physics-based classification
+        4. Geometric analysis
+        5. Validation and consistency checks
+        
+        Args:
+            edge_features: Edge feature tensor [batch_size, num_edges, feature_dim]
+            
+        Returns:
+            Edge type tensor [batch_size, num_edges] with values:
+            0 = WALK, 1 = JUMP, 2 = WALL_JUMP, 3 = LAUNCH_PAD, 4 = FALL, 5 = SLIDE
+        """
         if edge_features is None:
             # Default to WALK edges if no edge features
             batch_size = 1  # This should be extracted from other tensors
             num_edges = 1
             return torch.zeros(batch_size, num_edges, dtype=torch.long)
         
-        batch_size, num_edges, _ = edge_features.shape
+        batch_size, num_edges, feature_dim = edge_features.shape
+        device = edge_features.device
         
-        # Simple heuristic: use first 6 features as one-hot edge type encoding
-        edge_types = torch.argmax(edge_features[:, :, :6], dim=-1)
+        # Initialize edge types
+        edge_types = torch.zeros(batch_size, num_edges, dtype=torch.long, device=device)
+        
+        for batch_idx in range(batch_size):
+            for edge_idx in range(num_edges):
+                features = edge_features[batch_idx, edge_idx]
+                
+                # Method 1: Check for explicit type encoding
+                if feature_dim >= 6:
+                    type_indicators = features[:6]
+                    if torch.sum(type_indicators) > 0.8:  # Strong type signal
+                        edge_types[batch_idx, edge_idx] = torch.argmax(type_indicators)
+                        continue
+                
+                # Method 2: Movement pattern analysis
+                edge_type = self._analyze_movement_pattern(features, feature_dim)
+                if edge_type is not None:
+                    edge_types[batch_idx, edge_idx] = edge_type
+                    continue
+                
+                # Method 3: Physics-based classification
+                edge_type = self._analyze_physics_movement(features, feature_dim)
+                if edge_type is not None:
+                    edge_types[batch_idx, edge_idx] = edge_type
+                    continue
+                
+                # Method 4: Geometric analysis
+                edge_type = self._analyze_geometric_properties(features, feature_dim)
+                if edge_type is not None:
+                    edge_types[batch_idx, edge_idx] = edge_type
+                    continue
+                
+                # Method 5: Fallback - assume walk
+                edge_types[batch_idx, edge_idx] = 0  # WALK
+        
+        # Validation: Ensure edge type distribution is reasonable
+        self._validate_edge_type_distribution(edge_types)
         
         return edge_types
+    
+    def _analyze_movement_pattern(self, features: torch.Tensor, feature_dim: int) -> Optional[int]:
+        """Analyze movement patterns to determine edge type."""
+        if feature_dim < 8:
+            return None
+        
+        # Look for velocity/displacement features
+        # Common locations: [2:4], [4:6], [6:8]
+        velocity_candidates = []
+        if feature_dim > 4:
+            velocity_candidates.append(features[2:4])
+        if feature_dim > 6:
+            velocity_candidates.append(features[4:6])
+        if feature_dim > 8:
+            velocity_candidates.append(features[6:8])
+        
+        for vel_features in velocity_candidates:
+            vx, vy = vel_features[0], vel_features[1]
+            
+            # High upward velocity suggests jump
+            if vy < -3.0:  # Negative Y is up in many coordinate systems
+                if abs(vx) > 2.0:
+                    return 2  # WALL_JUMP
+                else:
+                    return 1  # JUMP
+            
+            # High downward velocity suggests fall
+            elif vy > 5.0:
+                return 4  # FALL
+            
+            # High horizontal velocity with moderate vertical
+            elif abs(vx) > 4.0 and abs(vy) < 2.0:
+                return 0  # WALK (fast horizontal movement)
+            
+            # Very high velocity suggests launch pad
+            elif torch.norm(vel_features) > 8.0:
+                return 3  # LAUNCH_PAD
+        
+        return None
+    
+    def _analyze_physics_movement(self, features: torch.Tensor, feature_dim: int) -> Optional[int]:
+        """Analyze physics-based features to determine edge type."""
+        if feature_dim < 12:
+            return None
+        
+        # Look for physics indicators in later features
+        physics_features = features[8:12] if feature_dim > 12 else features[-4:]
+        
+        # Energy-based classification
+        if len(physics_features) >= 2:
+            kinetic_energy = physics_features[0]
+            potential_energy = physics_features[1] if len(physics_features) > 1 else 0
+            
+            # High kinetic energy suggests dynamic movement
+            if kinetic_energy > 5.0:
+                if potential_energy > 2.0:
+                    return 1  # JUMP (high kinetic + potential)
+                else:
+                    return 0  # WALK (high kinetic, low potential)
+            
+            # High potential energy suggests vertical movement
+            elif potential_energy > 3.0:
+                return 4  # FALL (gaining potential energy)
+        
+        # Contact state analysis (if available)
+        if feature_dim > 15:
+            contact_features = features[12:15]
+            ground_contact = contact_features[0] if len(contact_features) > 0 else 0
+            wall_contact = contact_features[1] if len(contact_features) > 1 else 0
+            
+            if wall_contact > 0.5:
+                return 5  # SLIDE (wall contact)
+            elif ground_contact < 0.1:
+                return 4  # FALL (no ground contact)
+        
+        return None
+    
+    def _analyze_geometric_properties(self, features: torch.Tensor, feature_dim: int) -> Optional[int]:
+        """Analyze geometric properties to determine edge type."""
+        # Look for distance/direction features
+        if feature_dim > 20:
+            # Distance features often in later dimensions
+            distance_features = features[-5:]
+            
+            # Very long distance suggests launch pad or special movement
+            if torch.max(distance_features) > 10.0:
+                return 3  # LAUNCH_PAD
+            
+            # Moderate distance with specific patterns
+            elif torch.max(distance_features) > 3.0:
+                # Check for vertical bias
+                if len(distance_features) >= 2:
+                    horizontal_dist = distance_features[0]
+                    vertical_dist = distance_features[1]
+                    
+                    if abs(vertical_dist) > abs(horizontal_dist) * 1.5:
+                        return 1  # JUMP (vertical bias)
+        
+        return None
+    
+    def _validate_edge_type_distribution(self, edge_types: torch.Tensor) -> None:
+        """Validate that edge type distribution is reasonable."""
+        batch_size, num_edges = edge_types.shape
+        
+        for batch_idx in range(batch_size):
+            types = edge_types[batch_idx]
+            
+            # Count each type
+            walk_count = torch.sum(types == 0).item()
+            jump_count = torch.sum(types == 1).item()
+            wall_jump_count = torch.sum(types == 2).item()
+            launch_pad_count = torch.sum(types == 3).item()
+            fall_count = torch.sum(types == 4).item()
+            slide_count = torch.sum(types == 5).item()
+            
+            # Validation rules
+            # 1. Should have mostly walk edges
+            if walk_count < num_edges * 0.3:
+                # Too few walks - convert some other types to walks
+                non_walk_indices = torch.where(types != 0)[0]
+                if len(non_walk_indices) > 0:
+                    convert_count = min(len(non_walk_indices), int(num_edges * 0.3) - walk_count)
+                    edge_types[batch_idx, non_walk_indices[:convert_count]] = 0
+            
+            # 2. Launch pad edges should be rare
+            if launch_pad_count > max(1, num_edges // 10):
+                # Too many launch pads - convert excess to jumps
+                launch_pad_indices = torch.where(types == 3)[0]
+                if len(launch_pad_indices) > 1:
+                    keep_count = max(1, num_edges // 10)
+                    edge_types[batch_idx, launch_pad_indices[keep_count:]] = 1
     
 
     

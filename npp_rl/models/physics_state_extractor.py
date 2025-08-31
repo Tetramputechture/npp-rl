@@ -49,10 +49,12 @@ class PhysicsStateExtractor:
     """
     
     def __init__(self):
-        """Initialize physics state extractor with caching for static level data."""
+        """Initialize physics state extractor with caching for level data."""
         # Cache for static level data (optimized for single ninja assumption)
         self._level_cache = {}
         self._current_level_id = None
+        # Cache for dynamic entity states (updated each frame)
+        self._dynamic_entity_cache = {}
 
     def extract_ninja_physics_state(
         self,
@@ -93,6 +95,8 @@ class PhysicsStateExtractor:
         # Cache level data for single ninja optimization
         if level_data:
             self._cache_level_data(level_data)
+            # Update dynamic entity states (must be done each frame)
+            self._update_dynamic_entities(level_data)
         
         # Extract movement state (default to 0 if not available)
         movement_state = ninja_state.get('movement_state', 0)
@@ -338,6 +342,76 @@ class PhysicsStateExtractor:
             pass
         return False
 
+    def _update_dynamic_entities(self, level_data: Dict[str, Any]) -> None:
+        """
+        Update dynamic entity states that can change during gameplay.
+        
+        This method should be called each time physics state is extracted to ensure
+        entity states (like toggle mine states, switch activations) are current.
+        
+        Args:
+            level_data: Current level data with entity states
+        """
+        if not level_data:
+            return
+            
+        self._dynamic_entity_cache = {
+            'toggle_mines': [],
+            'switches': [],
+            'drones': [],
+            'thwumps': []
+        }
+        
+        entities = level_data.get('entities', [])
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            entity_state = entity.get('state', 0)
+            
+            # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
+            if entity_type == EntityToggleMine.ENTITY_TYPE:
+                self._dynamic_entity_cache['toggle_mines'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'is_deadly': entity_state == 0,  # Deadly when state 0
+                    'entity': entity
+                })
+            
+            # Cache switches (activation state changes)
+            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+                self._dynamic_entity_cache['switches'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'activated': entity_state > 0,
+                    'entity': entity
+                })
+            
+            # Cache drones (position and direction can change)
+            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+                self._dynamic_entity_cache['drones'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
+            
+            # Cache thwumps (position and state can change)
+            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+                self._dynamic_entity_cache['thwumps'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
+
     def _extract_entity_proximity(
         self,
         ninja_position: Tuple[float, float],
@@ -382,25 +456,26 @@ class PhysicsStateExtractor:
                 
                 if entity_type == EntityLaunchPad.ENTITY_TYPE:  # Launch pad
                     launch_pad_proximity = max(launch_pad_proximity, proximity)
-                elif self._is_hazardous_entity(entity):
+                elif self._is_hazardous_entity(entity, ninja_position):
                     hazard_proximity = max(hazard_proximity, proximity)
                 elif entity_type in [6, 7, 8]:  # Collectibles (gold, switches, etc.)
                     collectible_proximity = max(collectible_proximity, proximity)
         
         return launch_pad_proximity, hazard_proximity, collectible_proximity
 
-    def _is_hazardous_entity(self, entity: Dict[str, Any]) -> bool:
+    def _is_hazardous_entity(self, entity: Dict[str, Any], ninja_position: Optional[Tuple[float, float]] = None) -> bool:
         """
         Determine if an entity is hazardous based on precise N++ hazard definition.
         
         A hazard is defined as:
         - A toggle mine that is toggled (in state 0)
         - Any side of any kind of drone
-        - The dangerous side of a thwump
+        - The dangerous side of a thwump (requires ninja position)
         - Any side of a shove thwump once activated
         
         Args:
             entity: Entity dictionary with type, state, and other properties
+            ninja_position: Optional ninja position for orientation-based hazard detection
             
         Returns:
             True if entity is currently hazardous
@@ -418,9 +493,30 @@ class PhysicsStateExtractor:
             
         # Thwumps - need to check orientation and state for dangerous side
         if entity_type == EntityThwump.ENTITY_TYPE:
-            # For now, consider all thwumps potentially hazardous
-            # TODO: Implement precise dangerous side detection based on orientation
-            return True
+            # Thwumps are dangerous on the side they can move toward
+            # Based on N++ mechanics, thwumps move in their orientation direction
+            orientation = entity.get('orientation', 0)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            
+            # Calculate ninja position relative to thwump
+            ninja_x, ninja_y = ninja_position
+            relative_x = ninja_x - entity_x
+            relative_y = ninja_y - entity_y
+            
+            # Map orientation to dangerous direction
+            # 0=right, 1=down, 2=left, 3=up (standard N++ orientations)
+            if orientation == 0:  # Right-facing thwump
+                return relative_x > 0  # Dangerous on right side
+            elif orientation == 1:  # Down-facing thwump
+                return relative_y > 0  # Dangerous on bottom side
+            elif orientation == 2:  # Left-facing thwump
+                return relative_x < 0  # Dangerous on left side
+            elif orientation == 3:  # Up-facing thwump
+                return relative_y < 0  # Dangerous on top side
+            else:
+                # Unknown orientation, assume dangerous
+                return True
             
         # Shove thwumps when activated are hazardous on any side
         if entity_type == EntityShoveThwump.ENTITY_TYPE:

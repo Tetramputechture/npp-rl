@@ -19,6 +19,12 @@ from nclone.constants import (
     MAX_SURVIVABLE_IMPACT
 )
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
+from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
+from nclone.entity_classes.entity_drone_zap import EntityDroneZap
+from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
+from nclone.entity_classes.entity_thwump import EntityThwump
+from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
+from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
 from nclone.physics import overlap_circle_vs_circle, map_orientation_to_vector
 
 # Movement classification constants
@@ -100,7 +106,9 @@ class MovementClassifier:
     def __init__(self):
         """Initialize movement classifier with N++ physics constants."""
         # Cache for static entity data (positions never change during level)
-        self._entity_cache = {}
+        self._static_entity_cache = {}
+        # Cache for dynamic entity states (can change during gameplay)
+        self._dynamic_entity_cache = {}
         self._current_level_id = None
 
     def classify_movement(
@@ -525,6 +533,8 @@ class MovementClassifier:
             
         # Cache static entities for performance (only done once per level)
         self._cache_static_entities(level_data)
+        # Update dynamic entity states (done every time as states can change)
+        self._update_dynamic_entities(level_data)
         
         # Calculate movement vector properties
         distance = math.sqrt(dx*dx + dy*dy)
@@ -534,7 +544,7 @@ class MovementClassifier:
             return False
             
         # Use cached launch pad data for performance
-        launch_pads = self._entity_cache.get('launch_pads', [])
+        launch_pads = self._static_entity_cache.get('launch_pads', [])
         if not launch_pads:
             return False
             
@@ -565,10 +575,10 @@ class MovementClassifier:
         Cache static entity positions since they never change during a level.
         
         Static entities include:
-        - Launch pads (never change position)
-        - Mines (never change position) 
+        - Launch pads (never change position or orientation)
         - One-way platforms (never change position)
-        - Switches (never change position)
+        - Exits (never change position)
+        - Doors (never change position, but open/close state is dynamic)
         """
         level_id = level_data.get('level_id', id(level_data))
         
@@ -577,11 +587,11 @@ class MovementClassifier:
             return
             
         self._current_level_id = level_id
-        self._entity_cache = {
+        self._static_entity_cache = {
             'launch_pads': [],
-            'mines': [],
-            'switches': [],
-            'one_way_platforms': []
+            'one_way_platforms': [],
+            'exits': [],
+            'doors': []
         }
         
         entities = level_data.get('entities', [])
@@ -593,7 +603,7 @@ class MovementClassifier:
             entity_x = entity.get('x', 0)
             entity_y = entity.get('y', 0)
             
-            # Cache launch pads
+            # Cache launch pads (static - position and orientation never change)
             if entity_type == EntityLaunchPad.ENTITY_TYPE:
                 orientation = entity.get('orientation', 0)
                 normal_x, normal_y = map_orientation_to_vector(orientation)
@@ -607,7 +617,7 @@ class MovementClassifier:
                 expected_boost_y = normal_y * EntityLaunchPad.BOOST * yboost_scale * JUMP_LAUNCH_PAD_BOOST_FACTOR
                 boost_distance = math.sqrt(expected_boost_x**2 + expected_boost_y**2)
                 
-                self._entity_cache['launch_pads'].append({
+                self._static_entity_cache['launch_pads'].append({
                     'x': entity_x,
                     'y': entity_y,
                     'orientation': orientation,
@@ -618,8 +628,90 @@ class MovementClassifier:
                     'boost_dir_y': expected_boost_y / boost_distance if boost_distance > 0 else 0
                 })
             
-            # Cache other static entities for future use
-            # TODO: Add mine, switch, platform caching as needed
+            # Cache other static entities (positions don't change)
+            elif entity_type in ['one_way_platform', 'exit', 'door_regular', 'door_locked']:
+                cache_key = 'one_way_platforms' if entity_type == 'one_way_platform' else \
+                           'exits' if entity_type == 'exit' else 'doors'
+                
+                self._static_entity_cache[cache_key].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'type': entity_type,
+                    'entity': entity
+                })
+
+    def _update_dynamic_entities(self, level_data: Dict[str, Any]) -> None:
+        """
+        Update dynamic entity states that can change during gameplay.
+        
+        Dynamic entities include:
+        - Toggle mines (state changes: 1=safe initially, 0=deadly after ninja visit)
+        - Switches (activation state changes)
+        - Drones (position and direction can change)
+        - Thwumps (position and state can change)
+        
+        Args:
+            level_data: Current level data with entity states
+        """
+        if not level_data:
+            return
+            
+        self._dynamic_entity_cache = {
+            'toggle_mines': [],
+            'switches': [],
+            'drones': [],
+            'thwumps': []
+        }
+        
+        entities = level_data.get('entities', [])
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            entity_state = entity.get('state', 0)
+            
+            # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
+            if entity_type == EntityToggleMine.ENTITY_TYPE:
+                self._dynamic_entity_cache['toggle_mines'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'is_deadly': entity_state == 0,  # Deadly when state 0
+                    'entity': entity
+                })
+            
+            # Cache switches (activation state changes)
+            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+                self._dynamic_entity_cache['switches'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'activated': entity_state > 0,
+                    'entity': entity
+                })
+            
+            # Cache drones (position and direction can change)
+            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+                self._dynamic_entity_cache['drones'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
+            
+            # Cache thwumps (position and state can change)
+            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+                self._dynamic_entity_cache['thwumps'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
 
     def classify_movement_sequence(
         self,
