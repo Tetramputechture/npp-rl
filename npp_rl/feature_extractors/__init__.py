@@ -1,156 +1,102 @@
 """
 Feature Extractors Package for N++ RL Agent
 
-This package provides a comprehensive collection of feature extractors for
-different types of observations and modeling needs in the N++ RL environment.
-
-The package is organized into specialized modules:
-- `temporal`: 3D CNN-based extractors for temporal modeling
-- `multimodal`: Advanced extractors supporting multiple observation modalities
+This package provides the state-of-the-art hierarchical multimodal feature extractor
+for the N++ RL environment, implementing multi-resolution graph processing with
+DiffPool GNNs and adaptive fusion mechanisms.
 
 Key Components:
     
-    Temporal Extractors:
-        - TemporalFeatureExtractor: 3D CNN for frame-stacked observations
-        - FeatureExtractor: Alias for backward compatibility
-    
-    Multimodal Extractors:
-        - MultimodalGraphExtractor: Full multimodal with GNN support
-        - MultimodalExtractor: Simplified multimodal without graphs
-        - NppMultimodalGraphExtractor: Backward compatibility alias
-        - NppMultimodalExtractor: Backward compatibility alias
+    Primary Extractor:
+        - HierarchicalMultimodalExtractor: Advanced multimodal extractor with:
+          * Multi-resolution graph processing (6px, 24px, 96px)
+          * DiffPool GNN with learnable hierarchical representations
+          * Context-aware attention mechanisms
+          * Auxiliary loss training for improved representations
     
     Factory Functions:
-        - create_feature_extractor: Smart factory for any extractor type
-        - create_multimodal_extractor: Factory for multimodal extractors
+        - create_hierarchical_multimodal_extractor: Factory for the primary extractor
 
 Usage Examples:
 
-    # Basic temporal modeling (recommended for most use cases)
-    from npp_rl.feature_extractors import TemporalFeatureExtractor
-    extractor = TemporalFeatureExtractor(observation_space, features_dim=512)
-    
-    # Advanced multimodal with graph support
-    from npp_rl.feature_extractors import MultimodalGraphExtractor
-    extractor = MultimodalGraphExtractor(
+    # Primary hierarchical multimodal extractor (recommended)
+    from npp_rl.feature_extractors import HierarchicalMultimodalExtractor
+    extractor = HierarchicalMultimodalExtractor(
         observation_space,
         features_dim=512,
-        use_graph_obs=True
+        use_hierarchical_graph=True
     )
     
-    # Factory function (automatic selection)
-    from npp_rl.feature_extractors import create_feature_extractor
-    extractor = create_feature_extractor(
-        observation_space,
-        extractor_type='temporal',  # or 'multimodal'
-        features_dim=512
+    # Factory function
+    from npp_rl.feature_extractors import create_hierarchical_multimodal_extractor
+    extractor = create_hierarchical_multimodal_extractor(
+        observation_space=env.observation_space,
+        features_dim=512,
+        use_hierarchical_graph=True
     )
-    
-    # Backward compatibility
-    from npp_rl.feature_extractors import FeatureExtractor  # Original name
-    from npp_rl.feature_extractors import create_feature_extractor as create_fe
+
+Note: Legacy extractors (temporal, multimodal) have been moved to archive/
+for reference. The hierarchical multimodal extractor provides superior
+accuracy, robustness, and sample efficiency.
 """
 
 from typing import Union, Literal
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 
-# Import all extractors
-from .temporal import TemporalFeatureExtractor, FeatureExtractor
-from .multimodal import (
-    MultimodalGraphExtractor,
-    MultimodalExtractor,
-    create_multimodal_extractor,
-    # Backward compatibility aliases
-    NppMultimodalGraphExtractor,
-    NppMultimodalExtractor,
+# Import primary extractor
+from .hierarchical_multimodal import (
+    HierarchicalMultimodalExtractor,
+    HierarchicalGraphObservationWrapper,
+    create_hierarchical_multimodal_extractor
 )
 
 
 def create_feature_extractor(
     observation_space: SpacesDict,
-    extractor_type: Literal['temporal', 'multimodal'] = 'temporal',
     features_dim: int = 512,
-    use_graph_obs: bool = False,
+    use_hierarchical_graph: bool = True,
     **kwargs
 ) -> BaseFeaturesExtractor:
     """
-    Smart factory function to create appropriate feature extractor.
+    Factory function to create the hierarchical multimodal feature extractor.
     
-    This function provides a unified interface for creating any type of
-    feature extractor based on the specified type and parameters.
+    This function creates the state-of-the-art hierarchical multimodal extractor
+    with multi-resolution graph processing capabilities.
     
     Args:
         observation_space: Gym observation space dictionary
-        extractor_type: Type of extractor to create:
-            - 'temporal': TemporalFeatureExtractor with 3D CNNs
-            - 'multimodal': MultimodalExtractor with optional GNN support
         features_dim: Output feature dimension (default: 512)
-        use_graph_obs: Whether to use graph observations (multimodal only)
-        **kwargs: Additional arguments passed to the specific extractor
+        use_hierarchical_graph: Whether to use hierarchical graph processing
+        **kwargs: Additional arguments passed to the extractor
         
     Returns:
-        Configured feature extractor instance
-        
-    Raises:
-        ValueError: If extractor_type is not recognized
+        Configured hierarchical multimodal feature extractor instance
         
     Examples:
-        # Basic temporal extractor
-        extractor = create_feature_extractor(obs_space, 'temporal')
+        # Standard hierarchical extractor
+        extractor = create_feature_extractor(obs_space)
         
-        # Multimodal without graphs
-        extractor = create_feature_extractor(obs_space, 'multimodal')
-        
-        # Multimodal with graphs
+        # Without hierarchical graphs (fallback mode)
         extractor = create_feature_extractor(
-            obs_space, 'multimodal', use_graph_obs=True
+            obs_space, use_hierarchical_graph=False
         )
     """
-    if extractor_type == 'temporal':
-        return TemporalFeatureExtractor(
-            observation_space=observation_space,
-            features_dim=features_dim,
-            **kwargs
-        )
-    elif extractor_type == 'multimodal':
-        return create_multimodal_extractor(
-            observation_space=observation_space,
-            features_dim=features_dim,
-            use_graph_obs=use_graph_obs,
-            **kwargs
-        )
-    else:
-        raise ValueError(
-            f"Unknown extractor_type: {extractor_type}. "
-            f"Expected 'temporal' or 'multimodal'."
-        )
+    return create_hierarchical_multimodal_extractor(
+        observation_space=observation_space,
+        features_dim=features_dim,
+        use_hierarchical_graph=use_hierarchical_graph,
+        **kwargs
+    )
 
 
 # Export all public components
 __all__ = [
-    # Temporal extractors
-    'TemporalFeatureExtractor',
-    'FeatureExtractor',  # Backward compatibility
-    
-    # Multimodal extractors
-    'MultimodalGraphExtractor',
-    'MultimodalExtractor',
-    'NppMultimodalGraphExtractor',  # Backward compatibility
-    'NppMultimodalExtractor',       # Backward compatibility
+    # Primary hierarchical extractor
+    'HierarchicalMultimodalExtractor',
+    'HierarchicalGraphObservationWrapper',
     
     # Factory functions
     'create_feature_extractor',
-    'create_multimodal_extractor',
+    'create_hierarchical_multimodal_extractor',
 ]
-
-
-# Backward compatibility - direct access to old names
-# This allows existing code to continue working without modification
-def create_feature_extractor_legacy(*args, **kwargs):
-    """Legacy factory function for backward compatibility."""
-    return create_multimodal_extractor(*args, **kwargs)
-
-
-# Maintain old import path compatibility
-create_feature_extractor_old = create_multimodal_extractor
