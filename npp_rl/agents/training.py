@@ -1,9 +1,9 @@
 """
-Enhanced Training Script for N++ RL Agent
+Training Script for N++ RL Agent
 
-This script implements the state-of-the-art HGT-based multimodal architecture
+This script implements HGT-based multimodal architecture
 for training an RL agent to play N++. It uses the HGTMultimodalExtractor
-with Heterogeneous Graph Transformers, type-specific attention, and advanced fusion.
+with Heterogeneous Graph Transformers, type-specific attention, and multimodal fusion.
 
 Key Features:
 - HGT-based multimodal feature extraction (PRIMARY)
@@ -14,7 +14,7 @@ Key Features:
 - Comprehensive logging and evaluation
 
 Usage:
-    python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
+    python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
 """
 
 import argparse
@@ -39,7 +39,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class HierarchicalLoggingCallback(BaseCallback):
-    """Enhanced callback for logging hierarchical training metrics."""
+    """Callback for logging hierarchical training metrics."""
     
     def __init__(self, exploration_manager: AdaptiveExplorationManager, log_freq: int = 1000):
         super().__init__()
@@ -65,8 +65,8 @@ class HierarchicalLoggingCallback(BaseCallback):
         return True
 
 
-def create_enhanced_environment(render_mode: str = "rgb_array", **kwargs):
-    """Create enhanced environment with hierarchical graph observations."""
+def create_environment(render_mode: str = "rgb_array", **kwargs):
+    """Create environment with hierarchical graph observations."""
     def _init():
         env = BasicLevelNoGold(
             render_mode=render_mode,
@@ -81,7 +81,7 @@ def create_enhanced_environment(render_mode: str = "rgb_array", **kwargs):
     return _init
 
 
-def train_enhanced_agent(
+def train_agent(
     num_envs: int = 64,
     total_timesteps: int = 10_000_000,
     load_model: str = None,
@@ -93,7 +93,7 @@ def train_enhanced_agent(
     extractor_type: str = 'hgt'
 ):
     """
-    Train the enhanced multimodal agent with HGT or hierarchical architecture.
+    Train the multimodal agent with HGT or hierarchical architecture.
     
     Args:
         num_envs: Number of parallel environments
@@ -117,18 +117,18 @@ def train_enhanced_agent(
         num_envs = 1
         print("Human rendering mode detected. Setting num_envs=1.")
     
-    print(f"Training enhanced hierarchical agent with {num_envs} environments")
+    print(f"Training hierarchical agent with {num_envs} environments")
     print(f"Device: {device}")
     print(f"Total timesteps: {total_timesteps:,}")
     
     # Create timestamped log directory
     timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
-    log_dir = Path(f'./training_logs/enhanced_ppo_training/session-{timestamp}')
+    log_dir = Path(f'./training_logs/ppo_training/session-{timestamp}')
     log_dir.mkdir(exist_ok=True, parents=True)
     
     # Create environment factory
     def make_env():
-        return create_enhanced_environment(render_mode=render_mode)
+        return create_environment(render_mode=render_mode)
     
     # Create vectorized environment
     if num_envs == 1:
@@ -199,7 +199,7 @@ def train_enhanced_agent(
             if hasattr(model, key):
                 setattr(model, key, value)
     else:
-        # Create new model with enhanced hyperparameters
+        # Create new model with hyperparameters
         model = PPO(
             policy="MultiInputPolicy",
             env=env,
@@ -255,7 +255,7 @@ def train_enhanced_agent(
     )
     callbacks.append(stop_callback)
     
-    # Enhanced logging callback
+    # Logging callback
     if exploration_manager:
         logging_callback = HierarchicalLoggingCallback(
             exploration_manager=exploration_manager,
@@ -295,8 +295,8 @@ def train_enhanced_agent(
 
 
 def main():
-    """Main entry point for enhanced training."""
-    parser = argparse.ArgumentParser(description="Enhanced N++ RL Agent Training")
+    """Main entry point for training."""
+    parser = argparse.ArgumentParser(description="N++ RL Agent Training")
     
     parser.add_argument("--num_envs", type=int, default=64,
                         help="Number of parallel environments (default: 64)")
@@ -321,8 +321,8 @@ def main():
     
     args = parser.parse_args()
     
-    # Train the enhanced agent
-    train_enhanced_agent(
+    # Train the agent
+    train_agent(
         num_envs=args.num_envs,
         total_timesteps=args.total_timesteps,
         load_model=args.load_model,
