@@ -99,7 +99,9 @@ class MovementClassifier:
 
     def __init__(self):
         """Initialize movement classifier with N++ physics constants."""
-        pass
+        # Cache for static entity data (positions never change during level)
+        self._entity_cache = {}
+        self._current_level_id = None
 
     def classify_movement(
         self,
@@ -517,15 +519,13 @@ class MovementClassifier:
         dy: float,
         level_data: Dict[str, Any]
     ) -> bool:
-        """Check if movement involves a launch pad by analyzing level entities."""
+        """Check if movement involves a launch pad using cached entity data."""
         if not level_data:
             return False
             
-        # Get entities from level data
-        entities = level_data.get('entities', [])
-        if not entities:
-            return False
-            
+        # Cache static entities for performance (only done once per level)
+        self._cache_static_entities(level_data)
+        
         # Calculate movement vector properties
         distance = math.sqrt(dx*dx + dy*dy)
         
@@ -533,50 +533,93 @@ class MovementClassifier:
         if distance < EntityLaunchPad.BOOST * 0.5:  # Minimum boost distance
             return False
             
-        # Look for launch pad entities in the level
+        # Use cached launch pad data for performance
+        launch_pads = self._entity_cache.get('launch_pads', [])
+        if not launch_pads:
+            return False
+            
+        # Normalize actual movement direction
+        move_dir_x = dx / distance
+        move_dir_y = dy / distance
+        
+        # Check against all cached launch pads
+        for launch_pad in launch_pads:
+            boost_distance = launch_pad['boost_distance']
+            
+            if boost_distance > 0:
+                # Use pre-calculated boost direction vectors
+                boost_dir_x = launch_pad['boost_dir_x']
+                boost_dir_y = launch_pad['boost_dir_y']
+                
+                # Calculate dot product to check alignment
+                alignment = boost_dir_x * move_dir_x + boost_dir_y * move_dir_y
+                
+                # If movement aligns well with launch pad direction and distance is significant
+                if alignment > 0.7 and distance > boost_distance * 0.3:
+                    return True
+                        
+        return False
+
+    def _cache_static_entities(self, level_data: Dict[str, Any]) -> None:
+        """
+        Cache static entity positions since they never change during a level.
+        
+        Static entities include:
+        - Launch pads (never change position)
+        - Mines (never change position) 
+        - One-way platforms (never change position)
+        - Switches (never change position)
+        """
+        level_id = level_data.get('level_id', id(level_data))
+        
+        # Only recache if level changed
+        if self._current_level_id == level_id:
+            return
+            
+        self._current_level_id = level_id
+        self._entity_cache = {
+            'launch_pads': [],
+            'mines': [],
+            'switches': [],
+            'one_way_platforms': []
+        }
+        
+        entities = level_data.get('entities', [])
         for entity in entities:
             if not isinstance(entity, dict):
                 continue
                 
             entity_type = entity.get('type', None)
-            # EntityLaunchPad.ENTITY_TYPE is 10
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            
+            # Cache launch pads
             if entity_type == EntityLaunchPad.ENTITY_TYPE:
-                entity_x = entity.get('x', 0)
-                entity_y = entity.get('y', 0)
                 orientation = entity.get('orientation', 0)
-                
-                # Get launch pad direction vector
                 normal_x, normal_y = map_orientation_to_vector(orientation)
                 
-                # Calculate expected boost velocity
+                # Pre-calculate boost vectors for performance
                 yboost_scale = 1
                 if normal_y < 0:
                     yboost_scale = 1 - normal_y
                     
                 expected_boost_x = normal_x * EntityLaunchPad.BOOST * JUMP_LAUNCH_PAD_BOOST_FACTOR
                 expected_boost_y = normal_y * EntityLaunchPad.BOOST * yboost_scale * JUMP_LAUNCH_PAD_BOOST_FACTOR
-                
-                # Check if movement direction aligns with launch pad boost
-                # Allow for some trajectory deviation due to gravity and air resistance
                 boost_distance = math.sqrt(expected_boost_x**2 + expected_boost_y**2)
                 
-                if boost_distance > 0:
-                    # Normalize expected boost direction
-                    boost_dir_x = expected_boost_x / boost_distance
-                    boost_dir_y = expected_boost_y / boost_distance
-                    
-                    # Normalize actual movement direction
-                    move_dir_x = dx / distance
-                    move_dir_y = dy / distance
-                    
-                    # Calculate dot product to check alignment
-                    alignment = boost_dir_x * move_dir_x + boost_dir_y * move_dir_y
-                    
-                    # If movement aligns well with launch pad direction and distance is significant
-                    if alignment > 0.7 and distance > boost_distance * 0.3:
-                        return True
-                        
-        return False
+                self._entity_cache['launch_pads'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'orientation': orientation,
+                    'boost_x': expected_boost_x,
+                    'boost_y': expected_boost_y,
+                    'boost_distance': boost_distance,
+                    'boost_dir_x': expected_boost_x / boost_distance if boost_distance > 0 else 0,
+                    'boost_dir_y': expected_boost_y / boost_distance if boost_distance > 0 else 0
+                })
+            
+            # Cache other static entities for future use
+            # TODO: Add mine, switch, platform caching as needed
 
     def classify_movement_sequence(
         self,

@@ -390,8 +390,8 @@ class TestPhysicsStateExtractor(unittest.TestCase):
             ninja_position, ninja_velocity, self.ninja_state, self.level_data
         )
         
-        # Should return 28 features
-        self.assertEqual(len(features), 28)
+        # Should return 31 features (with multi-exit path finding)
+        self.assertEqual(len(features), 31)
         
         # Check velocity normalization
         self.assertAlmostEqual(features[0], 2.0 / MAX_HOR_SPEED, places=3)  # vx_norm
@@ -549,7 +549,7 @@ class TestPhysicsStateExtractor(unittest.TestCase):
         """Test feature names retrieval."""
         feature_names = self.extractor.get_feature_names()
         
-        self.assertEqual(len(feature_names), 28)
+        self.assertEqual(len(feature_names), 31)
         self.assertIn('velocity_x_norm', feature_names)
         self.assertIn('contact_normal_x', feature_names)
         self.assertIn('launch_pad_proximity', feature_names)

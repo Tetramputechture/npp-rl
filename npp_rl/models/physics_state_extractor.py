@@ -15,12 +15,24 @@ from nclone.constants import (
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y
 )
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
+from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
+from nclone.entity_classes.entity_drone_zap import EntityDroneZap
+from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
+from nclone.entity_classes.entity_thwump import EntityThwump
+from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
+from nclone.entity_classes.entity_exit import EntityExit
+from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
 from nclone.physics import sweep_circle_vs_tiles
 
 GROUND_STATES = {0, 1, 2}
 AIR_STATES = {3, 4}
 WALL_STATES = {5}
 INACTIVE_STATES = {6, 7, 8, 9}
+
+# Level geometry constants
+TYPICAL_LEVEL_SIZE = 1000.0  # Pixels, for distance normalization
+PROXIMITY_THRESHOLD = 100.0  # Distance threshold for entity proximity
+HAZARD_PROXIMITY_THRESHOLD = 50.0  # Closer threshold for hazard detection
 
 NORMALIZED_HEIGHT_DIVISOR = MAP_TILE_HEIGHT * TILE_PIXEL_SIZE
 
@@ -32,7 +44,15 @@ class PhysicsStateExtractor:
     physics-aware features that can be incorporated into graph node representations.
     The extracted features include velocity components, energy calculations,
     contact states, and movement capabilities.
+    
+    Optimized for single ninja per map assumption and multi-exit path finding.
     """
+    
+    def __init__(self):
+        """Initialize physics state extractor with caching for static level data."""
+        # Cache for static level data (optimized for single ninja assumption)
+        self._level_cache = {}
+        self._current_level_id = None
 
     def extract_ninja_physics_state(
         self,
@@ -51,7 +71,7 @@ class PhysicsStateExtractor:
             level_data: Level data for context (optional)
             
         Returns:
-            Array of 28 physics features:
+            Array of 31 physics features (optimized for single ninja):
             [0-1]: Normalized velocity (vx, vy)
             [2]: Velocity magnitude
             [3]: Movement state (normalized)
@@ -65,9 +85,14 @@ class PhysicsStateExtractor:
             [20-22]: Entity proximity (launch_pad, hazard, collectible)
             [23-25]: Advanced buffer states (wall_slide_buffer, air_time, ground_time)
             [26-27]: Physics constraints (max_jump_height, remaining_air_accel)
+            [28-30]: Multi-exit path finding (closest_exit_distance, switch_completion_ratio, path_efficiency)
         """
         vx, vy = ninja_velocity
         x, y = ninja_position
+        
+        # Cache level data for single ninja optimization
+        if level_data:
+            self._cache_level_data(level_data)
         
         # Extract movement state (default to 0 if not available)
         movement_state = ninja_state.get('movement_state', 0)
@@ -158,6 +183,11 @@ class PhysicsStateExtractor:
             ninja_position, ninja_velocity, ninja_state
         )
         
+        # Extract multi-exit path finding features (single ninja optimization)
+        closest_exit_distance, switch_completion_ratio, path_efficiency = self._get_multi_exit_features(
+            ninja_position
+        )
+        
         return np.array([
             vx_norm, vy_norm, vel_magnitude, movement_state_norm,
             ground_contact, wall_contact, airborne,
@@ -167,7 +197,8 @@ class PhysicsStateExtractor:
             contact_normal_x, contact_normal_y,
             launch_pad_proximity, hazard_proximity, collectible_proximity,
             wall_slide_buffer, air_time, ground_time,
-            max_jump_height, remaining_air_accel
+            max_jump_height, remaining_air_accel,
+            closest_exit_distance, switch_completion_ratio, path_efficiency
         ], dtype=np.float32)
     
     def get_feature_names(self) -> list:
@@ -186,7 +217,8 @@ class PhysicsStateExtractor:
             'contact_normal_x', 'contact_normal_y',
             'launch_pad_proximity', 'hazard_proximity', 'collectible_proximity',
             'wall_slide_buffer', 'air_time', 'ground_time',
-            'max_jump_height', 'remaining_air_accel'
+            'max_jump_height', 'remaining_air_accel',
+            'closest_exit_distance', 'switch_completion_ratio', 'path_efficiency'
         ]
     
     def validate_physics_state(self, physics_features: np.ndarray) -> bool:
@@ -199,7 +231,7 @@ class PhysicsStateExtractor:
         Returns:
             True if features are valid, False otherwise
         """
-        if len(physics_features) != 28:
+        if len(physics_features) != 31:
             return False
         
         # Check velocity components are normalized
@@ -331,7 +363,7 @@ class PhysicsStateExtractor:
         hazard_proximity = 0.0
         collectible_proximity = 0.0
         
-        proximity_threshold = 100.0  # pixels
+        proximity_threshold = PROXIMITY_THRESHOLD
         
         for entity in entities:
             if not isinstance(entity, dict):
@@ -350,12 +382,176 @@ class PhysicsStateExtractor:
                 
                 if entity_type == EntityLaunchPad.ENTITY_TYPE:  # Launch pad
                     launch_pad_proximity = max(launch_pad_proximity, proximity)
-                elif entity_type in [1, 2, 3, 4, 5]:  # Hazards (mines, turrets, etc.)
+                elif self._is_hazardous_entity(entity):
                     hazard_proximity = max(hazard_proximity, proximity)
                 elif entity_type in [6, 7, 8]:  # Collectibles (gold, switches, etc.)
                     collectible_proximity = max(collectible_proximity, proximity)
         
         return launch_pad_proximity, hazard_proximity, collectible_proximity
+
+    def _is_hazardous_entity(self, entity: Dict[str, Any]) -> bool:
+        """
+        Determine if an entity is hazardous based on precise N++ hazard definition.
+        
+        A hazard is defined as:
+        - A toggle mine that is toggled (in state 0)
+        - Any side of any kind of drone
+        - The dangerous side of a thwump
+        - Any side of a shove thwump once activated
+        
+        Args:
+            entity: Entity dictionary with type, state, and other properties
+            
+        Returns:
+            True if entity is currently hazardous
+        """
+        entity_type = entity.get('type', None)
+        entity_state = entity.get('state', 0)
+        
+        # Toggle mine in toggled state (state 0) is hazardous
+        if entity_type in [EntityToggleMine.ENTITY_TYPE, 21]:  # Types 1 and 21
+            return entity_state == 0  # Toggled (deadly) state
+            
+        # All drone types are always hazardous on any side
+        if entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+            return True
+            
+        # Thwumps - need to check orientation and state for dangerous side
+        if entity_type == EntityThwump.ENTITY_TYPE:
+            # For now, consider all thwumps potentially hazardous
+            # TODO: Implement precise dangerous side detection based on orientation
+            return True
+            
+        # Shove thwumps when activated are hazardous on any side
+        if entity_type == EntityShoveThwump.ENTITY_TYPE:
+            # Shove thwumps are hazardous when activated (state > 0)
+            return entity_state > 0
+            
+        # Regular mines (if they exist) are always hazardous
+        if entity_type == 2:  # Regular mine type
+            return True
+            
+        return False
+
+    def _cache_level_data(self, level_data: Dict[str, Any]) -> None:
+        """
+        Cache static level data for single ninja optimization.
+        
+        Since there's only one ninja per map, we can cache:
+        - Exit positions and states
+        - Switch positions and required states
+        - Static entity positions
+        - Level geometry bounds
+        
+        Args:
+            level_data: Level data dictionary
+        """
+        if not level_data:
+            return
+            
+        level_id = level_data.get('level_id', id(level_data))
+        
+        # Only recache if level changed
+        if self._current_level_id == level_id:
+            return
+            
+        self._current_level_id = level_id
+        self._level_cache = {
+            'exits': [],
+            'switches': [],
+            'switch_door_pairs': [],
+            'level_bounds': None
+        }
+        
+        entities = level_data.get('entities', [])
+        
+        # Cache exits and switches for multi-exit path finding
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            entity_state = entity.get('state', 0)
+            
+            # Cache exit positions
+            if entity_type == EntityExit.ENTITY_TYPE:
+                self._level_cache['exits'].append({
+                    'position': (entity_x, entity_y),
+                    'state': entity_state,
+                    'entity': entity
+                })
+                
+            # Cache switch positions and states
+            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+                self._level_cache['switches'].append({
+                    'position': (entity_x, entity_y),
+                    'state': entity_state,
+                    'entity': entity
+                })
+        
+        # Calculate level bounds for normalization
+        if entities:
+            min_x = min(e.get('x', 0) for e in entities if isinstance(e, dict))
+            max_x = max(e.get('x', 0) for e in entities if isinstance(e, dict))
+            min_y = min(e.get('y', 0) for e in entities if isinstance(e, dict))
+            max_y = max(e.get('y', 0) for e in entities if isinstance(e, dict))
+            self._level_cache['level_bounds'] = (min_x, max_x, min_y, max_y)
+
+    def _get_multi_exit_features(self, ninja_position: Tuple[float, float]) -> Tuple[float, float, float]:
+        """
+        Extract multi-exit path finding features for single ninja optimization.
+        
+        Args:
+            ninja_position: Current ninja position (x, y)
+            
+        Returns:
+            Tuple of (closest_exit_distance, switch_completion_ratio, path_efficiency)
+        """
+        if not self._level_cache.get('exits'):
+            return 0.0, 0.0, 0.0
+            
+        x, y = ninja_position
+        
+        # Find closest exit distance (normalized)
+        closest_exit_distance = float('inf')
+        for exit_info in self._level_cache['exits']:
+            exit_x, exit_y = exit_info['position']
+            dist = math.sqrt((x - exit_x)**2 + (y - exit_y)**2)
+            closest_exit_distance = min(closest_exit_distance, dist)
+            
+        # Normalize distance
+        if closest_exit_distance == float('inf'):
+            closest_exit_distance = 0.0
+        else:
+            # Normalize by typical level size
+            closest_exit_distance = max(0.0, 1.0 - (closest_exit_distance / TYPICAL_LEVEL_SIZE))
+        
+        # Calculate switch completion ratio
+        total_switches = len(self._level_cache['switches'])
+        if total_switches == 0:
+            switch_completion_ratio = 1.0  # No switches needed
+        else:
+            # Count activated switches (assuming state > 0 means activated)
+            activated_switches = sum(1 for s in self._level_cache['switches'] if s['state'] > 0)
+            switch_completion_ratio = activated_switches / total_switches
+        
+        # Calculate path efficiency (distance to closest switch if not all activated)
+        path_efficiency = 1.0
+        if switch_completion_ratio < 1.0:
+            # Find closest unactivated switch
+            closest_switch_distance = float('inf')
+            for switch_info in self._level_cache['switches']:
+                if switch_info['state'] == 0:  # Unactivated
+                    switch_x, switch_y = switch_info['position']
+                    dist = math.sqrt((x - switch_x)**2 + (y - switch_y)**2)
+                    closest_switch_distance = min(closest_switch_distance, dist)
+            
+            if closest_switch_distance != float('inf'):
+                path_efficiency = max(0.0, 1.0 - (closest_switch_distance / TYPICAL_LEVEL_SIZE))
+        
+        return closest_exit_distance, switch_completion_ratio, path_efficiency
 
     def _extract_advanced_buffers(
         self,
