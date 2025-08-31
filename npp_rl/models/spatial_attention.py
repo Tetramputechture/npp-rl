@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Tuple, Optional
 
-from .attention_constants import (
+from .hgt_config import (
     DEFAULT_DROPOUT_RATE,
     DEFAULT_GUIDANCE_DIM,
     DEFAULT_SPATIAL_HEIGHT,

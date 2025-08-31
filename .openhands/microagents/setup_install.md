@@ -167,7 +167,7 @@ pytest tests/test_phase2_basic.py -v
 
 # Run a quick training verification (1000 steps)
 python -c "
-from npp_rl.agents.enhanced_training import train_enhanced_agent
+from npp_rl.agents.training import train_enhanced_agent
 model, log_dir = train_enhanced_agent(num_envs=4, total_timesteps=1000, render_mode='rgb_array')
 print(f'Quick training test completed. Logs: {log_dir}')
 "
@@ -179,7 +179,7 @@ print(f'Quick training test completed. Logs: {log_dir}')
 make lint
 
 # Test that you can run a minimal training
-python -m npp_rl.agents.enhanced_training --num_envs 4 --total_timesteps 1000
+python -m npp_rl.agents.training --num_envs 4 --total_timesteps 1000
 ```
 
 ## Common Installation Issues
@@ -261,7 +261,7 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"  # If import issues persist
 ### 1. Quick Training Test
 ```bash
 # Run a short training to verify everything works
-python -m npp_rl.agents.enhanced_training --num_envs 16 --total_timesteps 50000
+python -m npp_rl.agents.training --num_envs 16 --total_timesteps 50000
 ```
 
 ### 2. Monitor Training
@@ -289,7 +289,7 @@ pytest tests/ -v
 ### For Training Performance
 ```bash
 # Adjust based on your hardware
-python -m npp_rl.agents.enhanced_training \
+python -m npp_rl.agents.training \
     --num_envs $(nproc)  \  # Use all CPU cores
     --total_timesteps 10000000
 ```
@@ -297,7 +297,7 @@ python -m npp_rl.agents.enhanced_training \
 ### For Development
 ```bash
 # Quick iteration with fewer environments
-python -m npp_rl.agents.enhanced_training --num_envs 4 --total_timesteps 100000
+python -m npp_rl.agents.training --num_envs 4 --total_timesteps 100000
 ```
 
 The setup is complete when you can successfully run training and see meaningful logs in TensorBoard without errors.

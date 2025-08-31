@@ -58,3 +58,6 @@ tune_logs/
 
 # OpenHands tasks
 .openhands/TASKS.md
+
+# Mermaid diagrams
+*.mmd

@@ -166,7 +166,7 @@ class TestValidationAndEdgeCases:
         guidance = GraphSpatialGuidance(graph_dim=64)
         
         # Check that default values match constants
-        from npp_rl.models.attention_constants import (
+        from npp_rl.models.hgt_config import (
             DEFAULT_SPATIAL_HEIGHT,
             DEFAULT_SPATIAL_WIDTH,
             DEFAULT_GUIDANCE_DIM,
@@ -182,7 +182,7 @@ class TestValidationAndEdgeCases:
         """Test that MultiScaleSpatialAttention uses default scales when none provided."""
         attention = MultiScaleSpatialAttention(graph_dim=64, visual_dim=128)
         
-        from npp_rl.models.attention_constants import DEFAULT_SCALES
+        from npp_rl.models.hgt_config import DEFAULT_SCALES
         
         assert attention.scales == DEFAULT_SCALES
         assert attention.num_scales == len(DEFAULT_SCALES)

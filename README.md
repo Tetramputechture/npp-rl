@@ -34,24 +34,25 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-Multiple feature extractor architectures are available in the consolidated `npp_rl/feature_extractors/` package:
+The consolidated architecture uses **Heterogeneous Graph Transformers (HGT)** as the primary approach for optimal performance:
 
-*   **`FeatureExtractor` (Recommended for temporal data)**:
-    *   Employs 3D convolutions over the 12 stacked player-centric frames to directly model spatiotemporal patterns.
-        *   Input shape: `(Batch, 1, TemporalFrames, Height, Width)`.
-    *   Uses varied 3D convolutional kernel sizes (e.g., `(4,7,7)`, `(3,5,5)`) and strides to capture features at multiple temporal and spatial scales.
-    *   Processes the global view with a separate 2D CNN.
-    *   Includes adaptive pooling layers to ensure fixed-size outputs before fusion.
+*   **`HGTMultimodalExtractor` (Primary Architecture - RECOMMENDED)**:
+    *   Implements **Heterogeneous Graph Transformers** with type-specific attention mechanisms.
+    *   **Type-aware processing**: Specialized handling for different node types (grid cells, entities, hazards, switches).
+    *   **Edge-type specialization**: Distinct processing for movement edges (walk, jump, fall) vs functional relationships.
+    *   **Multi-head attention**: Advanced attention mechanisms adapted for heterogeneous graph structures.
+    *   **Entity-aware embeddings**: Specialized processing for different entity types with hazard-aware attention.
+    *   **Advanced multimodal fusion**: Cross-modal attention with spatial awareness for optimal feature integration.
 
-Both extractors process the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs and the game state vector are then fused and passed to the policy and value networks.
-
-*   **`HierarchicalMultimodalExtractor` (Advanced - Task 2.1)**:
+*   **`HierarchicalMultimodalExtractor` (Secondary Architecture)**:
     *   Implements multi-resolution graph neural networks for structural level understanding.
     *   **Three resolution levels**: Sub-cell (6px), Tile (24px), Region (96px) for both local precision and strategic planning.
     *   **DiffPool GNN**: Differentiable graph pooling with learnable hierarchical representations.
     *   **Multi-scale fusion**: Context-aware attention mechanisms that adapt to ninja physics state.
-    *   **Auxiliary losses**: Link prediction, entropy, and orthogonality regularization for stable training.
-    *   Integrates seamlessly with existing CNN/MLP processing for comprehensive multimodal understanding.
+
+The extractor processes the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs, graph representations, and the game state vector are then fused and passed to the policy and value networks.
+
+**Note**: Legacy extractors (temporal, basic multimodal) have been moved to `archive/` for reference. The HGT multimodal extractor provides superior performance and is the recommended approach for new projects.
 
 ### 3. Network Architecture & Hyperparameters
 
@@ -101,29 +102,31 @@ The extrinsic reward signal from the environment is designed to guide the agent 
 
 ## Project Structure
 
-Current layout focused on Phase 1:
+Consolidated architecture focused on hierarchical multimodal processing:
 
 - `npp_rl/`
   - `agents/`
-    - `enhanced_training.py`: Main training entrypoint with CLI; uses PPO, 3D/2D extractors, vec envs, logging.
-  - `feature_extractors/`
-    - `temporal.py`: `TemporalFeatureExtractor` with 3D CNNs for temporal modeling.
-    - `multimodal.py`: `MultimodalExtractor` and `MultimodalGraphExtractor` for complex observations.
-    - `__init__.py`: Unified interface with factory functions for easy extractor selection.
+    - `training.py`: **Primary training entrypoint** with hierarchical multimodal architecture, CLI interface, PPO, vectorized environments, and comprehensive logging.
     - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
     - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
-    - `npp_agent_ppo.py`: Secondary training utilities (create/train/eval/record) kept for compatibility.
+  - `feature_extractors/`
+    - `hierarchical_multimodal.py`: **Primary feature extractor** with multi-resolution graph processing, DiffPool GNNs, and adaptive fusion.
+    - `__init__.py`: Unified interface with factory functions for hierarchical extractor.
   - (other subpackages may be added in later phases)
 - Top-level scripts
-  - `ppo_train.py`: Thin wrapper to launch PPO via `npp_rl.agents.npp_agent_ppo.start_training`.
+  - `ppo_train.py`: Thin wrapper to launch PPO via enhanced training.
   - `tools/`: Small utilities (e.g., `convert_actions.py`, `rotate_videos.py`).
-  - `archive/`: Deprecated/experimental scripts kept for reference; not used in Phase 1.
+- `archive/`: **Deprecated strategies** moved for reference:
+  - `temporal.py`: Legacy temporal feature extractor
+  - `multimodal.py`: Legacy multimodal extractors  
+  - `training.py`: Legacy training script
+  - `npp_agent_ppo.py`: Legacy training utilities
 
 See `archive/README.md` for details on what was moved and why.
 
 ## Training the Agent
 
-The primary script for training the agent with all features is `npp_rl/agents/enhanced_training.py`.
+The primary script for training the agent with all features is `npp_rl/agents/training.py`.
 
 ### Prerequisites
 
@@ -170,32 +173,38 @@ Before starting, ensure you have:
 ### Starting a Training Run
 
 **Recommended Quick Start:**
-This command starts training using the `3DFeatureExtractor`, 12-frame stacking, adaptive exploration, and optimized hyperparameters, utilizing 64 parallel environments.
+This command starts training using the HGT-based multimodal extractor (PRIMARY), adaptive exploration, and optimized hyperparameters, utilizing 64 parallel environments.
 
 ```bash
-python -m npp_rl.agents.enhanced_training --num_envs 64 --total_timesteps 10000000
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
 ```
 
-**Command-Line Options for `enhanced_training.py`:**
-The `enhanced_training.py` script offers various options:
+**Command-Line Options for `training.py`:**
+The `training.py` script offers various options:
 
 ```bash
-python -m npp_rl.agents.enhanced_training --help
+python -m npp_rl.agents.training --help
 ```
 
 Key options include:
 *   `--num_envs`: Number of parallel simulation environments (default: 64).
 *   `--total_timesteps`: Total number of training steps (default: 10,000,000).
+*   `--extractor_type`: Feature extractor type - `hgt` (recommended) or `hierarchical` (default: hgt).
 *   `--load_model`: Path to a previously saved model checkpoint to resume training.
 *   `--render_mode`: Set to `human` for visual rendering (forces `num_envs=1`). Default is `rgb_array`.
 *   `--disable_exploration`: Turn off the adaptive exploration system.
 
-**Example - Resuming Training:**
+**Example - Resuming Training with HGT:**
 ```bash
-python -m npp_rl.agents.enhanced_training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32
+python -m npp_rl.agents.training --load_model ./training_logs/enhanced_ppo_training/session-MM-DD-YYYY-HH-MM-SS/best_model/best_model.zip --num_envs 32 --extractor_type hgt
 ```
 
-The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `enhanced_training.py` going forward.
+**Example - Using Hierarchical Extractor (Secondary):**
+```bash
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hierarchical
+```
+
+The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `training.py` going forward.
 
 ### Hyperparameter Tuning
 
@@ -248,10 +257,6 @@ The architecture and training procedures are informed by principles and findings
 *   Ying, R., et al. (2018). Hierarchical Graph Representation Learning with Differentiable Pooling. (DiffPool implementation for hierarchical GNNs).
 *   Hamilton, W., Ying, Z., & Leskovec, J. (2017). Inductive Representation Learning on Large Graphs. (GraphSAGE foundation for graph neural networks).
 
-## Advanced Features: Hierarchical Graph Processing (Task 2.1)
-
-The project now includes state-of-the-art hierarchical graph neural networks for structural level understanding, implementing multi-resolution processing that enables both precise local movement decisions and strategic global planning.
-
 ### Multi-Resolution Graph Architecture
 
 The hierarchical graph system processes N++ levels at three resolution levels:
@@ -285,10 +290,18 @@ The hierarchical graph system processes N++ levels at three resolution levels:
 ### Usage Example
 
 ```python
-from npp_rl.feature_extractors.hierarchical_multimodal import create_hierarchical_multimodal_extractor
+from npp_rl.feature_extractors import create_hgt_multimodal_extractor, create_hierarchical_multimodal_extractor
 
-# Create hierarchical feature extractor
-extractor = create_hierarchical_multimodal_extractor(
+# PRIMARY: Create HGT-based feature extractor (RECOMMENDED)
+hgt_extractor = create_hgt_multimodal_extractor(
+    observation_space=env.observation_space,
+    features_dim=512,
+    hgt_hidden_dim=256,
+    hgt_num_layers=3
+)
+
+# SECONDARY: Create hierarchical feature extractor
+hierarchical_extractor = create_hierarchical_multimodal_extractor(
     observation_space=env.observation_space,
     features_dim=512,
     use_hierarchical_graph=True
