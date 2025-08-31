@@ -17,7 +17,7 @@ Based on "Heterogeneous Graph Transformer" by Wang et al. (2020).
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional
+from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Dict as SpacesDict
 

@@ -19,20 +19,18 @@ Usage:
 
 import argparse
 import torch
-import numpy as np
 from pathlib import Path
 import json
 import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import get_linear_fn
-from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement, BaseCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan, VecNormalize
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv, VecCheckNan
 from stable_baselines3.common.logger import configure
 
 from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
-from npp_rl.feature_extractors import create_feature_extractor, HGTMultimodalExtractor, HierarchicalMultimodalExtractor
+from npp_rl.feature_extractors import HGTMultimodalExtractor, HierarchicalMultimodalExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -263,7 +261,7 @@ def train_agent(
         )
         callbacks.append(logging_callback)
     
-    print(f"Starting training...")
+    print("Starting training...")
     print(f"Logs will be saved to: {log_dir}")
     print(f"Monitor tensorboard with: tensorboard --logdir {log_dir / 'tensorboard'}")
     
