@@ -131,7 +131,7 @@ class TestValidationAndEdgeCases:
         enhanced_visual, attention_map = attention(visual_features, graph_features)
         
         assert enhanced_visual.shape == (1, 128)
-        assert attention_map.shape == (1, 16, 16)  # Default spatial size
+        assert attention_map.shape == (1, 32, 32)  # Default spatial size
         
         # Test with very small attention weights (should be clamped)
         # This tests the attention weight clamping logic

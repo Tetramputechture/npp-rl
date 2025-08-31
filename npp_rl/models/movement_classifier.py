@@ -10,9 +10,22 @@ from typing import Tuple, Optional, Dict, Any
 from enum import IntEnum
 
 from nclone.constants import (
-    MAX_HOR_SPEED, GROUND_ACCEL,
-    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y
+    MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
+    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
+    NINJA_RADIUS, JUMP_LAUNCH_PAD_BOOST_SCALAR, JUMP_LAUNCH_PAD_BOOST_FACTOR,
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_JUMP_DURATION,
+    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
+    MAX_SURVIVABLE_IMPACT
 )
+from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
+from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
+from nclone.entity_classes.entity_drone_zap import EntityDroneZap
+from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
+from nclone.entity_classes.entity_thwump import EntityThwump
+from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
+from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
+from nclone.physics import overlap_circle_vs_circle, map_orientation_to_vector
 
 # Movement classification constants
 MOVEMENT_THRESHOLD = 1e-6
@@ -21,12 +34,15 @@ JUMP_VELOCITY_THRESHOLD = 0.3
 MIN_HORIZONTAL_VELOCITY = 0.1
 WALL_CONTACT_DISTANCE = 15.0
 LAUNCH_PAD_VELOCITY_MULTIPLIER = 1.5
+
+# Approximate gravity for backward compatibility
+GRAVITY_APPROXIMATE = (GRAVITY_FALL + GRAVITY_JUMP) / 2
 HORIZONTAL_MOVEMENT_THRESHOLD = 2.0
 UPWARD_MOVEMENT_THRESHOLD = -5.0
 DOWNWARD_MOVEMENT_THRESHOLD = 5.0
 DEFAULT_TIME_ESTIMATE = 1.0
 DEFAULT_DIFFICULTY = 1.0
-GRAVITY_APPROXIMATE = 0.067
+# Use actual N++ gravity constants instead of approximation
 JUMP_TIME_FALLBACK = 5.0
 JUMP_ENERGY_BASE = 1.5
 HEIGHT_FACTOR_DIVISOR = 50.0
@@ -89,7 +105,11 @@ class MovementClassifier:
 
     def __init__(self):
         """Initialize movement classifier with N++ physics constants."""
-        pass
+        # Cache for static entity data (positions never change during level)
+        self._static_entity_cache = {}
+        # Cache for dynamic entity states (can change during gameplay)
+        self._dynamic_entity_cache = {}
+        self._current_level_id = None
 
     def classify_movement(
         self,
@@ -249,32 +269,69 @@ class MovementClassifier:
         dy: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
-        """Calculate parameters for jumping movement."""
-        # Use standard jump velocity as baseline
-        initial_vy = abs(JUMP_FLAT_GROUND_Y)
+        """Calculate parameters for jumping movement using actual N++ physics."""
+        # Use actual N++ jump velocity
+        initial_vy = abs(JUMP_FLAT_GROUND_Y)  # 2.0 pixels/frame
 
-        # Estimate time of flight for upward movement
-        # Using: t = (-v0 + sqrt(v0² + 2*g*|dy|)) / g
-        gravity = GRAVITY_APPROXIMATE
+        # Use actual N++ gravity constants
+        # During jump, gravity is reduced (GRAVITY_JUMP = 0.0111...)
+        # During fall, gravity is higher (GRAVITY_FALL = 0.0666...)
+        gravity_up = GRAVITY_JUMP
+        gravity_down = GRAVITY_FALL
+
+        # Calculate time of flight using actual physics
         if abs(dy) > 0:
-            discriminant = initial_vy*initial_vy + 2*gravity*abs(dy)
-            time_estimate = (
-                (-initial_vy + math.sqrt(discriminant)) / gravity
-                if discriminant >= 0 else JUMP_TIME_FALLBACK
-            )
+            if dy < 0:  # Upward movement
+                # Time to reach peak: t_up = v0 / g_up
+                t_up = initial_vy / gravity_up
+                # Height at peak: h_peak = v0² / (2 * g_up)
+                h_peak = (initial_vy * initial_vy) / (2 * gravity_up)
+                
+                if abs(dy) <= h_peak:
+                    # Jump doesn't reach peak, solve: dy = v0*t - 0.5*g*t²
+                    # Using quadratic formula: t = (v0 ± sqrt(v0² - 2*g*dy)) / g
+                    discriminant = initial_vy*initial_vy - 2*gravity_up*abs(dy)
+                    if discriminant >= 0:
+                        time_estimate = (initial_vy - math.sqrt(discriminant)) / gravity_up
+                    else:
+                        time_estimate = JUMP_TIME_FALLBACK
+                else:
+                    # Jump reaches peak and continues falling
+                    remaining_height = abs(dy) - h_peak
+                    # Time to fall remaining height: t = sqrt(2*h/g)
+                    t_down = math.sqrt(2 * remaining_height / gravity_down)
+                    time_estimate = t_up + t_down
+            else:  # Downward movement (falling)
+                # Pure fall: t = sqrt(2*h/g)
+                time_estimate = math.sqrt(2 * abs(dy) / gravity_down)
         else:
-            time_estimate = 2 * initial_vy / gravity
+            # Horizontal jump
+            time_estimate = 2 * initial_vy / gravity_up
 
-        # Required horizontal velocity
-        required_velocity = abs(dx) / max(time_estimate, MIN_HORIZONTAL_VELOCITY)
-        required_velocity = min(required_velocity, MAX_HOR_SPEED)
+        # Account for air resistance and drag
+        time_estimate *= (1.0 / DRAG_REGULAR)  # Adjust for drag effects
 
-        # Energy cost increases with height and distance
+        # Required horizontal velocity considering air acceleration
+        if time_estimate > 0:
+            required_velocity = abs(dx) / time_estimate
+            # Limit by air acceleration capabilities
+            max_air_velocity = AIR_ACCEL * time_estimate
+            required_velocity = min(required_velocity, min(MAX_HOR_SPEED, max_air_velocity))
+        else:
+            required_velocity = MAX_HOR_SPEED
+
+        # Energy cost based on actual physics requirements
         height_factor = min(abs(dy) / HEIGHT_FACTOR_DIVISOR, HEIGHT_FACTOR_MAX)
         distance_factor = min(abs(dx) / DISTANCE_FACTOR_DIVISOR, DISTANCE_FACTOR_MAX)
-        energy_cost = JUMP_ENERGY_BASE + height_factor + distance_factor
+        
+        # Account for air vs ground movement energy difference
+        air_movement_penalty = 1.2 if not (ninja_state and ninja_state.ground_contact) else 1.0
+        energy_cost = (JUMP_ENERGY_BASE + height_factor + distance_factor) * air_movement_penalty
 
-        difficulty = min(energy_cost / JUMP_DIFFICULTY_DIVISOR, 1.0)
+        # Difficulty increases with precision requirements and physics constraints
+        velocity_difficulty = required_velocity / MAX_HOR_SPEED
+        timing_difficulty = min(time_estimate / MAX_JUMP_DURATION, 1.0)
+        difficulty = min((energy_cost + velocity_difficulty + timing_difficulty) / JUMP_DIFFICULTY_DIVISOR, 1.0)
 
         return {
             'required_velocity': required_velocity,
@@ -338,23 +395,84 @@ class MovementClassifier:
         dy: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
-        """Calculate parameters for wall jumping movement."""
-        # Wall jumps have specific velocity components
-        initial_vx = abs(JUMP_WALL_REGULAR_X)
-        initial_vy = abs(JUMP_WALL_REGULAR_Y)
+        """Calculate parameters for wall jumping movement using actual N++ physics."""
+        # Determine wall jump type based on movement characteristics
+        if abs(dy) > abs(dx) and dy < 0:
+            # Regular wall jump (away from wall, upward)
+            initial_vx = JUMP_WALL_REGULAR_X  # 1.0 pixels/frame
+            initial_vy = abs(JUMP_WALL_REGULAR_Y)  # 1.4 pixels/frame
+        else:
+            # Wall slide jump (along wall)
+            initial_vx = JUMP_WALL_SLIDE_X  # 2/3 pixels/frame
+            initial_vy = abs(JUMP_WALL_SLIDE_Y)  # 1.0 pixels/frame
 
-        # Estimate time based on vertical component
-        gravity = GRAVITY_APPROXIMATE
-        time_estimate = 2 * initial_vy / gravity
+        # Use actual N++ gravity for wall jump physics
+        gravity_up = GRAVITY_JUMP
+        gravity_down = GRAVITY_FALL
 
-        required_velocity = max(initial_vx, initial_vy)
-        energy_cost = WALL_JUMP_ENERGY_BASE  # Wall jumps are energy intensive
-        difficulty = WALL_JUMP_DIFFICULTY   # High difficulty
+        # Calculate time of flight
+        if abs(dy) > 0:
+            if dy < 0:  # Upward wall jump
+                # Time to reach peak
+                t_up = initial_vy / gravity_up
+                h_peak = (initial_vy * initial_vy) / (2 * gravity_up)
+                
+                if abs(dy) <= h_peak:
+                    # Wall jump doesn't reach full peak
+                    discriminant = initial_vy*initial_vy - 2*gravity_up*abs(dy)
+                    if discriminant >= 0:
+                        time_estimate = (initial_vy - math.sqrt(discriminant)) / gravity_up
+                    else:
+                        time_estimate = JUMP_TIME_FALLBACK
+                else:
+                    # Wall jump reaches peak and falls
+                    remaining_height = abs(dy) - h_peak
+                    t_down = math.sqrt(2 * remaining_height / gravity_down)
+                    time_estimate = t_up + t_down
+            else:  # Downward wall movement
+                time_estimate = math.sqrt(2 * abs(dy) / gravity_down)
+        else:
+            # Horizontal wall jump
+            time_estimate = 2 * initial_vy / gravity_up
+
+        # Account for wall friction effects
+        time_estimate *= (1.0 / FRICTION_WALL)
+
+        # Required velocity considering wall jump physics
+        horizontal_velocity_needed = abs(dx) / max(time_estimate, MIN_HORIZONTAL_VELOCITY)
+        
+        # Wall jumps have specific velocity constraints
+        required_velocity = max(
+            horizontal_velocity_needed,
+            math.sqrt(initial_vx*initial_vx + initial_vy*initial_vy)
+        )
+        
+        # Limit by maximum survivable impact and air acceleration
+        max_safe_velocity = MAX_SURVIVABLE_IMPACT
+        required_velocity = min(required_velocity, max_safe_velocity)
+
+        # Energy cost for wall jumps (higher due to precision requirements)
+        base_energy = WALL_JUMP_ENERGY_BASE
+        
+        # Additional cost for complex wall jump sequences
+        precision_penalty = 1.0
+        if ninja_state and ninja_state.wall_contact:
+            # Wall jump from wall contact requires more precision
+            precision_penalty = 1.3
+            
+        energy_cost = base_energy * precision_penalty
+
+        # Difficulty based on timing precision and velocity requirements
+        velocity_difficulty = required_velocity / MAX_HOR_SPEED
+        timing_difficulty = 1.0 - min(time_estimate / MAX_JUMP_DURATION, 1.0)  # Shorter time = harder
+        wall_difficulty_base = WALL_JUMP_DIFFICULTY
+        
+        difficulty = min(wall_difficulty_base + velocity_difficulty + timing_difficulty, 1.0)
 
         return {
             'required_velocity': required_velocity,
             'energy_cost': energy_cost,
-            'time_estimate': time_estimate,
+            'time_estimate': max(time_estimate, MIN_HORIZONTAL_VELOCITY),
             'difficulty': difficulty
         }
 
@@ -364,21 +482,42 @@ class MovementClassifier:
         dy: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
-        """Calculate parameters for launch pad movement."""
-        # Launch pads provide significant velocity boost
-        boost_factor = LAUNCH_PAD_BOOST_FACTOR
-        # High initial velocity
-        time_estimate = max(
-            math.sqrt(abs(dy) / LAUNCH_PAD_GRAVITY_DIVISOR), LAUNCH_PAD_MIN_TIME
-        )
-        required_velocity = MAX_HOR_SPEED * boost_factor
-        energy_cost = LAUNCH_PAD_ENERGY_COST  # Launch pads reduce energy cost
+        """Calculate parameters for launch pad movement using actual N++ physics."""
+        # Use actual launch pad boost values from nclone
+        base_boost = EntityLaunchPad.BOOST  # 36/7 ≈ 5.14 pixels/frame
+        
+        # Calculate boost velocity components (with scaling factors from constants)
+        boost_velocity = base_boost * JUMP_LAUNCH_PAD_BOOST_FACTOR  # 2/3 scaling
+        
+        # Estimate time based on actual trajectory physics
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance > 0:
+            # Estimate time based on boost velocity and gravity effects
+            # For upward movement, account for gravity deceleration
+            if dy < 0:  # Upward movement
+                # Use actual N++ gravity for launch pad trajectory
+                gravity = GRAVITY_FALL  # Launch pad trajectories use fall gravity
+                initial_velocity = boost_velocity
+                discriminant = initial_velocity**2 + 2 * gravity * abs(dy)
+                if discriminant >= 0:
+                    time_estimate = (-initial_velocity + math.sqrt(discriminant)) / gravity
+                else:
+                    time_estimate = LAUNCH_PAD_MIN_TIME
+            else:  # Downward or horizontal movement
+                time_estimate = distance / boost_velocity
+        else:
+            time_estimate = LAUNCH_PAD_MIN_TIME
+            
+        # Launch pads provide high velocity with reduced energy cost
+        required_velocity = boost_velocity
+        energy_cost = LAUNCH_PAD_ENERGY_COST  # Much lower than normal movement
         difficulty = LAUNCH_PAD_DIFFICULTY   # Easier with launch pad assistance
 
         return {
             'required_velocity': required_velocity,
             'energy_cost': energy_cost,
-            'time_estimate': time_estimate,
+            'time_estimate': max(time_estimate, LAUNCH_PAD_MIN_TIME),
             'difficulty': difficulty
         }
 
@@ -388,8 +527,275 @@ class MovementClassifier:
         dy: float,
         level_data: Dict[str, Any]
     ) -> bool:
-        """Check if movement involves a launch pad (placeholder)."""
-        # This would analyze level_data for launch pad entities
-        # For now, detect based on large displacement
+        """Check if movement involves a launch pad using cached entity data."""
+        if not level_data:
+            return False
+            
+        # Cache static entities for performance (only done once per level)
+        self._cache_static_entities(level_data)
+        # Update dynamic entity states (done every time as states can change)
+        self._update_dynamic_entities(level_data)
+        
+        # Calculate movement vector properties
         distance = math.sqrt(dx*dx + dy*dy)
-        return distance > LAUNCH_PAD_DISTANCE_THRESHOLD  # Large movements might involve launch pads
+        
+        # Check if movement is large enough to potentially involve launch pad
+        if distance < EntityLaunchPad.BOOST * 0.5:  # Minimum boost distance
+            return False
+            
+        # Use cached launch pad data for performance
+        launch_pads = self._static_entity_cache.get('launch_pads', [])
+        if not launch_pads:
+            return False
+            
+        # Normalize actual movement direction
+        move_dir_x = dx / distance
+        move_dir_y = dy / distance
+        
+        # Check against all cached launch pads
+        for launch_pad in launch_pads:
+            boost_distance = launch_pad['boost_distance']
+            
+            if boost_distance > 0:
+                # Use pre-calculated boost direction vectors
+                boost_dir_x = launch_pad['boost_dir_x']
+                boost_dir_y = launch_pad['boost_dir_y']
+                
+                # Calculate dot product to check alignment
+                alignment = boost_dir_x * move_dir_x + boost_dir_y * move_dir_y
+                
+                # If movement aligns well with launch pad direction and distance is significant
+                if alignment > 0.7 and distance > boost_distance * 0.3:
+                    return True
+                        
+        return False
+
+    def _cache_static_entities(self, level_data: Dict[str, Any]) -> None:
+        """
+        Cache static entity positions since they never change during a level.
+        
+        Static entities include:
+        - Launch pads (never change position or orientation)
+        - One-way platforms (never change position)
+        - Exits (never change position)
+        - Doors (never change position, but open/close state is dynamic)
+        """
+        level_id = level_data.get('level_id', id(level_data))
+        
+        # Only recache if level changed
+        if self._current_level_id == level_id:
+            return
+            
+        self._current_level_id = level_id
+        self._static_entity_cache = {
+            'launch_pads': [],
+            'one_way_platforms': [],
+            'exits': [],
+            'doors': []
+        }
+        
+        entities = level_data.get('entities', [])
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            
+            # Cache launch pads (static - position and orientation never change)
+            if entity_type == EntityLaunchPad.ENTITY_TYPE:
+                orientation = entity.get('orientation', 0)
+                normal_x, normal_y = map_orientation_to_vector(orientation)
+                
+                # Pre-calculate boost vectors for performance
+                yboost_scale = 1
+                if normal_y < 0:
+                    yboost_scale = 1 - normal_y
+                    
+                expected_boost_x = normal_x * EntityLaunchPad.BOOST * JUMP_LAUNCH_PAD_BOOST_FACTOR
+                expected_boost_y = normal_y * EntityLaunchPad.BOOST * yboost_scale * JUMP_LAUNCH_PAD_BOOST_FACTOR
+                boost_distance = math.sqrt(expected_boost_x**2 + expected_boost_y**2)
+                
+                self._static_entity_cache['launch_pads'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'orientation': orientation,
+                    'boost_x': expected_boost_x,
+                    'boost_y': expected_boost_y,
+                    'boost_distance': boost_distance,
+                    'boost_dir_x': expected_boost_x / boost_distance if boost_distance > 0 else 0,
+                    'boost_dir_y': expected_boost_y / boost_distance if boost_distance > 0 else 0
+                })
+            
+            # Cache other static entities (positions don't change)
+            elif entity_type in ['one_way_platform', 'exit', 'door_regular', 'door_locked']:
+                cache_key = 'one_way_platforms' if entity_type == 'one_way_platform' else \
+                           'exits' if entity_type == 'exit' else 'doors'
+                
+                self._static_entity_cache[cache_key].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'type': entity_type,
+                    'entity': entity
+                })
+
+    def _update_dynamic_entities(self, level_data: Dict[str, Any]) -> None:
+        """
+        Update dynamic entity states that can change during gameplay.
+        
+        Dynamic entities include:
+        - Toggle mines (state changes: 1=safe initially, 0=deadly after ninja visit)
+        - Switches (activation state changes)
+        - Drones (position and direction can change)
+        - Thwumps (position and state can change)
+        
+        Args:
+            level_data: Current level data with entity states
+        """
+        if not level_data:
+            return
+            
+        self._dynamic_entity_cache = {
+            'toggle_mines': [],
+            'switches': [],
+            'drones': [],
+            'thwumps': []
+        }
+        
+        entities = level_data.get('entities', [])
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            entity_state = entity.get('state', 0)
+            
+            # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
+            if entity_type == EntityToggleMine.ENTITY_TYPE:
+                self._dynamic_entity_cache['toggle_mines'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'is_deadly': entity_state == 0,  # Deadly when state 0
+                    'entity': entity
+                })
+            
+            # Cache switches (activation state changes)
+            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+                self._dynamic_entity_cache['switches'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'activated': entity_state > 0,
+                    'entity': entity
+                })
+            
+            # Cache drones (position and direction can change)
+            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+                self._dynamic_entity_cache['drones'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
+            
+            # Cache thwumps (position and state can change)
+            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+                self._dynamic_entity_cache['thwumps'].append({
+                    'x': entity_x,
+                    'y': entity_y,
+                    'state': entity_state,
+                    'type': entity_type,
+                    'entity': entity
+                })
+
+    def classify_movement_sequence(
+        self,
+        positions: list[Tuple[float, float]],
+        ninja_states: Optional[list[NinjaState]] = None,
+        level_data: Optional[Dict[str, Any]] = None
+    ) -> list[Tuple[MovementType, Dict[str, float]]]:
+        """
+        Classify a sequence of movements for complex movement chains.
+        
+        Args:
+            positions: List of (x, y) positions in sequence
+            ninja_states: Optional list of ninja states for each position
+            level_data: Level geometry data
+            
+        Returns:
+            List of (MovementType, physics_parameters) for each movement segment
+        """
+        if len(positions) < 2:
+            return []
+            
+        movements = []
+        
+        for i in range(len(positions) - 1):
+            src_pos = positions[i]
+            tgt_pos = positions[i + 1]
+            
+            # Get ninja state for this segment
+            ninja_state = ninja_states[i] if ninja_states and i < len(ninja_states) else None
+            
+            # Classify individual movement
+            movement_type, params = self.classify_movement(
+                src_pos, tgt_pos, ninja_state, level_data
+            )
+            
+            # Adjust parameters for movement chains
+            if i > 0:
+                # Previous movement affects current movement
+                prev_movement_type, prev_params = movements[i - 1]
+                params = self._adjust_for_movement_chain(
+                    movement_type, params, prev_movement_type, prev_params
+                )
+                
+            movements.append((movement_type, params))
+            
+        return movements
+        
+    def _adjust_for_movement_chain(
+        self,
+        current_type: MovementType,
+        current_params: Dict[str, float],
+        prev_type: MovementType,
+        prev_params: Dict[str, float]
+    ) -> Dict[str, float]:
+        """Adjust movement parameters based on previous movement in chain."""
+        adjusted_params = current_params.copy()
+        
+        # Chain bonuses and penalties
+        if prev_type == MovementType.WALL_JUMP and current_type == MovementType.WALL_JUMP:
+            # Wall jump chains are more difficult
+            adjusted_params['difficulty'] = min(adjusted_params['difficulty'] * 1.2, 1.0)
+            adjusted_params['energy_cost'] *= 1.1
+            
+        elif prev_type == MovementType.LAUNCH_PAD:
+            # Launch pad provides momentum for next movement
+            adjusted_params['energy_cost'] *= 0.9  # Easier follow-up
+            adjusted_params['required_velocity'] *= 1.1  # Higher velocity available
+            
+        elif prev_type == MovementType.JUMP and current_type == MovementType.WALL_SLIDE:
+            # Jump to wall slide is a common sequence
+            adjusted_params['difficulty'] *= 0.95  # Slightly easier
+            
+        elif prev_type == MovementType.WALL_SLIDE and current_type == MovementType.WALL_JUMP:
+            # Wall slide to wall jump is natural
+            adjusted_params['energy_cost'] *= 0.9
+            adjusted_params['time_estimate'] *= 0.95  # Faster transition
+            
+        # Momentum conservation effects
+        prev_velocity = prev_params.get('required_velocity', 0)
+        if prev_velocity > MAX_HOR_SPEED * 0.8:  # High velocity from previous movement
+            # Momentum helps with current movement
+            velocity_bonus = min(prev_velocity * 0.1, MAX_HOR_SPEED * 0.2)
+            adjusted_params['required_velocity'] = max(
+                0, adjusted_params['required_velocity'] - velocity_bonus
+            )
+            
+        return adjusted_params

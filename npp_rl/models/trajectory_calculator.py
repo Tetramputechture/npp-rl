@@ -11,9 +11,18 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 from nclone.constants import (
-    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED,
-    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
+    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
+    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
+    JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
+    FULL_MAP_WIDTH, FULL_MAP_HEIGHT, TILE_PIXEL_SIZE
 )
+from nclone.physics import sweep_circle_vs_tiles
+from nclone.entity_classes.entity_exit import EntityExit
+from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
+from nclone.entity_classes.entity_door_regular import EntityDoorRegular
+from nclone.entity_classes.entity_door_locked import EntityDoorLocked
 
 # Physics calculation constants
 VERTICAL_MOVEMENT_THRESHOLD = 1e-6
@@ -36,6 +45,13 @@ JUMP_THRESHOLD_Y = -1.0
 JUMP_THRESHOLD_VELOCITY = 0.5
 DEFAULT_TRAJECTORY_POINTS = 10
 DEFAULT_MINIMUM_TIME = 1.0
+
+# Win condition constants
+SWITCH_DOOR_MAX_DISTANCE = 500.0  # Max distance for switch-door pairing
+WIN_CONDITION_SWITCH_BONUS = 0.3  # Bonus for approaching switches
+WIN_CONDITION_EXIT_BONUS = 0.5    # Bonus for approaching exits
+WIN_CONDITION_DOOR_BONUS = 0.4    # Bonus for utilizing opened doors
+WIN_CONDITION_DOOR_PROXIMITY = 100.0  # Distance for door utilization bonus
 
 
 class MovementState(IntEnum):
@@ -75,7 +91,9 @@ class TrajectoryCalculator:
 
     def __init__(self):
         """Initialize trajectory calculator with N++ physics constants."""
-        pass
+        # Cache for static level geometry (tiles never change during level)
+        self._tile_cache = {}
+        self._current_level_id = None
 
     def calculate_jump_trajectory(
         self,
@@ -156,7 +174,8 @@ class TrajectoryCalculator:
 
         # Calculate success probability (based on trajectory difficulty)
         success_probability = self._calculate_success_probability(
-            distance, abs(dy), velocity_magnitude, time_of_flight
+            distance, abs(dy), velocity_magnitude, time_of_flight,
+            ninja_state, start_pos, end_pos
         )
 
         # Determine movement requirements
@@ -190,10 +209,524 @@ class TrajectoryCalculator:
         Returns:
             True if trajectory is clear, False if blocked
         """
-        # This would integrate with nclone's collision system
-        # For now, return True as a placeholder
-        # In full implementation, would use sweep_circle_vs_tiles
+        if not trajectory_points or len(trajectory_points) < 2:
+            return True
+        
+        if level_data is None:
+            return True  # No level data, assume clear
+            
+        # Get simulation object from level_data if available
+        sim = level_data.get('sim', None)
+        if not sim:
+            # If no simulation object, try basic tile-based validation
+            return self._validate_trajectory_basic(trajectory_points, level_data)
+            
+        # Use nclone's sweep_circle_vs_tiles for accurate collision detection
+        for i in range(len(trajectory_points) - 1):
+            x0, y0 = trajectory_points[i]
+            x1, y1 = trajectory_points[i + 1]
+            
+            # Calculate movement vector
+            dx = x1 - x0
+            dy = y1 - y0
+            
+            # Use sweep_circle_vs_tiles to check for collisions
+            collision_result = sweep_circle_vs_tiles(sim, x0, y0, dx, dy, NINJA_RADIUS)
+            
+            # If collision_result indicates a collision, trajectory is blocked
+            if collision_result and collision_result.get('collision', False):
+                return False
+                
         return True
+        
+    def _validate_trajectory_basic(
+        self,
+        trajectory_points: List[Tuple[float, float]],
+        level_data: dict
+    ) -> bool:
+        """
+        Basic trajectory validation using cached level geometry.
+        
+        Args:
+            trajectory_points: List of (x, y) points along trajectory
+            level_data: Level data containing tile information
+            
+        Returns:
+            True if trajectory appears clear, False if likely blocked
+        """
+        # Cache level geometry for performance (only done once per level)
+        self._cache_level_geometry(level_data)
+        
+        # If no cached tiles, assume clear
+        if not self._tile_cache:
+            return True
+            
+        # Check each point along trajectory for tile collisions using cache
+        for point in trajectory_points:
+            # Handle both tuple (x, y) and dict {'x': x, 'y': y} formats
+            if isinstance(point, dict):
+                x, y = point['x'], point['y']
+            else:
+                x, y = point
+            # Convert world coordinates to tile coordinates
+            tile_x = int(x // TILE_PIXEL_SIZE)
+            tile_y = int(y // TILE_PIXEL_SIZE)
+            
+            # Check if tile is solid using cache (much faster lookup)
+            if (tile_x, tile_y) in self._tile_cache:
+                # Check if ninja circle overlaps with solid tile
+                tile_world_x = tile_x * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2  # Center of tile
+                tile_world_y = tile_y * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
+                
+                # Distance from ninja center to tile center
+                dist_sq = (x - tile_world_x)**2 + (y - tile_world_y)**2
+                
+                # If ninja radius overlaps with tile (approximate as circle vs square)
+                if dist_sq < (NINJA_RADIUS + 12)**2:  # 12 is half tile size
+                    return False
+                    
+        return True
+
+    def _cache_level_geometry(self, level_data: dict) -> None:
+        """
+        Cache static level geometry since tiles never change during a level.
+        
+        Args:
+            level_data: Level data containing tile information
+        """
+        level_id = level_data.get('level_id', id(level_data))
+        
+        # Only recache if level changed
+        if self._current_level_id == level_id:
+            return
+            
+        self._current_level_id = level_id
+        tiles = level_data.get('tiles', None)
+        
+        if tiles is None:
+            self._tile_cache = {}
+            return
+            
+        # Pre-process tile data into a fast lookup format
+        self._tile_cache = {}
+        
+        # Handle different tile data formats and cache solid tiles
+        if hasattr(tiles, '__getitem__'):
+            if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
+                # NumPy array format - use actual dimensions (but expect 25x44 for real levels)
+                height, width = tiles.shape
+                for tile_y in range(height):
+                    for tile_x in range(width):
+                        if tiles[tile_y, tile_x] != 0:  # Solid tile
+                            self._tile_cache[(tile_x, tile_y)] = True
+            elif isinstance(tiles, (list, tuple)):
+                # List/tuple format
+                for tile_y, row in enumerate(tiles):
+                    if hasattr(row, '__getitem__'):
+                        for tile_x, tile_value in enumerate(row):
+                            if tile_value != 0:  # Solid tile
+                                self._tile_cache[(tile_x, tile_y)] = True
+            elif isinstance(tiles, dict):
+                # Dict format - copy solid tiles
+                for (tile_x, tile_y), tile_value in tiles.items():
+                    if tile_value != 0:
+                        self._tile_cache[(tile_x, tile_y)] = True
+        
+    def _is_solid_tile(self, tiles: any, tile_x: int, tile_y: int) -> bool:
+        """Check if a tile at given coordinates is solid."""
+        try:
+            # Handle different tile data formats
+            if hasattr(tiles, '__getitem__'):
+                if hasattr(tiles, 'shape') and len(tiles.shape) == 2:
+                    # NumPy array format - use actual dimensions (but expect 25x44 for real levels)
+                    height, width = tiles.shape
+                    if 0 <= tile_y < height and 0 <= tile_x < width:
+                        return tiles[tile_y, tile_x] != 0  # 0 = empty, non-zero = solid
+                elif isinstance(tiles, (list, tuple)):
+                    # List format
+                    if 0 <= tile_y < len(tiles) and 0 <= tile_x < len(tiles[tile_y]):
+                        return tiles[tile_y][tile_x] != 0
+                elif isinstance(tiles, dict):
+                    # Dictionary format
+                    return tiles.get((tile_x, tile_y), 0) != 0
+            return False
+        except (IndexError, KeyError, AttributeError):
+            return False  # Assume empty if can't access
+
+    def _analyze_win_conditions(self, level_data: dict) -> dict:
+        """
+        Analyze win conditions for trajectory planning optimization.
+        
+        Identifies switch→door sequences, exit requirements, and path constraints
+        to optimize trajectory planning for goal-oriented movement.
+        
+        Args:
+            level_data: Level data containing entities
+            
+        Returns:
+            Dict containing win condition analysis:
+            - 'exits': List of exit positions and states
+            - 'switches': List of switch positions and states  
+            - 'doors': List of door positions and states
+            - 'switch_door_pairs': Identified switch→door relationships
+            - 'completion_requirements': Steps needed to complete level
+        """
+        if not level_data or 'entities' not in level_data:
+            return {}
+            
+        entities = level_data['entities']
+        win_analysis = {
+            'exits': [],
+            'switches': [],
+            'doors': [],
+            'switch_door_pairs': [],
+            'completion_requirements': []
+        }
+        
+        # Collect all relevant entities
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+                
+            entity_type = entity.get('type', None)
+            entity_x = entity.get('x', 0)
+            entity_y = entity.get('y', 0)
+            entity_state = entity.get('state', 0)
+            
+            # Collect exits
+            if entity_type == EntityExit.ENTITY_TYPE:
+                win_analysis['exits'].append({
+                    'position': (entity_x, entity_y),
+                    'state': entity_state,
+                    'accessible': entity_state > 0  # Assume state > 0 means accessible
+                })
+                
+            # Collect switches
+            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+                win_analysis['switches'].append({
+                    'position': (entity_x, entity_y),
+                    'state': entity_state,
+                    'activated': entity_state > 0
+                })
+                
+            # Collect doors
+            elif entity_type in [EntityDoorRegular.ENTITY_TYPE, EntityDoorLocked.ENTITY_TYPE]:
+                win_analysis['doors'].append({
+                    'position': (entity_x, entity_y),
+                    'state': entity_state,
+                    'type': entity_type,
+                    'open': entity_state > 0  # Assume state > 0 means open
+                })
+        
+        # Analyze switch→door relationships (simplified heuristic)
+        for switch in win_analysis['switches']:
+            switch_x, switch_y = switch['position']
+            
+            # Find closest door to each switch (simple proximity heuristic)
+            closest_door = None
+            min_distance = float('inf')
+            
+            for door in win_analysis['doors']:
+                door_x, door_y = door['position']
+                distance = math.sqrt((switch_x - door_x)**2 + (switch_y - door_y)**2)
+                
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_door = door
+                    
+            if closest_door and min_distance < SWITCH_DOOR_MAX_DISTANCE:
+                win_analysis['switch_door_pairs'].append({
+                    'switch': switch,
+                    'door': closest_door,
+                    'distance': min_distance
+                })
+        
+        # Determine completion requirements
+        unactivated_switches = [s for s in win_analysis['switches'] if not s['activated']]
+        inaccessible_exits = [e for e in win_analysis['exits'] if not e['accessible']]
+        
+        if unactivated_switches:
+            win_analysis['completion_requirements'].append({
+                'type': 'activate_switches',
+                'count': len(unactivated_switches),
+                'positions': [s['position'] for s in unactivated_switches]
+            })
+            
+        if inaccessible_exits:
+            win_analysis['completion_requirements'].append({
+                'type': 'unlock_exits',
+                'count': len(inaccessible_exits),
+                'positions': [e['position'] for e in inaccessible_exits]
+            })
+        
+        return win_analysis
+
+    def _calculate_win_condition_trajectory_bonus(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        level_data: dict
+    ) -> float:
+        """
+        Calculate trajectory bonus based on win condition progress.
+        
+        Trajectories that move toward switches, exits, or complete win conditions
+        receive bonus scores to guide the agent toward level completion.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            level_data: Level data for win condition analysis
+            
+        Returns:
+            Bonus score (0.0 to 1.0) for win condition progress
+        """
+        win_analysis = self._analyze_win_conditions(level_data)
+        
+        if not win_analysis:
+            return 0.0
+            
+        start_x, start_y = start_pos
+        end_x, end_y = end_pos
+        bonus = 0.0
+        
+        # Bonus for moving toward unactivated switches
+        unactivated_switches = [s for s in win_analysis['switches'] if not s['activated']]
+        if unactivated_switches:
+            for switch in unactivated_switches:
+                switch_x, switch_y = switch['position']
+                
+                # Distance from start and end to switch
+                start_dist = math.sqrt((start_x - switch_x)**2 + (start_y - switch_y)**2)
+                end_dist = math.sqrt((end_x - switch_x)**2 + (end_y - switch_y)**2)
+                
+                # Bonus if moving closer to switch
+                if end_dist < start_dist:
+                    improvement = (start_dist - end_dist) / max(start_dist, 1.0)
+                    bonus += improvement * WIN_CONDITION_SWITCH_BONUS
+        
+        # Bonus for moving toward accessible exits
+        accessible_exits = [e for e in win_analysis['exits'] if e['accessible']]
+        if accessible_exits:
+            for exit_info in accessible_exits:
+                exit_x, exit_y = exit_info['position']
+                
+                # Distance from start and end to exit
+                start_dist = math.sqrt((start_x - exit_x)**2 + (start_y - exit_y)**2)
+                end_dist = math.sqrt((end_x - exit_x)**2 + (end_y - exit_y)**2)
+                
+                # Bonus if moving closer to exit
+                if end_dist < start_dist:
+                    improvement = (start_dist - end_dist) / max(start_dist, 1.0)
+                    bonus += improvement * WIN_CONDITION_EXIT_BONUS
+        
+        # Bonus for completing switch→door sequences
+        for pair in win_analysis['switch_door_pairs']:
+            switch_pos = pair['switch']['position']
+            door_pos = pair['door']['position']
+            
+            # If switch is activated and door is now accessible
+            if pair['switch']['activated'] and pair['door']['open']:
+                # Bonus for being near the opened door
+                door_x, door_y = door_pos
+                end_dist = math.sqrt((end_x - door_x)**2 + (end_y - door_y)**2)
+                
+                if end_dist < WIN_CONDITION_DOOR_PROXIMITY:
+                    bonus += WIN_CONDITION_DOOR_BONUS
+        
+        return min(bonus, 1.0)  # Cap at 100% bonus
+
+    def calculate_momentum_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        initial_velocity: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory considering initial momentum and physics constraints.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            initial_velocity: Initial velocity (vx, vy)
+            ninja_state: Current ninja movement state
+            level_data: Level geometry data for collision detection
+            
+        Returns:
+            TrajectoryResult with momentum-dependent physics parameters
+        """
+        x0, y0 = start_pos
+        x1, y1 = end_pos
+        vx0, vy0 = initial_velocity
+        
+        dx = x1 - x0
+        dy = y1 - y0
+        
+        # Get appropriate physics constants based on ninja state
+        gravity = self._get_gravity_for_state(ninja_state)
+        drag = self._get_drag_for_state(ninja_state)
+        accel = self._get_acceleration_for_state(ninja_state)
+        
+        # Calculate trajectory with momentum conservation
+        trajectory_points = []
+        feasible = True
+        
+        # Simulate trajectory step by step
+        dt = 0.1  # Time step for simulation
+        max_time = 10.0  # Maximum simulation time
+        
+        x, y = x0, y0
+        vx, vy = vx0, vy0
+        t = 0.0
+        
+        trajectory_points.append((x, y))
+        
+        while t < max_time:
+            # Apply physics forces
+            # Gravity
+            vy += gravity * dt
+            
+            # Drag (air resistance)
+            speed = math.sqrt(vx*vx + vy*vy)
+            if speed > 0:
+                drag_force = drag * speed
+                vx -= (vx / speed) * drag_force * dt
+                vy -= (vy / speed) * drag_force * dt
+            
+            # Apply acceleration constraints
+            if ninja_state in [MovementState.RUNNING, MovementState.GROUND_SLIDING]:
+                # Ground movement - can accelerate horizontally
+                if abs(vx) < MAX_HOR_SPEED:
+                    target_vx = MAX_HOR_SPEED if dx > 0 else -MAX_HOR_SPEED
+                    accel_dir = 1 if target_vx > vx else -1
+                    vx += accel_dir * accel * dt
+                    vx = max(-MAX_HOR_SPEED, min(MAX_HOR_SPEED, vx))
+            elif ninja_state in [MovementState.JUMPING, MovementState.FALLING, MovementState.AIRBORNE]:
+                # Air movement - limited horizontal acceleration
+                if abs(vx) < MAX_HOR_SPEED:
+                    target_vx = MAX_HOR_SPEED if dx > 0 else -MAX_HOR_SPEED
+                    accel_dir = 1 if target_vx > vx else -1
+                    vx += accel_dir * AIR_ACCEL * dt
+                    vx = max(-MAX_HOR_SPEED, min(MAX_HOR_SPEED, vx))
+            
+            # Update position
+            x += vx * dt
+            y += vy * dt
+            t += dt
+            
+            trajectory_points.append((x, y))
+            
+            # Check if we've reached the target (within tolerance)
+            dist_to_target = math.sqrt((x - x1)**2 + (y - y1)**2)
+            if dist_to_target < NINJA_RADIUS:
+                break
+                
+            # Check if we've overshot significantly
+            if abs(x - x1) > abs(dx) * 2 or abs(y - y1) > abs(dy) * 2:
+                feasible = False
+                break
+        
+        # Validate trajectory against level geometry
+        if feasible and level_data:
+            feasible = self.validate_trajectory_clearance(trajectory_points, level_data)
+        
+        # Calculate physics parameters
+        time_of_flight = t
+        
+        # Energy cost based on required velocity changes and time
+        initial_speed = math.sqrt(vx0*vx0 + vy0*vy0)
+        final_speed = math.sqrt(vx*vx + vy*vy)
+        energy_cost = ENERGY_COST_BASE + abs(final_speed - initial_speed) * ENERGY_COST_JUMP_MULTIPLIER
+        
+        # Success probability based on trajectory complexity
+        success_probability = self._calculate_success_probability(
+            dx, dy, time_of_flight, initial_speed, ninja_state,
+            start_pos, end_pos, level_data
+        )
+        
+        # Velocity requirements
+        max_velocity = max(initial_speed, final_speed)
+        min_velocity = min(initial_speed, final_speed)
+        
+        # Movement requirements
+        requires_jump = abs(dy) > JUMP_THRESHOLD_Y or ninja_state in [
+            MovementState.JUMPING, MovementState.WALL_JUMPING
+        ]
+        requires_wall_contact = ninja_state in [
+            MovementState.WALL_SLIDING, MovementState.WALL_JUMPING
+        ]
+        
+        return TrajectoryResult(
+            feasible=feasible,
+            time_of_flight=time_of_flight,
+            energy_cost=energy_cost,
+            success_probability=success_probability,
+            min_velocity=min_velocity,
+            max_velocity=max_velocity,
+            requires_jump=requires_jump,
+            requires_wall_contact=requires_wall_contact,
+            trajectory_points=trajectory_points
+        )
+
+    def calculate_wall_jump_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        wall_normal: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for wall jump movement with proper physics.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            wall_normal: Wall normal vector (nx, ny)
+            ninja_state: Current ninja movement state
+            level_data: Level geometry data
+            
+        Returns:
+            TrajectoryResult for wall jump movement
+        """
+        x0, y0 = start_pos
+        x1, y1 = end_pos
+        nx, ny = wall_normal
+        
+        dx = x1 - x0
+        dy = y1 - y0
+        
+        # Determine wall jump type based on movement direction
+        if abs(dy) > abs(dx) and dy < 0:
+            # Regular wall jump (away from wall, upward)
+            initial_vx = JUMP_WALL_REGULAR_X * (-nx)  # Away from wall
+            initial_vy = -abs(JUMP_WALL_REGULAR_Y)  # Upward
+        else:
+            # Wall slide jump (along wall)
+            initial_vx = JUMP_WALL_SLIDE_X * (-nx)
+            initial_vy = -abs(JUMP_WALL_SLIDE_Y)
+        
+        # Use momentum trajectory calculation with wall jump initial velocity
+        return self.calculate_momentum_trajectory(
+            start_pos, end_pos, (initial_vx, initial_vy),
+            MovementState.WALL_JUMPING, level_data
+        )
+
+    def _get_drag_for_state(self, ninja_state: Optional[MovementState]) -> float:
+        """Get appropriate drag constant based on ninja state."""
+        if ninja_state in [MovementState.GROUND_SLIDING, MovementState.WALL_SLIDING]:
+            return DRAG_SLOW
+        else:
+            return DRAG_REGULAR
+            
+    def _get_acceleration_for_state(self, ninja_state: Optional[MovementState]) -> float:
+        """Get appropriate acceleration constant based on ninja state."""
+        if ninja_state in [MovementState.RUNNING, MovementState.GROUND_SLIDING]:
+            return GROUND_ACCEL
+        else:
+            return AIR_ACCEL
 
     def _get_gravity_for_state(self, ninja_state: Optional[MovementState]) -> float:
         """Get appropriate gravity constant based on ninja state."""
@@ -243,28 +776,66 @@ class TrajectoryCalculator:
 
     def _calculate_success_probability(
         self,
-        distance: float,
-        height_diff: float,
-        velocity_magnitude: float,
-        time_of_flight: float
+        dx: float,
+        dy: float,
+        time_of_flight: float,
+        velocity: float,
+        ninja_state: Optional[MovementState] = None,
+        start_pos: Optional[Tuple[float, float]] = None,
+        end_pos: Optional[Tuple[float, float]] = None,
+        level_data: Optional[dict] = None
     ) -> float:
-        """Calculate probability of successful trajectory execution."""
-        # Base probability starts high for simple movements
-        base_prob = SUCCESS_PROBABILITY_HIGH_BASE
-
-        # Reduce probability for longer distances
+        """
+        Calculate success probability based on movement complexity.
+        
+        Args:
+            dx: Horizontal displacement
+            dy: Vertical displacement
+            time_of_flight: Time required for movement
+            velocity: Required velocity
+            ninja_state: Current ninja state
+            
+        Returns:
+            Success probability between 0.0 and 1.0
+        """
+        # Base success probability
+        base_prob = SUCCESS_PROBABILITY_BASE
+        
+        # Adjust based on movement type
+        if ninja_state in [MovementState.WALL_JUMPING, MovementState.WALL_SLIDING]:
+            base_prob = SUCCESS_PROBABILITY_BASE * 0.8  # Wall movements are harder
+        elif ninja_state == MovementState.LAUNCH_PAD:
+            base_prob = SUCCESS_PROBABILITY_HIGH_BASE  # Launch pads are easier
+        
+        # Distance penalty
+        distance = math.sqrt(dx*dx + dy*dy)
         distance_penalty = min(distance / DISTANCE_PENALTY_DIVISOR, DISTANCE_PENALTY_MAX)
-
-        # Reduce probability for large height differences
-        height_penalty = min(abs(height_diff) / HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX)
-
-        # Reduce probability for high velocities
-        velocity_penalty = min(velocity_magnitude / MAX_HOR_SPEED, VELOCITY_PENALTY_MAX)
-
-        # Reduce probability for long flight times
-        time_penalty = min(time_of_flight / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
-
-        success_prob = (
-            base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty
-        )
-        return max(SUCCESS_PROBABILITY_MIN, min(1.0, success_prob))
+        
+        # Height penalty (upward movement is harder)
+        height_penalty = 0.0
+        if dy < 0:  # Upward movement
+            height_penalty = min(abs(dy) / HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX)
+        
+        # Velocity penalty (high velocity requirements are harder)
+        velocity_penalty = 0.0
+        if velocity > MAX_HOR_SPEED * 0.8:
+            velocity_penalty = min((velocity - MAX_HOR_SPEED * 0.8) / MAX_HOR_SPEED, VELOCITY_PENALTY_MAX)
+        
+        # Time penalty (very short or very long movements are harder)
+        time_penalty = 0.0
+        if time_of_flight < 1.0:
+            time_penalty = min((1.0 - time_of_flight) / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
+        elif time_of_flight > MAX_JUMP_DURATION:
+            time_penalty = min((time_of_flight - MAX_JUMP_DURATION) / TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX)
+        
+        # Win condition bonus (if positions and level data available)
+        win_condition_bonus = 0.0
+        if start_pos and end_pos and level_data:
+            win_condition_bonus = self._calculate_win_condition_trajectory_bonus(
+                start_pos, end_pos, level_data
+            )
+        
+        # Calculate final probability with win condition awareness
+        final_prob = base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty + win_condition_bonus
+        
+        return max(final_prob, SUCCESS_PROBABILITY_MIN)
