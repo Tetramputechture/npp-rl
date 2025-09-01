@@ -9,14 +9,16 @@ import math
 from typing import Tuple, Optional, Dict, Any
 from enum import IntEnum
 
-from nclone.constants import (
-    MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
-    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
-    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
-    NINJA_RADIUS, JUMP_LAUNCH_PAD_BOOST_SCALAR, JUMP_LAUNCH_PAD_BOOST_FACTOR,
-    GRAVITY_FALL, GRAVITY_JUMP, MAX_JUMP_DURATION,
-    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
-    MAX_SURVIVABLE_IMPACT
+from nclone.constants.physics_constants import *
+from nclone.utils.physics_utils import (
+    BounceBlockState, 
+    calculate_bounce_block_boost_multiplier,
+    calculate_distance
+)
+from nclone.utils.collision_utils import (
+    find_entities_in_radius,
+    find_bounce_blocks_near_trajectory,
+    find_chainable_bounce_blocks
 )
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
 from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
@@ -25,14 +27,13 @@ from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
 from nclone.entity_classes.entity_thwump import EntityThwump
 from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
 from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.entity_classes.entity_bounce_block import EntityBounceBlock, BounceBlockState
+from nclone.entity_classes.entity_bounce_block import EntityBounceBlock
 from nclone.physics import overlap_circle_vs_circle, map_orientation_to_vector
 
-# Movement classification constants
+# Movement classification constants (non-physics)
 MOVEMENT_THRESHOLD = 1e-6
 WALK_SPEED_THRESHOLD = 0.5
 JUMP_VELOCITY_THRESHOLD = 0.3
-MIN_HORIZONTAL_VELOCITY = 0.1
 WALL_CONTACT_DISTANCE = 15.0
 LAUNCH_PAD_VELOCITY_MULTIPLIER = 1.5
 
@@ -43,7 +44,6 @@ UPWARD_MOVEMENT_THRESHOLD = -5.0
 DOWNWARD_MOVEMENT_THRESHOLD = 5.0
 DEFAULT_TIME_ESTIMATE = 1.0
 DEFAULT_DIFFICULTY = 1.0
-# Use actual N++ gravity constants instead of approximation
 JUMP_TIME_FALLBACK = 5.0
 JUMP_ENERGY_BASE = 1.5
 HEIGHT_FACTOR_DIVISOR = 50.0
@@ -67,16 +67,7 @@ LAUNCH_PAD_ENERGY_COST = 0.3
 LAUNCH_PAD_DIFFICULTY = 0.4
 LAUNCH_PAD_DISTANCE_THRESHOLD = 100.0
 
-# Bounce block movement constants
-BOUNCE_BLOCK_BOOST_BASE = 1.5
-BOUNCE_BLOCK_BOOST_MAX = 3.0
-BOUNCE_BLOCK_COMPRESSION_TIME = 0.3
-BOUNCE_BLOCK_EXTENSION_TIME = 0.5
-BOUNCE_BLOCK_CHAIN_BONUS = 1.2
-BOUNCE_BLOCK_REPEATED_BOOST_DECAY = 0.95
-BOUNCE_BLOCK_ENERGY_EFFICIENCY = 0.7  # More energy efficient than regular jumps
-BOUNCE_BLOCK_SUCCESS_RATE_BASE = 0.9  # High success rate
-BOUNCE_BLOCK_CLEARANCE_BONUS = 1.5  # Bonus for good clearance
+# Note: Bounce block constants are now in centralized physics_constants.py
 
 
 class MovementType(IntEnum):
@@ -838,17 +829,15 @@ class MovementClassifier:
         if not level_data or not level_data.get('entities'):
             return MovementType.WALK  # Default to no bounce block
         
-        # Look for bounce blocks in the level
-        bounce_blocks = []
-        for entity in level_data.get('entities', []):
-            if entity.get('type') == 17:  # Bounce block type
-                bounce_blocks.append(entity)
+        # Get bounce blocks from level data using centralized constant
+        entities = level_data.get('entities', [])
+        bounce_blocks = [e for e in entities if e.get('type') == ENTITY_TYPE_BOUNCE_BLOCK]
         
         if not bounce_blocks:
             return MovementType.WALK
         
-        # Calculate movement properties
-        distance = math.sqrt(dx*dx + dy*dy)
+        # Calculate movement properties using centralized utility
+        distance = calculate_distance((0, 0), (dx, dy))
         if distance < 10.0:  # Too small to be bounce block movement
             return MovementType.WALK
         
@@ -856,8 +845,8 @@ class MovementClassifier:
         movement_start = ninja_state.position if ninja_state else (0, 0)
         movement_end = (movement_start[0] + dx, movement_start[1] + dy)
         
-        # Check for bounce block interaction
-        interacting_blocks = self._find_interacting_bounce_blocks(
+        # Find bounce blocks near trajectory using centralized utility
+        interacting_blocks = find_bounce_blocks_near_trajectory(
             movement_start, movement_end, bounce_blocks
         )
         
@@ -866,8 +855,12 @@ class MovementClassifier:
         
         # Determine type of bounce block movement
         if len(interacting_blocks) > 1:
-            # Multiple blocks - likely a chain
-            return MovementType.BOUNCE_CHAIN
+            # Check if blocks can be chained using centralized utility
+            chainable_blocks = find_chainable_bounce_blocks(
+                interacting_blocks, movement_start, movement_end
+            )
+            if len(chainable_blocks) > 1:
+                return MovementType.BOUNCE_CHAIN
         
         block = interacting_blocks[0]
         block_state = block.get('bounce_state', BounceBlockState.NEUTRAL)
@@ -881,60 +874,7 @@ class MovementClassifier:
         # Regular bounce block interaction
         return MovementType.BOUNCE_BLOCK
     
-    def _find_interacting_bounce_blocks(
-        self,
-        start_pos: tuple[float, float],
-        end_pos: tuple[float, float],
-        bounce_blocks: list
-    ) -> list:
-        """Find bounce blocks that interact with the movement path."""
-        interacting = []
-        
-        for block in bounce_blocks:
-            block_x = block.get('x', 0.0)
-            block_y = block.get('y', 0.0)
-            block_radius = 9.0  # EntityBounceBlock.SEMI_SIDE
-            
-            # Check if path intersects with bounce block
-            if self._path_intersects_circle(start_pos, end_pos, (block_x, block_y), block_radius):
-                interacting.append(block)
-        
-        return interacting
-    
-    def _path_intersects_circle(
-        self,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        center: tuple[float, float],
-        radius: float
-    ) -> bool:
-        """Check if line segment intersects with circle."""
-        # Vector from start to end
-        dx = end[0] - start[0]
-        dy = end[1] - start[1]
-        
-        # Vector from start to circle center
-        fx = center[0] - start[0]
-        fy = center[1] - start[1]
-        
-        # Project circle center onto line segment
-        if dx == 0 and dy == 0:
-            # Degenerate case - point to point
-            distance = math.sqrt(fx*fx + fy*fy)
-            return distance <= radius
-        
-        t = max(0, min(1, (fx*dx + fy*dy) / (dx*dx + dy*dy)))
-        
-        # Closest point on line segment
-        closest_x = start[0] + t * dx
-        closest_y = start[1] + t * dy
-        
-        # Distance from circle center to closest point
-        dist_x = center[0] - closest_x
-        dist_y = center[1] - closest_y
-        distance = math.sqrt(dist_x*dist_x + dist_y*dist_y)
-        
-        return distance <= radius
+    # Note: Bounce block interaction detection now uses centralized utilities
     
     def _calculate_bounce_block_parameters(
         self,
@@ -945,8 +885,8 @@ class MovementClassifier:
         """Calculate parameters for basic bounce block movement."""
         distance = math.sqrt(dx*dx + dy*dy)
         
-        # Bounce blocks provide momentum boost
-        boost_multiplier = BOUNCE_BLOCK_BOOST_BASE
+        # Bounce blocks provide momentum boost using centralized constants
+        boost_multiplier = BOUNCE_BLOCK_BOOST_MIN
         
         # Time estimate with bounce block assistance
         if distance > 0:
@@ -954,7 +894,7 @@ class MovementClassifier:
             base_time = distance / MAX_HOR_SPEED
             time_estimate = base_time * (1.0 / boost_multiplier)
         else:
-            time_estimate = BOUNCE_BLOCK_COMPRESSION_TIME
+            time_estimate = DEFAULT_MINIMUM_TIME
         
         # Required velocity is reduced due to boost
         required_velocity = min(distance / max(time_estimate, 0.1), MAX_HOR_SPEED)
@@ -964,7 +904,7 @@ class MovementClassifier:
         energy_cost = BOUNCE_BLOCK_ENERGY_EFFICIENCY
         
         # High success rate for bounce blocks
-        difficulty = 1.0 - BOUNCE_BLOCK_SUCCESS_RATE_BASE
+        difficulty = 1.0 - BASE_SUCCESS_PROBABILITY - BOUNCE_BLOCK_SUCCESS_BONUS
         
         return {
             'required_velocity': required_velocity,
@@ -984,10 +924,10 @@ class MovementClassifier:
         # Start with basic bounce block parameters
         params = self._calculate_bounce_block_parameters(dx, dy, ninja_state)
         
-        # Chain bonus - multiple blocks provide better performance
-        chain_bonus = BOUNCE_BLOCK_CHAIN_BONUS
+        # Chain bonus - multiple blocks provide better performance (20% bonus per block)
+        chain_bonus = 1.2  # 20% bonus for chaining
         
-        # Enhanced boost from chaining
+        # Enhanced boost from chaining using centralized constants
         params['boost_multiplier'] = min(
             params['boost_multiplier'] * chain_bonus,
             BOUNCE_BLOCK_BOOST_MAX
@@ -1013,14 +953,14 @@ class MovementClassifier:
         """Calculate parameters for repeated bounce boost movement."""
         distance = math.sqrt(dx*dx + dy*dy)
         
-        # Repeated boosts provide maximum multiplier but with decay
-        boost_multiplier = BOUNCE_BLOCK_BOOST_MAX * BOUNCE_BLOCK_REPEATED_BOOST_DECAY
+        # Repeated boosts provide maximum multiplier but with decay using centralized constants
+        boost_multiplier = BOUNCE_BLOCK_BOOST_MAX * BOUNCE_BLOCK_DAMPING
         
         # Very fast movement due to repeated boosts
         if distance > 0:
             time_estimate = distance / (MAX_HOR_SPEED * boost_multiplier)
         else:
-            time_estimate = BOUNCE_BLOCK_EXTENSION_TIME
+            time_estimate = DEFAULT_MINIMUM_TIME
         
         # High velocity from repeated boosts
         required_velocity = min(

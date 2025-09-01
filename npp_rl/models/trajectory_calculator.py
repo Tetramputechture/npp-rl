@@ -10,20 +10,23 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from enum import IntEnum
 
-from nclone.constants import (
-    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
-    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
-    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
-    JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
-    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
-    FULL_MAP_WIDTH, FULL_MAP_HEIGHT, TILE_PIXEL_SIZE
+from nclone.constants.physics_constants import *
+from nclone.utils.physics_utils import (
+    BounceBlockState,
+    calculate_bounce_block_boost_multiplier,
+    calculate_distance,
+    calculate_trajectory_with_bounce_blocks
+)
+from nclone.utils.collision_utils import (
+    find_entities_in_radius,
+    find_bounce_blocks_near_trajectory
 )
 from nclone.physics import sweep_circle_vs_tiles
 from nclone.entity_classes.entity_exit import EntityExit
 from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
 from nclone.entity_classes.entity_door_regular import EntityDoorRegular
 from nclone.entity_classes.entity_door_locked import EntityDoorLocked
-from nclone.entity_classes.entity_bounce_block import EntityBounceBlock, BounceBlockState
+from nclone.entity_classes.entity_bounce_block import EntityBounceBlock
 
 # Physics calculation constants
 VERTICAL_MOVEMENT_THRESHOLD = 1e-6
@@ -54,15 +57,7 @@ WIN_CONDITION_EXIT_BONUS = 0.5    # Bonus for approaching exits
 WIN_CONDITION_DOOR_BONUS = 0.4    # Bonus for utilizing opened doors
 WIN_CONDITION_DOOR_PROXIMITY = 100.0  # Distance for door utilization bonus
 
-# Bounce block trajectory constants
-BOUNCE_BLOCK_BOOST_MIN = 1.5      # Minimum boost multiplier
-BOUNCE_BLOCK_BOOST_MAX = 3.0      # Maximum boost multiplier
-BOUNCE_BLOCK_INTERACTION_RADIUS = 15.0  # Radius for bounce block interaction
-BOUNCE_BLOCK_CHAIN_DISTANCE = 50.0     # Max distance for chaining blocks
-BOUNCE_BLOCK_COMPRESSION_FRAMES = 10   # Frames to compress
-BOUNCE_BLOCK_EXTENSION_FRAMES = 15     # Frames to extend
-BOUNCE_BLOCK_ENERGY_EFFICIENCY = 0.6  # Energy efficiency bonus
-BOUNCE_BLOCK_SUCCESS_BONUS = 0.2      # Success probability bonus
+# Note: Bounce block constants are now in centralized physics_constants.py
 
 
 class MovementState(IntEnum):
@@ -975,19 +970,12 @@ class TrajectoryCalculator:
         if not level_data or not level_data.get('entities'):
             return []
         
-        bounce_blocks = []
-        for entity in level_data.get('entities', []):
-            if entity.get('type') == 17:  # Bounce block type
-                block_x = entity.get('x', 0.0)
-                block_y = entity.get('y', 0.0)
-                
-                # Check if block is near the trajectory path
-                if self._point_near_line_segment(
-                    (block_x, block_y), start_pos, end_pos, BOUNCE_BLOCK_INTERACTION_RADIUS
-                ):
-                    bounce_blocks.append(entity)
+        # Get bounce blocks from level data using centralized constant
+        entities = level_data.get('entities', [])
+        bounce_blocks = [e for e in entities if e.get('type') == ENTITY_TYPE_BOUNCE_BLOCK]
         
-        return bounce_blocks
+        # Use centralized utility to find blocks near trajectory
+        return find_bounce_blocks_near_trajectory(start_pos, end_pos, bounce_blocks)
     
     def _find_chainable_bounce_blocks(
         self,
@@ -1199,18 +1187,8 @@ class TrajectoryCalculator:
             compression = block.get('compression_amount', 0.0)
             state = block.get('bounce_state', BounceBlockState.NEUTRAL)
             
-            if state == BounceBlockState.EXTENDING:
-                # Maximum boost when extending
-                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression
-            elif state == BounceBlockState.COMPRESSED:
-                # Good boost when compressed
-                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression * 0.8
-            elif state == BounceBlockState.COMPRESSING:
-                # Moderate boost when compressing
-                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression * 0.5
-            else:
-                # Minimal boost when neutral
-                boost = BOUNCE_BLOCK_BOOST_MIN * 0.8
+            # Use centralized utility for individual block boost calculation
+            boost = calculate_bounce_block_boost_multiplier([block])
             
             total_boost += boost
         
