@@ -17,9 +17,6 @@ from nclone.constants import (
 )
 from nclone.constants.entity_types import EntityType
 
-# All constants are now imported from nclone.constants
-# FIXED level geometry constants - all levels are exactly 1056x600 pixels
-
 class PhysicsStateExtractor:
     """
     Extracts comprehensive physics state for node features.
