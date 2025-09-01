@@ -10,55 +10,26 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from enum import IntEnum
 
-from nclone.constants.physics_constants import *
-from nclone.utils.physics_utils import (
-    BounceBlockState,
-    calculate_bounce_block_boost_multiplier,
-    calculate_distance,
-    calculate_trajectory_with_bounce_blocks
-)
-from nclone.utils.collision_utils import (
-    find_entities_in_radius,
-    find_bounce_blocks_near_trajectory
+from nclone.constants.entity_types import EntityType
+from nclone.constants import (
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
+    JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
+    DRAG_REGULAR, DRAG_SLOW, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
+    TILE_PIXEL_SIZE,
+    # Movement and trajectory constants
+    VERTICAL_MOVEMENT_THRESHOLD, MIN_HORIZONTAL_VELOCITY,
+    ENERGY_COST_BASE, ENERGY_COST_JUMP_MULTIPLIER,
+    SUCCESS_PROBABILITY_BASE, SUCCESS_PROBABILITY_HIGH_BASE, DISTANCE_PENALTY_DIVISOR, DISTANCE_PENALTY_MAX,
+    HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX, VELOCITY_PENALTY_MAX,
+    TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX, SUCCESS_PROBABILITY_MIN,
+    VELOCITY_MARGIN_MULTIPLIER, JUMP_THRESHOLD_Y, JUMP_THRESHOLD_VELOCITY,
+    DEFAULT_TRAJECTORY_POINTS, DEFAULT_MINIMUM_TIME,
+    # Win condition constants
+    SWITCH_DOOR_MAX_DISTANCE, WIN_CONDITION_SWITCH_BONUS,
+    WIN_CONDITION_EXIT_BONUS, WIN_CONDITION_DOOR_BONUS, WIN_CONDITION_DOOR_PROXIMITY
 )
 from nclone.physics import sweep_circle_vs_tiles
-from nclone.entity_classes.entity_exit import EntityExit
-from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.entity_classes.entity_door_regular import EntityDoorRegular
-from nclone.entity_classes.entity_door_locked import EntityDoorLocked
-from nclone.entity_classes.entity_bounce_block import EntityBounceBlock
-
-# Physics calculation constants
-VERTICAL_MOVEMENT_THRESHOLD = 1e-6
-MIN_HORIZONTAL_VELOCITY = 0.1
-ENERGY_COST_BASE = 10.0
-ENERGY_COST_JUMP_MULTIPLIER = 2.0
-SUCCESS_PROBABILITY_BASE = 0.8
-SUCCESS_PROBABILITY_DISTANCE_FACTOR = 0.001
-SUCCESS_PROBABILITY_HIGH_BASE = 0.95
-DISTANCE_PENALTY_DIVISOR = 100.0
-DISTANCE_PENALTY_MAX = 0.3
-HEIGHT_PENALTY_DIVISOR = 50.0
-HEIGHT_PENALTY_MAX = 0.2
-VELOCITY_PENALTY_MAX = 0.2
-TIME_PENALTY_DIVISOR = 30.0
-TIME_PENALTY_MAX = 0.1
-SUCCESS_PROBABILITY_MIN = 0.1
-VELOCITY_MARGIN_MULTIPLIER = 2
-JUMP_THRESHOLD_Y = -1.0
-JUMP_THRESHOLD_VELOCITY = 0.5
-DEFAULT_TRAJECTORY_POINTS = 10
-DEFAULT_MINIMUM_TIME = 1.0
-
-# Win condition constants
-SWITCH_DOOR_MAX_DISTANCE = 500.0  # Max distance for switch-door pairing
-WIN_CONDITION_SWITCH_BONUS = 0.3  # Bonus for approaching switches
-WIN_CONDITION_EXIT_BONUS = 0.5    # Bonus for approaching exits
-WIN_CONDITION_DOOR_BONUS = 0.4    # Bonus for utilizing opened doors
-WIN_CONDITION_DOOR_PROXIMITY = 100.0  # Distance for door utilization bonus
-
-# Note: Bounce block constants are now in centralized physics_constants.py
-
 
 class MovementState(IntEnum):
     """Ninja movement states from sim_mechanics_doc.md"""
@@ -400,7 +371,7 @@ class TrajectoryCalculator:
             entity_state = entity.get('state', 0)
             
             # Collect exits
-            if entity_type == EntityExit.ENTITY_TYPE:
+            if entity_type == EntityType.EXIT_DOOR:
                 win_analysis['exits'].append({
                     'position': (entity_x, entity_y),
                     'state': entity_state,
@@ -408,7 +379,7 @@ class TrajectoryCalculator:
                 })
                 
             # Collect switches
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+            elif entity_type == EntityType.EXIT_SWITCH:
                 win_analysis['switches'].append({
                     'position': (entity_x, entity_y),
                     'state': entity_state,
@@ -416,7 +387,7 @@ class TrajectoryCalculator:
                 })
                 
             # Collect doors
-            elif entity_type in [EntityDoorRegular.ENTITY_TYPE, EntityDoorLocked.ENTITY_TYPE]:
+            elif entity_type in [EntityType.REGULAR_DOOR, EntityType.LOCKED_DOOR]:
                 win_analysis['doors'].append({
                     'position': (entity_x, entity_y),
                     'state': entity_state,

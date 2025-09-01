@@ -9,63 +9,31 @@ import math
 from typing import Tuple, Optional, Dict, Any
 from enum import IntEnum
 
-from nclone.constants.physics_constants import *
-from nclone.utils.physics_utils import (
-    BounceBlockState, 
-    calculate_bounce_block_boost_multiplier,
-    calculate_distance
+from nclone.constants import (
+    MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
+    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
+    JUMP_LAUNCH_PAD_BOOST_FACTOR,
+    GRAVITY_FALL, GRAVITY_JUMP, MAX_JUMP_DURATION,
+    DRAG_REGULAR, FRICTION_WALL,
+    MAX_SURVIVABLE_IMPACT,
+    # Movement classification constants
+    MIN_HORIZONTAL_VELOCITY, HORIZONTAL_MOVEMENT_THRESHOLD, UPWARD_MOVEMENT_THRESHOLD, DOWNWARD_MOVEMENT_THRESHOLD,
+    DEFAULT_TIME_ESTIMATE, DEFAULT_DIFFICULTY, JUMP_TIME_FALLBACK,
+    # Energy constants
+    JUMP_ENERGY_BASE, HEIGHT_FACTOR_DIVISOR, HEIGHT_FACTOR_MAX,
+    DISTANCE_FACTOR_DIVISOR, DISTANCE_FACTOR_MAX, JUMP_DIFFICULTY_DIVISOR,
+    FALL_ENERGY_BASE, FALL_ENERGY_DISTANCE_DIVISOR, FALL_ENERGY_DISTANCE_MAX,
+    # Wall movement constants
+    WALL_SLIDE_SPEED_DIVISOR, WALL_SLIDE_MIN_TIME, WALL_SLIDE_ENERGY_COST,
+    WALL_SLIDE_DIFFICULTY, WALL_JUMP_ENERGY_BASE, WALL_JUMP_DIFFICULTY,
+    # Launch pad constants
+    LAUNCH_PAD_MIN_TIME,
+    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY
 )
-from nclone.utils.collision_utils import (
-    find_entities_in_radius,
-    find_bounce_blocks_near_trajectory,
-    find_chainable_bounce_blocks
-)
+from nclone.constants.entity_types import EntityType
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
-from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
-from nclone.entity_classes.entity_drone_zap import EntityDroneZap
-from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
-from nclone.entity_classes.entity_thwump import EntityThwump
-from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
-from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.entity_classes.entity_bounce_block import EntityBounceBlock
-from nclone.physics import overlap_circle_vs_circle, map_orientation_to_vector
-
-# Movement classification constants (non-physics)
-MOVEMENT_THRESHOLD = 1e-6
-WALK_SPEED_THRESHOLD = 0.5
-JUMP_VELOCITY_THRESHOLD = 0.3
-WALL_CONTACT_DISTANCE = 15.0
-LAUNCH_PAD_VELOCITY_MULTIPLIER = 1.5
-
-# Approximate gravity for backward compatibility
-GRAVITY_APPROXIMATE = (GRAVITY_FALL + GRAVITY_JUMP) / 2
-HORIZONTAL_MOVEMENT_THRESHOLD = 2.0
-UPWARD_MOVEMENT_THRESHOLD = -5.0
-DOWNWARD_MOVEMENT_THRESHOLD = 5.0
-DEFAULT_TIME_ESTIMATE = 1.0
-DEFAULT_DIFFICULTY = 1.0
-JUMP_TIME_FALLBACK = 5.0
-JUMP_ENERGY_BASE = 1.5
-HEIGHT_FACTOR_DIVISOR = 50.0
-HEIGHT_FACTOR_MAX = 2.0
-DISTANCE_FACTOR_DIVISOR = 100.0
-DISTANCE_FACTOR_MAX = 1.5
-JUMP_DIFFICULTY_DIVISOR = 3.0
-FALL_ENERGY_BASE = 0.5
-FALL_ENERGY_DISTANCE_DIVISOR = 100.0
-FALL_ENERGY_DISTANCE_MAX = 0.5
-WALL_SLIDE_SPEED_DIVISOR = 20.0
-WALL_SLIDE_MIN_TIME = 0.5
-WALL_SLIDE_ENERGY_COST = 1.2
-WALL_SLIDE_DIFFICULTY = 0.7
-WALL_JUMP_ENERGY_BASE = 2.0
-WALL_JUMP_DIFFICULTY = 0.8
-LAUNCH_PAD_BOOST_FACTOR = 1.7
-LAUNCH_PAD_GRAVITY_DIVISOR = 0.1
-LAUNCH_PAD_MIN_TIME = 1.0
-LAUNCH_PAD_ENERGY_COST = 0.3
-LAUNCH_PAD_DIFFICULTY = 0.4
-LAUNCH_PAD_DISTANCE_THRESHOLD = 100.0
+from nclone.physics import map_orientation_to_vector
 
 # Note: Bounce block constants are now in centralized physics_constants.py
 
@@ -364,10 +332,9 @@ class MovementClassifier:
         dy: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
-        """Calculate parameters for falling movement."""
+        """Calculate parameters for falling movement using actual N++ physics."""
         # Time to fall: t = sqrt(2*h/g)
-        gravity = GRAVITY_APPROXIMATE
-        time_estimate = math.sqrt(2 * abs(dy) / gravity) if abs(dy) > 0 else MIN_HORIZONTAL_VELOCITY
+        time_estimate = math.sqrt(2 * abs(dy) / GRAVITY_FALL) if abs(dy) > 0 else MIN_HORIZONTAL_VELOCITY
 
         # Required horizontal velocity
         required_velocity = abs(dx) / max(time_estimate, MIN_HORIZONTAL_VELOCITY)
@@ -622,7 +589,7 @@ class MovementClassifier:
             entity_y = entity.get('y', 0)
             
             # Cache launch pads (static - position and orientation never change)
-            if entity_type == EntityLaunchPad.ENTITY_TYPE:
+            if entity_type == EntityType.LAUNCH_PAD:
                 orientation = entity.get('orientation', 0)
                 normal_x, normal_y = map_orientation_to_vector(orientation)
                 
@@ -692,7 +659,7 @@ class MovementClassifier:
             entity_state = entity.get('state', 0)
             
             # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
-            if entity_type == EntityToggleMine.ENTITY_TYPE:
+            if entity_type == EntityType.TOGGLE_MINE:
                 self._dynamic_entity_cache['toggle_mines'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -702,7 +669,7 @@ class MovementClassifier:
                 })
             
             # Cache switches (activation state changes)
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+            elif entity_type == EntityType.EXIT_SWITCH:
                 self._dynamic_entity_cache['switches'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -712,7 +679,7 @@ class MovementClassifier:
                 })
             
             # Cache drones (position and direction can change)
-            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+            elif entity_type in [EntityType.DRONE_ZAP, EntityType.MINI_DRONE]:
                 self._dynamic_entity_cache['drones'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -722,7 +689,7 @@ class MovementClassifier:
                 })
             
             # Cache thwumps (position and state can change)
-            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+            elif entity_type in [EntityType.THWUMP, EntityType.SHWUMP]:
                 self._dynamic_entity_cache['thwumps'].append({
                     'x': entity_x,
                     'y': entity_y,

@@ -9,11 +9,7 @@ This approach is more accurate, robust, and efficient.
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from nclone.graph.common import NodeType, EdgeType
-from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
-from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
-from nclone.entity_classes.entity_drone_zap import EntityDroneZap
-from nclone.entity_classes.entity_thwump import EntityThwump
-
+from nclone.constants.entity_types import EntityType
 
 def calculate_node_types_from_map_data(
     level_data: Dict[str, Any],
@@ -165,7 +161,7 @@ def calculate_functional_edge_types(
                 break
         
         # Determine if this creates a functional relationship
-        if source_entity_type == EntityLaunchPad.ENTITY_TYPE:
+        if source_entity_type == EntityType.LAUNCH_PAD:
             # Launch pad creates functional edge to landing position
             distance = np.sqrt((target_pos[0] - source_pos[0])**2 + (target_pos[1] - source_pos[1])**2)
             if distance > 50:  # Long distance suggests launch pad trajectory
@@ -188,9 +184,9 @@ def demonstrate_proper_type_calculation():
     level_data = {
         'tiles': np.zeros((20, 20)),
         'entities': [
-            {'type': EntityLaunchPad.ENTITY_TYPE, 'x': 100.0, 'y': 100.0},
-            {'type': EntityToggleMine.ENTITY_TYPE, 'x': 200.0, 'y': 150.0, 'state': 1},
-            {'type': EntityDroneZap.ENTITY_TYPE, 'x': 300.0, 'y': 200.0}
+            {'type': EntityType.LAUNCH_PAD, 'x': 100.0, 'y': 100.0},
+            {'type': EntityType.TOGGLE_MINE, 'x': 200.0, 'y': 150.0, 'state': 1},
+            {'type': EntityType.DRONE_ZAP, 'x': 300.0, 'y': 200.0}
         ]
     }
     
