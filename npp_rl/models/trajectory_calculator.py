@@ -23,6 +23,7 @@ from nclone.entity_classes.entity_exit import EntityExit
 from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
 from nclone.entity_classes.entity_door_regular import EntityDoorRegular
 from nclone.entity_classes.entity_door_locked import EntityDoorLocked
+from nclone.entity_classes.entity_bounce_block import EntityBounceBlock, BounceBlockState
 
 # Physics calculation constants
 VERTICAL_MOVEMENT_THRESHOLD = 1e-6
@@ -52,6 +53,16 @@ WIN_CONDITION_SWITCH_BONUS = 0.3  # Bonus for approaching switches
 WIN_CONDITION_EXIT_BONUS = 0.5    # Bonus for approaching exits
 WIN_CONDITION_DOOR_BONUS = 0.4    # Bonus for utilizing opened doors
 WIN_CONDITION_DOOR_PROXIMITY = 100.0  # Distance for door utilization bonus
+
+# Bounce block trajectory constants
+BOUNCE_BLOCK_BOOST_MIN = 1.5      # Minimum boost multiplier
+BOUNCE_BLOCK_BOOST_MAX = 3.0      # Maximum boost multiplier
+BOUNCE_BLOCK_INTERACTION_RADIUS = 15.0  # Radius for bounce block interaction
+BOUNCE_BLOCK_CHAIN_DISTANCE = 50.0     # Max distance for chaining blocks
+BOUNCE_BLOCK_COMPRESSION_FRAMES = 10   # Frames to compress
+BOUNCE_BLOCK_EXTENSION_FRAMES = 15     # Frames to extend
+BOUNCE_BLOCK_ENERGY_EFFICIENCY = 0.6  # Energy efficiency bonus
+BOUNCE_BLOCK_SUCCESS_BONUS = 0.2      # Success probability bonus
 
 
 class MovementState(IntEnum):
@@ -839,3 +850,423 @@ class TrajectoryCalculator:
         final_prob = base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty + win_condition_bonus
         
         return max(final_prob, SUCCESS_PROBABILITY_MIN)
+    
+    def calculate_bounce_block_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for bounce block interactions.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with bounce block physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find bounce blocks along the trajectory
+        bounce_blocks = self._find_trajectory_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if not bounce_blocks:
+            # No bounce blocks - fall back to regular trajectory
+            return self.calculate_jump_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate bounce block enhanced trajectory
+        return self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+    
+    def calculate_bounce_chain_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for chained bounce block interactions.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with chained bounce block physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find chainable bounce blocks
+        bounce_blocks = self._find_chainable_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if len(bounce_blocks) < 2:
+            # Not enough blocks for chaining - fall back to single block
+            return self.calculate_bounce_block_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate chained trajectory
+        return self._calculate_chained_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+    
+    def calculate_bounce_boost_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for repeated bounce boost mechanics.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with repeated boost physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find extending bounce blocks for boost
+        extending_blocks = self._find_extending_bounce_blocks(start_pos, level_data)
+        
+        if not extending_blocks:
+            # No extending blocks - fall back to regular bounce block
+            return self.calculate_bounce_block_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate repeated boost trajectory
+        return self._calculate_repeated_boost_trajectory(
+            start_pos, end_pos, extending_blocks, ninja_state, level_data
+        )
+    
+    def _find_trajectory_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks that interact with the trajectory."""
+        if not level_data or not level_data.get('entities'):
+            return []
+        
+        bounce_blocks = []
+        for entity in level_data.get('entities', []):
+            if entity.get('type') == 17:  # Bounce block type
+                block_x = entity.get('x', 0.0)
+                block_y = entity.get('y', 0.0)
+                
+                # Check if block is near the trajectory path
+                if self._point_near_line_segment(
+                    (block_x, block_y), start_pos, end_pos, BOUNCE_BLOCK_INTERACTION_RADIUS
+                ):
+                    bounce_blocks.append(entity)
+        
+        return bounce_blocks
+    
+    def _find_chainable_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks that can be chained together."""
+        trajectory_blocks = self._find_trajectory_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if len(trajectory_blocks) < 2:
+            return trajectory_blocks
+        
+        # Sort blocks by distance along trajectory
+        def trajectory_distance(block):
+            block_pos = (block.get('x', 0.0), block.get('y', 0.0))
+            # Project block position onto trajectory line
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            if dx == 0 and dy == 0:
+                return 0.0
+            
+            bx = block_pos[0] - start_pos[0]
+            by = block_pos[1] - start_pos[1]
+            t = max(0, min(1, (bx*dx + by*dy) / (dx*dx + dy*dy)))
+            return t
+        
+        trajectory_blocks.sort(key=trajectory_distance)
+        
+        # Filter blocks that are within chaining distance
+        chainable = [trajectory_blocks[0]]  # Always include first block
+        
+        for i in range(1, len(trajectory_blocks)):
+            prev_block = chainable[-1]
+            curr_block = trajectory_blocks[i]
+            
+            prev_pos = (prev_block.get('x', 0.0), prev_block.get('y', 0.0))
+            curr_pos = (curr_block.get('x', 0.0), curr_block.get('y', 0.0))
+            
+            distance = math.sqrt(
+                (curr_pos[0] - prev_pos[0])**2 + (curr_pos[1] - prev_pos[1])**2
+            )
+            
+            if distance <= BOUNCE_BLOCK_CHAIN_DISTANCE:
+                chainable.append(curr_block)
+        
+        return chainable
+    
+    def _find_extending_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks in extending state near start position."""
+        if not level_data or not level_data.get('entities'):
+            return []
+        
+        extending_blocks = []
+        for entity in level_data.get('entities', []):
+            if (entity.get('type') == 17 and  # Bounce block type
+                entity.get('bounce_state') == BounceBlockState.EXTENDING):
+                
+                block_x = entity.get('x', 0.0)
+                block_y = entity.get('y', 0.0)
+                distance = math.sqrt(
+                    (block_x - start_pos[0])**2 + (block_y - start_pos[1])**2
+                )
+                
+                if distance <= BOUNCE_BLOCK_INTERACTION_RADIUS:
+                    extending_blocks.append(entity)
+        
+        return extending_blocks
+    
+    def _calculate_enhanced_bounce_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        bounce_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory enhanced by bounce block physics."""
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # Calculate boost multiplier based on bounce block states
+        boost_multiplier = self._calculate_bounce_boost_multiplier(bounce_blocks)
+        
+        # Enhanced initial velocity from bounce block
+        if abs(dx) > abs(dy):  # Horizontal movement
+            horizontal_velocity = (dx / abs(dx)) * MAX_HOR_SPEED * boost_multiplier if dx != 0 else 0
+            initial_vy = dy / max(abs(dx) / horizontal_velocity, 0.1) if dx != 0 else 0
+        else:  # Vertical movement
+            initial_vy = -math.sqrt(2 * abs(dy) * GRAVITY_FALL) * boost_multiplier if dy < 0 else 0
+            horizontal_velocity = dx / max(abs(dy) / abs(initial_vy), 0.1) if initial_vy != 0 else 0
+        
+        # Calculate time of flight with bounce enhancement
+        if dy < 0:  # Upward movement
+            gravity = GRAVITY_FALL
+            discriminant = initial_vy**2 + 2 * gravity * abs(dy)
+            if discriminant >= 0:
+                time_of_flight = (-initial_vy + math.sqrt(discriminant)) / gravity
+            else:
+                time_of_flight = DEFAULT_MINIMUM_TIME
+        else:  # Downward movement
+            time_of_flight = distance / max(abs(horizontal_velocity), MIN_HORIZONTAL_VELOCITY)
+        
+        # Reduce time due to bounce block efficiency
+        time_of_flight *= (1.0 / boost_multiplier)
+        
+        # Calculate energy cost with bounce block efficiency
+        base_energy = abs(horizontal_velocity) / MAX_HOR_SPEED + abs(initial_vy) / MAX_HOR_SPEED
+        energy_cost = base_energy * BOUNCE_BLOCK_ENERGY_EFFICIENCY
+        
+        # Enhanced success probability
+        success_probability = self._calculate_success_probability(
+            dx, dy, time_of_flight, max(abs(horizontal_velocity), abs(initial_vy)),
+            ninja_state, start_pos, end_pos, level_data
+        )
+        success_probability = min(success_probability + BOUNCE_BLOCK_SUCCESS_BONUS, 1.0)
+        
+        # Generate trajectory points
+        trajectory_points = self._generate_trajectory_points(
+            start_pos, horizontal_velocity, initial_vy, GRAVITY_FALL, time_of_flight
+        )
+        
+        return TrajectoryResult(
+            feasible=True,
+            time_of_flight=time_of_flight,
+            energy_cost=energy_cost,
+            success_probability=success_probability,
+            min_velocity=min(abs(horizontal_velocity), abs(initial_vy)),
+            max_velocity=max(abs(horizontal_velocity), abs(initial_vy)) * boost_multiplier,
+            requires_jump=True,
+            requires_wall_contact=False,
+            trajectory_points=trajectory_points
+        )
+    
+    def _calculate_chained_bounce_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        bounce_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory for chained bounce blocks."""
+        # Start with enhanced bounce trajectory
+        result = self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+        
+        # Apply chain bonuses
+        chain_count = len(bounce_blocks)
+        chain_multiplier = 1.0 + (chain_count - 1) * 0.2  # 20% bonus per additional block
+        
+        # Enhanced velocity and reduced time
+        result.max_velocity *= chain_multiplier
+        result.time_of_flight /= chain_multiplier
+        
+        # Slightly higher energy cost due to complexity
+        result.energy_cost *= 1.1
+        
+        # Slightly reduced success probability due to timing requirements
+        result.success_probability *= 0.95
+        
+        return result
+    
+    def _calculate_repeated_boost_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        extending_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory for repeated boost mechanics."""
+        # Start with enhanced bounce trajectory
+        result = self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, extending_blocks, ninja_state, level_data
+        )
+        
+        # Apply repeated boost bonuses
+        boost_count = min(len(extending_blocks) * 3, 10)  # Max 10 boosts
+        boost_decay = 0.95 ** boost_count  # Decay with each boost
+        
+        # Maximum velocity from repeated boosts
+        result.max_velocity = MAX_HOR_SPEED * BOUNCE_BLOCK_BOOST_MAX * boost_decay
+        
+        # Very fast movement
+        result.time_of_flight *= 0.5
+        
+        # Very energy efficient
+        result.energy_cost *= 0.5
+        
+        # Moderate success probability (timing dependent)
+        result.success_probability = 0.8
+        
+        return result
+    
+    def _calculate_bounce_boost_multiplier(self, bounce_blocks: List[dict]) -> float:
+        """Calculate boost multiplier based on bounce block states."""
+        if not bounce_blocks:
+            return 1.0
+        
+        total_boost = 0.0
+        for block in bounce_blocks:
+            compression = block.get('compression_amount', 0.0)
+            state = block.get('bounce_state', BounceBlockState.NEUTRAL)
+            
+            if state == BounceBlockState.EXTENDING:
+                # Maximum boost when extending
+                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression
+            elif state == BounceBlockState.COMPRESSED:
+                # Good boost when compressed
+                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression * 0.8
+            elif state == BounceBlockState.COMPRESSING:
+                # Moderate boost when compressing
+                boost = BOUNCE_BLOCK_BOOST_MIN + (BOUNCE_BLOCK_BOOST_MAX - BOUNCE_BLOCK_BOOST_MIN) * compression * 0.5
+            else:
+                # Minimal boost when neutral
+                boost = BOUNCE_BLOCK_BOOST_MIN * 0.8
+            
+            total_boost += boost
+        
+        # Average boost across all blocks, with diminishing returns
+        avg_boost = total_boost / len(bounce_blocks)
+        return min(avg_boost, BOUNCE_BLOCK_BOOST_MAX)
+    
+    def _point_near_line_segment(
+        self,
+        point: Tuple[float, float],
+        line_start: Tuple[float, float],
+        line_end: Tuple[float, float],
+        threshold: float
+    ) -> bool:
+        """Check if point is within threshold distance of line segment."""
+        px, py = point
+        x1, y1 = line_start
+        x2, y2 = line_end
+        
+        # Vector from line start to end
+        dx = x2 - x1
+        dy = y2 - y1
+        
+        # Vector from line start to point
+        fx = px - x1
+        fy = py - y1
+        
+        # Handle degenerate case
+        if dx == 0 and dy == 0:
+            distance = math.sqrt(fx*fx + fy*fy)
+            return distance <= threshold
+        
+        # Project point onto line
+        t = max(0, min(1, (fx*dx + fy*dy) / (dx*dx + dy*dy)))
+        
+        # Closest point on line segment
+        closest_x = x1 + t * dx
+        closest_y = y1 + t * dy
+        
+        # Distance from point to closest point on line
+        dist_x = px - closest_x
+        dist_y = py - closest_y
+        distance = math.sqrt(dist_x*dist_x + dist_y*dist_y)
+        
+        return distance <= threshold
+    
+    def _create_zero_trajectory_result(self) -> TrajectoryResult:
+        """Create a trajectory result for zero-distance movement."""
+        return TrajectoryResult(
+            feasible=True,
+            time_of_flight=0.0,
+            energy_cost=0.0,
+            success_probability=1.0,
+            min_velocity=0.0,
+            max_velocity=0.0,
+            requires_jump=False,
+            requires_wall_contact=False,
+            trajectory_points=[]
+        )
