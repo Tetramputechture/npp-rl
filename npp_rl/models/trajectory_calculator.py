@@ -26,7 +26,7 @@ from nclone.constants import (
     VELOCITY_MARGIN_MULTIPLIER, JUMP_THRESHOLD_Y, JUMP_THRESHOLD_VELOCITY,
     DEFAULT_TRAJECTORY_POINTS, DEFAULT_MINIMUM_TIME,
     # Win condition constants
-    SWITCH_DOOR_MAX_DISTANCE, WIN_CONDITION_SWITCH_BONUS,
+    WIN_CONDITION_SWITCH_BONUS,
     WIN_CONDITION_EXIT_BONUS, WIN_CONDITION_DOOR_BONUS, WIN_CONDITION_DOOR_PROXIMITY,
     # Bounce block constants
     BOUNCE_BLOCK_CHAIN_DISTANCE, BOUNCE_BLOCK_INTERACTION_RADIUS,
@@ -36,13 +36,7 @@ from nclone.physics import sweep_circle_vs_tiles
 from nclone.utils.collision_utils import find_bounce_blocks_near_trajectory
 from nclone.utils.physics_utils import BounceBlockState, calculate_bounce_block_boost_multiplier
 
-# Import our simplified entity association system
-try:
-    from ..utils.entity_associations import EntityAssociationManager, LevelCompletionInfo
-except ImportError:
-    # Fallback if import fails
-    EntityAssociationManager = None
-    LevelCompletionInfo = None
+from ..utils.entity_associations import EntityAssociationManager
 
 class MovementState(IntEnum):
     """Ninja movement states from sim_mechanics_doc.md"""
@@ -810,7 +804,7 @@ class TrajectoryCalculator:
                     'door_position': pair['door']['position'],
                     'priority': 3,
                     'optional': True,  # Only needed if blocking path
-                    'description': f'Activate locked door switch if blocking path to exit'
+                    'description': 'Activate locked door switch if blocking path to exit'
                 })
         
         completion_sequence.extend(potentially_needed_locked_switches)

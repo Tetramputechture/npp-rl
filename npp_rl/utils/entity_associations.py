@@ -14,7 +14,7 @@ from nclone.constants.entity_types import EntityType
 
 @dataclass
 class EntityPair:
-    """Represents a switch-door pair with their relationship."""
+    """Represents a switch-door pair with their 1:1 relationship."""
     switch_entity: Any
     door_entity: Any
     switch_pos: Tuple[float, float]
@@ -22,6 +22,7 @@ class EntityPair:
     switch_active: bool
     door_accessible: bool
     pair_type: str  # 'exit', 'locked', 'trap'
+    entity_id: Optional[str] = None  # Unique identifier for the pair
 
 
 @dataclass
@@ -37,11 +38,12 @@ class LevelCompletionInfo:
 
 class EntityAssociationManager:
     """
-    Manages entity associations using actual nclone entity relationships.
+    Manages entity associations using nclone entity relationships.
     
-    This class provides a simplified interface for entity analysis that leverages
-    the built-in parent-child relationships and coordinate references instead of
-    proximity-based heuristics.
+    Key Principles:
+    - Each switch controls exactly one entity (1:1 relationship)
+    - Exit switches have direct parent references to exit doors
+    - Locked/trap door entities store both switch and door coordinates
     """
     
     def __init__(self):
@@ -78,13 +80,14 @@ class EntityAssociationManager:
                         door_pos=(exit_door.xpos, exit_door.ypos),
                         switch_active=exit_switch.active,
                         door_accessible=getattr(exit_door, 'switch_hit', False),
-                        pair_type='exit'
+                        pair_type='exit',
+                        entity_id=f'exit_{i}'
                     ))
             
             # Extract locked door pairs using coordinate references
             locked_doors = sim.entity_dic.get(EntityType.LOCKED_DOOR, [])
             
-            for locked_door in locked_doors:
+            for i, locked_door in enumerate(locked_doors):
                 # Locked door entity is positioned at switch location
                 # Door segment position is calculated from door entity properties
                 if hasattr(locked_door, 'segment') and locked_door.segment:
@@ -102,13 +105,14 @@ class EntityAssociationManager:
                     door_pos=door_pos,  # Door segment position
                     switch_active=locked_door.active,
                     door_accessible=not getattr(locked_door, 'closed', True),
-                    pair_type='locked'
+                    pair_type='locked',
+                    entity_id=f'locked_{i}'
                 ))
             
             # Extract trap door pairs using coordinate references
             trap_doors = sim.entity_dic.get(EntityType.TRAP_DOOR, [])
             
-            for trap_door in trap_doors:
+            for i, trap_door in enumerate(trap_doors):
                 # Trap door entity is positioned at switch location
                 # Door segment position is calculated from door entity properties
                 if hasattr(trap_door, 'segment') and trap_door.segment:
@@ -126,7 +130,8 @@ class EntityAssociationManager:
                     door_pos=door_pos,  # Door segment position
                     switch_active=trap_door.active,
                     door_accessible=not getattr(trap_door, 'closed', False),  # Trap doors start open
-                    pair_type='trap'
+                    pair_type='trap',
+                    entity_id=f'trap_{i}'
                 ))
         
         # Analyze completion strategy
@@ -372,6 +377,34 @@ class EntityAssociationManager:
                 })
         
         return sorted(requirements, key=lambda r: r['priority'])
+    
+    def get_controlled_entity(self, switch_pair: EntityPair) -> Any:
+        """
+        Get the entity controlled by a switch (always 1:1 relationship).
+        
+        Args:
+            switch_pair: EntityPair representing the switch-door relationship
+            
+        Returns:
+            The controlled entity (door entity for the switch)
+        """
+        return switch_pair.door_entity
+    
+    def get_switch_for_entity(self, entity_pairs: List[EntityPair], entity_id: str) -> Optional[EntityPair]:
+        """
+        Find the switch that controls a specific entity.
+        
+        Args:
+            entity_pairs: List of EntityPair objects
+            entity_id: ID of the entity to find the controlling switch for
+            
+        Returns:
+            EntityPair if found, None otherwise
+        """
+        for pair in entity_pairs:
+            if pair.entity_id == entity_id:
+                return pair
+        return None
 
 
 def demonstrate_simplified_usage():
@@ -398,8 +431,10 @@ def demonstrate_simplified_usage():
     Benefits:
     - No proximity-based guessing
     - Uses actual parent-child relationships from nclone entities
+    - 1:1 switch-entity relationship (each switch controls exactly one entity)
     - Integrates with hierarchical graph pathfinding
     - Simple, clean interfaces
     - Handles multiple exits correctly
+    - Centralized entity association logic
     """
     pass
