@@ -39,7 +39,7 @@ class TestMovementClassifier(unittest.TestCase):
         self.level_data = {
             'entities': [
                 {
-                    'type': EntityLaunchPad.ENTITY_TYPE,
+                    'type': EntityType.LAUNCH_PAD,
                     'x': 100.0,
                     'y': 100.0,
                     'orientation': 0  # Pointing right
@@ -372,7 +372,7 @@ class TestPhysicsStateExtractor(unittest.TestCase):
         self.level_data = {
             'entities': [
                 {
-                    'type': EntityLaunchPad.ENTITY_TYPE,
+                    'type': EntityType.LAUNCH_PAD,
                     'x': 150.0,
                     'y': 100.0,
                     'orientation': 0

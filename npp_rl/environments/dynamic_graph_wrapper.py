@@ -23,6 +23,17 @@ import numpy as np
 import gymnasium as gym
 
 from nclone.graph.graph_builder import GraphBuilder, GraphData, EdgeType, E_MAX_EDGES
+from nclone.constants.entity_types import EntityType
+
+# Import our simplified entity association system
+try:
+    from ..utils.entity_associations import EntityAssociationManager, LevelCompletionInfo
+except ImportError:
+    # Fallback if import fails
+    EntityAssociationManager = None
+    LevelCompletionInfo = None
+
+
 class EventType(IntEnum):
     """Types of events that can trigger graph updates."""
     ENTITY_MOVED = 0          # Entity position changed
@@ -224,6 +235,7 @@ class DynamicGraphWrapper(gym.Wrapper):
         # Core components
         self.graph_builder = GraphBuilder()
         self.constraint_propagator = DynamicConstraintPropagator()
+        self.entity_manager = EntityAssociationManager() if EntityAssociationManager else None
         
         # Event management
         self.event_queue = deque(maxlen=event_buffer_size)
@@ -246,6 +258,9 @@ class DynamicGraphWrapper(gym.Wrapper):
             'events_processed': 0,
             'events_skipped': 0
         }
+        
+        # Initialize entity cache for simplified associations
+        self.current_entities = []
         
         # Initialize graph observation space extension
         self._extend_observation_space_for_dynamic_graph()
@@ -271,6 +286,7 @@ class DynamicGraphWrapper(gym.Wrapper):
         self.processed_events.clear()
         self.temporal_edges.clear()
         self.active_temporal_edges.clear()
+        self.current_entities = []  # Reset entity cache
         self.last_full_rebuild_time = time.time()
         
         # Build initial graph
@@ -293,6 +309,16 @@ class DynamicGraphWrapper(gym.Wrapper):
         # Update dynamic graph if enabled
         if self.enable_dynamic_updates and self.current_graph is not None:
             self.update_budget.reset()
+            
+            # Update entity cache for simplified associations
+            if 'entities' in obs:
+                self.update_entity_cache(obs['entities'])
+            elif hasattr(self.env, '_extract_graph_entities'):
+                try:
+                    entities = self.env._extract_graph_entities()
+                    self.update_entity_cache(entities)
+                except Exception as e:
+                    logging.debug(f"Failed to extract entities for cache: {e}")
             
             # Detect and queue environmental changes
             self._detect_environmental_changes(obs, info)
@@ -467,12 +493,12 @@ class DynamicGraphWrapper(gym.Wrapper):
     
     def _handle_switch_activation(self, event: GraphEvent):
         """Handle switch activation events."""
-        # Find doors/mechanisms controlled by this switch
+        # Find the single entity controlled by this switch
         switch_id = event.entity_id
-        controlled_entities = self._find_entities_controlled_by_switch(switch_id)
+        controlled_entity_id = self._find_entity_controlled_by_switch(switch_id)
         
-        for controlled_entity_id in controlled_entities:
-            # Create door toggle event
+        if controlled_entity_id is not None:
+            # Create door toggle event for the controlled entity
             door_event = GraphEvent(
                 event_type=EventType.DOOR_TOGGLED,
                 timestamp=event.timestamp,
@@ -540,10 +566,151 @@ class DynamicGraphWrapper(gym.Wrapper):
         if self.current_graph is not None and edge_idx < len(self.current_graph.edge_mask):
             self.current_graph.edge_mask[edge_idx] = 1.0 if is_available else 0.0
     
-    def _find_entities_controlled_by_switch(self, switch_id: int) -> List[int]:
-        """Find entities controlled by a switch."""
-        # Placeholder - would use level data to find switch->door mappings
-        return []
+    def _find_entity_controlled_by_switch(self, switch_id: int) -> Optional[int]:
+        """Find the single entity controlled by a switch using simplified associations."""
+        if not self.entity_manager:
+            return None  # Fallback if entity manager not available
+        
+        # Get entities from current environment state
+        entities = getattr(self, 'current_entities', [])
+        if not entities:
+            return None
+        
+        # Find the switch entity
+        switch_entity = None
+        for entity in entities:
+            if entity.get('entity_id') == switch_id or entity.get('id') == switch_id:
+                switch_entity = entity
+                break
+        
+        if not switch_entity:
+            return None
+        
+        switch_type = switch_entity.get('type')
+        
+        # For exit switches, find the corresponding exit door using entity_id pairing
+        if switch_type == 'exit_switch':
+            switch_entity_id = switch_entity.get('entity_id', -1)
+            
+            for entity in entities:
+                if (entity.get('type') == 'exit_door' and 
+                    entity.get('entity_id') == switch_entity_id):
+                    return entity.get('id', entity.get('entity_id', -1))
+        
+        # For locked door switches, the door is part of the same entity
+        elif switch_type == EntityType.LOCKED_DOOR:
+            # The door is controlled by the same entity (unified locked door)
+            return switch_id
+        
+        # For trap door switches, the door is part of the same entity  
+        elif switch_type == EntityType.TRAP_DOOR:
+            # The door is controlled by the same entity (unified trap door)
+            return switch_id
+        
+        return None
+    
+    def get_level_completion_info(self) -> Optional[Any]:
+        """
+        Get level completion information using simplified entity associations.
+        
+        Returns:
+            LevelCompletionInfo object with all entity relationships, or None if unavailable
+        """
+        if not self.entity_manager or not hasattr(self.env, 'nplay_headless'):
+            return None
+        
+        try:
+            sim = self.env.nplay_headless.sim
+            return self.entity_manager.extract_entity_pairs_from_sim(sim)
+        except Exception as e:
+            logging.warning(f"Failed to extract level completion info: {e}")
+            return None
+    
+    def find_best_exit_strategy(self, ninja_position: Tuple[float, float]) -> Optional[Dict[str, Any]]:
+        """
+        Find the best exit strategy using graph-based pathfinding.
+        
+        Args:
+            ninja_position: Current ninja position (x, y)
+            
+        Returns:
+            Best exit strategy dict or None if not available
+        """
+        if not self.entity_manager:
+            return None
+        
+        completion_info = self.get_level_completion_info()
+        if not completion_info:
+            return None
+        
+        # Use current graph data for pathfinding
+        best_exit = self.entity_manager.find_best_exit_option(
+            completion_info, ninja_position, self.current_graph
+        )
+        
+        if not best_exit:
+            return None
+        
+        # Convert to strategy dict format
+        if best_exit in completion_info.accessible_exits:
+            return {
+                'strategy': 'direct_exit',
+                'target_exit': best_exit.door_pos,
+                'target_switch': None,
+                'exit_pair': best_exit,
+                'graph_cost': self.entity_manager._calculate_path_cost(
+                    ninja_position, best_exit.door_pos, self.current_graph
+                )
+            }
+        else:
+            switch_cost = self.entity_manager._calculate_path_cost(
+                ninja_position, best_exit.switch_pos, self.current_graph
+            )
+            door_cost = self.entity_manager._calculate_path_cost(
+                best_exit.switch_pos, best_exit.door_pos, self.current_graph
+            )
+            
+            return {
+                'strategy': 'via_switch',
+                'target_exit': best_exit.door_pos,
+                'target_switch': best_exit.switch_pos,
+                'exit_pair': best_exit,
+                'switch_cost': switch_cost,
+                'door_cost': door_cost,
+                'total_cost': switch_cost + door_cost
+            }
+    
+    def update_entity_cache(self, entities: List[Dict[str, Any]]):
+        """Update cached entity data for switch-door associations."""
+        self.current_entities = entities
+    
+    def get_completion_requirements(self) -> List[Dict[str, Any]]:
+        """
+        Get structured completion requirements using simplified entity associations.
+        
+        Returns:
+            List of completion requirements in priority order
+        """
+        completion_info = self.get_level_completion_info()
+        if not completion_info or not self.entity_manager:
+            return []
+        
+        return self.entity_manager.get_completion_requirements(completion_info)
+    
+    def is_level_completable(self) -> bool:
+        """
+        Check if the level is completable in its current state.
+        
+        Returns:
+            True if at least one exit path exists
+        """
+        completion_info = self.get_level_completion_info()
+        if not completion_info:
+            return False
+        
+        # Level is completable if there are accessible exits or activatable switches
+        return (len(completion_info.accessible_exits) > 0 or 
+                len(completion_info.required_switches) > 0)
     
     def _get_dynamic_graph_metadata(self) -> np.ndarray:
         """Get dynamic graph metadata for observation."""

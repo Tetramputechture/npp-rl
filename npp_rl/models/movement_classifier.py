@@ -13,58 +13,29 @@ from nclone.constants import (
     MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
     JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
-    NINJA_RADIUS, JUMP_LAUNCH_PAD_BOOST_SCALAR, JUMP_LAUNCH_PAD_BOOST_FACTOR,
+    JUMP_LAUNCH_PAD_BOOST_FACTOR,
     GRAVITY_FALL, GRAVITY_JUMP, MAX_JUMP_DURATION,
-    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
-    MAX_SURVIVABLE_IMPACT
+    DRAG_REGULAR, FRICTION_WALL,
+    MAX_SURVIVABLE_IMPACT,
+    # Movement classification constants
+    MIN_HORIZONTAL_VELOCITY, HORIZONTAL_MOVEMENT_THRESHOLD, UPWARD_MOVEMENT_THRESHOLD, DOWNWARD_MOVEMENT_THRESHOLD,
+    DEFAULT_TIME_ESTIMATE, DEFAULT_DIFFICULTY, JUMP_TIME_FALLBACK,
+    # Energy constants
+    JUMP_ENERGY_BASE, HEIGHT_FACTOR_DIVISOR, HEIGHT_FACTOR_MAX,
+    DISTANCE_FACTOR_DIVISOR, DISTANCE_FACTOR_MAX, JUMP_DIFFICULTY_DIVISOR,
+    FALL_ENERGY_BASE, FALL_ENERGY_DISTANCE_DIVISOR, FALL_ENERGY_DISTANCE_MAX,
+    # Wall movement constants
+    WALL_SLIDE_SPEED_DIVISOR, WALL_SLIDE_MIN_TIME, WALL_SLIDE_ENERGY_COST,
+    WALL_SLIDE_DIFFICULTY, WALL_JUMP_ENERGY_BASE, WALL_JUMP_DIFFICULTY,
+    # Launch pad constants
+    LAUNCH_PAD_MIN_TIME,
+    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY
 )
+from nclone.constants.entity_types import EntityType
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
-from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
-from nclone.entity_classes.entity_drone_zap import EntityDroneZap
-from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
-from nclone.entity_classes.entity_thwump import EntityThwump
-from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
-from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.physics import overlap_circle_vs_circle, map_orientation_to_vector
+from nclone.physics import map_orientation_to_vector
 
-# Movement classification constants
-MOVEMENT_THRESHOLD = 1e-6
-WALK_SPEED_THRESHOLD = 0.5
-JUMP_VELOCITY_THRESHOLD = 0.3
-MIN_HORIZONTAL_VELOCITY = 0.1
-WALL_CONTACT_DISTANCE = 15.0
-LAUNCH_PAD_VELOCITY_MULTIPLIER = 1.5
-
-# Approximate gravity for backward compatibility
-GRAVITY_APPROXIMATE = (GRAVITY_FALL + GRAVITY_JUMP) / 2
-HORIZONTAL_MOVEMENT_THRESHOLD = 2.0
-UPWARD_MOVEMENT_THRESHOLD = -5.0
-DOWNWARD_MOVEMENT_THRESHOLD = 5.0
-DEFAULT_TIME_ESTIMATE = 1.0
-DEFAULT_DIFFICULTY = 1.0
-# Use actual N++ gravity constants instead of approximation
-JUMP_TIME_FALLBACK = 5.0
-JUMP_ENERGY_BASE = 1.5
-HEIGHT_FACTOR_DIVISOR = 50.0
-HEIGHT_FACTOR_MAX = 2.0
-DISTANCE_FACTOR_DIVISOR = 100.0
-DISTANCE_FACTOR_MAX = 1.5
-JUMP_DIFFICULTY_DIVISOR = 3.0
-FALL_ENERGY_BASE = 0.5
-FALL_ENERGY_DISTANCE_DIVISOR = 100.0
-FALL_ENERGY_DISTANCE_MAX = 0.5
-WALL_SLIDE_SPEED_DIVISOR = 20.0
-WALL_SLIDE_MIN_TIME = 0.5
-WALL_SLIDE_ENERGY_COST = 1.2
-WALL_SLIDE_DIFFICULTY = 0.7
-WALL_JUMP_ENERGY_BASE = 2.0
-WALL_JUMP_DIFFICULTY = 0.8
-LAUNCH_PAD_BOOST_FACTOR = 1.7
-LAUNCH_PAD_GRAVITY_DIVISOR = 0.1
-LAUNCH_PAD_MIN_TIME = 1.0
-LAUNCH_PAD_ENERGY_COST = 0.3
-LAUNCH_PAD_DIFFICULTY = 0.4
-LAUNCH_PAD_DISTANCE_THRESHOLD = 100.0
+# Note: Bounce block constants are now in centralized physics_constants.py
 
 
 class MovementType(IntEnum):
@@ -75,6 +46,9 @@ class MovementType(IntEnum):
     WALL_SLIDE = 3  # Wall contact movement
     WALL_JUMP = 4   # Wall-assisted jump
     LAUNCH_PAD = 5  # Launch pad boost
+    BOUNCE_BLOCK = 6  # Bounce block interaction
+    BOUNCE_CHAIN = 7  # Chained bounce block sequence
+    BOUNCE_BOOST = 8  # Repeated boost on extending bounce block
 
 
 class NinjaState:
@@ -177,7 +151,13 @@ class MovementClassifier:
             else:
                 return MovementType.WALL_SLIDE
 
-        # Check for launch pad movement (would need level data analysis)
+        # Check for bounce block movement first (highest priority)
+        if level_data:
+            bounce_movement = self._check_bounce_block_movement(dx, dy, level_data, ninja_state)
+            if bounce_movement != MovementType.WALK:  # Use WALK as default/no-bounce indicator
+                return bounce_movement
+
+        # Check for launch pad movement
         if level_data and self._is_launch_pad_movement(dx, dy, level_data):
             return MovementType.LAUNCH_PAD
 
@@ -220,6 +200,12 @@ class MovementClassifier:
             params.update(self._calculate_wall_jump_parameters(dx, dy, ninja_state))
         elif movement_type == MovementType.LAUNCH_PAD:
             params.update(self._calculate_launch_pad_parameters(dx, dy, ninja_state))
+        elif movement_type == MovementType.BOUNCE_BLOCK:
+            params.update(self._calculate_bounce_block_parameters(dx, dy, ninja_state))
+        elif movement_type == MovementType.BOUNCE_CHAIN:
+            params.update(self._calculate_bounce_chain_parameters(dx, dy, ninja_state))
+        elif movement_type == MovementType.BOUNCE_BOOST:
+            params.update(self._calculate_bounce_boost_parameters(dx, dy, ninja_state))
 
         return params
 
@@ -346,10 +332,9 @@ class MovementClassifier:
         dy: float,
         ninja_state: Optional[NinjaState]
     ) -> Dict[str, float]:
-        """Calculate parameters for falling movement."""
+        """Calculate parameters for falling movement using actual N++ physics."""
         # Time to fall: t = sqrt(2*h/g)
-        gravity = GRAVITY_APPROXIMATE
-        time_estimate = math.sqrt(2 * abs(dy) / gravity) if abs(dy) > 0 else MIN_HORIZONTAL_VELOCITY
+        time_estimate = math.sqrt(2 * abs(dy) / GRAVITY_FALL) if abs(dy) > 0 else MIN_HORIZONTAL_VELOCITY
 
         # Required horizontal velocity
         required_velocity = abs(dx) / max(time_estimate, MIN_HORIZONTAL_VELOCITY)
@@ -604,7 +589,7 @@ class MovementClassifier:
             entity_y = entity.get('y', 0)
             
             # Cache launch pads (static - position and orientation never change)
-            if entity_type == EntityLaunchPad.ENTITY_TYPE:
+            if entity_type == EntityType.LAUNCH_PAD:
                 orientation = entity.get('orientation', 0)
                 normal_x, normal_y = map_orientation_to_vector(orientation)
                 
@@ -674,7 +659,7 @@ class MovementClassifier:
             entity_state = entity.get('state', 0)
             
             # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
-            if entity_type == EntityToggleMine.ENTITY_TYPE:
+            if entity_type == EntityType.TOGGLE_MINE:
                 self._dynamic_entity_cache['toggle_mines'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -684,7 +669,7 @@ class MovementClassifier:
                 })
             
             # Cache switches (activation state changes)
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+            elif entity_type == EntityType.EXIT_SWITCH:
                 self._dynamic_entity_cache['switches'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -694,7 +679,7 @@ class MovementClassifier:
                 })
             
             # Cache drones (position and direction can change)
-            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+            elif entity_type in [EntityType.DRONE_ZAP, EntityType.MINI_DRONE]:
                 self._dynamic_entity_cache['drones'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -704,7 +689,7 @@ class MovementClassifier:
                 })
             
             # Cache thwumps (position and state can change)
-            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+            elif entity_type in [EntityType.THWUMP, EntityType.SHWUMP]:
                 self._dynamic_entity_cache['thwumps'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -799,3 +784,168 @@ class MovementClassifier:
             )
             
         return adjusted_params
+    
+    def _check_bounce_block_movement(
+        self,
+        dx: float,
+        dy: float,
+        level_data: Dict[str, Any],
+        ninja_state: Optional[NinjaState]
+    ) -> MovementType:
+        """Check if movement involves bounce block interactions."""
+        if not level_data or not level_data.get('entities'):
+            return MovementType.WALK  # Default to no bounce block
+        
+        # Get bounce blocks from level data using centralized constant
+        entities = level_data.get('entities', [])
+        bounce_blocks = [e for e in entities if e.get('type') == ENTITY_TYPE_BOUNCE_BLOCK]
+        
+        if not bounce_blocks:
+            return MovementType.WALK
+        
+        # Calculate movement properties using centralized utility
+        distance = calculate_distance((0, 0), (dx, dy))
+        if distance < 10.0:  # Too small to be bounce block movement
+            return MovementType.WALK
+        
+        # Check for different types of bounce block movement
+        movement_start = ninja_state.position if ninja_state else (0, 0)
+        movement_end = (movement_start[0] + dx, movement_start[1] + dy)
+        
+        # Find bounce blocks near trajectory using centralized utility
+        interacting_blocks = find_bounce_blocks_near_trajectory(
+            movement_start, movement_end, bounce_blocks
+        )
+        
+        if not interacting_blocks:
+            return MovementType.WALK
+        
+        # Determine type of bounce block movement
+        if len(interacting_blocks) > 1:
+            # Check if blocks can be chained using centralized utility
+            chainable_blocks = find_chainable_bounce_blocks(
+                interacting_blocks, movement_start, movement_end
+            )
+            if len(chainable_blocks) > 1:
+                return MovementType.BOUNCE_CHAIN
+        
+        block = interacting_blocks[0]
+        block_state = block.get('bounce_state', BounceBlockState.NEUTRAL)
+        
+        # Check for repeated boost (ninja jumping on extending block)
+        if (block_state == BounceBlockState.EXTENDING and 
+            ninja_state and ninja_state.movement_state == 3 and  # Jumping
+            dy < -10.0):  # Significant upward movement
+            return MovementType.BOUNCE_BOOST
+        
+        # Regular bounce block interaction
+        return MovementType.BOUNCE_BLOCK
+    
+    # Note: Bounce block interaction detection now uses centralized utilities
+    
+    def _calculate_bounce_block_parameters(
+        self,
+        dx: float,
+        dy: float,
+        ninja_state: Optional[NinjaState]
+    ) -> Dict[str, float]:
+        """Calculate parameters for basic bounce block movement."""
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # Bounce blocks provide momentum boost using centralized constants
+        boost_multiplier = BOUNCE_BLOCK_BOOST_MIN
+        
+        # Time estimate with bounce block assistance
+        if distance > 0:
+            # Bounce blocks reduce time of flight
+            base_time = distance / MAX_HOR_SPEED
+            time_estimate = base_time * (1.0 / boost_multiplier)
+        else:
+            time_estimate = DEFAULT_MINIMUM_TIME
+        
+        # Required velocity is reduced due to boost
+        required_velocity = min(distance / max(time_estimate, 0.1), MAX_HOR_SPEED)
+        required_velocity *= (1.0 / boost_multiplier)
+        
+        # Energy cost is reduced (bounce blocks are efficient)
+        energy_cost = BOUNCE_BLOCK_ENERGY_EFFICIENCY
+        
+        # High success rate for bounce blocks
+        difficulty = 1.0 - BASE_SUCCESS_PROBABILITY - BOUNCE_BLOCK_SUCCESS_BONUS
+        
+        return {
+            'required_velocity': required_velocity,
+            'energy_cost': energy_cost,
+            'time_estimate': time_estimate,
+            'difficulty': difficulty,
+            'boost_multiplier': boost_multiplier
+        }
+    
+    def _calculate_bounce_chain_parameters(
+        self,
+        dx: float,
+        dy: float,
+        ninja_state: Optional[NinjaState]
+    ) -> Dict[str, float]:
+        """Calculate parameters for chained bounce block movement."""
+        # Start with basic bounce block parameters
+        params = self._calculate_bounce_block_parameters(dx, dy, ninja_state)
+        
+        # Chain bonus - multiple blocks provide better performance (20% bonus per block)
+        chain_bonus = 1.2  # 20% bonus for chaining
+        
+        # Enhanced boost from chaining using centralized constants
+        params['boost_multiplier'] = min(
+            params['boost_multiplier'] * chain_bonus,
+            BOUNCE_BLOCK_BOOST_MAX
+        )
+        
+        # Reduced time due to chaining
+        params['time_estimate'] *= (1.0 / chain_bonus)
+        
+        # Slightly higher energy cost due to complexity
+        params['energy_cost'] *= 1.1
+        
+        # Slightly higher difficulty due to timing requirements
+        params['difficulty'] *= 1.2
+        
+        return params
+    
+    def _calculate_bounce_boost_parameters(
+        self,
+        dx: float,
+        dy: float,
+        ninja_state: Optional[NinjaState]
+    ) -> Dict[str, float]:
+        """Calculate parameters for repeated bounce boost movement."""
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # Repeated boosts provide maximum multiplier but with decay using centralized constants
+        boost_multiplier = BOUNCE_BLOCK_BOOST_MAX * BOUNCE_BLOCK_DAMPING
+        
+        # Very fast movement due to repeated boosts
+        if distance > 0:
+            time_estimate = distance / (MAX_HOR_SPEED * boost_multiplier)
+        else:
+            time_estimate = DEFAULT_MINIMUM_TIME
+        
+        # High velocity from repeated boosts
+        required_velocity = min(
+            distance / max(time_estimate, 0.1),
+            MAX_HOR_SPEED * boost_multiplier
+        )
+        
+        # Very energy efficient due to stored energy release
+        energy_cost = BOUNCE_BLOCK_ENERGY_EFFICIENCY * 0.5
+        
+        # Moderate difficulty due to timing requirements
+        difficulty = 0.3
+        
+        return {
+            'required_velocity': required_velocity,
+            'energy_cost': energy_cost,
+            'time_estimate': time_estimate,
+            'difficulty': difficulty,
+            'boost_multiplier': boost_multiplier,
+            'repeated_boost': True
+        }

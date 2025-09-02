@@ -29,28 +29,28 @@ class TestDynamicEntityCaching(unittest.TestCase):
             'entities': [
                 # Toggle mine - starts safe (state 1), becomes deadly (state 0)
                 {
-                    'type': EntityToggleMine.ENTITY_TYPE,
+                    'type': EntityType.TOGGLE_MINE,
                     'x': 100.0,
                     'y': 100.0,
                     'state': 1  # Safe initially
                 },
                 # Exit switch - starts inactive (state 0), becomes active (state 1)
                 {
-                    'type': EntityExitSwitch.ENTITY_TYPE,
+                    'type': EntityType.EXIT_SWITCH,
                     'x': 200.0,
                     'y': 100.0,
                     'state': 0  # Inactive initially
                 },
                 # Drone - position can change
                 {
-                    'type': EntityDroneZap.ENTITY_TYPE,
+                    'type': EntityType.DRONE_ZAP,
                     'x': 150.0,
                     'y': 150.0,
                     'state': 0
                 },
                 # Thwump - position and state can change
                 {
-                    'type': EntityThwump.ENTITY_TYPE,
+                    'type': EntityType.THWUMP,
                     'x': 250.0,
                     'y': 100.0,
                     'state': 0,
@@ -188,7 +188,7 @@ class TestDynamicEntityCaching(unittest.TestCase):
         """Test hazard detection considers dynamic entity states."""
         # Test with safe toggle mine
         safe_mine = {
-            'type': EntityToggleMine.ENTITY_TYPE,
+            'type': EntityType.TOGGLE_MINE,
             'state': 1,  # Safe state
             'x': 100.0,
             'y': 100.0
@@ -197,7 +197,7 @@ class TestDynamicEntityCaching(unittest.TestCase):
         
         # Test with deadly toggle mine
         deadly_mine = {
-            'type': EntityToggleMine.ENTITY_TYPE,
+            'type': EntityType.TOGGLE_MINE,
             'state': 0,  # Deadly state
             'x': 100.0,
             'y': 100.0
@@ -210,7 +210,7 @@ class TestDynamicEntityCaching(unittest.TestCase):
         
         # Right-facing thwump (orientation 0) - ninja is on dangerous side
         right_thwump = {
-            'type': EntityThwump.ENTITY_TYPE,
+            'type': EntityType.THWUMP,
             'orientation': 0,
             'x': 250.0,
             'y': 100.0,
@@ -220,7 +220,7 @@ class TestDynamicEntityCaching(unittest.TestCase):
         
         # Left-facing thwump (orientation 2) - ninja is on safe side
         left_thwump = {
-            'type': EntityThwump.ENTITY_TYPE,
+            'type': EntityType.THWUMP,
             'orientation': 2,
             'x': 250.0,
             'y': 100.0,

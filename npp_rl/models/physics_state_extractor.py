@@ -10,32 +10,12 @@ import math
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
 from nclone.constants import (
-    MAX_HOR_SPEED, FULL_MAP_HEIGHT_PX, TILE_PIXEL_SIZE,
-    NINJA_RADIUS, GRAVITY_FALL, GRAVITY_JUMP,
-    JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y
+    MAX_HOR_SPEED, TILE_PIXEL_SIZE,
+    GRAVITY_JUMP,
+    JUMP_FLAT_GROUND_Y, GROUND_STATES, AIR_STATES, WALL_STATES, LEVEL_WIDTH_PX, LEVEL_HEIGHT_PX, PROXIMITY_THRESHOLD,
+    NORMALIZED_HEIGHT_DIVISOR
 )
-from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
-from nclone.entity_classes.entity_toggle_mine import EntityToggleMine
-from nclone.entity_classes.entity_drone_zap import EntityDroneZap
-from nclone.entity_classes.entity_mini_drone import EntityMiniDrone
-from nclone.entity_classes.entity_thwump import EntityThwump
-from nclone.entity_classes.entity_shove_thwump import EntityShoveThwump
-from nclone.entity_classes.entity_exit import EntityExit
-from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.physics import sweep_circle_vs_tiles
-
-GROUND_STATES = {0, 1, 2}
-AIR_STATES = {3, 4}
-WALL_STATES = {5}
-INACTIVE_STATES = {6, 7, 8, 9}
-
-# FIXED level geometry constants - all levels are exactly 1056x600 pixels
-LEVEL_WIDTH_PX = 1056.0  # Fixed level width in pixels
-LEVEL_HEIGHT_PX = 600.0  # Fixed level height in pixels
-PROXIMITY_THRESHOLD = 100.0  # Distance threshold for entity proximity
-HAZARD_PROXIMITY_THRESHOLD = 50.0  # Closer threshold for hazard detection
-
-NORMALIZED_HEIGHT_DIVISOR = FULL_MAP_HEIGHT_PX  # 600 pixels
+from nclone.constants.entity_types import EntityType
 
 class PhysicsStateExtractor:
     """
@@ -376,7 +356,7 @@ class PhysicsStateExtractor:
             entity_state = entity.get('state', 0)
             
             # Cache toggle mines (state changes: 1=safe, 0=deadly after ninja visit)
-            if entity_type == EntityToggleMine.ENTITY_TYPE:
+            if entity_type == EntityType.TOGGLE_MINE:
                 self._dynamic_entity_cache['toggle_mines'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -386,7 +366,7 @@ class PhysicsStateExtractor:
                 })
             
             # Cache switches (activation state changes)
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+            elif entity_type == EntityType.EXIT_SWITCH:
                 self._dynamic_entity_cache['switches'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -396,7 +376,7 @@ class PhysicsStateExtractor:
                 })
             
             # Cache drones (position and direction can change)
-            elif entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+            elif entity_type in [EntityType.DRONE_ZAP, EntityType.MINI_DRONE]:
                 self._dynamic_entity_cache['drones'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -406,7 +386,7 @@ class PhysicsStateExtractor:
                 })
             
             # Cache thwumps (position and state can change)
-            elif entity_type in [EntityThwump.ENTITY_TYPE, EntityShoveThwump.ENTITY_TYPE]:
+            elif entity_type in [EntityType.THWUMP, EntityType.SHWUMP]:
                 self._dynamic_entity_cache['thwumps'].append({
                     'x': entity_x,
                     'y': entity_y,
@@ -457,7 +437,7 @@ class PhysicsStateExtractor:
                 # Normalize proximity (closer = higher value)
                 proximity = 1.0 - (dist / proximity_threshold)
                 
-                if entity_type == EntityLaunchPad.ENTITY_TYPE:  # Launch pad
+                if entity_type == EntityType.LAUNCH_PAD:  # Launch pad
                     launch_pad_proximity = max(launch_pad_proximity, proximity)
                 elif self._is_hazardous_entity(entity, ninja_position):
                     hazard_proximity = max(hazard_proximity, proximity)
@@ -487,15 +467,15 @@ class PhysicsStateExtractor:
         entity_state = entity.get('state', 0)
         
         # Toggle mine in toggled state (state 0) is hazardous
-        if entity_type in [EntityToggleMine.ENTITY_TYPE, 21]:  # Types 1 and 21
+        if entity_type in [EntityType.TOGGLE_MINE, 21]:  # Types 1 and 21
             return entity_state == 0  # Toggled (deadly) state
             
         # All drone types are always hazardous on any side
-        if entity_type in [EntityDroneZap.ENTITY_TYPE, EntityMiniDrone.ENTITY_TYPE]:
+        if entity_type in [EntityType.DRONE_ZAP, EntityType.MINI_DRONE]:
             return True
             
         # Thwumps - need to check orientation and state for dangerous side
-        if entity_type == EntityThwump.ENTITY_TYPE:
+        if entity_type == EntityType.THWUMP:
             # Thwumps are dangerous on the side they can move toward
             # Based on N++ mechanics, thwumps move in their orientation direction
             orientation = entity.get('orientation', 0)
@@ -522,7 +502,7 @@ class PhysicsStateExtractor:
                 return True
             
         # Shove thwumps when activated are hazardous on any side
-        if entity_type == EntityShoveThwump.ENTITY_TYPE:
+        if entity_type == EntityType.SHWUMP:
             # Shove thwumps are hazardous when activated (state > 0)
             return entity_state > 0
             
@@ -575,7 +555,7 @@ class PhysicsStateExtractor:
             entity_state = entity.get('state', 0)
             
             # Cache exit positions
-            if entity_type == EntityExit.ENTITY_TYPE:
+            if entity_type == EntityType.EXIT_DOOR:
                 self._level_cache['exits'].append({
                     'position': (entity_x, entity_y),
                     'state': entity_state,
@@ -583,7 +563,7 @@ class PhysicsStateExtractor:
                 })
                 
             # Cache switch positions and states
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
+            elif entity_type == EntityType.EXIT_SWITCH:
                 self._level_cache['switches'].append({
                     'position': (entity_x, entity_y),
                     'state': entity_state,
@@ -624,8 +604,9 @@ class PhysicsStateExtractor:
         if closest_exit_distance == float('inf'):
             closest_exit_distance = 0.0
         else:
-            # Normalize by typical level size
-            closest_exit_distance = max(0.0, 1.0 - (closest_exit_distance / TYPICAL_LEVEL_SIZE))
+            # Normalize by level diagonal (approximately 1200 pixels)
+            level_diagonal = math.sqrt(LEVEL_WIDTH_PX**2 + LEVEL_HEIGHT_PX**2)
+            closest_exit_distance = max(0.0, 1.0 - (closest_exit_distance / level_diagonal))
         
         # Calculate switch completion ratio
         total_switches = len(self._level_cache['switches'])
@@ -648,7 +629,8 @@ class PhysicsStateExtractor:
                     closest_switch_distance = min(closest_switch_distance, dist)
             
             if closest_switch_distance != float('inf'):
-                path_efficiency = max(0.0, 1.0 - (closest_switch_distance / TYPICAL_LEVEL_SIZE))
+                level_diagonal = math.sqrt(LEVEL_WIDTH_PX**2 + LEVEL_HEIGHT_PX**2)
+                path_efficiency = max(0.0, 1.0 - (closest_switch_distance / level_diagonal))
         
         return closest_exit_distance, switch_completion_ratio, path_efficiency
 

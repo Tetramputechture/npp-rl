@@ -10,49 +10,33 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from enum import IntEnum
 
+from nclone.constants.entity_types import EntityType
 from nclone.constants import (
     GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
     JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
-    DRAG_REGULAR, DRAG_SLOW, FRICTION_GROUND, FRICTION_WALL,
-    JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
+    DRAG_REGULAR, DRAG_SLOW, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
     JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
-    FULL_MAP_WIDTH, FULL_MAP_HEIGHT, TILE_PIXEL_SIZE
+    TILE_PIXEL_SIZE,
+    # Movement and trajectory constants
+    VERTICAL_MOVEMENT_THRESHOLD, MIN_HORIZONTAL_VELOCITY,
+    ENERGY_COST_BASE, ENERGY_COST_JUMP_MULTIPLIER,
+    SUCCESS_PROBABILITY_BASE, SUCCESS_PROBABILITY_HIGH_BASE, DISTANCE_PENALTY_DIVISOR, DISTANCE_PENALTY_MAX,
+    HEIGHT_PENALTY_DIVISOR, HEIGHT_PENALTY_MAX, VELOCITY_PENALTY_MAX,
+    TIME_PENALTY_DIVISOR, TIME_PENALTY_MAX, SUCCESS_PROBABILITY_MIN,
+    VELOCITY_MARGIN_MULTIPLIER, JUMP_THRESHOLD_Y, JUMP_THRESHOLD_VELOCITY,
+    DEFAULT_TRAJECTORY_POINTS, DEFAULT_MINIMUM_TIME,
+    # Win condition constants
+    WIN_CONDITION_SWITCH_BONUS,
+    WIN_CONDITION_EXIT_BONUS, WIN_CONDITION_DOOR_BONUS, WIN_CONDITION_DOOR_PROXIMITY,
+    # Bounce block constants
+    BOUNCE_BLOCK_CHAIN_DISTANCE, BOUNCE_BLOCK_INTERACTION_RADIUS,
+    BOUNCE_BLOCK_ENERGY_EFFICIENCY, BOUNCE_BLOCK_SUCCESS_BONUS, BOUNCE_BLOCK_BOOST_MAX
 )
 from nclone.physics import sweep_circle_vs_tiles
-from nclone.entity_classes.entity_exit import EntityExit
-from nclone.entity_classes.entity_exit_switch import EntityExitSwitch
-from nclone.entity_classes.entity_door_regular import EntityDoorRegular
-from nclone.entity_classes.entity_door_locked import EntityDoorLocked
+from nclone.utils.collision_utils import find_bounce_blocks_near_trajectory
+from nclone.utils.physics_utils import BounceBlockState, calculate_bounce_block_boost_multiplier
 
-# Physics calculation constants
-VERTICAL_MOVEMENT_THRESHOLD = 1e-6
-MIN_HORIZONTAL_VELOCITY = 0.1
-ENERGY_COST_BASE = 10.0
-ENERGY_COST_JUMP_MULTIPLIER = 2.0
-SUCCESS_PROBABILITY_BASE = 0.8
-SUCCESS_PROBABILITY_DISTANCE_FACTOR = 0.001
-SUCCESS_PROBABILITY_HIGH_BASE = 0.95
-DISTANCE_PENALTY_DIVISOR = 100.0
-DISTANCE_PENALTY_MAX = 0.3
-HEIGHT_PENALTY_DIVISOR = 50.0
-HEIGHT_PENALTY_MAX = 0.2
-VELOCITY_PENALTY_MAX = 0.2
-TIME_PENALTY_DIVISOR = 30.0
-TIME_PENALTY_MAX = 0.1
-SUCCESS_PROBABILITY_MIN = 0.1
-VELOCITY_MARGIN_MULTIPLIER = 2
-JUMP_THRESHOLD_Y = -1.0
-JUMP_THRESHOLD_VELOCITY = 0.5
-DEFAULT_TRAJECTORY_POINTS = 10
-DEFAULT_MINIMUM_TIME = 1.0
-
-# Win condition constants
-SWITCH_DOOR_MAX_DISTANCE = 500.0  # Max distance for switch-door pairing
-WIN_CONDITION_SWITCH_BONUS = 0.3  # Bonus for approaching switches
-WIN_CONDITION_EXIT_BONUS = 0.5    # Bonus for approaching exits
-WIN_CONDITION_DOOR_BONUS = 0.4    # Bonus for utilizing opened doors
-WIN_CONDITION_DOOR_PROXIMITY = 100.0  # Distance for door utilization bonus
-
+from ..utils.entity_associations import EntityAssociationManager
 
 class MovementState(IntEnum):
     """Ninja movement states from sim_mechanics_doc.md"""
@@ -94,6 +78,9 @@ class TrajectoryCalculator:
         # Cache for static level geometry (tiles never change during level)
         self._tile_cache = {}
         self._current_level_id = None
+        
+        # Initialize simplified entity association system
+        self._entity_manager = EntityAssociationManager() if EntityAssociationManager else None
 
     def calculate_jump_trajectory(
         self,
@@ -357,19 +344,15 @@ class TrajectoryCalculator:
         """
         Analyze win conditions for trajectory planning optimization.
         
-        Identifies switch→door sequences, exit requirements, and path constraints
-        to optimize trajectory planning for goal-oriented movement.
+        DEPRECATED: Use analyze_level_completion_simple() with direct sim access instead.
+        This method is maintained for backward compatibility but should be avoided
+        as it doesn't preserve actual entity relationships.
         
         Args:
             level_data: Level data containing entities
             
         Returns:
-            Dict containing win condition analysis:
-            - 'exits': List of exit positions and states
-            - 'switches': List of switch positions and states  
-            - 'doors': List of door positions and states
-            - 'switch_door_pairs': Identified switch→door relationships
-            - 'completion_requirements': Steps needed to complete level
+            Dict containing win condition analysis (simplified for compatibility)
         """
         if not level_data or 'entities' not in level_data:
             return {}
@@ -383,7 +366,11 @@ class TrajectoryCalculator:
             'completion_requirements': []
         }
         
-        # Collect all relevant entities
+        # Simplified entity collection using the new unified structure
+        exit_pairs = []
+        locked_door_entities = []
+        trap_door_entities = []
+        
         for entity in entities:
             if not isinstance(entity, dict):
                 continue
@@ -392,71 +379,189 @@ class TrajectoryCalculator:
             entity_x = entity.get('x', 0)
             entity_y = entity.get('y', 0)
             entity_state = entity.get('state', 0)
+            entity_active = entity.get('active', True)
+            entity_closed = entity.get('closed', True)
             
-            # Collect exits
-            if entity_type == EntityExit.ENTITY_TYPE:
-                win_analysis['exits'].append({
-                    'position': (entity_x, entity_y),
-                    'state': entity_state,
-                    'accessible': entity_state > 0  # Assume state > 0 means accessible
+            # Collect exit pairs using the new unified structure with entity_id pairing
+            if entity_type == 'exit_switch':
+                switch_entity_id = entity.get('entity_id', -1)
+                
+                # Find corresponding exit door with same entity_id
+                corresponding_door = None
+                for other_entity in entities:
+                    if (other_entity.get('type') == 'exit_door' and 
+                        other_entity.get('entity_id') == switch_entity_id):
+                        corresponding_door = other_entity
+                        break
+                
+                if corresponding_door:
+                    exit_pairs.append({
+                        'switch': {
+                            'position': (entity_x, entity_y),
+                            'state': entity_state,
+                            'activated': not entity_active
+                        },
+                        'door': {
+                            'position': (corresponding_door['x'], corresponding_door['y']),
+                            'state': corresponding_door['state'],
+                            'accessible': corresponding_door['active']
+                        },
+                        'type': 'exit'
+                    })
+            
+            # Collect unified locked door entities
+            elif entity_type == EntityType.LOCKED_DOOR:
+                locked_door_entities.append({
+                    'switch_pos': (entity_x, entity_y),
+                    'door_pos': (entity.get('door_x', 0), entity.get('door_y', 0)),
+                    'switch_active': entity_active,
+                    'door_open': not entity_closed,
+                    'entity': entity
                 })
                 
-            # Collect switches
-            elif entity_type == EntityExitSwitch.ENTITY_TYPE:
-                win_analysis['switches'].append({
-                    'position': (entity_x, entity_y),
-                    'state': entity_state,
-                    'activated': entity_state > 0
-                })
-                
-            # Collect doors
-            elif entity_type in [EntityDoorRegular.ENTITY_TYPE, EntityDoorLocked.ENTITY_TYPE]:
-                win_analysis['doors'].append({
-                    'position': (entity_x, entity_y),
-                    'state': entity_state,
-                    'type': entity_type,
-                    'open': entity_state > 0  # Assume state > 0 means open
+            # Collect unified trap door entities
+            elif entity_type == EntityType.TRAP_DOOR:
+                trap_door_entities.append({
+                    'switch_pos': (entity_x, entity_y),
+                    'door_pos': (entity.get('door_x', 0), entity.get('door_y', 0)),
+                    'switch_active': entity_active,
+                    'door_open': not entity_closed,
+                    'entity': entity
                 })
         
-        # Analyze switch→door relationships (simplified heuristic)
-        for switch in win_analysis['switches']:
-            switch_x, switch_y = switch['position']
-            
-            # Find closest door to each switch (simple proximity heuristic)
-            closest_door = None
-            min_distance = float('inf')
-            
-            for door in win_analysis['doors']:
-                door_x, door_y = door['position']
-                distance = math.sqrt((switch_x - door_x)**2 + (switch_y - door_y)**2)
-                
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_door = door
-                    
-            if closest_door and min_distance < SWITCH_DOOR_MAX_DISTANCE:
-                win_analysis['switch_door_pairs'].append({
-                    'switch': switch,
-                    'door': closest_door,
-                    'distance': min_distance
-                })
+        # Build simplified switch→door relationships
+        win_analysis['switch_door_pairs'] = exit_pairs
         
-        # Determine completion requirements
-        unactivated_switches = [s for s in win_analysis['switches'] if not s['activated']]
-        inaccessible_exits = [e for e in win_analysis['exits'] if not e['accessible']]
-        
-        if unactivated_switches:
-            win_analysis['completion_requirements'].append({
-                'type': 'activate_switches',
-                'count': len(unactivated_switches),
-                'positions': [s['position'] for s in unactivated_switches]
+        # Add locked doors to pairs
+        for locked_entity in locked_door_entities:
+            win_analysis['switch_door_pairs'].append({
+                'switch': {
+                    'position': locked_entity['switch_pos'],
+                    'activated': not locked_entity['switch_active']
+                },
+                'door': {
+                    'position': locked_entity['door_pos'],
+                    'open': locked_entity['door_open']
+                },
+                'type': 'locked'
             })
-            
-        if inaccessible_exits:
+        
+        # Add trap doors to pairs
+        for trap_entity in trap_door_entities:
+            win_analysis['switch_door_pairs'].append({
+                'switch': {
+                    'position': trap_entity['switch_pos'],
+                    'activated': not trap_entity['switch_active']
+                },
+                'door': {
+                    'position': trap_entity['door_pos'],
+                    'open': trap_entity['door_open']
+                },
+                'type': 'trap'
+            })
+        
+        # Populate individual lists for backward compatibility
+        for pair in win_analysis['switch_door_pairs']:
+            if pair['type'] == 'exit':
+                win_analysis['exits'].append({
+                    'position': pair['door']['position'],
+                    'accessible': pair['door']['accessible']
+                })
+                win_analysis['switches'].append({
+                    'position': pair['switch']['position'],
+                    'activated': pair['switch']['activated']
+                })
+            else:
+                win_analysis['doors'].append({
+                    'position': pair['door']['position'],
+                    'open': pair['door']['open'],
+                    'type': EntityType.LOCKED_DOOR if pair['type'] == 'locked' else EntityType.TRAP_DOOR
+                })
+                win_analysis['switches'].append({
+                    'position': pair['switch']['position'],
+                    'activated': pair['switch']['activated']
+                })
+        
+        # Determine completion requirements based on level completion strategy
+        # Strategy: Find shortest path to ANY accessible exit door
+        
+        # Check for immediately accessible exits (no switch activation needed)
+        accessible_exits = []
+        pending_exit_pairs = []
+        
+        for pair in win_analysis['switch_door_pairs']:
+            if pair['type'] == 'exit':
+                if pair['switch']['activated'] and pair['door']['accessible']:
+                    accessible_exits.append(pair)
+                else:
+                    pending_exit_pairs.append(pair)
+        
+        # Level completion strategy
+        if accessible_exits:
+            # At least one exit is immediately accessible
             win_analysis['completion_requirements'].append({
-                'type': 'unlock_exits',
-                'count': len(inaccessible_exits),
-                'positions': [e['position'] for e in inaccessible_exits]
+                'type': 'reach_any_exit',
+                'count': len(accessible_exits),
+                'exit_pairs': accessible_exits,
+                'positions': [pair['door']['position'] for pair in accessible_exits],
+                'critical': True,
+                'description': 'Touch any accessible exit door to complete level'
+            })
+        elif pending_exit_pairs:
+            # Need to activate exit switches first
+            unactivated_exit_switches = [pair['switch'] for pair in pending_exit_pairs if not pair['switch']['activated']]
+            if unactivated_exit_switches:
+                win_analysis['completion_requirements'].append({
+                    'type': 'activate_any_exit_switch',
+                    'count': len(unactivated_exit_switches),
+                    'exit_pairs': pending_exit_pairs,
+                    'positions': [s['position'] for s in unactivated_exit_switches],
+                    'critical': True,
+                    'description': 'Activate any exit switch to unlock corresponding exit door'
+                })
+                
+                # Also add the subsequent exit requirement
+                win_analysis['completion_requirements'].append({
+                    'type': 'reach_unlocked_exit', 
+                    'count': len(pending_exit_pairs),
+                    'exit_pairs': pending_exit_pairs,
+                    'positions': [pair['door']['position'] for pair in pending_exit_pairs],
+                    'critical': True,
+                    'description': 'Touch unlocked exit door to complete level'
+                })
+        
+        # Check for locked doors that might block access to exit switches or doors
+        # Only include these if they potentially block paths to exits
+        potentially_blocking_locked_doors = []
+        for pair in win_analysis['switch_door_pairs']:
+            if pair['type'] == 'locked' and not pair['switch']['activated'] and pair['door']['closed']:
+                potentially_blocking_locked_doors.append(pair)
+        
+        if potentially_blocking_locked_doors:
+            win_analysis['completion_requirements'].append({
+                'type': 'consider_locked_doors',
+                'count': len(potentially_blocking_locked_doors),
+                'pairs': potentially_blocking_locked_doors,
+                'positions': [pair['switch']['position'] for pair in potentially_blocking_locked_doors],
+                'critical': False,  # Only needed if they block paths to exits
+                'description': 'May need to activate if blocking path to exit'
+            })
+        
+        # Check for trap doors that could close paths to exits
+        risky_trap_switches = []
+        for pair in win_analysis['switch_door_pairs']:
+            if pair['type'] == 'trap' and not pair['switch']['activated'] and pair['door']['open']:
+                risky_trap_switches.append(pair)
+        
+        if risky_trap_switches:
+            win_analysis['completion_requirements'].append({
+                'type': 'avoid_trap_switches',
+                'count': len(risky_trap_switches),
+                'pairs': risky_trap_switches,
+                'positions': [pair['switch']['position'] for pair in risky_trap_switches],
+                'critical': False,
+                'warning': True,  # These could permanently close paths
+                'description': 'Avoid activating unless necessary - will permanently close doors'
             })
         
         return win_analysis
@@ -472,6 +577,7 @@ class TrajectoryCalculator:
         
         Trajectories that move toward switches, exits, or complete win conditions
         receive bonus scores to guide the agent toward level completion.
+        Uses accurate door-switch associations instead of distance-based heuristics.
         
         Args:
             start_pos: Starting position (x, y)
@@ -490,51 +596,446 @@ class TrajectoryCalculator:
         end_x, end_y = end_pos
         bonus = 0.0
         
-        # Bonus for moving toward unactivated switches
-        unactivated_switches = [s for s in win_analysis['switches'] if not s['activated']]
-        if unactivated_switches:
-            for switch in unactivated_switches:
-                switch_x, switch_y = switch['position']
-                
-                # Distance from start and end to switch
-                start_dist = math.sqrt((start_x - switch_x)**2 + (start_y - switch_y)**2)
-                end_dist = math.sqrt((end_x - switch_x)**2 + (end_y - switch_y)**2)
-                
-                # Bonus if moving closer to switch
-                if end_dist < start_dist:
-                    improvement = (start_dist - end_dist) / max(start_dist, 1.0)
-                    bonus += improvement * WIN_CONDITION_SWITCH_BONUS
+        # Prioritize bonuses based on level completion logic
+        # Strategy: Find shortest path to ANY accessible exit door
         
-        # Bonus for moving toward accessible exits
-        accessible_exits = [e for e in win_analysis['exits'] if e['accessible']]
-        if accessible_exits:
-            for exit_info in accessible_exits:
-                exit_x, exit_y = exit_info['position']
+        # Highest priority: Move toward any accessible exit door
+        accessible_exit_pairs = [pair for pair in win_analysis['switch_door_pairs'] 
+                               if pair['type'] == 'exit' and pair['switch']['activated'] and pair['door']['accessible']]
+        
+        if accessible_exit_pairs:
+            # Find the closest accessible exit
+            best_exit_bonus = 0.0
+            for pair in accessible_exit_pairs:
+                door_pos = pair['door']['position']
+                exit_x, exit_y = door_pos
                 
-                # Distance from start and end to exit
+                # Distance from start and end to this exit
                 start_dist = math.sqrt((start_x - exit_x)**2 + (start_y - exit_y)**2)
                 end_dist = math.sqrt((end_x - exit_x)**2 + (end_y - exit_y)**2)
                 
-                # Bonus if moving closer to exit
+                # Bonus for moving toward this accessible exit
                 if end_dist < start_dist:
                     improvement = (start_dist - end_dist) / max(start_dist, 1.0)
-                    bonus += improvement * WIN_CONDITION_EXIT_BONUS
-        
-        # Bonus for completing switch→door sequences
-        for pair in win_analysis['switch_door_pairs']:
-            switch_pos = pair['switch']['position']
-            door_pos = pair['door']['position']
+                    exit_bonus = improvement * WIN_CONDITION_EXIT_BONUS * 2.0  # Double bonus for ready exit
+                    best_exit_bonus = max(best_exit_bonus, exit_bonus)
             
-            # If switch is activated and door is now accessible
-            if pair['switch']['activated'] and pair['door']['open']:
-                # Bonus for being near the opened door
+            bonus += best_exit_bonus
+        else:
+            # Second priority: Move toward any unactivated exit switch
+            pending_exit_pairs = [pair for pair in win_analysis['switch_door_pairs'] 
+                                if pair['type'] == 'exit' and not pair['switch']['activated']]
+            
+            if pending_exit_pairs:
+                # Find the closest unactivated exit switch
+                best_switch_bonus = 0.0
+                for pair in pending_exit_pairs:
+                    switch_pos = pair['switch']['position']
+                    switch_x, switch_y = switch_pos
+                    
+                    # Distance from start and end to this exit switch
+                    start_dist = math.sqrt((start_x - switch_x)**2 + (start_y - switch_y)**2)
+                    end_dist = math.sqrt((end_x - switch_x)**2 + (end_y - switch_y)**2)
+                    
+                    # Bonus for moving toward this exit switch
+                    if end_dist < start_dist:
+                        improvement = (start_dist - end_dist) / max(start_dist, 1.0)
+                        switch_bonus = improvement * WIN_CONDITION_SWITCH_BONUS * 1.5  # Higher priority for exit switch
+                        best_switch_bonus = max(best_switch_bonus, switch_bonus)
+                
+                bonus += best_switch_bonus
+        
+        # Third priority: Move toward locked door switches only if they might block exit access
+        # (Conservative approach - only consider if no direct path to exits exists)
+        if not accessible_exit_pairs:
+            locked_switch_bonus = 0.0
+            for pair in win_analysis['switch_door_pairs']:
+                if (pair['type'] == 'locked' and 
+                    not pair['switch']['activated'] and 
+                    pair['door']['closed']):
+                    
+                    switch_pos = pair['switch']['position']
+                    switch_x, switch_y = switch_pos
+                    
+                    # Distance from start and end to locked door switch
+                    start_dist = math.sqrt((start_x - switch_x)**2 + (start_y - switch_y)**2)
+                    end_dist = math.sqrt((end_x - switch_x)**2 + (end_y - switch_y)**2)
+                    
+                    # Small bonus for moving toward switches that might unlock barriers
+                    if end_dist < start_dist:
+                        improvement = (start_dist - end_dist) / max(start_dist, 1.0)
+                        locked_switch_bonus += improvement * WIN_CONDITION_SWITCH_BONUS * 0.5  # Reduced bonus
+            
+            bonus += min(locked_switch_bonus, WIN_CONDITION_SWITCH_BONUS)  # Cap locked door bonus
+        
+        # Fourth priority: Move through opened doors (path utilization)
+        for pair in win_analysis['switch_door_pairs']:
+            if ((pair['type'] in ['locked', 'trap']) and 
+                pair['switch']['activated'] and 
+                pair['door']['open']):
+                
+                door_pos = pair['door']['position']
                 door_x, door_y = door_pos
+                
+                # Small bonus for utilizing opened doors (suggests path progress)
                 end_dist = math.sqrt((end_x - door_x)**2 + (end_y - door_y)**2)
                 
                 if end_dist < WIN_CONDITION_DOOR_PROXIMITY:
-                    bonus += WIN_CONDITION_DOOR_BONUS
+                    bonus += WIN_CONDITION_DOOR_BONUS * 0.5  # Reduced bonus for non-exit doors
         
-        return min(bonus, 1.0)  # Cap at 100% bonus
+        # Warning penalty: Avoid trap door switches that would close open paths
+        for pair in win_analysis['switch_door_pairs']:
+            if (pair['type'] == 'trap' and 
+                not pair['switch']['activated'] and 
+                pair['door']['open']):
+                
+                switch_pos = pair['switch']['position']
+                switch_x, switch_y = switch_pos
+                
+                # Penalty for getting too close to trap switches (unless necessary for exit access)
+                end_dist = math.sqrt((end_x - switch_x)**2 + (end_y - switch_y)**2)
+                
+                if end_dist < WIN_CONDITION_DOOR_PROXIMITY:
+                    # Check if this trap might be necessary for exit access
+                    necessary_for_exit_access = any(
+                        req['type'] in ['activate_any_exit_switch', 'activate_exit_switch'] and 
+                        any(math.sqrt((switch_x - pos[0])**2 + (switch_y - pos[1])**2) < WIN_CONDITION_DOOR_PROXIMITY * 2
+                            for pos in req.get('positions', []))
+                        for req in win_analysis['completion_requirements']
+                    )
+                    
+                    if not necessary_for_exit_access:
+                        bonus -= WIN_CONDITION_SWITCH_BONUS * 0.5  # Penalty for risky trap proximity
+        
+        return max(min(bonus, 1.0), -0.5)  # Cap bonus at 100%, allow small penalty
+
+    def calculate_subgoal_paths(
+        self,
+        start_pos: Tuple[float, float],
+        level_data: dict,
+        graph_data: Optional[dict] = None
+    ) -> dict:
+        """
+        Calculate shortest traversable paths to each subgoal for level completion.
+        
+        Level completion strategy: Touch ANY accessible exit door to complete the level.
+        Switches are only needed if they're required to access exit doors.
+        Regular doors are always traversable and don't block progress.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            level_data: Level data containing entities
+            graph_data: Optional graph structure for pathfinding
+            
+        Returns:
+            Dict containing subgoal paths:
+            - 'exit_path': Best path to any accessible exit door
+            - 'switch_paths': Paths to switches needed for exit access
+            - 'door_paths': Paths through opened doors (deprecated - not used)
+            - 'completion_sequence': Alternative completion goals with priorities
+        """
+        win_analysis = self._analyze_win_conditions(level_data)
+        
+        if not win_analysis:
+            return {}
+        
+        subgoal_paths = {
+            'exit_path': None,
+            'switch_paths': [],
+            'door_paths': [],
+            'completion_sequence': []
+        }
+        
+        # Determine the optimal completion sequence based on dependencies
+        # Strategy: Find shortest path to ANY accessible exit door
+        completion_sequence = []
+        
+        # Check for immediately accessible exits
+        accessible_exit_pairs = [pair for pair in win_analysis['switch_door_pairs'] 
+                               if pair['type'] == 'exit' and pair['switch']['activated'] and pair['door']['accessible']]
+        
+        if accessible_exit_pairs:
+            # Add all accessible exits as alternative completion goals
+            for i, pair in enumerate(accessible_exit_pairs):
+                completion_sequence.append({
+                    'type': 'reach_exit',
+                    'position': pair['door']['position'],
+                    'priority': 1,
+                    'alternative_id': i,  # Mark as alternative exit option
+                    'description': f'Touch accessible exit door {i+1} to complete level'
+                })
+        else:
+            # Need to activate exit switches first - find all options
+            pending_exit_pairs = [pair for pair in win_analysis['switch_door_pairs'] 
+                                if pair['type'] == 'exit' and not pair['switch']['activated']]
+            
+            if pending_exit_pairs:
+                # Add exit switch activation as alternative goals
+                for i, pair in enumerate(pending_exit_pairs):
+                    completion_sequence.append({
+                        'type': 'activate_exit_switch',
+                        'position': pair['switch']['position'],
+                        'priority': 2,
+                        'alternative_id': i,  # Mark as alternative switch option
+                        'associated_door': pair['door']['position'],
+                        'description': f'Activate exit switch {i+1} to unlock exit door'
+                    })
+                    
+                    # Add corresponding exit door goal
+                    completion_sequence.append({
+                        'type': 'reach_exit',
+                        'position': pair['door']['position'],
+                        'priority': 1,
+                        'prerequisite_switch': pair['switch']['position'],
+                        'description': f'Touch exit door {i+1} after activating switch'
+                    })
+        
+        # Add locked door switches only if they might block access to exits
+        # (Only relevant if they could be blocking paths - this is a heuristic)
+        potentially_needed_locked_switches = []
+        for pair in win_analysis['switch_door_pairs']:
+            if (pair['type'] == 'locked' and 
+                not pair['switch']['activated'] and 
+                pair['door']['closed']):
+                # This locked door might be blocking access to exits
+                potentially_needed_locked_switches.append({
+                    'type': 'activate_locked_switch',
+                    'position': pair['switch']['position'],
+                    'door_position': pair['door']['position'],
+                    'priority': 3,
+                    'optional': True,  # Only needed if blocking path
+                    'description': 'Activate locked door switch if blocking path to exit'
+                })
+        
+        completion_sequence.extend(potentially_needed_locked_switches)
+        
+        # Sort by priority (lower number = higher priority), then by feasibility
+        completion_sequence.sort(key=lambda x: (x['priority'], x.get('alternative_id', 0)))
+        subgoal_paths['completion_sequence'] = completion_sequence
+        
+        # Calculate paths to each subgoal and find the best options
+        exit_path_options = []
+        switch_path_options = []
+        
+        for subgoal in completion_sequence:
+            subgoal_pos = subgoal['position']
+            
+            # Calculate direct trajectory (placeholder for more sophisticated pathfinding)
+            trajectory = self.calculate_jump_trajectory(start_pos, subgoal_pos)
+            
+            path_info = {
+                'subgoal': subgoal,
+                'trajectory': trajectory,
+                'feasible': trajectory.feasible,
+                'cost': trajectory.energy_cost,
+                'time': trajectory.time_of_flight,
+                'risk': 1.0 - trajectory.success_probability,
+                'alternative_id': subgoal.get('alternative_id', 0),
+                'optional': subgoal.get('optional', False)
+            }
+            
+            if subgoal['type'] == 'reach_exit':
+                exit_path_options.append(path_info)
+            elif 'switch' in subgoal['type']:
+                switch_path_options.append(path_info)
+        
+        # Select the best exit path from available options
+        if exit_path_options:
+            # Prioritize feasible paths, then by lowest cost
+            feasible_exits = [p for p in exit_path_options if p['feasible']]
+            if feasible_exits:
+                subgoal_paths['exit_path'] = min(feasible_exits, key=lambda p: (p['cost'], p['time']))
+            else:
+                # No feasible direct paths, keep the best infeasible option
+                subgoal_paths['exit_path'] = min(exit_path_options, key=lambda p: p['cost'])
+        
+        # Select the best switch paths (non-optional first)
+        if switch_path_options:
+            # Prioritize non-optional switches, then by feasibility and cost
+            critical_switches = [p for p in switch_path_options if not p['optional']]
+            optional_switches = [p for p in switch_path_options if p['optional']]
+            
+            # Add critical switches first
+            for switch_path in critical_switches:
+                subgoal_paths['switch_paths'].append(switch_path)
+            
+            # Add best optional switches if critical ones exist
+            if critical_switches and optional_switches:
+                feasible_optional = [p for p in optional_switches if p['feasible']]
+                if feasible_optional:
+                    best_optional = min(feasible_optional, key=lambda p: (p['cost'], p['time']))
+                    subgoal_paths['switch_paths'].append(best_optional)
+        
+        return subgoal_paths
+
+    def find_best_exit_strategy(
+        self,
+        start_pos: Tuple[float, float],
+        level_data: dict
+    ) -> dict:
+        """
+        Find the best exit strategy for level completion.
+        
+        Analyzes all available exit doors and determines the optimal completion path:
+        - Direct to exit if switch already activated
+        - Via switch activation then exit if needed
+        - Considers multiple exit options and chooses the best one
+        
+        Args:
+            start_pos: Starting position (x, y)
+            level_data: Level data containing entities
+            
+        Returns:
+            Dict containing best exit strategy:
+            - 'strategy': 'direct_exit' or 'via_switch'
+            - 'target_exit': Best exit door position
+            - 'target_switch': Switch position (if needed)
+            - 'total_cost': Estimated total completion cost
+            - 'total_time': Estimated total completion time
+            - 'feasible': Whether strategy is feasible
+        """
+        win_analysis = self._analyze_win_conditions(level_data)
+        
+        if not win_analysis or not win_analysis['switch_door_pairs']:
+            return {}
+        
+        exit_pairs = [pair for pair in win_analysis['switch_door_pairs'] if pair['type'] == 'exit']
+        
+        if not exit_pairs:
+            return {}
+        
+        best_strategy = None
+        best_cost = float('inf')
+        
+        for pair in exit_pairs:
+            switch = pair['switch']
+            door = pair['door']
+            
+            if switch['activated'] and door['accessible']:
+                # Direct exit strategy
+                trajectory = self.calculate_jump_trajectory(start_pos, door['position'])
+                
+                strategy = {
+                    'strategy': 'direct_exit',
+                    'target_exit': door['position'],
+                    'target_switch': None,
+                    'total_cost': trajectory.energy_cost,
+                    'total_time': trajectory.time_of_flight,
+                    'feasible': trajectory.feasible,
+                    'exit_pair': pair
+                }
+                
+                if trajectory.feasible and trajectory.energy_cost < best_cost:
+                    best_cost = trajectory.energy_cost
+                    best_strategy = strategy
+            else:
+                # Via switch strategy
+                switch_trajectory = self.calculate_jump_trajectory(start_pos, switch['position'])
+                door_trajectory = self.calculate_jump_trajectory(switch['position'], door['position'])
+                
+                total_cost = switch_trajectory.energy_cost + door_trajectory.energy_cost
+                total_time = switch_trajectory.time_of_flight + door_trajectory.time_of_flight
+                feasible = switch_trajectory.feasible and door_trajectory.feasible
+                
+                strategy = {
+                    'strategy': 'via_switch',
+                    'target_exit': door['position'],
+                    'target_switch': switch['position'],
+                    'total_cost': total_cost,
+                    'total_time': total_time,
+                    'feasible': feasible,
+                    'switch_trajectory': switch_trajectory,
+                    'exit_trajectory': door_trajectory,
+                    'exit_pair': pair
+                }
+                
+                if feasible and total_cost < best_cost:
+                    best_cost = total_cost
+                    best_strategy = strategy
+        
+        return best_strategy if best_strategy else {}
+
+    def analyze_level_completion_simple(
+        self, 
+        sim, 
+        start_pos: Tuple[float, float],
+        graph_data: Optional[Any] = None
+    ) -> dict:
+        """
+        Simplified level completion analysis using direct entity relationships.
+        
+        Uses the actual nclone simulation entities to avoid proximity-based guessing
+        and integrates with hierarchical graph pathfinding when available.
+        
+        Args:
+            sim: The nclone simulation object
+            start_pos: Starting position (x, y)
+            graph_data: Optional hierarchical graph data for pathfinding
+            
+        Returns:
+            Dict containing simplified completion analysis:
+            - 'strategy': 'direct_exit', 'via_switches', or 'blocked'
+            - 'target_exit': Best exit door position
+            - 'target_switch': Required switch position (if needed)
+            - 'total_cost': Path cost using graph if available
+            - 'feasible': Whether completion is feasible
+            - 'all_options': List of all exit options for comparison
+        """
+        if not self._entity_manager:
+            # Fallback to old system if new system not available
+            return self.find_best_exit_strategy(start_pos, {'entities': []})
+        
+        # Extract entity relationships directly from simulation
+        completion_info = self._entity_manager.extract_entity_pairs_from_sim(sim)
+        
+        # Find the best exit option using graph data if available
+        best_exit = self._entity_manager.find_best_exit_option(completion_info, start_pos, graph_data)
+        
+        if not best_exit:
+            return {'strategy': 'blocked', 'feasible': False}
+        
+        # Analyze the best option
+        if best_exit in completion_info.accessible_exits:
+            # Direct exit strategy
+            return {
+                'strategy': 'direct_exit',
+                'target_exit': best_exit.door_pos,
+                'target_switch': None,
+                'total_cost': self._entity_manager._calculate_path_cost(start_pos, best_exit.door_pos, graph_data),
+                'feasible': True,
+                'exit_pair': best_exit,
+                'all_options': completion_info.accessible_exits
+            }
+        else:
+            # Via switch strategy
+            switch_cost = self._entity_manager._calculate_path_cost(start_pos, best_exit.switch_pos, graph_data)
+            door_cost = self._entity_manager._calculate_path_cost(best_exit.switch_pos, best_exit.door_pos, graph_data)
+            
+            return {
+                'strategy': 'via_switch',
+                'target_exit': best_exit.door_pos,
+                'target_switch': best_exit.switch_pos,
+                'total_cost': switch_cost + door_cost,
+                'feasible': True,
+                'exit_pair': best_exit,
+                'all_options': completion_info.required_switches
+            }
+
+    def get_completion_requirements_simple(self, sim) -> List[Dict[str, Any]]:
+        """
+        Get simplified completion requirements using direct entity relationships.
+        
+        Args:
+            sim: The nclone simulation object
+            
+        Returns:
+            List of completion requirements in priority order
+        """
+        if not self._entity_manager:
+            return []
+        
+        completion_info = self._entity_manager.extract_entity_pairs_from_sim(sim)
+        return self._entity_manager.get_completion_requirements(completion_info)
 
     def calculate_momentum_trajectory(
         self,
@@ -839,3 +1340,406 @@ class TrajectoryCalculator:
         final_prob = base_prob - distance_penalty - height_penalty - velocity_penalty - time_penalty + win_condition_bonus
         
         return max(final_prob, SUCCESS_PROBABILITY_MIN)
+    
+    def calculate_bounce_block_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for bounce block interactions.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with bounce block physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find bounce blocks along the trajectory
+        bounce_blocks = self._find_trajectory_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if not bounce_blocks:
+            # No bounce blocks - fall back to regular trajectory
+            return self.calculate_jump_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate bounce block enhanced trajectory
+        return self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+    
+    def calculate_bounce_chain_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for chained bounce block interactions.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with chained bounce block physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find chainable bounce blocks
+        bounce_blocks = self._find_chainable_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if len(bounce_blocks) < 2:
+            # Not enough blocks for chaining - fall back to single block
+            return self.calculate_bounce_block_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate chained trajectory
+        return self._calculate_chained_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+    
+    def calculate_bounce_boost_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        ninja_state: Optional[MovementState] = None,
+        level_data: Optional[dict] = None
+    ) -> TrajectoryResult:
+        """
+        Calculate trajectory for repeated bounce boost mechanics.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            end_pos: Target position (x, y)
+            ninja_state: Current ninja movement state
+            level_data: Level data including bounce blocks
+            
+        Returns:
+            TrajectoryResult with repeated boost physics
+        """
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < 1e-6:
+            return self._create_zero_trajectory_result()
+        
+        # Find extending bounce blocks for boost
+        extending_blocks = self._find_extending_bounce_blocks(start_pos, level_data)
+        
+        if not extending_blocks:
+            # No extending blocks - fall back to regular bounce block
+            return self.calculate_bounce_block_trajectory(start_pos, end_pos, ninja_state, level_data)
+        
+        # Calculate repeated boost trajectory
+        return self._calculate_repeated_boost_trajectory(
+            start_pos, end_pos, extending_blocks, ninja_state, level_data
+        )
+    
+    def _find_trajectory_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks that interact with the trajectory."""
+        if not level_data or not level_data.get('entities'):
+            return []
+        
+        # Get bounce blocks from level data using centralized constant
+        entities = level_data.get('entities', [])
+        bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
+        
+        # Use centralized utility to find blocks near trajectory
+        return find_bounce_blocks_near_trajectory(start_pos, end_pos, bounce_blocks)
+    
+    def _find_chainable_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks that can be chained together."""
+        trajectory_blocks = self._find_trajectory_bounce_blocks(start_pos, end_pos, level_data)
+        
+        if len(trajectory_blocks) < 2:
+            return trajectory_blocks
+        
+        # Sort blocks by distance along trajectory
+        def trajectory_distance(block):
+            block_pos = (block.get('x', 0.0), block.get('y', 0.0))
+            # Project block position onto trajectory line
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            if dx == 0 and dy == 0:
+                return 0.0
+            
+            bx = block_pos[0] - start_pos[0]
+            by = block_pos[1] - start_pos[1]
+            t = max(0, min(1, (bx*dx + by*dy) / (dx*dx + dy*dy)))
+            return t
+        
+        trajectory_blocks.sort(key=trajectory_distance)
+        
+        # Filter blocks that are within chaining distance
+        chainable = [trajectory_blocks[0]]  # Always include first block
+        
+        for i in range(1, len(trajectory_blocks)):
+            prev_block = chainable[-1]
+            curr_block = trajectory_blocks[i]
+            
+            prev_pos = (prev_block.get('x', 0.0), prev_block.get('y', 0.0))
+            curr_pos = (curr_block.get('x', 0.0), curr_block.get('y', 0.0))
+            
+            distance = math.sqrt(
+                (curr_pos[0] - prev_pos[0])**2 + (curr_pos[1] - prev_pos[1])**2
+            )
+            
+            if distance <= BOUNCE_BLOCK_CHAIN_DISTANCE:
+                chainable.append(curr_block)
+        
+        return chainable
+    
+    def _find_extending_bounce_blocks(
+        self,
+        start_pos: Tuple[float, float],
+        level_data: Optional[dict]
+    ) -> List[dict]:
+        """Find bounce blocks in extending state near start position."""
+        if not level_data or not level_data.get('entities'):
+            return []
+        
+        extending_blocks = []
+        for entity in level_data.get('entities', []):
+            if (entity.get('type') == 17 and  # Bounce block type
+                entity.get('bounce_state') == BounceBlockState.EXTENDING):
+                
+                block_x = entity.get('x', 0.0)
+                block_y = entity.get('y', 0.0)
+                distance = math.sqrt(
+                    (block_x - start_pos[0])**2 + (block_y - start_pos[1])**2
+                )
+                
+                if distance <= BOUNCE_BLOCK_INTERACTION_RADIUS:
+                    extending_blocks.append(entity)
+        
+        return extending_blocks
+    
+    def _calculate_enhanced_bounce_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        bounce_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory enhanced by bounce block physics."""
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # Calculate boost multiplier based on bounce block states
+        boost_multiplier = self._calculate_bounce_boost_multiplier(bounce_blocks)
+        
+        # Enhanced initial velocity from bounce block
+        if abs(dx) > abs(dy):  # Horizontal movement
+            horizontal_velocity = (dx / abs(dx)) * MAX_HOR_SPEED * boost_multiplier if dx != 0 else 0
+            initial_vy = dy / max(abs(dx) / horizontal_velocity, 0.1) if dx != 0 else 0
+        else:  # Vertical movement
+            initial_vy = -math.sqrt(2 * abs(dy) * GRAVITY_FALL) * boost_multiplier if dy < 0 else 0
+            horizontal_velocity = dx / max(abs(dy) / abs(initial_vy), 0.1) if initial_vy != 0 else 0
+        
+        # Calculate time of flight with bounce enhancement
+        if dy < 0:  # Upward movement
+            gravity = GRAVITY_FALL
+            discriminant = initial_vy**2 + 2 * gravity * abs(dy)
+            if discriminant >= 0:
+                time_of_flight = (-initial_vy + math.sqrt(discriminant)) / gravity
+            else:
+                time_of_flight = DEFAULT_MINIMUM_TIME
+        else:  # Downward movement
+            time_of_flight = distance / max(abs(horizontal_velocity), MIN_HORIZONTAL_VELOCITY)
+        
+        # Reduce time due to bounce block efficiency
+        time_of_flight *= (1.0 / boost_multiplier)
+        
+        # Calculate energy cost with bounce block efficiency
+        base_energy = abs(horizontal_velocity) / MAX_HOR_SPEED + abs(initial_vy) / MAX_HOR_SPEED
+        energy_cost = base_energy * BOUNCE_BLOCK_ENERGY_EFFICIENCY
+        
+        # Enhanced success probability
+        success_probability = self._calculate_success_probability(
+            dx, dy, time_of_flight, max(abs(horizontal_velocity), abs(initial_vy)),
+            ninja_state, start_pos, end_pos, level_data
+        )
+        success_probability = min(success_probability + BOUNCE_BLOCK_SUCCESS_BONUS, 1.0)
+        
+        # Generate trajectory points
+        trajectory_points = self._generate_trajectory_points(
+            start_pos, horizontal_velocity, initial_vy, GRAVITY_FALL, time_of_flight
+        )
+        
+        return TrajectoryResult(
+            feasible=True,
+            time_of_flight=time_of_flight,
+            energy_cost=energy_cost,
+            success_probability=success_probability,
+            min_velocity=min(abs(horizontal_velocity), abs(initial_vy)),
+            max_velocity=max(abs(horizontal_velocity), abs(initial_vy)) * boost_multiplier,
+            requires_jump=True,
+            requires_wall_contact=False,
+            trajectory_points=trajectory_points
+        )
+    
+    def _calculate_chained_bounce_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        bounce_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory for chained bounce blocks."""
+        # Start with enhanced bounce trajectory
+        result = self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, bounce_blocks, ninja_state, level_data
+        )
+        
+        # Apply chain bonuses
+        chain_count = len(bounce_blocks)
+        chain_multiplier = 1.0 + (chain_count - 1) * 0.2  # 20% bonus per additional block
+        
+        # Enhanced velocity and reduced time
+        result.max_velocity *= chain_multiplier
+        result.time_of_flight /= chain_multiplier
+        
+        # Slightly higher energy cost due to complexity
+        result.energy_cost *= 1.1
+        
+        # Slightly reduced success probability due to timing requirements
+        result.success_probability *= 0.95
+        
+        return result
+    
+    def _calculate_repeated_boost_trajectory(
+        self,
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        extending_blocks: List[dict],
+        ninja_state: Optional[MovementState],
+        level_data: Optional[dict]
+    ) -> TrajectoryResult:
+        """Calculate trajectory for repeated boost mechanics."""
+        # Start with enhanced bounce trajectory
+        result = self._calculate_enhanced_bounce_trajectory(
+            start_pos, end_pos, extending_blocks, ninja_state, level_data
+        )
+        
+        # Apply repeated boost bonuses
+        boost_count = min(len(extending_blocks) * 3, 10)  # Max 10 boosts
+        boost_decay = 0.95 ** boost_count  # Decay with each boost
+        
+        # Maximum velocity from repeated boosts
+        result.max_velocity = MAX_HOR_SPEED * BOUNCE_BLOCK_BOOST_MAX * boost_decay
+        
+        # Very fast movement
+        result.time_of_flight *= 0.5
+        
+        # Very energy efficient
+        result.energy_cost *= 0.5
+        
+        # Moderate success probability (timing dependent)
+        result.success_probability = 0.8
+        
+        return result
+    
+    def _calculate_bounce_boost_multiplier(self, bounce_blocks: List[dict]) -> float:
+        """Calculate boost multiplier based on bounce block states."""
+        if not bounce_blocks:
+            return 1.0
+        
+        total_boost = 0.0
+        for block in bounce_blocks:
+            compression = block.get('compression_amount', 0.0)
+            state = block.get('bounce_state', BounceBlockState.NEUTRAL)
+            
+            # Use centralized utility for individual block boost calculation
+            boost = calculate_bounce_block_boost_multiplier([block])
+            
+            total_boost += boost
+        
+        # Average boost across all blocks, with diminishing returns
+        avg_boost = total_boost / len(bounce_blocks)
+        return min(avg_boost, BOUNCE_BLOCK_BOOST_MAX)
+    
+    def _point_near_line_segment(
+        self,
+        point: Tuple[float, float],
+        line_start: Tuple[float, float],
+        line_end: Tuple[float, float],
+        threshold: float
+    ) -> bool:
+        """Check if point is within threshold distance of line segment."""
+        px, py = point
+        x1, y1 = line_start
+        x2, y2 = line_end
+        
+        # Vector from line start to end
+        dx = x2 - x1
+        dy = y2 - y1
+        
+        # Vector from line start to point
+        fx = px - x1
+        fy = py - y1
+        
+        # Handle degenerate case
+        if dx == 0 and dy == 0:
+            distance = math.sqrt(fx*fx + fy*fy)
+            return distance <= threshold
+        
+        # Project point onto line
+        t = max(0, min(1, (fx*dx + fy*dy) / (dx*dx + dy*dy)))
+        
+        # Closest point on line segment
+        closest_x = x1 + t * dx
+        closest_y = y1 + t * dy
+        
+        # Distance from point to closest point on line
+        dist_x = px - closest_x
+        dist_y = py - closest_y
+        distance = math.sqrt(dist_x*dist_x + dist_y*dist_y)
+        
+        return distance <= threshold
+    
+    def _create_zero_trajectory_result(self) -> TrajectoryResult:
+        """Create a trajectory result for zero-distance movement."""
+        return TrajectoryResult(
+            feasible=True,
+            time_of_flight=0.0,
+            energy_cost=0.0,
+            success_probability=1.0,
+            min_velocity=0.0,
+            max_velocity=0.0,
+            requires_jump=False,
+            requires_wall_contact=False,
+            trajectory_points=[]
+        )
