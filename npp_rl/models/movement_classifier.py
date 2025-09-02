@@ -34,6 +34,8 @@ from nclone.constants import (
 from nclone.constants.entity_types import EntityType
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
 from nclone.physics import map_orientation_to_vector
+from nclone.graph.precise_collision import PreciseTileCollision
+from nclone.graph.hazard_system import HazardClassificationSystem
 
 # Note: Bounce block constants are now in centralized physics_constants.py
 
@@ -78,12 +80,16 @@ class MovementClassifier:
     """
 
     def __init__(self):
-        """Initialize movement classifier with N++ physics constants."""
+        """Initialize movement classifier with N++ physics constants and precise collision."""
         # Cache for static entity data (positions never change during level)
         self._static_entity_cache = {}
         # Cache for dynamic entity states (can change during gameplay)
         self._dynamic_entity_cache = {}
         self._current_level_id = None
+        
+        # Initialize precise collision and hazard systems
+        self.precise_collision = PreciseTileCollision()
+        self.hazard_system = HazardClassificationSystem()
 
     def classify_movement(
         self,
@@ -208,6 +214,70 @@ class MovementClassifier:
             params.update(self._calculate_bounce_boost_parameters(dx, dy, ninja_state))
 
         return params
+    
+    def is_movement_physically_feasible(
+        self,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
+        level_data: Optional[Dict[str, Any]] = None,
+        entities: Optional[List[Dict[str, Any]]] = None,
+        ninja_position: Optional[Tuple[float, float]] = None
+    ) -> bool:
+        """
+        Check if movement is physically feasible using precise collision detection.
+        
+        This method uses the enhanced collision system to validate movement
+        feasibility against tile geometry and hazards.
+        
+        Args:
+            src_pos: Source position (x, y)
+            tgt_pos: Target position (x, y)
+            level_data: Level geometry data
+            entities: List of entity dictionaries
+            ninja_position: Current ninja position for hazard range calculation
+            
+        Returns:
+            True if movement is physically feasible
+        """
+        if level_data is None:
+            return True  # No level data, assume feasible
+        
+        src_x, src_y = src_pos
+        tgt_x, tgt_y = tgt_pos
+        
+        # Check precise tile collision
+        if not self.precise_collision.is_path_traversable(
+            src_x, src_y, tgt_x, tgt_y, level_data
+        ):
+            return False
+        
+        # Check hazards if entities are provided
+        if entities is not None:
+            # Check static hazards
+            static_hazard_cache = self.hazard_system.build_static_hazard_cache(
+                entities, level_data
+            )
+            
+            # Check if path intersects any static hazards
+            for hazard_info in static_hazard_cache.values():
+                if self.hazard_system.check_path_hazard_intersection(
+                    src_x, src_y, tgt_x, tgt_y, hazard_info
+                ):
+                    return False
+            
+            # Check dynamic hazards if ninja position is provided
+            if ninja_position is not None:
+                dynamic_hazards = self.hazard_system.get_dynamic_hazards_in_range(
+                    entities, ninja_position
+                )
+                
+                for hazard_info in dynamic_hazards:
+                    if self.hazard_system.check_path_hazard_intersection(
+                        src_x, src_y, tgt_x, tgt_y, hazard_info
+                    ):
+                        return False
+        
+        return True
 
     def _calculate_walk_parameters(
         self,

@@ -35,6 +35,8 @@ from nclone.constants import (
 from nclone.physics import sweep_circle_vs_tiles
 from nclone.utils.collision_utils import find_bounce_blocks_near_trajectory
 from nclone.utils.physics_utils import BounceBlockState, calculate_bounce_block_boost_multiplier
+from nclone.graph.precise_collision import PreciseTileCollision
+from nclone.graph.hazard_system import HazardClassificationSystem
 
 from ..utils.entity_associations import EntityAssociationManager
 
@@ -74,13 +76,17 @@ class TrajectoryCalculator:
     """
 
     def __init__(self):
-        """Initialize trajectory calculator with N++ physics constants."""
+        """Initialize trajectory calculator with N++ physics constants and precise collision."""
         # Cache for static level geometry (tiles never change during level)
         self._tile_cache = {}
         self._current_level_id = None
         
         # Initialize simplified entity association system
         self._entity_manager = EntityAssociationManager() if EntityAssociationManager else None
+        
+        # Initialize precise collision and hazard systems
+        self.precise_collision = PreciseTileCollision()
+        self.hazard_system = HazardClassificationSystem()
 
     def calculate_jump_trajectory(
         self,
@@ -184,14 +190,18 @@ class TrajectoryCalculator:
     def validate_trajectory_clearance(
         self,
         trajectory_points: List[Tuple[float, float]],
-        level_data: dict
+        level_data: dict,
+        entities: Optional[List[Dict[str, Any]]] = None,
+        ninja_position: Optional[Tuple[float, float]] = None
     ) -> bool:
         """
-        Check if trajectory clears all obstacles using ninja radius.
+        Check if trajectory clears all obstacles using precise collision detection.
 
         Args:
             trajectory_points: List of (x, y) points along trajectory
             level_data: Level collision data
+            entities: List of entity dictionaries for hazard checking
+            ninja_position: Current ninja position for dynamic hazard range
 
         Returns:
             True if trajectory is clear, False if blocked
@@ -201,28 +211,42 @@ class TrajectoryCalculator:
         
         if level_data is None:
             return True  # No level data, assume clear
-            
-        # Get simulation object from level_data if available
-        sim = level_data.get('sim', None)
-        if not sim:
-            # If no simulation object, try basic tile-based validation
-            return self._validate_trajectory_basic(trajectory_points, level_data)
-            
-        # Use nclone's sweep_circle_vs_tiles for accurate collision detection
+        
+        # Use precise collision detection for each trajectory segment
         for i in range(len(trajectory_points) - 1):
             x0, y0 = trajectory_points[i]
             x1, y1 = trajectory_points[i + 1]
             
-            # Calculate movement vector
-            dx = x1 - x0
-            dy = y1 - y0
-            
-            # Use sweep_circle_vs_tiles to check for collisions
-            collision_result = sweep_circle_vs_tiles(sim, x0, y0, dx, dy, NINJA_RADIUS)
-            
-            # If collision_result indicates a collision, trajectory is blocked
-            if collision_result and collision_result.get('collision', False):
+            # Check precise tile collision
+            if not self.precise_collision.is_path_traversable(
+                x0, y0, x1, y1, level_data
+            ):
                 return False
+            
+            # Check hazards if entities are provided
+            if entities is not None:
+                # Check static hazards
+                static_hazard_cache = self.hazard_system.build_static_hazard_cache(
+                    entities, level_data
+                )
+                
+                for hazard_info in static_hazard_cache.values():
+                    if self.hazard_system.check_path_hazard_intersection(
+                        x0, y0, x1, y1, hazard_info
+                    ):
+                        return False
+                
+                # Check dynamic hazards if ninja position is provided
+                if ninja_position is not None:
+                    dynamic_hazards = self.hazard_system.get_dynamic_hazards_in_range(
+                        entities, ninja_position
+                    )
+                    
+                    for hazard_info in dynamic_hazards:
+                        if self.hazard_system.check_path_hazard_intersection(
+                            x0, y0, x1, y1, hazard_info
+                        ):
+                            return False
                 
         return True
         
