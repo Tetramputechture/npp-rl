@@ -301,7 +301,7 @@ class TrajectoryCalculator:
                 dist_sq = (x - tile_world_x)**2 + (y - tile_world_y)**2
                 
                 # If ninja radius overlaps with tile (approximate as circle vs square)
-                if dist_sq < (NINJA_RADIUS + 12)**2:  # 12 is half tile size
+                if dist_sq < (NINJA_RADIUS + TILE_PIXEL_SIZE // 2)**2:  # Half tile size
                     return False
                     
         return True

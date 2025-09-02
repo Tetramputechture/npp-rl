@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional, List
 import json
 from pathlib import Path
 
+from nclone.constants.physics_constants import TILE_PIXEL_SIZE
+
 
 @dataclass
 class ICMConfig:
@@ -78,7 +80,7 @@ class ExplorationConfig:
     enabled: bool = True
     grid_width: int = 42
     grid_height: int = 23
-    cell_size: int = 24
+    cell_size: int = TILE_PIXEL_SIZE
     window_size: int = 100  # Rolling metrics window
     log_frequency: int = 1000  # Log metrics every N steps
     track_level_complexity: bool = True

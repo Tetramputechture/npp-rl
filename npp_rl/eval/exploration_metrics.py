@@ -11,6 +11,8 @@ from typing import Dict, Tuple, Optional, Any
 from collections import defaultdict, deque
 import math
 
+from nclone.constants.physics_constants import TILE_PIXEL_SIZE
+
 
 class ExplorationMetrics:
     """
@@ -27,7 +29,7 @@ class ExplorationMetrics:
         self,
         grid_width: int = 42,
         grid_height: int = 23,
-        cell_size: int = 24,
+        cell_size: int = TILE_PIXEL_SIZE,
         window_size: int = 100
     ):
         """
