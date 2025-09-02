@@ -6,12 +6,12 @@ to determine movement feasibility, energy costs, and timing requirements.
 """
 
 import math
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import IntEnum
 
 from nclone.constants.entity_types import EntityType
-from nclone.constants import (
+from nclone.constants.physics_constants import (
     GRAVITY_FALL, GRAVITY_JUMP, MAX_HOR_SPEED, AIR_ACCEL, GROUND_ACCEL,
     JUMP_FLAT_GROUND_Y, MAX_JUMP_DURATION, NINJA_RADIUS,
     DRAG_REGULAR, DRAG_SLOW, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
@@ -233,6 +233,14 @@ class TrajectoryCalculator:
                 for hazard_info in static_hazard_cache.values():
                     if self.hazard_system.check_path_hazard_intersection(
                         x0, y0, x1, y1, hazard_info
+                    ):
+                        return False
+                
+                # Check bounce block traversal (not handled by general hazard system)
+                bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
+                for bounce_block in bounce_blocks:
+                    if self.hazard_system.analyze_bounce_block_traversal_blocking(
+                        bounce_block, entities, (x0, y0), (x1, y1)
                     ):
                         return False
                 

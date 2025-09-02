@@ -6,10 +6,10 @@ based on ninja state and level geometry.
 """
 
 import math
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 from enum import IntEnum
 
-from nclone.constants import (
+from nclone.constants.physics_constants import (
     MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
     JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
@@ -29,15 +29,19 @@ from nclone.constants import (
     WALL_SLIDE_DIFFICULTY, WALL_JUMP_ENERGY_BASE, WALL_JUMP_DIFFICULTY,
     # Launch pad constants
     LAUNCH_PAD_MIN_TIME,
-    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY
+    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY,
+    # Bounce block constants
+    BOUNCE_BLOCK_BOOST_MIN, BOUNCE_BLOCK_BOOST_MAX, BOUNCE_BLOCK_DAMPING,
+    BOUNCE_BLOCK_ENERGY_EFFICIENCY, BOUNCE_BLOCK_SUCCESS_BONUS,
+    BASE_SUCCESS_PROBABILITY, DEFAULT_MINIMUM_TIME
 )
 from nclone.constants.entity_types import EntityType
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
 from nclone.physics import map_orientation_to_vector
 from nclone.graph.precise_collision import PreciseTileCollision
 from nclone.graph.hazard_system import HazardClassificationSystem
-
-# Note: Bounce block constants are now in centralized physics_constants.py
+from nclone.utils.physics_utils import BounceBlockState, calculate_distance
+from nclone.utils.collision_utils import find_bounce_blocks_near_trajectory, find_chainable_bounce_blocks
 
 
 class MovementType(IntEnum):
@@ -131,7 +135,7 @@ class MovementClassifier:
 
         # Classify based on movement characteristics
         movement_type = self._determine_movement_type(
-            dx, dy, ninja_state, level_data
+            src_pos, tgt_pos, dx, dy, ninja_state, level_data
         )
 
         # Calculate type-specific physics parameters
@@ -143,6 +147,8 @@ class MovementClassifier:
 
     def _determine_movement_type(
         self,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
         dx: float,
         dy: float,
         ninja_state: Optional[NinjaState],
@@ -159,7 +165,7 @@ class MovementClassifier:
 
         # Check for bounce block movement first (highest priority)
         if level_data:
-            bounce_movement = self._check_bounce_block_movement(dx, dy, level_data, ninja_state)
+            bounce_movement = self._check_bounce_block_movement(src_pos, tgt_pos, level_data, ninja_state)
             if bounce_movement != MovementType.WALK:  # Use WALK as default/no-bounce indicator
                 return bounce_movement
 
@@ -262,6 +268,14 @@ class MovementClassifier:
             for hazard_info in static_hazard_cache.values():
                 if self.hazard_system.check_path_hazard_intersection(
                     src_x, src_y, tgt_x, tgt_y, hazard_info
+                ):
+                    return False
+            
+            # Check bounce block traversal (not handled by general hazard system)
+            bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
+            for bounce_block in bounce_blocks:
+                if self.hazard_system.analyze_bounce_block_traversal_blocking(
+                    bounce_block, entities, (src_x, src_y), (tgt_x, tgt_y)
                 ):
                     return False
             
@@ -857,8 +871,8 @@ class MovementClassifier:
     
     def _check_bounce_block_movement(
         self,
-        dx: float,
-        dy: float,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
         level_data: Dict[str, Any],
         ninja_state: Optional[NinjaState]
     ) -> MovementType:
@@ -868,19 +882,19 @@ class MovementClassifier:
         
         # Get bounce blocks from level data using centralized constant
         entities = level_data.get('entities', [])
-        bounce_blocks = [e for e in entities if e.get('type') == ENTITY_TYPE_BOUNCE_BLOCK]
+        bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
         
         if not bounce_blocks:
             return MovementType.WALK
         
         # Calculate movement properties using centralized utility
-        distance = calculate_distance((0, 0), (dx, dy))
+        distance = calculate_distance(src_pos, tgt_pos)
         if distance < 10.0:  # Too small to be bounce block movement
             return MovementType.WALK
         
-        # Check for different types of bounce block movement
-        movement_start = ninja_state.position if ninja_state else (0, 0)
-        movement_end = (movement_start[0] + dx, movement_start[1] + dy)
+        # Use actual movement positions
+        movement_start = src_pos
+        movement_end = tgt_pos
         
         # Find bounce blocks near trajectory using centralized utility
         interacting_blocks = find_bounce_blocks_near_trajectory(
