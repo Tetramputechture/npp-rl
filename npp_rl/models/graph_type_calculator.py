@@ -167,8 +167,38 @@ def calculate_functional_edge_types(
             if distance > 50:  # Long distance suggests launch pad trajectory
                 functional_edges[i] = 1
         
-        # Add more functional relationship detection here
-        # (switches -> doors, keys -> locks, etc.)
+        # Switch -> Door functional relationships using actual entity associations
+        elif source_entity_type in ['exit_switch', EntityType.LOCKED_DOOR, EntityType.TRAP_DOOR]:
+            # Find the corresponding door entity using proper associations
+            target_entity_type = None
+            for (entity_x, entity_y), entity_type in entity_map.items():
+                if abs(target_pos[0] - entity_x) < 12 and abs(target_pos[1] - entity_y) < 12:
+                    target_entity_type = entity_type
+                    break
+            
+            # Check for proper switch->door relationships
+            if source_entity_type == 'exit_switch' and target_entity_type == 'exit_door':
+                functional_edges[i] = 1
+            elif (source_entity_type == EntityType.LOCKED_DOOR and 
+                  target_entity_type == 'door_segment_locked'):
+                # Verify this is the correct door using entity data
+                source_entity = next((e for e in entities if 
+                                    abs(e.get('x', 0) - source_pos[0]) < 12 and 
+                                    abs(e.get('y', 0) - source_pos[1]) < 12), None)
+                if source_entity:
+                    door_pos = (source_entity.get('door_x', 0), source_entity.get('door_y', 0))
+                    if abs(door_pos[0] - target_pos[0]) < 12 and abs(door_pos[1] - target_pos[1]) < 12:
+                        functional_edges[i] = 1
+            elif (source_entity_type == EntityType.TRAP_DOOR and 
+                  target_entity_type == 'door_segment_trap'):
+                # Verify this is the correct door using entity data
+                source_entity = next((e for e in entities if 
+                                    abs(e.get('x', 0) - source_pos[0]) < 12 and 
+                                    abs(e.get('y', 0) - source_pos[1]) < 12), None)
+                if source_entity:
+                    door_pos = (source_entity.get('door_x', 0), source_entity.get('door_y', 0))
+                    if abs(door_pos[0] - target_pos[0]) < 12 and abs(door_pos[1] - target_pos[1]) < 12:
+                        functional_edges[i] = 1
     
     return functional_edges
 

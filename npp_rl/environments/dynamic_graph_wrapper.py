@@ -14,6 +14,7 @@ Key Features:
 """
 
 import time
+import math
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ import numpy as np
 import gymnasium as gym
 
 from nclone.graph.graph_builder import GraphBuilder, GraphData, EdgeType, E_MAX_EDGES
+from nclone.constants.entity_types import EntityType
 class EventType(IntEnum):
     """Types of events that can trigger graph updates."""
     ENTITY_MOVED = 0          # Entity position changed
@@ -541,9 +543,70 @@ class DynamicGraphWrapper(gym.Wrapper):
             self.current_graph.edge_mask[edge_idx] = 1.0 if is_available else 0.0
     
     def _find_entities_controlled_by_switch(self, switch_id: int) -> List[int]:
-        """Find entities controlled by a switch."""
-        # Placeholder - would use level data to find switch->door mappings
-        return []
+        """Find entities controlled by a switch using actual entity associations."""
+        controlled_entities = []
+        
+        # Get level data and entities
+        if not hasattr(self, 'level_data') or not self.level_data:
+            return controlled_entities
+            
+        entities = self.level_data.get('entities', [])
+        
+        # Find the switch entity
+        switch_entity = None
+        for entity in entities:
+            if entity.get('id') == switch_id:
+                switch_entity = entity
+                break
+        
+        if not switch_entity:
+            return controlled_entities
+            
+        switch_type = switch_entity.get('type')
+        switch_pos = (switch_entity.get('x', 0), switch_entity.get('y', 0))
+        
+        # For exit switches, find the corresponding exit door(s)
+        # Note: A level can have multiple exit doors, but each switch controls a specific door
+        if switch_type == 'exit_switch':
+            # Find the closest exit door (they should be paired)
+            switch_x, switch_y = switch_pos
+            min_distance = float('inf')
+            closest_door_id = -1
+            
+            for entity in entities:
+                if entity.get('type') == 'exit_door':
+                    door_x = entity.get('x', 0)
+                    door_y = entity.get('y', 0)
+                    distance = math.sqrt((switch_x - door_x)**2 + (switch_y - door_y)**2)
+                    
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_door_id = entity.get('id', -1)
+            
+            if closest_door_id >= 0:
+                controlled_entities.append(closest_door_id)
+        
+        # For locked door switches, find the corresponding door segment
+        elif switch_type == EntityType.LOCKED_DOOR:
+            door_pos = (switch_entity.get('door_x', 0), switch_entity.get('door_y', 0))
+            for entity in entities:
+                if (entity.get('type') == 'door_segment_locked' and
+                    abs(entity.get('x', 0) - door_pos[0]) < 1.0 and
+                    abs(entity.get('y', 0) - door_pos[1]) < 1.0):
+                    controlled_entities.append(entity.get('id', -1))
+                    break
+        
+        # For trap door switches, find the corresponding door segment
+        elif switch_type == EntityType.TRAP_DOOR:
+            door_pos = (switch_entity.get('door_x', 0), switch_entity.get('door_y', 0))
+            for entity in entities:
+                if (entity.get('type') == 'door_segment_trap' and
+                    abs(entity.get('x', 0) - door_pos[0]) < 1.0 and
+                    abs(entity.get('y', 0) - door_pos[1]) < 1.0):
+                    controlled_entities.append(entity.get('id', -1))
+                    break
+        
+        return [eid for eid in controlled_entities if eid >= 0]
     
     def _get_dynamic_graph_metadata(self) -> np.ndarray:
         """Get dynamic graph metadata for observation."""
