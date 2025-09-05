@@ -6,10 +6,10 @@ based on ninja state and level geometry.
 """
 
 import math
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 from enum import IntEnum
 
-from nclone.constants import (
+from nclone.constants.physics_constants import (
     MAX_HOR_SPEED, GROUND_ACCEL, AIR_ACCEL,
     JUMP_FLAT_GROUND_Y, JUMP_WALL_REGULAR_X, JUMP_WALL_REGULAR_Y,
     JUMP_WALL_SLIDE_X, JUMP_WALL_SLIDE_Y,
@@ -29,13 +29,19 @@ from nclone.constants import (
     WALL_SLIDE_DIFFICULTY, WALL_JUMP_ENERGY_BASE, WALL_JUMP_DIFFICULTY,
     # Launch pad constants
     LAUNCH_PAD_MIN_TIME,
-    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY
+    LAUNCH_PAD_ENERGY_COST, LAUNCH_PAD_DIFFICULTY,
+    # Bounce block constants
+    BOUNCE_BLOCK_BOOST_MIN, BOUNCE_BLOCK_BOOST_MAX, BOUNCE_BLOCK_DAMPING,
+    BOUNCE_BLOCK_ENERGY_EFFICIENCY, BOUNCE_BLOCK_SUCCESS_BONUS,
+    BASE_SUCCESS_PROBABILITY, DEFAULT_MINIMUM_TIME
 )
 from nclone.constants.entity_types import EntityType
 from nclone.entity_classes.entity_launch_pad import EntityLaunchPad
 from nclone.physics import map_orientation_to_vector
-
-# Note: Bounce block constants are now in centralized physics_constants.py
+from nclone.graph.precise_collision import PreciseTileCollision
+from nclone.graph.hazard_system import HazardClassificationSystem
+from nclone.utils.physics_utils import BounceBlockState, calculate_distance
+from nclone.utils.collision_utils import find_bounce_blocks_near_trajectory, find_chainable_bounce_blocks
 
 
 class MovementType(IntEnum):
@@ -78,12 +84,16 @@ class MovementClassifier:
     """
 
     def __init__(self):
-        """Initialize movement classifier with N++ physics constants."""
+        """Initialize movement classifier with N++ physics constants and precise collision."""
         # Cache for static entity data (positions never change during level)
         self._static_entity_cache = {}
         # Cache for dynamic entity states (can change during gameplay)
         self._dynamic_entity_cache = {}
         self._current_level_id = None
+        
+        # Initialize precise collision and hazard systems
+        self.precise_collision = PreciseTileCollision()
+        self.hazard_system = HazardClassificationSystem()
 
     def classify_movement(
         self,
@@ -125,7 +135,7 @@ class MovementClassifier:
 
         # Classify based on movement characteristics
         movement_type = self._determine_movement_type(
-            dx, dy, ninja_state, level_data
+            src_pos, tgt_pos, dx, dy, ninja_state, level_data
         )
 
         # Calculate type-specific physics parameters
@@ -137,6 +147,8 @@ class MovementClassifier:
 
     def _determine_movement_type(
         self,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
         dx: float,
         dy: float,
         ninja_state: Optional[NinjaState],
@@ -153,7 +165,7 @@ class MovementClassifier:
 
         # Check for bounce block movement first (highest priority)
         if level_data:
-            bounce_movement = self._check_bounce_block_movement(dx, dy, level_data, ninja_state)
+            bounce_movement = self._check_bounce_block_movement(src_pos, tgt_pos, level_data, ninja_state)
             if bounce_movement != MovementType.WALK:  # Use WALK as default/no-bounce indicator
                 return bounce_movement
 
@@ -208,6 +220,78 @@ class MovementClassifier:
             params.update(self._calculate_bounce_boost_parameters(dx, dy, ninja_state))
 
         return params
+    
+    def is_movement_physically_feasible(
+        self,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
+        level_data: Optional[Dict[str, Any]] = None,
+        entities: Optional[List[Dict[str, Any]]] = None,
+        ninja_position: Optional[Tuple[float, float]] = None
+    ) -> bool:
+        """
+        Check if movement is physically feasible using precise collision detection.
+        
+        This method uses the enhanced collision system to validate movement
+        feasibility against tile geometry and hazards.
+        
+        Args:
+            src_pos: Source position (x, y)
+            tgt_pos: Target position (x, y)
+            level_data: Level geometry data
+            entities: List of entity dictionaries
+            ninja_position: Current ninja position for hazard range calculation
+            
+        Returns:
+            True if movement is physically feasible
+        """
+        if level_data is None:
+            return True  # No level data, assume feasible
+        
+        src_x, src_y = src_pos
+        tgt_x, tgt_y = tgt_pos
+        
+        # Check precise tile collision
+        if not self.precise_collision.is_path_traversable(
+            src_x, src_y, tgt_x, tgt_y, level_data
+        ):
+            return False
+        
+        # Check hazards if entities are provided
+        if entities is not None:
+            # Check static hazards
+            static_hazard_cache = self.hazard_system.build_static_hazard_cache(
+                entities, level_data
+            )
+            
+            # Check if path intersects any static hazards
+            for hazard_info in static_hazard_cache.values():
+                if self.hazard_system.check_path_hazard_intersection(
+                    src_x, src_y, tgt_x, tgt_y, hazard_info
+                ):
+                    return False
+            
+            # Check bounce block traversal (not handled by general hazard system)
+            bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
+            for bounce_block in bounce_blocks:
+                if self.hazard_system.analyze_bounce_block_traversal_blocking(
+                    bounce_block, entities, (src_x, src_y), (tgt_x, tgt_y)
+                ):
+                    return False
+            
+            # Check dynamic hazards if ninja position is provided
+            if ninja_position is not None:
+                dynamic_hazards = self.hazard_system.get_dynamic_hazards_in_range(
+                    entities, ninja_position
+                )
+                
+                for hazard_info in dynamic_hazards:
+                    if self.hazard_system.check_path_hazard_intersection(
+                        src_x, src_y, tgt_x, tgt_y, hazard_info
+                    ):
+                        return False
+        
+        return True
 
     def _calculate_walk_parameters(
         self,
@@ -787,8 +871,8 @@ class MovementClassifier:
     
     def _check_bounce_block_movement(
         self,
-        dx: float,
-        dy: float,
+        src_pos: Tuple[float, float],
+        tgt_pos: Tuple[float, float],
         level_data: Dict[str, Any],
         ninja_state: Optional[NinjaState]
     ) -> MovementType:
@@ -798,19 +882,19 @@ class MovementClassifier:
         
         # Get bounce blocks from level data using centralized constant
         entities = level_data.get('entities', [])
-        bounce_blocks = [e for e in entities if e.get('type') == ENTITY_TYPE_BOUNCE_BLOCK]
+        bounce_blocks = [e for e in entities if e.get('type') == EntityType.BOUNCE_BLOCK]
         
         if not bounce_blocks:
             return MovementType.WALK
         
         # Calculate movement properties using centralized utility
-        distance = calculate_distance((0, 0), (dx, dy))
+        distance = calculate_distance(src_pos, tgt_pos)
         if distance < 10.0:  # Too small to be bounce block movement
             return MovementType.WALK
         
-        # Check for different types of bounce block movement
-        movement_start = ninja_state.position if ninja_state else (0, 0)
-        movement_end = (movement_start[0] + dx, movement_start[1] + dy)
+        # Use actual movement positions
+        movement_start = src_pos
+        movement_end = tgt_pos
         
         # Find bounce blocks near trajectory using centralized utility
         interacting_blocks = find_bounce_blocks_near_trajectory(
