@@ -411,7 +411,7 @@ class HierarchicalGraphObservationWrapper:
         
         # Build hierarchical graph
         if level_data is not None and ninja_position is not None:
-            hierarchical_graph = self.hierarchical_builder.build_hierarchical_graph(
+            hierarchical_graph = self.hierarchical_builder.build_graph(
                 level_data, ninja_position, entities or [], ninja_velocity, ninja_state
             )
             

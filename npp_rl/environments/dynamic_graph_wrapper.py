@@ -22,7 +22,7 @@ from collections import deque, defaultdict
 import numpy as np
 import gymnasium as gym
 
-from nclone.graph.graph_builder import GraphBuilder, GraphData, EdgeType, E_MAX_EDGES
+from nclone.graph import HierarchicalGraphBuilder, GraphData, EdgeType, E_MAX_EDGES
 from nclone.constants.entity_types import EntityType
 
 # Import our simplified entity association system
@@ -233,7 +233,7 @@ class DynamicGraphWrapper(gym.Wrapper):
         self.temporal_window_size = temporal_window_size
         
         # Core components
-        self.graph_builder = GraphBuilder()
+        self.graph_builder = HierarchicalGraphBuilder()
         self.constraint_propagator = DynamicConstraintPropagator()
         self.entity_manager = EntityAssociationManager() if EntityAssociationManager else None
         
@@ -538,13 +538,16 @@ class DynamicGraphWrapper(gym.Wrapper):
             state = self.env.get_current_state()
             
             # Build new graph
-            self.current_graph = self.graph_builder.build_graph(
+            # Build hierarchical graph and extract sub-cell level for compatibility
+            hierarchical_graph = self.graph_builder.build_graph(
                 level_data=state.get('level_data', {}),
                 ninja_position=state.get('ninja_position', (0, 0)),
                 entities=state.get('entities', []),
                 ninja_velocity=state.get('ninja_velocity'),
                 ninja_state=state.get('ninja_state')
             )
+            # Use sub-cell graph for current compatibility
+            self.current_graph = hierarchical_graph.sub_cell_graph
             
             logging.debug(f"Rebuilt full graph: {self.current_graph.num_nodes} nodes, {self.current_graph.num_edges} edges")
             
