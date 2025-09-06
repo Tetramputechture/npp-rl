@@ -16,6 +16,7 @@ from nclone.constants import (
     NORMALIZED_HEIGHT_DIVISOR
 )
 from nclone.constants.entity_types import EntityType
+from nclone.graph.level_data import LevelData
 
 class PhysicsStateExtractor:
     """
@@ -325,7 +326,7 @@ class PhysicsStateExtractor:
             pass
         return False
 
-    def _update_dynamic_entities(self, level_data: Dict[str, Any]) -> None:
+    def _update_dynamic_entities(self, level_data: LevelData) -> None:
         """
         Update dynamic entity states that can change during gameplay.
         
@@ -333,9 +334,9 @@ class PhysicsStateExtractor:
         entity states (like toggle mine states, switch activations) are current.
         
         Args:
-            level_data: Current level data with entity states
+            level_data: LevelData object containing current entity states
         """
-        if not level_data:
+        if not level_data or not level_data.entities:
             return
             
         self._dynamic_entity_cache = {
@@ -345,7 +346,7 @@ class PhysicsStateExtractor:
             'thwumps': []
         }
         
-        entities = level_data.get('entities', [])
+        entities = level_data.entities
         for entity in entities:
             if not isinstance(entity, dict):
                 continue
@@ -512,7 +513,7 @@ class PhysicsStateExtractor:
             
         return False
 
-    def _cache_level_data(self, level_data: Dict[str, Any]) -> None:
+    def _cache_level_data(self, level_data: LevelData) -> None:
         """
         Cache static level data for single ninja optimization.
         
@@ -523,12 +524,12 @@ class PhysicsStateExtractor:
         - Level geometry bounds
         
         Args:
-            level_data: Level data dictionary
+            level_data: LevelData object
         """
         if not level_data:
             return
             
-        level_id = level_data.get('level_id', id(level_data))
+        level_id = level_data.level_id or id(level_data)
         
         # Only recache if level changed
         if self._current_level_id == level_id:
@@ -542,7 +543,7 @@ class PhysicsStateExtractor:
             'level_bounds': None
         }
         
-        entities = level_data.get('entities', [])
+        entities = level_data.entities
         
         # Cache exits and switches for multi-exit path finding
         for entity in entities:

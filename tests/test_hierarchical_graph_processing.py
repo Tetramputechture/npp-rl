@@ -97,7 +97,7 @@ class TestHierarchicalGraphBuilder:
             ninja_state = 1  # Running
             
             # Build hierarchical graph
-            hierarchical_graph = builder.build_hierarchical_graph(
+            hierarchical_graph = builder.build_graph(
                 mock_level_data, ninja_position, entities, ninja_velocity, ninja_state
             )
             
@@ -685,18 +685,18 @@ class TestErrorHandling:
         try:
             from nclone.graph.hierarchical_builder import HierarchicalGraphBuilder
             builder = HierarchicalGraphBuilder()
-            
+
             # Test with invalid level_data
-            with pytest.raises(ValueError, match="level_data must be a dictionary"):
-                builder.build_hierarchical_graph("not_a_dict", (0, 0), [])
+            with pytest.raises(ValueError, match="level_data must be a NumPy array"):
+                builder.build_graph("not_a_numpy_array", (0, 0), [])
             
             # Test with invalid ninja_position
             with pytest.raises(ValueError, match="ninja_position must be a tuple/list of length 2"):
-                builder.build_hierarchical_graph({}, (0,), [])
+                builder.build_graph({}, (0,), [])
             
             # Test with invalid entities
             with pytest.raises(ValueError, match="entities must be a list"):
-                builder.build_hierarchical_graph({}, (0, 0), "not_a_list")
+                builder.build_graph({}, (0, 0), "not_a_list")
                 
         except ImportError:
             pytest.skip("HierarchicalGraphBuilder not available")
