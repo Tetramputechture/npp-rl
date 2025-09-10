@@ -542,6 +542,154 @@ subtasks = {
    - Implement BC regularization during RL training
    - Add hybrid BC+RL loss functions
 
+**Testing & Validation Strategy**:
+
+**Unit Tests** (`tests/test_replay_processing.py`):
+```python
+class TestReplayProcessing(unittest.TestCase):
+    def test_replay_data_ingestion(self):
+        """Test replay file parsing and data extraction."""
+        # Load known replay file with expected structure
+        replay_file = "test_data/simple_level_completion.replay"
+        processor = ReplayDataProcessor()
+        
+        # Test basic parsing
+        replay_data = processor.parse_replay_file(replay_file)
+        self.assertIsNotNone(replay_data)
+        self.assertIn('frames', replay_data)
+        self.assertGreater(len(replay_data['frames']), 0)
+        
+        # Test observation extraction
+        frame_data = replay_data['frames'][100]  # Mid-level frame
+        obs = processor.create_observation_from_replay(frame_data)
+        
+        # Validate observation structure
+        self.assertIn('player_frame', obs)
+        self.assertIn('global_view', obs)
+        self.assertIn('physics_state', obs)
+        self.assertIn('graph_data', obs)
+        
+        # Validate observation dimensions
+        self.assertEqual(obs['player_frame'].shape, (12, 84, 84))  # 12-frame stack
+        self.assertEqual(obs['global_view'].shape, (176, 100))
+        self.assertIsInstance(obs['physics_state'], np.ndarray)
+        
+    def test_action_sequence_extraction(self):
+        """Test extraction of action sequences from replays."""
+        processor = ReplayDataProcessor()
+        replay_data = processor.parse_replay_file("test_data/wall_jump_sequence.replay")
+        
+        # Extract action sequence
+        actions = processor.extract_action_sequence(replay_data)
+        
+        # Validate action format
+        self.assertTrue(all(0 <= action <= 5 for action in actions))  # Valid action range
+        self.assertGreater(len(actions), 10)  # Non-trivial sequence
+        
+        # Test specific known sequences
+        # Wall jump should contain jump+direction combinations
+        wall_jump_actions = [4, 5]  # Jump+Left, Jump+Right
+        self.assertTrue(any(action in wall_jump_actions for action in actions))
+        
+    def test_data_quality_validation(self):
+        """Test replay data quality metrics."""
+        processor = ReplayDataProcessor()
+        
+        # Test with high-quality replay (level completion)
+        good_replay = processor.parse_replay_file("test_data/expert_completion.replay")
+        quality_score = processor.compute_quality_score(good_replay)
+        self.assertGreater(quality_score, 0.8)  # High quality threshold
+        
+        # Test with low-quality replay (early death)
+        bad_replay = processor.parse_replay_file("test_data/early_death.replay")
+        quality_score = processor.compute_quality_score(bad_replay)
+        self.assertLess(quality_score, 0.3)  # Low quality threshold
+```
+
+**Integration Tests** (`tests/test_replay_integration.py`):
+```python
+class TestReplayIntegration(unittest.TestCase):
+    def test_bc_dataset_creation(self):
+        """Test end-to-end BC dataset creation from replays."""
+        processor = ReplayDataProcessor()
+        
+        # Process multiple replay files
+        replay_files = glob.glob("test_data/replays/*.replay")
+        dataset = processor.create_behavioral_cloning_dataset(replay_files)
+        
+        # Validate dataset structure
+        self.assertIsInstance(dataset, torch.utils.data.Dataset)
+        self.assertGreater(len(dataset), 1000)  # Sufficient data
+        
+        # Test data loader
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+        batch = next(iter(dataloader))
+        obs, actions = batch
+        
+        # Validate batch structure
+        self.assertEqual(obs['player_frame'].shape[0], 32)  # Batch size
+        self.assertEqual(actions.shape[0], 32)
+        
+    def test_multimodal_observation_consistency(self):
+        """Test consistency between different observation modalities."""
+        processor = ReplayDataProcessor()
+        replay_data = processor.parse_replay_file("test_data/switch_activation.replay")
+        
+        # Extract observations at switch activation moment
+        switch_frame = processor.find_switch_activation_frame(replay_data)
+        obs = processor.create_observation_from_replay(replay_data['frames'][switch_frame])
+        
+        # Validate cross-modal consistency
+        ninja_pos_visual = processor.extract_ninja_position_from_visual(obs['player_frame'])
+        ninja_pos_physics = obs['physics_state'][:2]  # x, y position
+        
+        # Positions should match within tolerance
+        np.testing.assert_allclose(ninja_pos_visual, ninja_pos_physics, atol=5.0)
+```
+
+**Performance Benchmarks** (`tests/test_replay_performance.py`):
+```python
+class TestReplayPerformance(unittest.TestCase):
+    def test_processing_speed(self):
+        """Test replay processing performance."""
+        processor = ReplayDataProcessor()
+        
+        # Time processing of large replay file
+        start_time = time.time()
+        replay_data = processor.parse_replay_file("test_data/long_level.replay")
+        processing_time = time.time() - start_time
+        
+        # Should process at least 1000 frames per second
+        frames_per_second = len(replay_data['frames']) / processing_time
+        self.assertGreater(frames_per_second, 1000)
+        
+    def test_memory_usage(self):
+        """Test memory efficiency of replay processing."""
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        initial_memory = process.memory_info().rss
+        
+        processor = ReplayDataProcessor()
+        # Process multiple large replays
+        for i in range(10):
+            replay_data = processor.parse_replay_file(f"test_data/large_replay_{i}.replay")
+            
+        final_memory = process.memory_info().rss
+        memory_increase = final_memory - initial_memory
+        
+        # Memory increase should be reasonable (< 1GB)
+        self.assertLess(memory_increase, 1024 * 1024 * 1024)
+```
+
+**Validation Metrics**:
+- **Data Quality Score**: Percentage of replays that successfully complete levels
+- **Processing Speed**: Frames processed per second (target: >1000 FPS)
+- **Memory Efficiency**: Peak memory usage during batch processing
+- **Action Distribution**: Validation that extracted actions match expected N++ action patterns
+- **Cross-Modal Consistency**: Agreement between visual and physics state representations
+
 #### Task 1.2: Complete Physics Integration (2-3 weeks)
 **Objective**: Fix placeholder implementations in physics components
 
@@ -579,6 +727,215 @@ subtasks = {
    - Add real-time entity state tracking for dynamic hazards
    - Implement switch-door dependency tracking
    - Create unified physics state representation
+
+**Testing & Validation Strategy**:
+
+**Unit Tests** (`tests/test_physics_integration.py`):
+```python
+class TestPhysicsIntegration(unittest.TestCase):
+    def test_movement_classifier_accuracy(self):
+        """Test movement classification against known physics scenarios."""
+        classifier = MovementClassifier()
+        level_data = self.load_test_level("simple_jump_level.json")
+        
+        # Test basic jump classification
+        start_pos = (100, 400)  # Ground level
+        end_pos = (150, 350)    # Higher platform
+        movement_type = classifier.classify_movement(start_pos, end_pos, level_data)
+        self.assertEqual(movement_type, MovementType.JUMP)
+        
+        # Test wall jump classification
+        start_pos = (200, 300)  # Against wall
+        end_pos = (250, 250)    # Up and away from wall
+        movement_type = classifier.classify_movement(start_pos, end_pos, level_data)
+        self.assertEqual(movement_type, MovementType.WALL_JUMP)
+        
+        # Test launch pad detection
+        level_data_with_pad = self.load_test_level("launch_pad_level.json")
+        start_pos = (300, 400)  # Near launch pad
+        end_pos = (500, 200)    # Long distance jump
+        movement_type = classifier.classify_movement(start_pos, end_pos, level_data_with_pad)
+        self.assertEqual(movement_type, MovementType.LAUNCH_PAD)
+        
+    def test_trajectory_validation(self):
+        """Test trajectory validation against level geometry."""
+        calculator = TrajectoryCalculator()
+        level_data = self.load_test_level("obstacle_course.json")
+        
+        # Test valid trajectory (clear path)
+        trajectory = [(100, 400), (120, 380), (140, 360), (160, 340)]
+        is_valid = calculator.validate_trajectory(trajectory, level_data)
+        self.assertTrue(is_valid)
+        
+        # Test invalid trajectory (intersects wall)
+        trajectory_blocked = [(100, 400), (120, 380), (140, 360), (160, 320)]  # Goes through wall
+        is_valid = calculator.validate_trajectory(trajectory_blocked, level_data)
+        self.assertFalse(is_valid)
+        
+        # Test trajectory with dynamic hazard
+        level_with_drone = self.load_test_level("drone_patrol.json")
+        trajectory_hazard = [(200, 400), (220, 400), (240, 400)]  # Crosses drone path
+        is_valid = calculator.validate_trajectory(trajectory_hazard, level_with_drone)
+        self.assertFalse(is_valid)
+        
+    def test_physics_constants_integration(self):
+        """Test that physics constants are correctly applied."""
+        from nclone.constants.physics_constants import MAX_JUMP_DISTANCE, GRAVITY_FALL
+        
+        calculator = TrajectoryCalculator()
+        
+        # Test maximum jump distance constraint
+        start_pos = (0, 400)
+        end_pos = (MAX_JUMP_DISTANCE + 50, 350)  # Beyond max jump
+        can_reach = calculator.can_reach_with_jump(start_pos, end_pos)
+        self.assertFalse(can_reach)
+        
+        # Test within jump distance
+        end_pos_valid = (MAX_JUMP_DISTANCE - 50, 350)
+        can_reach = calculator.can_reach_with_jump(start_pos, end_pos_valid)
+        self.assertTrue(can_reach)
+        
+    def test_tile_type_handling(self):
+        """Test handling of all 33 tile types."""
+        collision_detector = PreciseTileCollision()
+        
+        # Test each tile type category
+        tile_test_cases = {
+            0: True,   # Empty - traversable
+            1: False,  # Solid - not traversable
+            2: True,   # Half tile top - conditionally traversable
+            6: True,   # 45-degree slope - traversable with physics
+            10: True,  # Quarter moon - traversable
+            14: True,  # Quarter pipe - traversable
+            18: True,  # Mild slope - traversable
+            26: True,  # Steep slope - traversable
+            34: True,  # Glitched tile - no collision
+        }
+        
+        for tile_type, expected_traversable in tile_test_cases.items():
+            level_data = self.create_single_tile_level(tile_type)
+            ninja_pos = (12, 12)  # Center of tile
+            is_traversable = collision_detector.is_position_traversable(
+                ninja_pos[0], ninja_pos[1], level_data.tiles, 10.0  # ninja radius
+            )
+            self.assertEqual(is_traversable, expected_traversable, 
+                           f"Tile type {tile_type} traversability mismatch")
+```
+
+**Integration Tests** (`tests/test_physics_reachability_integration.py`):
+```python
+class TestPhysicsReachabilityIntegration(unittest.TestCase):
+    def test_reachability_with_physics_constraints(self):
+        """Test reachability analysis respects physics limitations."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        level_data = self.load_test_level("physics_challenge.json")
+        
+        ninja_start = (50, 450)  # Bottom left
+        
+        # Test reachability analysis
+        reachability_state = analyzer.analyze_reachability(level_data, ninja_start, {})
+        
+        # Validate that unreachable areas are correctly identified
+        unreachable_pos = (1000, 100)  # Too far to jump
+        self.assertNotIn(self.pos_to_sub_grid(unreachable_pos), 
+                        reachability_state.reachable_positions)
+        
+        # Validate that reachable areas are correctly identified
+        reachable_pos = (100, 450)  # Walking distance
+        self.assertIn(self.pos_to_sub_grid(reachable_pos), 
+                     reachability_state.reachable_positions)
+        
+    def test_dynamic_entity_blocking(self):
+        """Test that dynamic entities correctly block reachability."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        level_data = self.load_test_level("drone_corridor.json")
+        
+        ninja_start = (50, 400)
+        
+        # Test with drone in blocking position
+        level_data.entities[0].position = (100, 400)  # Block corridor
+        reachability_state = analyzer.analyze_reachability(level_data, ninja_start, {})
+        
+        blocked_pos = (150, 400)  # Beyond drone
+        self.assertNotIn(self.pos_to_sub_grid(blocked_pos), 
+                        reachability_state.reachable_positions)
+        
+        # Test with drone moved away
+        level_data.entities[0].position = (100, 300)  # Out of corridor
+        reachability_state = analyzer.analyze_reachability(level_data, ninja_start, {})
+        
+        now_reachable_pos = (150, 400)
+        self.assertIn(self.pos_to_sub_grid(now_reachable_pos), 
+                     reachability_state.reachable_positions)
+        
+    def test_switch_door_dependencies(self):
+        """Test switch-door dependency handling."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        level_data = self.load_test_level("locked_door_puzzle.json")
+        
+        ninja_start = (50, 400)
+        
+        # Test with door locked (switch not activated)
+        reachability_state = analyzer.analyze_reachability(level_data, ninja_start, {})
+        
+        beyond_door_pos = (300, 400)  # Beyond locked door
+        self.assertNotIn(self.pos_to_sub_grid(beyond_door_pos), 
+                        reachability_state.reachable_positions)
+        
+        # Test with door unlocked (switch activated)
+        switch_states = {'door_1': True}
+        reachability_state = analyzer.analyze_reachability(level_data, ninja_start, switch_states)
+        
+        self.assertIn(self.pos_to_sub_grid(beyond_door_pos), 
+                     reachability_state.reachable_positions)
+```
+
+**Performance Tests** (`tests/test_physics_performance.py`):
+```python
+class TestPhysicsPerformance(unittest.TestCase):
+    def test_reachability_analysis_speed(self):
+        """Test reachability analysis performance on large levels."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        large_level = self.generate_large_level(42, 23)  # Full N++ level size
+        
+        ninja_start = (50, 550)  # Bottom of level
+        
+        # Time the analysis
+        start_time = time.time()
+        reachability_state = analyzer.analyze_reachability(large_level, ninja_start, {})
+        analysis_time = time.time() - start_time
+        
+        # Should complete within 100ms for real-time use
+        self.assertLess(analysis_time, 0.1)
+        
+        # Should find reasonable number of reachable positions
+        self.assertGreater(len(reachability_state.reachable_positions), 100)
+        
+    def test_movement_classification_speed(self):
+        """Test movement classification performance."""
+        classifier = MovementClassifier()
+        level_data = self.generate_complex_level()
+        
+        # Test batch classification
+        position_pairs = [(random.randint(0, 1000), random.randint(0, 600)) 
+                         for _ in range(1000)]
+        
+        start_time = time.time()
+        for start_pos, end_pos in zip(position_pairs[::2], position_pairs[1::2]):
+            movement_type = classifier.classify_movement(start_pos, end_pos, level_data)
+        classification_time = time.time() - start_time
+        
+        # Should classify at least 1000 movements per second
+        classifications_per_second = 500 / classification_time
+        self.assertGreater(classifications_per_second, 1000)
+```
+
+**Validation Metrics**:
+- **Physics Accuracy**: Percentage of movement classifications that match ground truth
+- **Trajectory Validation**: Accuracy of collision detection against known test cases
+- **Reachability Precision**: Percentage of positions correctly classified as reachable/unreachable
+- **Performance**: Analysis time for full-size levels (target: <100ms)
+- **Memory Usage**: Peak memory during reachability analysis (target: <50MB)
 
 #### Task 1.3: Reachability System Integration (3-4 weeks)
 **Objective**: Integrate existing nclone reachability system with RL architecture
@@ -628,6 +985,254 @@ subtasks = {
 - **Curiosity Filtering**: Intrinsic motivation avoids unreachable exploration
 - **Dynamic Updates**: Reachability updates when switches change state
 - **Performance Optimization**: Cache reachability results, update incrementally
+
+**Testing & Validation Strategy**:
+
+**Unit Tests** (`tests/test_reachability_integration.py`):
+```python
+class TestReachabilityIntegration(unittest.TestCase):
+    def test_hierarchical_reachability_manager(self):
+        """Test reachability manager integration with RL components."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        manager = HierarchicalReachabilityManager(analyzer)
+        
+        level_data = self.load_test_level("multi_switch_level.json")
+        ninja_pos = (50, 400)
+        switch_states = {}
+        
+        # Test initial reachable subgoals
+        subgoals = manager.get_reachable_subgoals(ninja_pos, level_data, switch_states)
+        
+        # Should include reachable switches but not exit (no switch activated)
+        self.assertIn('activate_door_switch_1', subgoals)
+        self.assertNotIn('navigate_to_exit_door', subgoals)
+        
+        # Test after switch activation
+        switch_states['door_1'] = True
+        subgoals = manager.get_reachable_subgoals(ninja_pos, level_data, switch_states)
+        
+        # Should now include previously unreachable areas
+        self.assertIn('navigate_to_exit_switch', subgoals)
+        
+    def test_reachability_caching(self):
+        """Test performance optimization through caching."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        manager = HierarchicalReachabilityManager(analyzer)
+        
+        level_data = self.load_test_level("large_level.json")
+        ninja_pos = (50, 400)
+        switch_states = {}
+        
+        # First call should compute reachability
+        start_time = time.time()
+        subgoals1 = manager.get_reachable_subgoals(ninja_pos, level_data, switch_states)
+        first_call_time = time.time() - start_time
+        
+        # Second call with same parameters should use cache
+        start_time = time.time()
+        subgoals2 = manager.get_reachable_subgoals(ninja_pos, level_data, switch_states)
+        second_call_time = time.time() - start_time
+        
+        # Results should be identical
+        self.assertEqual(set(subgoals1), set(subgoals2))
+        
+        # Second call should be much faster (cached)
+        self.assertLess(second_call_time, first_call_time * 0.1)
+        
+    def test_reachability_aware_curiosity(self):
+        """Test curiosity system integration with reachability."""
+        manager = HierarchicalReachabilityManager(ReachabilityAnalyzer(TrajectoryCalculator()))
+        curiosity = ReachabilityAwareCuriosity(manager)
+        
+        level_data = self.load_test_level("exploration_test.json")
+        ninja_pos = (50, 400)
+        
+        # Test curiosity for reachable target
+        reachable_target = (100, 400)  # Walking distance
+        bonus_reachable = curiosity.compute_exploration_bonus(ninja_pos, reachable_target, level_data)
+        self.assertGreater(bonus_reachable, 0.5)  # High curiosity
+        
+        # Test curiosity for unreachable target
+        unreachable_target = (1000, 100)  # Too far
+        bonus_unreachable = curiosity.compute_exploration_bonus(ninja_pos, unreachable_target, level_data)
+        self.assertEqual(bonus_unreachable, 0.0)  # No curiosity
+        
+        # Test curiosity for frontier target (might become reachable)
+        frontier_target = (300, 400)  # Behind locked door
+        bonus_frontier = curiosity.compute_exploration_bonus(ninja_pos, frontier_target, level_data)
+        self.assertGreater(bonus_frontier, 0.0)
+        self.assertLess(bonus_frontier, bonus_reachable)  # Medium curiosity
+        
+    def test_level_completion_planner(self):
+        """Test strategic level completion planning."""
+        analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+        planner = PhysicsAwareLevelCompletionPlanner(analyzer)
+        
+        level_data = self.load_test_level("complex_switch_puzzle.json")
+        ninja_pos = (50, 400)
+        switch_states = {}
+        
+        # Test completion strategy planning
+        strategy = planner.plan_completion_strategy(ninja_pos, level_data, switch_states)
+        
+        # Should return ordered list of actions
+        self.assertIsInstance(strategy, list)
+        self.assertGreater(len(strategy), 0)
+        
+        # Should end with exit sequence
+        self.assertIn('navigate_to_exit_switch', strategy)
+        self.assertIn('navigate_to_exit_door', strategy)
+        
+        # Exit switch should come before exit door
+        exit_switch_idx = strategy.index('navigate_to_exit_switch')
+        exit_door_idx = strategy.index('navigate_to_exit_door')
+        self.assertLess(exit_switch_idx, exit_door_idx)
+```
+
+**Integration Tests** (`tests/test_reachability_rl_integration.py`):
+```python
+class TestReachabilityRLIntegration(unittest.TestCase):
+    def test_hrl_subgoal_filtering(self):
+        """Test HRL integration with reachability filtering."""
+        # Create mock HRL agent with reachability integration
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        # Create test environment with known reachability constraints
+        env = self.create_test_env("blocked_exit_level.json")
+        obs = env.reset()
+        
+        # Extract reachable subgoals
+        ninja_pos = agent._extract_ninja_position(obs)
+        level_data = agent._extract_level_data(obs)
+        switch_states = agent._extract_switch_states(obs)
+        
+        reachable_subgoals = agent.reachability_manager.get_reachable_subgoals(
+            ninja_pos, level_data, switch_states
+        )
+        
+        # High-level policy should only see reachable options
+        filtered_obs = agent._filter_observation_by_reachability(
+            obs, reachable_subgoals, []
+        )
+        
+        # Validate filtering worked correctly
+        self.assertIn('available_subgoals', filtered_obs)
+        available_subgoals = filtered_obs['available_subgoals']
+        
+        # Should not include unreachable exit door
+        self.assertNotIn('navigate_to_exit_door', available_subgoals)
+        
+        # Should include reachable door switch
+        self.assertIn('activate_door_switch_1', available_subgoals)
+        
+    def test_curiosity_exploration_efficiency(self):
+        """Test that reachability-aware curiosity improves exploration efficiency."""
+        # Create two curiosity modules: standard and reachability-aware
+        standard_curiosity = StandardICM()
+        reachability_curiosity = ReachabilityAwareCuriosity(
+            HierarchicalReachabilityManager(ReachabilityAnalyzer(TrajectoryCalculator()))
+        )
+        
+        level_data = self.load_test_level("maze_with_unreachable_areas.json")
+        ninja_pos = (50, 400)
+        
+        # Test exploration bonuses for various targets
+        test_targets = [
+            (100, 400),   # Reachable
+            (200, 400),   # Reachable but further
+            (500, 100),   # Unreachable (isolated area)
+            (300, 400),   # Frontier (behind door)
+        ]
+        
+        standard_bonuses = []
+        reachability_bonuses = []
+        
+        for target in test_targets:
+            standard_bonus = standard_curiosity.compute_exploration_bonus(
+                ninja_pos, target, level_data
+            )
+            reachability_bonus = reachability_curiosity.compute_exploration_bonus(
+                ninja_pos, target, level_data
+            )
+            
+            standard_bonuses.append(standard_bonus)
+            reachability_bonuses.append(reachability_bonus)
+        
+        # Reachability-aware curiosity should give zero bonus to unreachable areas
+        self.assertEqual(reachability_bonuses[2], 0.0)  # Unreachable area
+        
+        # But should still give bonuses to reachable areas
+        self.assertGreater(reachability_bonuses[0], 0.0)  # Reachable
+        self.assertGreater(reachability_bonuses[1], 0.0)  # Reachable but further
+        
+        # Frontier areas should get reduced but non-zero bonus
+        self.assertGreater(reachability_bonuses[3], 0.0)
+        self.assertLess(reachability_bonuses[3], reachability_bonuses[0])
+```
+
+**Performance Tests** (`tests/test_reachability_performance.py`):
+```python
+class TestReachabilityPerformance(unittest.TestCase):
+    def test_real_time_reachability_updates(self):
+        """Test reachability system performance for real-time RL."""
+        manager = HierarchicalReachabilityManager(
+            ReachabilityAnalyzer(TrajectoryCalculator())
+        )
+        
+        level_data = self.load_test_level("dynamic_level.json")
+        
+        # Simulate 60 FPS updates for 10 seconds
+        num_updates = 600
+        ninja_positions = self.generate_ninja_trajectory(num_updates)
+        switch_states_sequence = self.generate_switch_state_changes(num_updates)
+        
+        start_time = time.time()
+        for i in range(num_updates):
+            subgoals = manager.get_reachable_subgoals(
+                ninja_positions[i], level_data, switch_states_sequence[i]
+            )
+        total_time = time.time() - start_time
+        
+        # Should maintain 60 FPS (16.67ms per frame)
+        avg_time_per_update = total_time / num_updates
+        self.assertLess(avg_time_per_update, 0.01)  # 10ms budget per update
+        
+    def test_memory_efficiency(self):
+        """Test memory usage of reachability caching."""
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        initial_memory = process.memory_info().rss
+        
+        manager = HierarchicalReachabilityManager(
+            ReachabilityAnalyzer(TrajectoryCalculator())
+        )
+        
+        # Create many different level configurations
+        for i in range(100):
+            level_data = self.generate_random_level(seed=i)
+            ninja_pos = (random.randint(50, 950), random.randint(50, 550))
+            switch_states = self.generate_random_switch_states(seed=i)
+            
+            subgoals = manager.get_reachable_subgoals(ninja_pos, level_data, switch_states)
+        
+        final_memory = process.memory_info().rss
+        memory_increase = final_memory - initial_memory
+        
+        # Memory increase should be reasonable (< 100MB)
+        self.assertLess(memory_increase, 100 * 1024 * 1024)
+```
+
+**Validation Metrics**:
+- **Subgoal Accuracy**: Percentage of subgoals correctly classified as reachable/unreachable
+- **Cache Hit Rate**: Percentage of reachability queries served from cache
+- **Update Latency**: Time to update reachability when switches change (target: <10ms)
+- **Memory Efficiency**: Peak memory usage for reachability caches (target: <100MB)
+- **Integration Correctness**: Validation that HRL and curiosity systems respect reachability constraints
 
 #### Task 1.4: Integration Testing and Bug Fixes (2-3 weeks)
 **Objective**: Ensure all components work together
@@ -705,6 +1310,241 @@ class ReachabilityAwareHierarchicalAgent:
 2. **Strategic Guidance**: Completion planner provides optimal switch sequences
 3. **Dynamic Updates**: Reachability updates when environment changes
 4. **Performance Optimization**: Cached reachability analysis for real-time decisions
+
+**Testing & Validation Strategy**:
+
+**Unit Tests** (`tests/test_hrl_framework.py`):
+```python
+class TestHRLFramework(unittest.TestCase):
+    def test_hierarchical_agent_initialization(self):
+        """Test proper initialization of hierarchical agent components."""
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        # Validate component initialization
+        self.assertIsNotNone(agent.reachability_manager)
+        self.assertIsNotNone(agent.high_level_policy)
+        self.assertIsNotNone(agent.low_level_policies)
+        self.assertIsNotNone(agent.completion_planner)
+        
+        # Validate subtask definitions
+        expected_subtasks = [
+            'navigate_to_exit_switch', 'navigate_to_exit_door',
+            'collect_gold', 'activate_door_switch', 'avoid_hazard'
+        ]
+        for subtask in expected_subtasks:
+            self.assertIn(subtask, agent.low_level_policies)
+            
+    def test_hierarchical_action_selection(self):
+        """Test hierarchical action selection with reachability filtering."""
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        # Create test observation with known reachability constraints
+        obs = self.create_test_observation("switch_puzzle_level.json")
+        
+        # Test action selection
+        action = agent.select_action(obs)
+        
+        # Should return valid action
+        self.assertIsInstance(action, int)
+        self.assertIn(action, range(6))  # Valid N++ action space
+        
+        # Test that current subtask is reachable
+        current_subtask = agent.current_subtask
+        ninja_pos = agent._extract_ninja_position(obs)
+        level_data = agent._extract_level_data(obs)
+        switch_states = agent._extract_switch_states(obs)
+        
+        reachable_subgoals = agent.reachability_manager.get_reachable_subgoals(
+            ninja_pos, level_data, switch_states
+        )
+        self.assertIn(current_subtask, reachable_subgoals)
+        
+    def test_subtask_transitions(self):
+        """Test proper subtask transitions based on completion."""
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        # Start with switch activation subtask
+        obs = self.create_test_observation("pre_switch_activation.json")
+        agent.current_subtask = 'activate_door_switch_1'
+        
+        # Simulate switch activation
+        obs_after_switch = self.create_test_observation("post_switch_activation.json")
+        action = agent.select_action(obs_after_switch)
+        
+        # Should transition to new subtask (exit switch now reachable)
+        self.assertNotEqual(agent.current_subtask, 'activate_door_switch_1')
+        self.assertIn(agent.current_subtask, ['navigate_to_exit_switch', 'collect_gold'])
+        
+    def test_strategic_planning_integration(self):
+        """Test integration with strategic level completion planner."""
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        obs = self.create_test_observation("complex_multi_switch_level.json")
+        
+        # Extract game state
+        ninja_pos = agent._extract_ninja_position(obs)
+        level_data = agent._extract_level_data(obs)
+        switch_states = agent._extract_switch_states(obs)
+        
+        # Get strategic plan
+        strategic_plan = agent.completion_planner.plan_completion_strategy(
+            ninja_pos, level_data, switch_states
+        )
+        
+        # Plan should influence subtask selection
+        action = agent.select_action(obs)
+        current_subtask = agent.current_subtask
+        
+        # Current subtask should align with strategic plan
+        if len(strategic_plan) > 0:
+            expected_first_action = strategic_plan[0]
+            self.assertEqual(current_subtask, expected_first_action)
+```
+
+**Integration Tests** (`tests/test_hrl_training_integration.py`):
+```python
+class TestHRLTrainingIntegration(unittest.TestCase):
+    def test_hierarchical_training_loop(self):
+        """Test hierarchical training with reachability constraints."""
+        # Create training environment
+        env = self.create_test_env("training_level_set.json")
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space
+        )
+        
+        # Run short training episode
+        obs = env.reset()
+        total_reward = 0
+        steps = 0
+        max_steps = 1000
+        
+        while steps < max_steps:
+            action = agent.select_action(obs)
+            obs, reward, done, info = env.step(action)
+            total_reward += reward
+            steps += 1
+            
+            if done:
+                break
+                
+        # Validate training metrics
+        self.assertGreater(steps, 10)  # Should take some steps
+        self.assertGreater(total_reward, -1000)  # Should not fail immediately
+        
+        # Validate that agent used hierarchical structure
+        self.assertIsNotNone(agent.current_subtask)
+        
+    def test_subtask_reward_shaping(self):
+        """Test that subtask environments provide appropriate reward shaping."""
+        subtask_env = PhysicsAwareSubtaskEnv('navigate_to_exit_switch')
+        
+        obs = subtask_env.reset()
+        
+        # Take action toward switch
+        action_toward_switch = self.get_action_toward_target(obs, 'exit_switch')
+        obs, reward, done, info = subtask_env.step(action_toward_switch)
+        
+        # Should receive positive reward for progress
+        self.assertGreater(reward, 0)
+        
+        # Take action away from switch
+        action_away_switch = self.get_action_away_from_target(obs, 'exit_switch')
+        obs, reward, done, info = subtask_env.step(action_away_switch)
+        
+        # Should receive negative or zero reward
+        self.assertLessEqual(reward, 0)
+        
+    def test_low_level_policy_specialization(self):
+        """Test that low-level policies specialize for their subtasks."""
+        # Create agents for different subtasks
+        jump_agent = self.create_subtask_agent('perform_wall_jump')
+        navigation_agent = self.create_subtask_agent('navigate_to_exit_switch')
+        
+        # Test on wall jump scenario
+        wall_jump_obs = self.create_test_observation("wall_jump_required.json")
+        
+        jump_action = jump_agent.predict(wall_jump_obs)
+        nav_action = navigation_agent.predict(wall_jump_obs)
+        
+        # Jump agent should be more likely to use jump actions
+        jump_actions = [3, 4, 5]  # Jump, Jump+Left, Jump+Right
+        self.assertIn(jump_action[0], jump_actions)
+        
+        # Navigation agent might choose differently
+        # (This tests that policies actually specialize)
+```
+
+**Performance Tests** (`tests/test_hrl_performance.py`):
+```python
+class TestHRLPerformance(unittest.TestCase):
+    def test_hierarchical_decision_speed(self):
+        """Test decision-making speed for hierarchical agent."""
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=self.create_test_obs_space(),
+            action_space=gym.spaces.Discrete(6)
+        )
+        
+        obs = self.create_test_observation("complex_level.json")
+        
+        # Time action selection
+        start_time = time.time()
+        for _ in range(100):
+            action = agent.select_action(obs)
+        decision_time = time.time() - start_time
+        
+        # Should make decisions quickly (< 10ms per decision)
+        avg_decision_time = decision_time / 100
+        self.assertLess(avg_decision_time, 0.01)
+        
+    def test_memory_usage_during_training(self):
+        """Test memory efficiency during hierarchical training."""
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        initial_memory = process.memory_info().rss
+        
+        # Create and train agent
+        env = self.create_test_env("memory_test_level.json")
+        agent = ReachabilityAwareHierarchicalAgent(
+            observation_space=env.observation_space,
+            action_space=env.action_space
+        )
+        
+        # Run training for multiple episodes
+        for episode in range(50):
+            obs = env.reset()
+            done = False
+            while not done:
+                action = agent.select_action(obs)
+                obs, reward, done, info = env.step(action)
+                
+        final_memory = process.memory_info().rss
+        memory_increase = final_memory - initial_memory
+        
+        # Memory increase should be reasonable (< 500MB)
+        self.assertLess(memory_increase, 500 * 1024 * 1024)
+```
+
+**Validation Metrics**:
+- **Subtask Completion Rate**: Percentage of subtasks successfully completed
+- **Hierarchical Efficiency**: Comparison of sample efficiency vs flat RL
+- **Reachability Compliance**: Percentage of selected subtasks that are actually reachable
+- **Decision Speed**: Time to select actions (target: <10ms)
+- **Memory Efficiency**: Peak memory usage during training (target: <500MB per agent)
 
 #### Task 2.2: Subtask Environment Wrappers (2-3 weeks)
 **Objective**: Create specialized environments for each subtask
@@ -1132,3 +1972,307 @@ This comprehensive analysis demonstrates that **physics-aware reachability analy
 - **Phase 3**: Add strategic planning for level completion heuristic (2-3 weeks)
 
 The proposed approach directly addresses your level completion heuristic while maintaining computational efficiency and leveraging the sophisticated physics simulation already implemented in nclone. This provides the best of both worlds: intelligent spatial reasoning without the computational overhead of full pathfinding.
+
+## 11. Comprehensive Testing and Validation Framework
+
+### 11.1 Testing Philosophy
+
+Our testing strategy follows a **pyramid approach** with comprehensive coverage at each level:
+
+1. **Unit Tests (70%)**: Fast, isolated tests for individual components
+2. **Integration Tests (20%)**: Component interaction validation
+3. **End-to-End Tests (10%)**: Full system validation
+
+### 11.2 Test Data Requirements
+
+**Essential Test Datasets**:
+```
+test_data/
+├── replays/
+│   ├── expert_completions/     # High-quality level completions
+│   ├── failed_attempts/        # Early deaths, timeouts
+│   ├── wall_jump_sequences/    # Specific skill demonstrations
+│   └── switch_puzzles/         # Complex multi-switch levels
+├── levels/
+│   ├── simple_jump_level.json  # Basic physics validation
+│   ├── obstacle_course.json    # Trajectory validation
+│   ├── drone_patrol.json       # Dynamic entity testing
+│   ├── locked_door_puzzle.json # Switch-door dependencies
+│   ├── maze_with_unreachable_areas.json # Reachability testing
+│   └── complex_multi_switch_level.json  # Strategic planning
+└── benchmarks/
+    ├── performance_levels/     # Large levels for performance testing
+    └── memory_test_levels/     # Memory usage validation
+```
+
+### 11.3 Automated Testing Pipeline
+
+**Continuous Integration Setup**:
+```yaml
+# .github/workflows/test.yml
+name: NPP-RL Test Suite
+on: [push, pull_request]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e ../nclone  # Install simulator
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/test_replay_processing.py -v
+          python -m pytest tests/test_physics_integration.py -v
+          python -m pytest tests/test_reachability_integration.py -v
+          python -m pytest tests/test_hrl_framework.py -v
+      - name: Generate coverage report
+        run: |
+          python -m pytest --cov=npp_rl --cov-report=xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v1
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Run integration tests
+        run: |
+          python -m pytest tests/test_replay_integration.py -v
+          python -m pytest tests/test_physics_reachability_integration.py -v
+          python -m pytest tests/test_reachability_rl_integration.py -v
+          python -m pytest tests/test_hrl_training_integration.py -v
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - name: Run performance benchmarks
+        run: |
+          python -m pytest tests/test_replay_performance.py -v
+          python -m pytest tests/test_physics_performance.py -v
+          python -m pytest tests/test_reachability_performance.py -v
+          python -m pytest tests/test_hrl_performance.py -v
+      - name: Performance regression check
+        run: |
+          python tools/check_performance_regression.py
+```
+
+### 11.4 Validation Metrics Dashboard
+
+**Key Performance Indicators**:
+```python
+# tests/validation_dashboard.py
+class ValidationDashboard:
+    def __init__(self):
+        self.metrics = {
+            # Data Processing Metrics
+            'replay_processing_speed': {'target': 1000, 'unit': 'FPS'},
+            'data_quality_score': {'target': 0.8, 'unit': 'ratio'},
+            'cross_modal_consistency': {'target': 0.95, 'unit': 'ratio'},
+            
+            # Physics Integration Metrics
+            'movement_classification_accuracy': {'target': 0.95, 'unit': 'ratio'},
+            'trajectory_validation_accuracy': {'target': 0.98, 'unit': 'ratio'},
+            'reachability_precision': {'target': 0.92, 'unit': 'ratio'},
+            'physics_analysis_speed': {'target': 0.1, 'unit': 'seconds'},
+            
+            # Reachability System Metrics
+            'subgoal_accuracy': {'target': 0.90, 'unit': 'ratio'},
+            'cache_hit_rate': {'target': 0.80, 'unit': 'ratio'},
+            'update_latency': {'target': 0.01, 'unit': 'seconds'},
+            'memory_efficiency': {'target': 100, 'unit': 'MB'},
+            
+            # HRL Framework Metrics
+            'subtask_completion_rate': {'target': 0.75, 'unit': 'ratio'},
+            'reachability_compliance': {'target': 0.95, 'unit': 'ratio'},
+            'decision_speed': {'target': 0.01, 'unit': 'seconds'},
+            'hierarchical_efficiency': {'target': 2.0, 'unit': 'ratio'},
+        }
+        
+    def validate_all_metrics(self) -> Dict[str, bool]:
+        """Run all validation tests and check against targets."""
+        results = {}
+        
+        for metric_name, target_info in self.metrics.items():
+            current_value = self.measure_metric(metric_name)
+            target_value = target_info['target']
+            
+            # Determine if higher or lower is better based on metric type
+            if 'speed' in metric_name or 'latency' in metric_name:
+                passed = current_value <= target_value  # Lower is better
+            else:
+                passed = current_value >= target_value  # Higher is better
+                
+            results[metric_name] = {
+                'passed': passed,
+                'current': current_value,
+                'target': target_value,
+                'unit': target_info['unit']
+            }
+            
+        return results
+        
+    def generate_report(self) -> str:
+        """Generate comprehensive validation report."""
+        results = self.validate_all_metrics()
+        
+        report = "# NPP-RL Validation Report\n\n"
+        
+        # Summary
+        total_tests = len(results)
+        passed_tests = sum(1 for r in results.values() if r['passed'])
+        report += f"**Overall Status**: {passed_tests}/{total_tests} tests passed\n\n"
+        
+        # Detailed results by category
+        categories = {
+            'Data Processing': ['replay_processing_speed', 'data_quality_score', 'cross_modal_consistency'],
+            'Physics Integration': ['movement_classification_accuracy', 'trajectory_validation_accuracy', 'reachability_precision', 'physics_analysis_speed'],
+            'Reachability System': ['subgoal_accuracy', 'cache_hit_rate', 'update_latency', 'memory_efficiency'],
+            'HRL Framework': ['subtask_completion_rate', 'reachability_compliance', 'decision_speed', 'hierarchical_efficiency']
+        }
+        
+        for category, metrics in categories.items():
+            report += f"## {category}\n\n"
+            for metric in metrics:
+                if metric in results:
+                    r = results[metric]
+                    status = "✅ PASS" if r['passed'] else "❌ FAIL"
+                    report += f"- **{metric}**: {status} ({r['current']} {r['unit']}, target: {r['target']} {r['unit']})\n"
+            report += "\n"
+            
+        return report
+```
+
+### 11.5 Test Execution Strategy
+
+**Phase-by-Phase Testing**:
+
+**Phase 1 Testing (Foundation)**:
+```bash
+# Run after each major component completion
+python -m pytest tests/test_replay_processing.py::TestReplayProcessing::test_replay_data_ingestion -v
+python -m pytest tests/test_physics_integration.py::TestPhysicsIntegration::test_movement_classifier_accuracy -v
+python -m pytest tests/test_reachability_integration.py::TestReachabilityIntegration::test_hierarchical_reachability_manager -v
+
+# Performance validation
+python -m pytest tests/test_replay_performance.py::TestReplayPerformance::test_processing_speed -v
+python -m pytest tests/test_physics_performance.py::TestPhysicsPerformance::test_reachability_analysis_speed -v
+```
+
+**Phase 2 Testing (HRL Implementation)**:
+```bash
+# HRL component testing
+python -m pytest tests/test_hrl_framework.py::TestHRLFramework::test_hierarchical_agent_initialization -v
+python -m pytest tests/test_hrl_training_integration.py::TestHRLTrainingIntegration::test_hierarchical_training_loop -v
+
+# Integration validation
+python -m pytest tests/test_reachability_rl_integration.py::TestReachabilityRLIntegration::test_hrl_subgoal_filtering -v
+```
+
+**Phase 3 Testing (Advanced Features)**:
+```bash
+# End-to-end system testing
+python -m pytest tests/test_end_to_end.py -v
+
+# Performance regression testing
+python tools/performance_regression_test.py --baseline=phase2_results.json
+```
+
+### 11.6 Success Criteria
+
+**Minimum Viable Product (MVP) Criteria**:
+- ✅ All unit tests pass (100% pass rate)
+- ✅ Integration tests pass (>95% pass rate)
+- ✅ Performance targets met (all metrics within 10% of targets)
+- ✅ Memory usage within bounds (<1GB peak usage)
+- ✅ Real-time performance (60 FPS decision making)
+
+**Production Ready Criteria**:
+- ✅ Comprehensive test coverage (>90% code coverage)
+- ✅ Performance benchmarks exceed targets by 20%
+- ✅ Stress testing passes (24-hour continuous operation)
+- ✅ Memory leak testing passes (stable memory usage over time)
+- ✅ Cross-platform compatibility (Linux, Windows, macOS)
+
+### 11.7 Debugging and Troubleshooting
+
+**Common Test Failure Scenarios**:
+
+1. **Reachability Analysis Failures**:
+   ```python
+   # Debug reachability issues
+   def debug_reachability_failure(level_data, ninja_pos, expected_reachable):
+       analyzer = ReachabilityAnalyzer(TrajectoryCalculator())
+       result = analyzer.analyze_reachability(level_data, ninja_pos, {})
+       
+       print(f"Expected reachable: {expected_reachable}")
+       print(f"Actually reachable: {len(result.reachable_positions)}")
+       
+       # Visualize reachability
+       visualizer = ReachabilityVisualizer()
+       visualizer.create_reachability_map(level_data, result, "debug_reachability.png")
+   ```
+
+2. **Performance Regression Detection**:
+   ```python
+   # Automated performance regression detection
+   def check_performance_regression(current_metrics, baseline_metrics, threshold=0.1):
+       regressions = []
+       for metric, current_value in current_metrics.items():
+           if metric in baseline_metrics:
+               baseline_value = baseline_metrics[metric]
+               change_ratio = (current_value - baseline_value) / baseline_value
+               
+               if abs(change_ratio) > threshold:
+                   regressions.append({
+                       'metric': metric,
+                       'current': current_value,
+                       'baseline': baseline_value,
+                       'change': change_ratio
+                   })
+       return regressions
+   ```
+
+3. **Memory Leak Detection**:
+   ```python
+   # Memory leak detection utility
+   def detect_memory_leaks(test_function, iterations=1000):
+       import gc
+       import psutil
+       import os
+       
+       process = psutil.Process(os.getpid())
+       memory_samples = []
+       
+       for i in range(iterations):
+           initial_memory = process.memory_info().rss
+           test_function()
+           gc.collect()  # Force garbage collection
+           final_memory = process.memory_info().rss
+           memory_samples.append(final_memory - initial_memory)
+           
+           if i % 100 == 0:
+               print(f"Iteration {i}: Memory delta = {memory_samples[-1]} bytes")
+       
+       # Check for consistent memory growth
+       if len(memory_samples) > 100:
+           recent_avg = sum(memory_samples[-100:]) / 100
+           early_avg = sum(memory_samples[:100]) / 100
+           
+           if recent_avg > early_avg * 1.5:  # 50% increase indicates leak
+               print(f"WARNING: Potential memory leak detected!")
+               print(f"Early average: {early_avg} bytes")
+               print(f"Recent average: {recent_avg} bytes")
+               return True
+       
+       return False
+   ```
+
+This comprehensive testing framework ensures that each component is thoroughly validated before integration, preventing issues from propagating through the system and maintaining high code quality throughout development.
