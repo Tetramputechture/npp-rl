@@ -8,9 +8,7 @@ triggers: ['setup', 'install', 'dependencies', 'environment', 'requirements', 'g
 ## System Requirements
 
 ### Operating System Support
-- **Linux**: Primary development platform (Ubuntu 20.04+ recommended)
-- **Windows**: Supported via WSL2 
-- **macOS**: Supported but GPU training requires compatible hardware
+- **Linux**: Primary development platform (Debian-based distributions including Ubuntu 20.04+ recommended)
 
 ### Hardware Requirements
 - **CPU**: 8+ cores recommended for parallel training environments
@@ -26,15 +24,6 @@ sudo apt update
 sudo apt install libcairo2-dev pkg-config python3-dev git python3-pip python3-venv
 ```
 
-**CentOS/RHEL:**
-```bash
-sudo yum install cairo-devel pkgconfig python3-devel git python3-pip
-```
-
-**macOS:**
-```bash
-brew install cairo pkg-config python@3.11
-```
 
 ## Installation Process
 
@@ -64,17 +53,11 @@ cd npp-rl
 
 ### Step 3: Python Environment Setup
 
-**Option A: Virtual Environment (Recommended)**
+**Virtual Environment**
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install --upgrade pip setuptools wheel
-```
-
-**Option B: Conda Environment**
-```bash
-conda create -n npp-rl python=3.11
-conda activate npp-rl
 ```
 
 ### Step 4: Install Python Dependencies
@@ -144,44 +127,6 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121  # For CUDA 12.1
 ```
 
-## Verification and Testing
-
-### Quick Environment Test
-```bash
-# Test basic functionality
-python -c "
-from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import BasicLevelNoGold
-env = BasicLevelNoGold()
-obs = env.reset()
-print('Environment setup successful!')
-print(f'Observation space: {env.observation_space}')
-print(f'Action space: {env.action_space}')
-env.close()
-"
-```
-
-### Run Test Suite
-```bash
-# Run basic tests to verify setup
-pytest tests/test_phase2_basic.py -v
-
-# Run a quick training verification (1000 steps)
-python -c "
-from npp_rl.agents.training import train_enhanced_agent
-model, log_dir = train_enhanced_agent(num_envs=4, total_timesteps=1000, render_mode='rgb_array')
-print(f'Quick training test completed. Logs: {log_dir}')
-"
-```
-
-### Development Environment Verification
-```bash
-# Test linting setup
-make lint
-
-# Test that you can run a minimal training
-python -m npp_rl.agents.training --num_envs 4 --total_timesteps 1000
-```
-
 ## Common Installation Issues
 
 ### Issue: "Cairo not found"
@@ -189,9 +134,6 @@ python -m npp_rl.agents.training --num_envs 4 --total_timesteps 1000
 ```bash
 # Ubuntu/Debian
 sudo apt install libcairo2-dev pkg-config python3-dev
-
-# macOS  
-brew install cairo pkg-config
 
 # Then reinstall nclone
 cd ../nclone
@@ -255,49 +197,3 @@ pip install --user -r requirements.txt
 export CUDA_LAUNCH_BLOCKING=1  # For debugging CUDA issues
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"  # If import issues persist
 ```
-
-## Post-Installation Next Steps
-
-### 1. Quick Training Test
-```bash
-# Run a short training to verify everything works
-python -m npp_rl.agents.training --num_envs 16 --total_timesteps 50000
-```
-
-### 2. Monitor Training
-```bash
-# In another terminal, start TensorBoard
-tensorboard --logdir ./training_logs/enhanced_ppo_training/
-# Open http://localhost:6006 in browser
-```
-
-### 3. Explore Documentation
-```bash
-# Read technical documentation
-ls docs/
-# Key files: README.md, docs/PHASE_2_IMPLEMENTATION_COMPLETE.md
-```
-
-### 4. Run Full Test Suite
-```bash
-# Comprehensive testing
-pytest tests/ -v
-```
-
-## Performance Optimization
-
-### For Training Performance
-```bash
-# Adjust based on your hardware
-python -m npp_rl.agents.training \
-    --num_envs $(nproc)  \  # Use all CPU cores
-    --total_timesteps 10000000
-```
-
-### For Development
-```bash
-# Quick iteration with fewer environments
-python -m npp_rl.agents.training --num_envs 4 --total_timesteps 100000
-```
-
-The setup is complete when you can successfully run training and see meaningful logs in TensorBoard without errors.
