@@ -13,7 +13,6 @@ Based on analysis of `/workspace/npp-rl/npp_rl/feature_extractors/hgt_multimodal
 - **Performance Target**: Real-time processing for 60 FPS gameplay
 
 ### Integration Strategy
-From `/workspace/nclone/docs/reachability_analysis_integration_strategy.md`:
 - **Compact Features**: 64-dimensional reachability encoding
 - **Guidance Over Ground Truth**: Approximate features for learned spatial reasoning
 - **HGT Compatibility**: Leverage graph transformer's ability to learn from compact representations
@@ -26,18 +25,97 @@ From `/workspace/nclone/docs/reachability_analysis_integration_strategy.md`:
 
 ## Technical Specification
 
-### Enhanced HGT Architecture
+### Code Organization and Documentation Requirements
+
+**Import Requirements**:
+- Always prefer top-level imports at the module level
+- Import all dependencies at the top of the file before any class or function definitions
+- Group imports by: standard library, third-party, nclone, npp_rl modules
+
+**Documentation Requirements**:
+- **Top-level module docstrings**: Every modified module must have comprehensive docstrings explaining the integration approach and theoretical foundation
+- **Inline documentation**: Complex algorithms and model architectures require detailed inline comments explaining the rationale
+- **Paper references**: All techniques must reference original research papers in docstrings and comments
+- **Integration notes**: Document how each component integrates with existing nclone systems
+
+**Module Modification Approach**:
+- **Update existing modules in place** rather than creating separate "enhanced" or "aware" versions
+- Extend existing classes with new functionality while maintaining backward compatibility
+- Add reachability integration directly to `HGTMultimodalExtractor` in `/npp_rl/feature_extractors/hgt_multimodal.py`
+
+### HGT Architecture Modifications
+**Target File**: `/npp_rl/feature_extractors/hgt_multimodal.py`
+
+**Required Documentation Additions**:
 ```python
-class ReachabilityAwareHGTExtractor(HGTMultimodalExtractor):
+"""
+HGT Multimodal Feature Extractor with Reachability Integration
+
+This module implements a Heterogeneous Graph Transformer (HGT) based feature extractor
+that processes multiple modalities (visual, graph, state) with integrated compact
+reachability features from the nclone physics engine.
+
+Integration Strategy:
+- Compact reachability features (64-dim) provide spatial guidance without ground truth dependency
+- Cross-modal attention mechanisms learn to weight reachability information appropriately
+- Performance-optimized for real-time RL training (<2ms feature extraction)
+
+Theoretical Foundation:
+- Heterogeneous Graph Transformers: Hu et al. (2020) "Heterogeneous Graph Transformer"
+- Multi-modal fusion: Baltrusaitis et al. (2018) "Multimodal Machine Learning: A Survey"
+- Attention mechanisms: Vaswani et al. (2017) "Attention Is All You Need"
+- Spatial reasoning: Hamilton et al. (2017) "Inductive Representation Learning on Large Graphs"
+
+nclone Integration:
+- Uses TieredReachabilitySystem for performance-tuned feature extraction
+- Integrates with compact feature representations from nclone.graph.reachability
+- Maintains compatibility with existing NPP physics constants and game state
+"""
+
+# Standard library imports
+import math
+import time
+from typing import Dict, Tuple, Optional, Any
+
+# Third-party imports
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# nclone imports (top-level imports preferred)
+from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
+from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
+from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+
+# npp_rl imports
+from npp_rl.feature_extractors.base import BaseFeatureExtractor
+from npp_rl.models.attention import CrossModalAttention
+
+
+class HGTMultimodalExtractor(BaseFeatureExtractor):
     """
-    Enhanced HGT extractor with integrated reachability features.
+    HGT-based multimodal feature extractor with integrated reachability features.
     
-    Architecture:
+    This extractor processes visual frames, graph structures, game state, and compact
+    reachability features through a unified Heterogeneous Graph Transformer architecture.
+    
+    Architecture Components:
     1. Visual Processing: 3D CNN for temporal frames + 2D CNN for global view
-    2. Graph Processing: HGT with type-specific attention
-    3. State Processing: MLP for physics/game state features
-    4. Reachability Processing: Compact feature integration
-    5. Multimodal Fusion: Cross-modal attention with reachability awareness
+    2. Graph Processing: HGT with type-specific attention mechanisms
+    3. State Processing: MLP for physics/game state features  
+    4. Reachability Processing: Compact feature integration with cross-modal attention
+    5. Multimodal Fusion: Attention-based fusion with reachability awareness
+    
+    Performance Optimizations:
+    - Lazy initialization of reachability extractor for dependency management
+    - Caching mechanisms for repeated reachability computations
+    - Tier-1 reachability extraction for real-time performance (<2ms target)
+    
+    References:
+    - HGT Architecture: Hu et al. (2020) "Heterogeneous Graph Transformer"
+    - Cross-modal Attention: Baltrusaitis et al. (2018) "Multimodal Machine Learning"
+    - Reachability Integration: Custom integration with nclone physics system
     """
     
     def __init__(self, observation_space, features_dim=512, 
@@ -46,18 +124,25 @@ class ReachabilityAwareHGTExtractor(HGTMultimodalExtractor):
         super().__init__(observation_space, features_dim, hgt_hidden_dim, 
                         hgt_num_layers, **kwargs)
         
-        # Reachability feature processing
+        # Reachability feature processing components
+        # Based on compact feature dimensionality from nclone.graph.reachability
         self.reachability_dim = reachability_dim
+        
+        # Multi-layer reachability encoder with batch normalization for stability
+        # Architecture inspired by residual connections from He et al. (2016)
         self.reachability_encoder = nn.Sequential(
             nn.Linear(reachability_dim, 128),
+            nn.BatchNorm1d(128),  # Stabilize training with reachability features
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Linear(64, 32)
+            nn.Linear(64, 32)  # Compact representation for attention mechanisms
         )
         
-        # Enhanced fusion with reachability awareness
+        # Cross-modal attention for reachability integration
+        # Implementation based on Baltrusaitis et al. (2018) multimodal fusion principles
         self.reachability_attention = ReachabilityAttentionModule(
             visual_dim=self.cnn_output_dim,
             graph_dim=self.hgt_output_dim,
@@ -65,7 +150,8 @@ class ReachabilityAwareHGTExtractor(HGTMultimodalExtractor):
             reachability_dim=32
         )
         
-        # Update final fusion layer dimensions
+        # Update final fusion layer to accommodate reachability features
+        # Maintain output dimensionality while integrating new modality
         total_dim = (self.cnn_output_dim + self.hgt_output_dim + 
                     self.mlp_output_dim + 32)
         self.final_fusion = nn.Sequential(
@@ -75,49 +161,81 @@ class ReachabilityAwareHGTExtractor(HGTMultimodalExtractor):
             nn.Linear(features_dim, features_dim)
         )
         
-        # Initialize reachability feature extractor
-        self.reachability_extractor = None  # Lazy initialization
+        # Lazy initialization to handle nclone dependency gracefully
+        # Allows fallback behavior if reachability system is unavailable
+        self.reachability_extractor = None
     
     def _initialize_reachability_extractor(self):
         """
         Lazy initialization of reachability feature extractor.
+        
+        This approach allows the model to be instantiated even when nclone
+        reachability components are not available, enabling development and
+        testing in environments without full physics integration.
+        
+        Implementation follows the dependency injection pattern for better
+        testability and modularity as described in Martin (2008) "Clean Code".
         """
         if self.reachability_extractor is None:
             try:
-                from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
-                from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
-                
+                # Import at runtime to avoid hard dependency on nclone at module level
+                # Use TieredReachabilitySystem for performance-optimized feature extraction
                 tiered_system = TieredReachabilitySystem()
                 self.reachability_extractor = ReachabilityFeatureExtractor(tiered_system)
             except ImportError:
-                # Fallback: create dummy extractor for development
+                # Graceful degradation: use dummy extractor during development
+                # This ensures the model can still function for testing and development
                 self.reachability_extractor = DummyReachabilityExtractor()
     
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        Enhanced forward pass with reachability feature integration.
+        Forward pass with integrated reachability feature processing.
+        
+        This method extends the base HGT forward pass to incorporate compact
+        reachability features as an additional modality. The integration follows
+        the multimodal fusion approach from Baltrusaitis et al. (2018).
+        
+        Args:
+            observations: Dict containing visual frames, graph data, state info,
+                         and optionally pre-computed reachability features
+                         
+        Returns:
+            torch.Tensor: Fused feature representation for policy/value networks
+            
+        Note:
+            Performance target is <2ms for real-time RL training compatibility.
+            Reachability extraction uses Tier-1 algorithms for speed optimization.
         """
-        # Initialize reachability extractor if needed
+        # Lazy initialization ensures graceful handling of missing dependencies
         if self.reachability_extractor is None:
             self._initialize_reachability_extractor()
         
-        # Standard multimodal processing
+        # Process each modality through dedicated pathways
+        # Visual: 3D CNN for temporal dynamics, 2D CNN for global spatial context
         visual_features = self._process_visual_observations(observations)
+        
+        # Graph: HGT with heterogeneous attention for structural relationships
+        # Based on Hu et al. (2020) type-aware graph transformer architecture
         graph_features = self._process_graph_observations(observations)
+        
+        # State: MLP processing of physics and game state variables
         state_features = self._process_state_observations(observations)
         
-        # Extract reachability features
+        # Reachability: Extract compact spatial reasoning features from nclone
+        # These provide approximate reachability guidance without ground truth dependency
         reachability_features = self._extract_reachability_features(observations)
         
-        # Process reachability features
+        # Encode reachability features through dedicated neural pathway
+        # Batch normalization stabilizes training with heterogeneous feature scales
         processed_reachability = self.reachability_encoder(reachability_features)
         
-        # Enhanced fusion with reachability awareness
+        # Cross-modal attention fusion integrating all four modalities
+        # Allows model to learn optimal weighting of reachability guidance
         fused_features = self.reachability_attention(
             visual_features, graph_features, state_features, processed_reachability
         )
         
-        # Final processing
+        # Final transformation to target feature dimensionality
         output = self.final_fusion(fused_features)
         
         return output
@@ -156,11 +274,33 @@ class ReachabilityAwareHGTExtractor(HGTMultimodalExtractor):
 ```
 
 ### Reachability Attention Module
+**Add to the same file**: `/npp_rl/feature_extractors/hgt_multimodal.py`
+
 ```python
 class ReachabilityAttentionModule(nn.Module):
     """
-    Cross-modal attention module that integrates reachability features
-    with visual, graph, and state representations.
+    Cross-modal attention module for integrating reachability features with multimodal representations.
+    
+    This module implements the attention-based fusion mechanism from Baltrusaitis et al. (2018)
+    "Multimodal Machine Learning: A Survey", adapted for spatial reasoning integration in RL.
+    
+    The architecture uses cross-modal attention to allow each modality to attend to
+    reachability features, followed by gating mechanisms to modulate feature importance
+    based on spatial reachability context.
+    
+    Architecture Components:
+    - Cross-modal attention between each modality and reachability features
+    - Learned gating mechanism for reachability-guided feature enhancement
+    - Multi-layer fusion network for final feature integration
+    
+    References:
+    - Multimodal fusion: Baltrusaitis et al. (2018) "Multimodal Machine Learning: A Survey"
+    - Attention mechanisms: Vaswani et al. (2017) "Attention Is All You Need"
+    - Gating networks: Dauphin et al. (2017) "Language Modeling with Gated Convolutional Networks"
+    
+    Note:
+        This module should be integrated directly into the HGTMultimodalExtractor
+        rather than created as a separate file to maintain architectural cohesion.
     """
     
     def __init__(self, visual_dim, graph_dim, state_dim, reachability_dim):
@@ -276,28 +416,57 @@ class CrossModalAttention(nn.Module):
 
 ## Implementation Plan
 
-### Phase 1: Core Integration (Week 1)
-**Deliverables**:
-1. **ReachabilityAwareHGTExtractor**: Enhanced HGT with reachability integration
-2. **ReachabilityAttentionModule**: Cross-modal attention for feature fusion
-3. **Integration Interface**: Clean interface between nclone and npp-rl
+### Core Integration
+**Objective**: Integrate reachability features into existing HGT architecture
 
-**Key Files**:
-- `npp_rl/feature_extractors/reachability_aware_hgt.py` (NEW)
-- `npp_rl/models/reachability_attention.py` (NEW)
-- `npp_rl/utils/reachability_interface.py` (NEW)
+**Approach**:
+- **Update existing modules in place** rather than creating new enhanced versions
+- Maintain backward compatibility while adding reachability functionality
+- Follow top-level import patterns and comprehensive documentation standards
 
-### Phase 2: Environment Integration (Week 2)
-**Deliverables**:
-1. **Enhanced Environment Wrapper**: Add reachability information to observations
-2. **Observation Space Extension**: Include reachability features in observation space
-3. **Batch Processing**: Efficient batch processing of reachability features
+**Key Modifications**:
+1. **HGT Feature Extractor**: Extend `HGTMultimodalExtractor` in `/npp_rl/feature_extractors/hgt_multimodal.py`
+2. **Attention Integration**: Add `ReachabilityAttentionModule` to same file for architectural cohesion  
+3. **Interface Components**: Create utility functions for nclone integration within existing modules
 
-**Implementation**:
+**Documentation Requirements**:
+- Add comprehensive module-level docstrings with theoretical foundations
+- Include inline documentation explaining integration approach and performance considerations
+- Reference all relevant research papers in docstrings and comments
+- Document nclone integration points and fallback mechanisms
+
+### Environment Integration  
+**Objective**: Extend environment observations to include reachability information
+
+**Approach**:
+- **Modify existing environment classes** rather than creating wrappers
+- Extend observation spaces to include reachability features
+- Implement efficient batch processing for real-time performance
+
+**Target Environment**: Modify existing `NPPEnv` class in place
+
+**Implementation Example** (modify existing environment):
 ```python
-class ReachabilityEnhancedNPPEnv(NPPEnv):
+# Add to existing NPPEnv class in npp_rl/environments/npp_env.py
+
+class NPPEnv:
     """
-    Enhanced NPP environment with reachability information.
+    NPP Environment with integrated reachability feature support.
+    
+    This environment extends the base NPP gameplay with compact reachability
+    features extracted from the nclone physics system. Reachability information
+    is provided as part of the observation space to guide spatial reasoning.
+    
+    Integration Components:
+    - Reachability feature extraction using TieredReachabilitySystem
+    - Extended observation space including 64-dimensional reachability features
+    - Performance-optimized caching for real-time extraction (<2ms target)
+    - Graceful fallback when nclone components are unavailable
+    
+    References:
+    - Reachability analysis: Custom integration with nclone physics system
+    - Observation space design: Gym environment standards
+    - Performance optimization: Real-time RL training requirements
     """
     
     def __init__(self, *args, **kwargs):
@@ -403,33 +572,53 @@ class ReachabilityEnhancedNPPEnv(NPPEnv):
             return np.zeros(64, dtype=np.float32)
 ```
 
-### Phase 3: Training Integration (Week 3)
-**Deliverables**:
-1. **Enhanced Training Script**: Support for reachability-aware training
-2. **Hyperparameter Tuning**: Optimize reachability feature integration
-3. **Performance Monitoring**: Track reachability feature impact on training
+### Training Integration
+**Objective**: Integrate reachability-aware feature extraction into existing training pipeline
 
-**Key Files**:
-- `npp_rl/agents/reachability_aware_training.py` (NEW)
-- `npp_rl/config/reachability_config.py` (NEW)
+**Approach**:
+- **Modify existing training scripts** to support reachability feature extraction
+- Update existing configuration systems to include reachability parameters
+- Add reachability-specific monitoring to existing performance tracking
 
-### Phase 4: Evaluation and Optimization (Week 4)
-**Deliverables**:
-1. **Performance Evaluation**: Compare reachability-aware vs standard training
-2. **Feature Analysis**: Analyze learned attention patterns
-3. **Optimization**: Performance tuning and memory optimization
+**Key Modifications**:
+1. **Training Scripts**: Update existing training modules to support reachability-aware extractors
+2. **Configuration**: Extend existing config files with reachability integration parameters
+3. **Monitoring**: Add reachability feature metrics to existing training monitoring systems
+
+**Documentation Requirements**:
+- Document reachability hyperparameters and their effects on training
+- Include performance benchmarking guidelines for reachability integration
+- Reference relevant RL and multimodal learning literature in training modifications
+
+### Evaluation and Optimization
+**Objective**: Assess integration impact and optimize performance
+
+**Evaluation Approach**:
+- Compare reachability-integrated models with baseline HGT performance
+- Analyze attention patterns to understand reachability feature utilization
+- Profile computational overhead and optimize for real-time performance requirements
+
+**Optimization Focus**:
+- Memory efficiency for batch processing of reachability features
+- Computational optimization for <2ms feature extraction target
+- Attention mechanism efficiency for real-time RL training
 
 ## Testing Strategy
 
 ### Unit Tests
+**Test existing modified classes with reachability integration**
+
 ```python
-class TestReachabilityAwareHGT(unittest.TestCase):
+class TestHGTMultimodalExtractorWithReachability(unittest.TestCase):
+    """Test reachability integration in the modified HGTMultimodalExtractor."""
+    
     def setUp(self):
         self.observation_space = create_mock_observation_space()
-        self.extractor = ReachabilityAwareHGTExtractor(
+        # Test the modified existing extractor with reachability features enabled
+        self.extractor = HGTMultimodalExtractor(
             observation_space=self.observation_space,
             features_dim=512,
-            reachability_dim=64
+            reachability_dim=64  # Enable reachability integration
         )
     
     def test_forward_pass(self):
@@ -480,11 +669,15 @@ class TestReachabilityAwareHGT(unittest.TestCase):
 
 ### Integration Tests
 ```python
-class TestReachabilityEnvironmentIntegration(unittest.TestCase):
+class TestNPPEnvironmentReachabilityIntegration(unittest.TestCase):
+    """Test reachability feature integration in the modified NPPEnv."""
+    
     def setUp(self):
-        self.env = ReachabilityEnhancedNPPEnv(
+        # Test the modified existing environment with reachability features enabled
+        self.env = NPPEnv(
             render_mode='rgb_array',
-            custom_map_path='test_maps/simple_level'
+            custom_map_path='test_maps/simple_level',
+            enable_reachability_features=True  # Enable reachability integration
         )
     
     def test_observation_space_extension(self):
@@ -544,21 +737,26 @@ class TestReachabilityEnvironmentIntegration(unittest.TestCase):
 
 ### Training Tests
 ```python
-class TestReachabilityAwareTraining(unittest.TestCase):
+class TestReachabilityIntegratedTraining(unittest.TestCase):
+    """Test training compatibility with reachability-integrated components."""
+    
     def test_training_compatibility(self):
-        """Test that reachability-aware extractor works with PPO training."""
-        # Create environment
-        env = ReachabilityEnhancedNPPEnv(render_mode='rgb_array')
+        """Test that modified HGT extractor works with PPO training."""
+        # Create environment with reachability features enabled
+        env = NPPEnv(
+            render_mode='rgb_array',
+            enable_reachability_features=True
+        )
         
-        # Create model with reachability-aware extractor
+        # Create model with modified HGT extractor (reachability integration enabled)
         model = PPO(
             policy="MultiInputPolicy",
             env=env,
             policy_kwargs={
-                "features_extractor_class": ReachabilityAwareHGTExtractor,
+                "features_extractor_class": HGTMultimodalExtractor,
                 "features_extractor_kwargs": {
                     "features_dim": 512,
-                    "reachability_dim": 64
+                    "reachability_dim": 64  # Enable reachability integration
                 }
             },
             verbose=1
@@ -613,18 +811,14 @@ class TestReachabilityAwareTraining(unittest.TestCase):
 
 ## Deliverables
 
-1. **ReachabilityAwareHGTExtractor**: Enhanced HGT with reachability integration
-2. **ReachabilityEnhancedNPPEnv**: Environment wrapper with reachability features
-3. **Training Integration**: Complete training pipeline with reachability awareness
-4. **Performance Analysis**: Comprehensive evaluation of integration impact
-5. **Documentation**: Complete integration guide and API documentation
+1. **Modified HGTMultimodalExtractor**: Existing HGT architecture extended with reachability integration
+2. **Enhanced NPPEnv**: Existing environment updated with reachability feature support
+3. **Training Pipeline Updates**: Modified training modules supporting reachability-aware feature extraction
+4. **Performance Analysis**: Comprehensive evaluation of integration impact on existing systems
+5. **Documentation**: Updated module docstrings and inline documentation with theoretical foundations
+6. **Integration Testing**: Test suites validating reachability integration in existing components
 
-## Timeline
-
-- **Week 1**: Core HGT integration and attention mechanisms
-- **Week 2**: Environment integration and observation space extension
-- **Week 3**: Training pipeline integration and hyperparameter tuning
-- **Week 4**: Evaluation, optimization, and documentation
+**Key Principle**: All modifications maintain backward compatibility while extending functionality
 
 ## Dependencies
 
