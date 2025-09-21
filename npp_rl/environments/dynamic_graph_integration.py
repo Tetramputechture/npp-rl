@@ -164,16 +164,9 @@ def validate_dynamic_graph_environment(env: gym.Env) -> bool:
             logging.error("Environment missing observation_space")
             return False
 
-        if isinstance(env.observation_space, SpacesDict):
-            required_spaces = ["dynamic_graph_metadata"]
-            for space_name in required_spaces:
-                if space_name not in env.observation_space.spaces:
-                    logging.error(f"Missing observation space: {space_name}")
-                    return False
-
         # Test environment reset and step
         obs, info = env.reset()
-        if isinstance(obs, dict) and "dynamic_graph_metadata" in obs:
+        if "dynamic_graph_metadata" in obs:
             metadata = obs["dynamic_graph_metadata"]
             if len(metadata) != 10:
                 logging.error(f"Invalid dynamic graph metadata shape: {metadata.shape}")

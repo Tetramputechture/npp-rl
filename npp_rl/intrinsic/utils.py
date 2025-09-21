@@ -10,20 +10,20 @@ from typing import Dict, Any, Optional, Union
 def extract_features_from_policy(
     policy,
     observations: Union[torch.Tensor, Dict[str, torch.Tensor]],
-    detach: bool = True
+    detach: bool = True,
 ) -> torch.Tensor:
     """
     Extract features from a policy's feature extractor.
-    
+
     Args:
         policy: SB3 policy with features_extractor
         observations: Observations to extract features from
         detach: Whether to detach features from computation graph
-        
+
     Returns:
         Feature tensor [batch_size, feature_dim]
     """
-    if hasattr(policy, 'features_extractor'):
+    if hasattr(policy, "features_extractor"):
         features = policy.features_extractor(observations)
         if detach:
             features = features.detach()
@@ -33,68 +33,61 @@ def extract_features_from_policy(
 
 
 def clip_intrinsic_reward(
-    intrinsic_reward: np.ndarray,
-    clip_max: float = 1.0,
-    clip_min: float = 0.0
+    intrinsic_reward: np.ndarray, clip_max: float = 1.0, clip_min: float = 0.0
 ) -> np.ndarray:
     """
     Clip intrinsic rewards to prevent instability.
-    
+
     Args:
         intrinsic_reward: Intrinsic rewards to clip
         clip_max: Maximum reward value
         clip_min: Minimum reward value
-        
+
     Returns:
         Clipped intrinsic rewards
     """
     return np.clip(intrinsic_reward, clip_min, clip_max)
 
 
-def normalize_features(
-    features: torch.Tensor,
-    method: str = 'l2'
-) -> torch.Tensor:
+def normalize_features(features: torch.Tensor, method: str = "l2") -> torch.Tensor:
     """
     Normalize feature vectors.
-    
+
     Args:
         features: Feature tensor to normalize
         method: Normalization method ('l2', 'batch', or 'none')
-        
+
     Returns:
         Normalized features
     """
-    if method == 'l2':
+    if method == "l2":
         return torch.nn.functional.normalize(features, p=2, dim=1)
-    elif method == 'batch':
+    elif method == "batch":
         return (features - features.mean(dim=0)) / (features.std(dim=0) + 1e-8)
-    elif method == 'none':
+    elif method == "none":
         return features
     else:
         raise ValueError(f"Unknown normalization method: {method}")
 
 
-def compute_feature_statistics(
-    features: torch.Tensor
-) -> Dict[str, float]:
+def compute_feature_statistics(features: torch.Tensor) -> Dict[str, float]:
     """
     Compute statistics about feature representations.
-    
+
     Args:
         features: Feature tensor [batch_size, feature_dim]
-        
+
     Returns:
         Dictionary of feature statistics
     """
     with torch.no_grad():
         stats = {
-            'mean_norm': torch.norm(features, dim=1).mean().item(),
-            'std_norm': torch.norm(features, dim=1).std().item(),
-            'mean_feature': features.mean().item(),
-            'std_feature': features.std().item(),
-            'max_feature': features.max().item(),
-            'min_feature': features.min().item()
+            "mean_norm": torch.norm(features, dim=1).mean().item(),
+            "std_norm": torch.norm(features, dim=1).std().item(),
+            "mean_feature": features.mean().item(),
+            "std_feature": features.std().item(),
+            "max_feature": features.max().item(),
+            "min_feature": features.min().item(),
         }
     return stats
 
@@ -109,11 +102,11 @@ def create_icm_config(
     learning_rate: float = 1e-3,
     alpha: float = 0.1,
     r_int_clip: float = 1.0,
-    share_backbone: bool = True
+    share_backbone: bool = True,
 ) -> Dict[str, Any]:
     """
     Create a default ICM configuration.
-    
+
     Args:
         feature_dim: Dimension of feature representations
         action_dim: Number of discrete actions
@@ -125,21 +118,21 @@ def create_icm_config(
         alpha: Weight for combining intrinsic and extrinsic rewards
         r_int_clip: Maximum intrinsic reward value
         share_backbone: Whether to share backbone with policy
-        
+
     Returns:
         ICM configuration dictionary
     """
     return {
-        'feature_dim': feature_dim,
-        'action_dim': action_dim,
-        'hidden_dim': hidden_dim,
-        'eta': eta,
-        'lambda_inv': lambda_inv,
-        'lambda_fwd': lambda_fwd,
-        'learning_rate': learning_rate,
-        'alpha': alpha,
-        'r_int_clip': r_int_clip,
-        'share_backbone': share_backbone
+        "feature_dim": feature_dim,
+        "action_dim": action_dim,
+        "hidden_dim": hidden_dim,
+        "eta": eta,
+        "lambda_inv": lambda_inv,
+        "lambda_fwd": lambda_fwd,
+        "learning_rate": learning_rate,
+        "alpha": alpha,
+        "r_int_clip": r_int_clip,
+        "share_backbone": share_backbone,
     }
 
 
@@ -147,17 +140,17 @@ class RewardCombiner:
     """
     Combines extrinsic and intrinsic rewards with optional annealing.
     """
-    
+
     def __init__(
         self,
         alpha_start: float = 0.1,
         alpha_end: float = 0.01,
         anneal_steps: Optional[int] = None,
-        anneal_method: str = 'linear'
+        anneal_method: str = "linear",
     ):
         """
         Initialize reward combiner.
-        
+
         Args:
             alpha_start: Initial weight for intrinsic rewards
             alpha_end: Final weight for intrinsic rewards
@@ -169,35 +162,33 @@ class RewardCombiner:
         self.anneal_steps = anneal_steps
         self.anneal_method = anneal_method
         self.current_step = 0
-        
+
     def get_alpha(self) -> float:
         """Get current alpha value."""
         if self.anneal_steps is None:
             return self.alpha_start
-            
+
         progress = min(self.current_step / self.anneal_steps, 1.0)
-        
-        if self.anneal_method == 'linear':
+
+        if self.anneal_method == "linear":
             alpha = self.alpha_start + progress * (self.alpha_end - self.alpha_start)
-        elif self.anneal_method == 'exponential':
+        elif self.anneal_method == "exponential":
             alpha = self.alpha_start * (self.alpha_end / self.alpha_start) ** progress
         else:
             raise ValueError(f"Unknown annealing method: {self.anneal_method}")
-            
+
         return alpha
-    
+
     def combine_rewards(
-        self,
-        extrinsic_rewards: np.ndarray,
-        intrinsic_rewards: np.ndarray
+        self, extrinsic_rewards: np.ndarray, intrinsic_rewards: np.ndarray
     ) -> np.ndarray:
         """
         Combine extrinsic and intrinsic rewards.
-        
+
         Args:
             extrinsic_rewards: External environment rewards
             intrinsic_rewards: ICM intrinsic rewards
-            
+
         Returns:
             Combined rewards
         """
@@ -205,7 +196,7 @@ class RewardCombiner:
         combined = extrinsic_rewards + alpha * intrinsic_rewards
         self.current_step += len(extrinsic_rewards)
         return combined
-    
+
     def reset(self):
         """Reset the step counter."""
         self.current_step = 0

@@ -165,7 +165,7 @@ class ReachabilityWrapper(gym.Wrapper):
         reachability_features = self._extract_reachability_features()
 
         # Add to observation
-        obs = self._add_reachability_to_obs(obs, reachability_features)
+        obs["reachability_features"] = self._extract_reachability_features()
 
         # Add reachability info for debugging
         if "reachability" not in info:
@@ -190,7 +190,7 @@ class ReachabilityWrapper(gym.Wrapper):
         reachability_features = self._extract_reachability_features()
 
         # Add to observation
-        obs = self._add_reachability_to_obs(obs, reachability_features)
+        obs["reachability_features"] = reachability_features
 
         # Add reachability info for debugging
         if "reachability" not in info:
@@ -212,14 +212,6 @@ class ReachabilityWrapper(gym.Wrapper):
         )
 
         return obs, reward, terminated, truncated, info
-
-    def _add_reachability_to_obs(self, obs, reachability_features):
-        """Add reachability features to observation."""
-        if isinstance(obs, dict):
-            obs["reachability_features"] = reachability_features
-        else:
-            obs = {"original_obs": obs, "reachability_features": reachability_features}
-        return obs
 
     def _extract_reachability_features(self) -> np.ndarray:
         """Extract reachability features for current game state."""
@@ -250,8 +242,13 @@ class ReachabilityWrapper(gym.Wrapper):
                 # Use ReachabilityFeatureExtractor interface
                 # Convert performance target to PerformanceMode enum
                 from nclone.graph.reachability.feature_extractor import PerformanceMode
-                perf_mode = getattr(PerformanceMode, self.performance_target.upper(), PerformanceMode.FAST)
-                
+
+                perf_mode = getattr(
+                    PerformanceMode,
+                    self.performance_target.upper(),
+                    PerformanceMode.FAST,
+                )
+
                 features_result = self.reachability_extractor.extract_features(
                     ninja_position=ninja_pos,
                     level_data=level_data,
@@ -317,9 +314,11 @@ class ReachabilityWrapper(gym.Wrapper):
     def _get_ninja_position(self) -> Tuple[float, float]:
         """Extract ninja position from environment state."""
         # Check if this is an nclone environment
-        if hasattr(self.env, 'ninja_position'):
+        if hasattr(self.env, "ninja_position"):
             return self.env.ninja_position()
-        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'ninja_position'):
+        elif hasattr(self.env, "unwrapped") and hasattr(
+            self.env.unwrapped, "ninja_position"
+        ):
             return self.env.unwrapped.ninja_position()
         else:
             # Fallback for non-nclone environments
@@ -328,9 +327,11 @@ class ReachabilityWrapper(gym.Wrapper):
     def _get_level_data(self) -> Optional[Any]:
         """Extract level data from environment state."""
         # Check if this is an nclone environment
-        if hasattr(self.env, 'level_data'):
+        if hasattr(self.env, "level_data"):
             return self.env.level_data
-        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'level_data'):
+        elif hasattr(self.env, "unwrapped") and hasattr(
+            self.env.unwrapped, "level_data"
+        ):
             return self.env.unwrapped.level_data
         else:
             # Fallback for non-nclone environments
@@ -339,29 +340,29 @@ class ReachabilityWrapper(gym.Wrapper):
     def _get_switch_states(self) -> Dict[str, bool]:
         """Extract switch states from environment state."""
         # Check if this is an nclone environment
-        if hasattr(self.env, 'entities'):
+        if hasattr(self.env, "entities"):
             entities = self.env.entities
-        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'entities'):
+        elif hasattr(self.env, "unwrapped") and hasattr(self.env.unwrapped, "entities"):
             entities = self.env.unwrapped.entities
         else:
             # Fallback for non-nclone environments
             return {}
-        
+
         # Extract switch states from entities
         switch_states = {}
         for entity in entities:
-            if hasattr(entity, 'entity_id') and hasattr(entity, 'activated'):
+            if hasattr(entity, "entity_id") and hasattr(entity, "activated"):
                 # This is a switch entity
                 switch_states[str(entity.entity_id)] = entity.activated
-        
+
         return switch_states
 
     def _get_entities(self) -> List[Any]:
         """Extract entities from environment state."""
         # Check if this is an nclone environment
-        if hasattr(self.env, 'entities'):
+        if hasattr(self.env, "entities"):
             return self.env.entities
-        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'entities'):
+        elif hasattr(self.env, "unwrapped") and hasattr(self.env.unwrapped, "entities"):
             return self.env.unwrapped.entities
         else:
             # Fallback for non-nclone environments
