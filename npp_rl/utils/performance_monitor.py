@@ -8,7 +8,7 @@ to have minimal overhead while providing useful insights for optimization.
 
 import time
 import statistics
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from collections import deque
 
 

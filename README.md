@@ -34,8 +34,6 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-The consolidated architecture uses **Heterogeneous Graph Transformers (HGT)** as the primary approach for optimal performance:
-
 *   **`HGTMultimodalExtractor` (Primary Architecture - RECOMMENDED)**:
     *   Implements **Heterogeneous Graph Transformers** with type-specific attention mechanisms.
     *   **Type-aware processing**: Specialized handling for different node types (grid cells, entities, hazards, switches).
@@ -43,12 +41,6 @@ The consolidated architecture uses **Heterogeneous Graph Transformers (HGT)** as
     *   **Multi-head attention**: Advanced attention mechanisms adapted for heterogeneous graph structures.
     *   **Entity-aware embeddings**: Specialized processing for different entity types with hazard-aware attention.
     *   **Advanced multimodal fusion**: Cross-modal attention with spatial awareness for optimal feature integration.
-
-*   **`HierarchicalMultimodalExtractor` (Secondary Architecture)**:
-    *   Implements multi-resolution graph neural networks for structural level understanding.
-    *   **Three resolution levels**: Sub-cell (6px), Tile (24px), Region (96px) for both local precision and strategic planning.
-    *   **DiffPool GNN**: Differentiable graph pooling with learnable hierarchical representations.
-    *   **Multi-scale fusion**: Context-aware attention mechanisms that adapt to ninja physics state.
 
 The extractor processes the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs, graph representations, and the game state vector are then fused and passed to the policy and value networks.
 
