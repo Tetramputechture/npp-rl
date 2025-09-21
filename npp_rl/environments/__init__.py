@@ -17,6 +17,11 @@ from .dynamic_graph_integration import (
     DynamicGraphProfiler
 )
 
+from .reachability_wrapper import (
+    ReachabilityWrapper,
+    create_reachability_aware_env
+)
+
 __all__ = [
     'DynamicGraphWrapper',
     'EventType',
@@ -28,5 +33,7 @@ __all__ = [
     'add_dynamic_graph_monitoring',
     'validate_dynamic_graph_environment',
     'benchmark_dynamic_graph_performance',
-    'DynamicGraphProfiler'
+    'DynamicGraphProfiler',
+    'ReachabilityWrapper',
+    'create_reachability_aware_env'
 ]

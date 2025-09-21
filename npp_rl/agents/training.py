@@ -32,6 +32,7 @@ from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import B
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import HYPERPARAMETERS, NET_ARCH_SIZE
 from npp_rl.feature_extractors import HGTMultimodalExtractor, HierarchicalMultimodalExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+from npp_rl.environments import ReachabilityWrapper, create_reachability_aware_env
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -63,10 +64,11 @@ class HierarchicalLoggingCallback(BaseCallback):
         return True
 
 
-def create_environment(render_mode: str = "rgb_array", **kwargs):
-    """Create environment with hierarchical graph observations."""
+def create_environment(render_mode: str = "rgb_array", enable_reachability: bool = True, **kwargs):
+    """Create environment with hierarchical graph observations and reachability features."""
     def _init():
-        env = BasicLevelNoGold(
+        # Create base environment
+        base_env = BasicLevelNoGold(
             render_mode=render_mode,
             enable_frame_stack=True,  # Enable 12-frame stacking
             enable_animation=False,
@@ -75,6 +77,19 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
             use_graph_obs=True,  # Enable graph observations for hierarchical processing
             **kwargs
         )
+        
+        # Wrap with reachability features if enabled
+        if enable_reachability:
+            env = create_reachability_aware_env(
+                base_env=base_env,
+                cache_ttl_ms=100.0,  # 100ms cache for real-time performance
+                performance_target="fast",  # Use Tier-1 algorithms
+                enable_monitoring=True,
+                debug=False
+            )
+        else:
+            env = base_env
+            
         return env
     return _init
 
@@ -88,26 +103,23 @@ def train_agent(
     save_freq: int = 100_000,
     eval_freq: int = 50_000,
     log_interval: int = 10,
-    extractor_type: str = 'hgt'
+    extractor_type: str = 'hgt',
+    enable_reachability: bool = True
 ):
     """
-    Train the multimodal agent with HGT or hierarchical architecture.
+    Train the multimodal agent with HGT or hierarchical architecture and reachability features.
     
     Args:
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model: Path to existing model to resume training
-        render_mode: Rendering mode for environments
-        disable_exploration: Whether to disable adaptive exploration
-        save_freq: Model save frequency
-        eval_freq: Evaluation frequency
-        log_interval: Logging interval
-        extractor_type: Type of feature extractor ('hgt' or 'hierarchical')
         render_mode: Rendering mode ('rgb_array' for headless, 'human' for visual)
         disable_exploration: Whether to disable adaptive exploration
         save_freq: Frequency of model saves
         eval_freq: Frequency of evaluation
         log_interval: Logging interval
+        extractor_type: Type of feature extractor ('hgt' or 'hierarchical')
+        enable_reachability: Whether to enable reachability feature integration
     """
     
     # Force single environment for human rendering
@@ -126,7 +138,7 @@ def train_agent(
     
     # Create environment factory
     def make_env():
-        return create_environment(render_mode=render_mode)
+        return create_environment(render_mode=render_mode, enable_reachability=enable_reachability)
     
     # Create vectorized environment
     if num_envs == 1:
@@ -152,7 +164,7 @@ def train_agent(
     
     # Configure policy with selected feature extractor
     if extractor_type == 'hgt':
-        print("Using HGT-based multimodal extractor (PRIMARY/RECOMMENDED)")
+        print(f"Using HGT-based multimodal extractor (PRIMARY/RECOMMENDED) with reachability: {enable_reachability}")
         extractor_class = HGTMultimodalExtractor
         extractor_kwargs = {
             "features_dim": 512,
@@ -160,7 +172,9 @@ def train_agent(
             "hgt_num_layers": 3,
             "hgt_output_dim": 256,
             "use_cross_modal_attention": True,
-            "use_spatial_attention": True
+            "use_spatial_attention": True,
+            "enable_reachability_features": enable_reachability,
+            "reachability_dim": 64  # Standard compact feature dimension
         }
     elif extractor_type == 'hierarchical':
         print("Using hierarchical multimodal extractor (SECONDARY)")
@@ -316,6 +330,8 @@ def main():
     parser.add_argument("--extractor_type", type=str, default="hgt",
                         choices=["hgt", "hierarchical"],
                         help="Feature extractor type: 'hgt' (recommended) or 'hierarchical' (default: hgt)")
+    parser.add_argument("--disable_reachability", action="store_true",
+                        help="Disable reachability feature integration (default: enabled)")
     
     args = parser.parse_args()
     
@@ -329,7 +345,8 @@ def main():
         save_freq=args.save_freq,
         eval_freq=args.eval_freq,
         log_interval=args.log_interval,
-        extractor_type=args.extractor_type
+        extractor_type=args.extractor_type,
+        enable_reachability=not args.disable_reachability
     )
 
 
