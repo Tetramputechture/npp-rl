@@ -37,8 +37,8 @@ from stable_baselines3.common.vec_env import (
 )
 from stable_baselines3.common.logger import configure
 
-from nclone.nclone_environments.basic_level_no_gold.basic_level_no_gold import (
-    BasicLevelNoGold,
+from nclone.gym_environment.npp_environment import (
+    NppEnvironment,
 )
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
     HYPERPARAMETERS,
@@ -85,7 +85,7 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
 
     def _init():
         # Create base environment
-        base_env = BasicLevelNoGold(
+        base_env = NppEnvironment(
             render_mode=render_mode,
             enable_frame_stack=True,  # Enable 12-frame stacking
             enable_animation=False,

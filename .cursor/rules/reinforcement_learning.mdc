@@ -37,7 +37,7 @@ Use consistent environment setup patterns:
 def create_training_environment(num_envs: int, render_mode: str = 'rgb_array'):
     """Create vectorized training environment with standard configuration."""
     def make_env():
-        env = BasicLevelNoGold(render_mode=render_mode)
+        env = NppEnvironment(render_mode=render_mode)
         # Apply standard wrappers consistently
         env = SomeStandardWrapper(env)
         return env

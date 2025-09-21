@@ -19,7 +19,7 @@ The agent receives multi-modal observations:
 *   **Player-Centric Visual Frames**:
     *   Dimensions: 84x84 pixels.
     *   Temporal Stacking: 12 consecutive frames are stacked to provide temporal context.
-        *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/nclone_environments/basic_level_no_gold/constants.py`).
+        *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/gym_environment/constants.py`).
     *   Preprocessing: Grayscale conversion, centering on the player, cropping, and normalization.
     *   Augmentation: Random cutout is applied to player frames with a 50% chance to improve generalization (inspired by DeVries & Taylor, 2017, "Improved Regularization of Convolutional Neural Networks with Cutout").
 

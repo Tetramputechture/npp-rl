@@ -4,7 +4,7 @@ This document defines the expected format and schema for human replay data inges
 
 ## Overview
 
-Human replay data is used for behavioral cloning (BC) pretraining to provide the RL agent with expert demonstrations. The data must be processed to align with the `BasicLevelNoGold` environment's observation space and action space.
+Human replay data is used for behavioral cloning (BC) pretraining to provide the RL agent with expert demonstrations. The data must be processed to align with the `NppEnvironment` environment's observation space and action space.
 
 ## Input Format Specification
 
@@ -140,7 +140,7 @@ For larger datasets, Parquet format with columnar storage:
 
 ### Observation Space Alignment
 
-The processed observations must match `BasicLevelNoGold.observation_space`:
+The processed observations must match `NppEnvironment.observation_space`:
 
 #### Player Frame (64x64x3)
 - Rendered view centered on player

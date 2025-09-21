@@ -1552,7 +1552,7 @@ class TestHRLPerformance(unittest.TestCase):
 **Implementation**:
 ```python
 class SubtaskWrapper(gym.Wrapper):
-    def __init__(self, env: BasicLevelNoGold, subtask_type: str):
+    def __init__(self, env: NppEnvironment, subtask_type: str):
         super().__init__(env)
         self.subtask_type = subtask_type
         self.subtask_reward_fn = self._create_reward_function(subtask_type)
