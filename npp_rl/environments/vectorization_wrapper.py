@@ -35,6 +35,7 @@ class VectorizationWrapper(gym.Wrapper):
                     "exploration_weight": 0.2,
                 },
                 "pbrs_gamma": 0.99,
+                "enable_reachability_features": False,  # Can be overridden
             }
 
         self.env_kwargs = env_kwargs

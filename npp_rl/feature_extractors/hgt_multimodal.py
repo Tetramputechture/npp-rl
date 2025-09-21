@@ -463,8 +463,8 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         Extract compact reachability features from observations.
 
         This method expects reachability features to be pre-computed by the
-        ReachabilityWrapper and included in the observations. If not present,
-        it returns zero features as fallback.
+        NppEnvironment (with enable_reachability_features=True) and included 
+        in the observations. If not present, it returns zero features as fallback.
 
         Args:
             observations: Dictionary of observation tensors
@@ -479,8 +479,8 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         if "reachability_features" in observations:
             return observations["reachability_features"]
 
-        # Fallback: zero features if not provided by wrapper
-        print("Warning: No reachability features found in observations. Use ReachabilityWrapper.")
+        # Fallback: zero features if not provided by environment
+        print("Warning: No reachability features found in observations. Enable reachability_features in NppEnvironment.")
         return torch.zeros(
             batch_size, self.reachability_dim, dtype=torch.float32, device=device
         )
