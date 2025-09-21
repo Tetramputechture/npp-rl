@@ -32,28 +32,117 @@ From `/workspace/nclone/docs/reachability_analysis_integration_strategy.md`:
 
 ## Technical Specification
 
-### Enhanced Curiosity Architecture
+### Code Organization and Documentation Requirements
+
+**Import Requirements**:
+- Always prefer top-level imports at the module level
+- Import all dependencies at the top of the file before any class or function definitions
+- Group imports by: standard library, third-party, nclone, npp_rl modules
+
+**Documentation Requirements**:
+- **Top-level module docstrings**: Every modified module must have comprehensive docstrings explaining the reachability integration approach and theoretical foundation
+- **Inline documentation**: Complex curiosity algorithms require detailed inline comments explaining the reachability-aware modifications
+- **Paper references**: All curiosity and exploration techniques must reference original research papers in docstrings and comments
+- **Integration notes**: Document how each component integrates with existing nclone reachability systems
+
+**Module Modification Approach**:
+- **Update existing intrinsic motivation modules in place** rather than creating separate reachability-aware versions
+- Extend existing ICM and novelty detection classes with reachability functionality while maintaining backward compatibility
+- Add reachability integration directly to existing modules in `/npp_rl/intrinsic/`
+
+### Intrinsic Motivation Module Modifications
+**Target Files**: 
+- `/npp_rl/intrinsic/icm.py` (existing ICM module)
+- `/npp_rl/intrinsic/novelty.py` (existing novelty detection)
+- `/npp_rl/intrinsic/base.py` (existing base classes)
+
+**Required Documentation Additions**:
 ```python
-class ReachabilityAwareCuriosity(nn.Module):
+"""
+Intrinsic Curiosity Module with Reachability Integration
+
+This module enhances the existing Intrinsic Curiosity Module (ICM) with reachability-aware
+exploration that avoids wasting curiosity on unreachable areas, improving sample efficiency.
+
+Integration Strategy:
+- Reachability scaling modulates base curiosity based on accessibility analysis
+- Frontier detection boosts exploration of newly reachable areas from nclone physics
+- Strategic weighting prioritizes exploration near level completion objectives
+- Performance-optimized for real-time RL training (<1ms curiosity computation)
+
+Theoretical Foundation:
+- Base ICM: Pathak et al. (2017) "Curiosity-driven Exploration by Self-supervised Prediction"  
+- Reachability guidance: Ecoffet et al. (2019) "Go-Explore: a New Approach for Hard-Exploration Problems"
+- Strategic exploration: Burda et al. (2018) "Exploration by Random Network Distillation"
+- Frontier exploration: Stanton & Clune (2018) "Deep curiosity search"
+
+nclone Integration:
+- Uses compact reachability features from nclone.graph.reachability for accessibility assessment
+- Integrates with TieredReachabilitySystem for performance-optimized reachability queries
+- Maintains compatibility with existing NPP physics constants and level objectives
+"""
+
+# Standard library imports
+import math
+import time
+from collections import deque
+from typing import Dict, Tuple, Optional, Set, List
+
+# Third-party imports
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# nclone imports (top-level imports preferred)
+from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
+from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
+from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+
+# npp_rl imports
+from npp_rl.intrinsic.base import BaseIntrinsicModule
+from npp_rl.intrinsic.utils import compute_prediction_error
+
+
+class ICMModule(BaseIntrinsicModule):
     """
-    Enhanced curiosity module that considers reachability constraints.
+    Intrinsic Curiosity Module with integrated reachability awareness.
     
-    Key Components:
-    1. Base Curiosity: ICM + Novelty detection (existing)
-    2. Reachability Scaling: Modulate curiosity based on reachability
-    3. Frontier Detection: Boost curiosity for newly reachable areas
-    4. Strategic Weighting: Prioritize exploration near objectives
+    This module extends the base ICM architecture from Pathak et al. (2017) with
+    reachability-aware exploration that scales curiosity based on accessibility.
+    
+    Architecture Enhancements:
+    1. Base ICM: Forward/inverse model prediction errors (existing functionality)
+    2. Reachability Scaling: Modulate curiosity based on reachability analysis
+    3. Frontier Detection: Boost curiosity for newly accessible areas
+    4. Strategic Weighting: Prioritize exploration near level objectives
+    
+    Performance Optimizations:
+    - Lazy initialization of reachability extractor for dependency management
+    - Caching mechanisms for repeated reachability computations
+    - <1ms curiosity computation target for real-time RL training
+    
+    References:
+    - ICM Foundation: Pathak et al. (2017) "Curiosity-driven Exploration by Self-supervised Prediction"
+    - Reachability Guidance: Ecoffet et al. (2019) "Go-Explore: a New Approach for Hard-Exploration Problems"
+    - Strategic Exploration: Custom integration with nclone physics system
     """
     
-    def __init__(self, base_curiosity_module, reachability_extractor, 
-                 observation_space, action_space):
-        super().__init__()
+    def __init__(self, observation_space, action_space, feature_dim=256, **kwargs):
+        super().__init__(observation_space, action_space, **kwargs)
         
-        # Base curiosity components
-        self.base_curiosity = base_curiosity_module
-        self.reachability_extractor = reachability_extractor
+        # Base ICM components (existing functionality preserved)
+        self.feature_dim = feature_dim
+        self.forward_model = self._build_forward_model()
+        self.inverse_model = self._build_inverse_model()
         
-        # Reachability-aware components
+        # Reachability integration components (new functionality)
+        # Lazy initialization to handle nclone dependency gracefully
+        # This allows the model to function without reachability components during development
+        self.reachability_extractor = None  
+        
+        # Reachability-aware enhancement components
+        # Based on theoretical foundations from Go-Explore and frontier exploration literature
         self.reachability_predictor = ReachabilityPredictor(
             observation_space, hidden_dim=128
         )
@@ -64,49 +153,72 @@ class ReachabilityAwareCuriosity(nn.Module):
             reachability_dim=64, objective_dim=32
         )
         
-        # Scaling parameters
-        self.reachability_scale_factor = 2.0
-        self.frontier_boost_factor = 3.0
-        self.strategic_weight_factor = 1.5
-        self.unreachable_penalty = 0.1
+        # Reachability scaling hyperparameters
+        # These parameters modulate base ICM curiosity based on accessibility
+        self.reachability_scale_factor = 2.0      # Boost for reachable areas
+        self.frontier_boost_factor = 3.0          # Extra boost for newly accessible areas
+        self.strategic_weight_factor = 1.5        # Weight for objective-proximate areas
+        self.unreachable_penalty = 0.1            # Penalty for confirmed unreachable areas
         
-        # Exploration history
+        # Exploration state tracking for frontier detection
+        # Maintains history of reachable positions to detect newly accessible areas
         self.exploration_history = ExplorationHistory(max_size=10000)
         self.last_reachable_positions = set()
     
     def compute_intrinsic_reward(self, obs, action, next_obs, info=None):
         """
-        Compute reachability-aware intrinsic reward.
+        Compute intrinsic reward with optional reachability awareness.
+        
+        This method extends the base ICM intrinsic reward computation from Pathak et al. (2017)
+        with reachability-aware modulation when enabled. The integration follows the exploration
+        efficiency principles from Ecoffet et al. (2019) "Go-Explore".
         
         Args:
-            obs: Current observation
+            obs: Current observation batch
             action: Action taken
-            next_obs: Next observation
-            info: Environment info (contains reachability data)
+            next_obs: Next observation batch  
+            info: Environment info containing optional reachability data
         
         Returns:
-            Enhanced intrinsic reward considering reachability
+            Intrinsic reward tensor, optionally enhanced with reachability awareness
+            
+        Note:
+            Falls back to base ICM computation when reachability awareness is disabled
+            or when reachability information is unavailable.
         """
-        # Get base curiosity reward
-        base_reward = self.base_curiosity.compute_intrinsic_reward(obs, action, next_obs)
+        # Compute base ICM curiosity reward using forward/inverse model prediction errors
+        # This preserves existing ICM functionality from Pathak et al. (2017)
+        base_reward = self._compute_base_icm_reward(obs, action, next_obs)
         
-        # Extract reachability information
+        # Initialize reachability extractor if needed (lazy loading for dependency management)
+        if self.reachability_extractor is None:
+            self._initialize_reachability_extractor()
+        
+        # Extract reachability information from environment info or compute from observations
         reachability_info = self._extract_reachability_info(obs, next_obs, info)
+
+        # Apply reachability-aware modulation to base curiosity
+        # Each component implements a specific aspect of reachability-guided exploration
         
-        # Compute reachability scaling
+        # 1. Scale curiosity based on reachability status (avoid unreachable areas)
+        # Implementation based on Go-Explore's accessibility filtering principles
         reachability_scale = self._compute_reachability_scale(reachability_info)
         
-        # Detect frontier exploration
+        # 2. Boost curiosity for frontier exploration (newly accessible areas)
+        # Based on frontier-based exploration from Stanton & Clune (2018)
         frontier_boost = self._compute_frontier_boost(reachability_info)
         
-        # Compute strategic weighting
+        # 3. Weight exploration by strategic value (proximity to objectives)
+        # Guides exploration toward level completion rather than random novelty
         strategic_weight = self._compute_strategic_weight(reachability_info)
         
-        # Combine all factors
+        # Combine all reachability factors with base ICM reward
+        # Multiplicative combination allows each factor to modulate the base curiosity
         enhanced_reward = (base_reward * reachability_scale * 
                           frontier_boost * strategic_weight)
         
-        # Update exploration history
+        # Update exploration history for frontier detection and strategic planning
+        # This maintains state for detecting newly accessible areas in future steps
         self._update_exploration_history(reachability_info, enhanced_reward)
         
         return enhanced_reward
@@ -185,15 +297,31 @@ class ReachabilityAwareCuriosity(nn.Module):
 ```
 
 ### Supporting Components
+**Add to existing intrinsic module files** rather than creating separate modules
 
-#### 1. Reachability Predictor
+#### 1. Reachability Predictor  
+**Target File**: Add to existing `/npp_rl/intrinsic/icm.py`
+
 ```python
 class ReachabilityPredictor(nn.Module):
     """
-    Predict reachability of positions based on observations.
+    Neural predictor for position reachability assessment within ICM framework.
     
-    This helps the curiosity module make reachability assessments
-    even when detailed reachability analysis is not available.
+    This component helps the ICM module make reachability assessments when detailed
+    reachability analysis from nclone is not available or too computationally expensive.
+    The predictor learns from ground truth reachability data during training.
+    
+    Architecture based on standard supervised learning for binary classification,
+    adapted for spatial reasoning tasks in NPP environments.
+    
+    References:
+    - Binary classification: Standard neural network literature
+    - Spatial reasoning: Hamilton et al. (2017) "Inductive Representation Learning on Large Graphs"
+    - Integration pattern: Custom design for ICM enhancement
+    
+    Note:
+        This class should be integrated into the existing ICM module file
+        to maintain architectural cohesion and avoid module proliferation.
     """
     
     def __init__(self, observation_space, hidden_dim=128):
@@ -260,10 +388,29 @@ class ReachabilityPredictor(nn.Module):
 ```
 
 #### 2. Frontier Detector
+**Target File**: Add to existing `/npp_rl/intrinsic/icm.py`
+
 ```python
 class FrontierDetector:
     """
-    Detect and track exploration frontiers (newly reachable areas).
+    Detection and tracking of exploration frontiers for reachability-aware ICM.
+    
+    This component identifies newly reachable areas that become accessible due to
+    environment changes (e.g., switch activation in NPP levels). Frontier detection
+    is inspired by frontier-based exploration from robotics and adapted for RL.
+    
+    The detector maintains a temporal history of reachable positions and identifies
+    areas that transition from unreachable to reachable, boosting curiosity for
+    these newly accessible regions.
+    
+    References:
+    - Frontier exploration: Yamauchi (1997) "A frontier-based approach for autonomous exploration"
+    - Temporal tracking: Stanton & Clune (2018) "Deep curiosity search"
+    - NPP integration: Custom design for switch-based level progression
+    
+    Note:
+        Integrated into ICM module for direct access to exploration state
+        and efficient frontier detection during curiosity computation.
     """
     
     def __init__(self, reachability_dim=64, memory_size=1000):
@@ -340,10 +487,30 @@ class FrontierDetector:
 ```
 
 #### 3. Strategic Weighter
+**Target File**: Add to existing `/npp_rl/intrinsic/icm.py`
+
 ```python
 class StrategicWeighter:
     """
-    Weight exploration based on strategic value for level completion.
+    Strategic weighting for objective-oriented exploration within ICM framework.
+    
+    This component weights curiosity based on strategic value for level completion,
+    prioritizing exploration of areas that are likely to contribute to progress.
+    The weighter considers proximity to objectives, critical path analysis, and
+    unlock potential for new areas.
+    
+    Strategic weighting is inspired by goal-directed exploration and adapted for
+    NPP levels where completion requires specific sequences of actions and area
+    accessibility patterns.
+    
+    References:
+    - Goal-directed exploration: Andrychowicz et al. (2017) "Hindsight Experience Replay"
+    - Strategic planning: Sutton & Barto (2018) "Reinforcement Learning: An Introduction"
+    - NPP-specific objectives: Custom analysis of level completion patterns
+    
+    Note:
+        Integrated into ICM module to directly influence curiosity computation
+        based on level-specific strategic considerations.
     """
     
     def __init__(self, reachability_dim=64, objective_dim=32):
@@ -444,39 +611,62 @@ class StrategicWeighter:
 
 ## Implementation Plan
 
-### Phase 1: Core Curiosity Enhancement (Week 1)
-**Deliverables**:
-1. **ReachabilityAwareCuriosity**: Main enhanced curiosity module
-2. **Integration Interface**: Clean integration with existing ICM
-3. **Basic Testing**: Unit tests for core functionality
+### Core ICM Enhancement
+**Objective**: Integrate reachability awareness into existing ICM architecture
 
-**Key Files**:
-- `npp_rl/intrinsic/reachability_aware_curiosity.py` (NEW)
-- `npp_rl/intrinsic/reachability_predictor.py` (NEW)
-- `tests/test_reachability_curiosity.py` (NEW)
+**Approach**:
+- **Modify existing ICM module in place** rather than creating separate reachability-aware version
+- Follow top-level import patterns and comprehensive documentation standards
 
-### Phase 2: Supporting Components (Week 2)
-**Deliverables**:
-1. **FrontierDetector**: Track newly reachable areas
-2. **StrategicWeighter**: Weight exploration by strategic value
-3. **ExplorationHistory**: Track exploration patterns
+**Key Modifications**:
+1. **ICM Module**: Extend existing `ICMModule` in `/npp_rl/intrinsic/icm.py`
+2. **Supporting Components**: Add `ReachabilityPredictor`, `FrontierDetector`, `StrategicWeighter` to same file for architectural cohesion
+3. **Base Classes**: Update existing base classes in `/npp_rl/intrinsic/base.py` if needed
 
-**Key Files**:
-- `npp_rl/intrinsic/frontier_detector.py` (NEW)
-- `npp_rl/intrinsic/strategic_weighter.py` (NEW)
-- `npp_rl/intrinsic/exploration_history.py` (NEW)
+**Documentation Requirements**:
+- Add comprehensive module-level docstrings with theoretical foundations
+- Include inline documentation explaining reachability integration approach and performance considerations
+- Reference all relevant research papers (Pathak et al. 2017, Ecoffet et al. 2019, etc.) in docstrings and comments
+- Document nclone integration points and fallback mechanisms
 
-### Phase 3: Training Integration (Week 3)
-**Deliverables**:
-1. **Enhanced Training Pipeline**: Integrate reachability-aware curiosity
-2. **Hyperparameter Tuning**: Optimize curiosity scaling factors
-3. **Performance Monitoring**: Track exploration efficiency metrics
+### Novelty Detection Enhancement
+**Objective**: Extend existing novelty detection with reachability filtering
 
-**Implementation**:
+**Approach**:
+- **Modify existing novelty detection modules** to incorporate reachability constraints
+- Extend count-based exploration to avoid unreachable state counting
+- Implement reachability-filtered state discretization
+
+### Training Integration
+**Objective**: Integrate reachability-aware curiosity into existing training pipeline
+
+**Approach**:
+- **Modify existing training scripts** to support reachability-aware ICM
+- Update existing configuration systems to include reachability awareness parameters
+- Add reachability-specific monitoring to existing performance tracking systems
+
+**Training Manager Modification Example** (modify existing training manager):
 ```python
-class ReachabilityAwareTrainingManager:
+# Modify existing training manager in npp_rl/agents/training_manager.py
+
+class PPOTrainingManager:
     """
-    Enhanced training manager with reachability-aware curiosity.
+    PPO Training Manager with integrated reachability-aware curiosity support.
+    
+    This training manager extends the existing PPO training pipeline with support
+    for reachability-aware intrinsic motivation. The integration maintains backward
+    compatibility while enabling enhanced exploration efficiency.
+    
+    Integration Components:
+    - Modified ICM with reachability awareness (optional via configuration)
+    - Enhanced curiosity metrics tracking for reachability analysis
+    - Performance monitoring for exploration efficiency assessment
+    - Graceful fallback when reachability components are unavailable
+    
+    References:
+    - PPO foundation: Schulman et al. (2017) "Proximal Policy Optimization Algorithms"
+    - Curiosity integration: Pathak et al. (2017) "Curiosity-driven Exploration by Self-supervised Prediction"  
+    - Training pipeline: Custom NPP-RL training architecture
     """
     
     def __init__(self, env, model_config, curiosity_config):
@@ -499,10 +689,8 @@ class ReachabilityAwareTrainingManager:
         # Reachability extractor
         reachability_extractor = self._create_reachability_extractor()
         
-        # Enhanced curiosity
-        return ReachabilityAwareCuriosity(
-            base_curiosity_module=base_curiosity,
-            reachability_extractor=reachability_extractor,
+        # Enhanced curiosity using modified ICM with reachability awareness
+        return ICMModule(
             observation_space=self.env.observation_space,
             action_space=self.env.action_space,
             **self.curiosity_config
@@ -533,26 +721,48 @@ class ReachabilityAwareTrainingManager:
             'reachability': self.reachability_metrics.get_summary(),
             'curiosity': self.curiosity_module.get_metrics()
         }
-```
 
-### Phase 4: Evaluation and Optimization (Week 4)
-**Deliverables**:
-1. **Performance Evaluation**: Compare with baseline curiosity
-2. **Ablation Studies**: Analyze individual component contributions
-3. **Optimization**: Performance tuning and memory optimization
+### Evaluation and Optimization
+**Objective**: Assess reachability integration impact and optimize performance
+
+**Evaluation Approach**:
+- Compare reachability-aware ICM with baseline ICM performance  
+- Analyze attention patterns to understand reachability feature utilization
+- Profile computational overhead and optimize for real-time performance requirements
+
+**Optimization Focus**:
+- Memory efficiency for reachability feature caching and frontier tracking
+- Computational optimization for <1ms curiosity computation target
+- Ablation studies on individual reachability components (scaling, frontier, strategic)
+
+**Key Modifications**:
+1. **Evaluation Scripts**: Update existing evaluation scripts to support reachability-aware metrics
+2. **Performance Profiling**: Extend existing profiling tools with reachability-specific measurements
+3. **Ablation Framework**: Add reachability component ablation to existing testing infrastructure
 
 ## Testing Strategy
 
 ### Unit Tests
+**Test existing modified classes with reachability integration**
+
 ```python
-class TestReachabilityAwareCuriosity(unittest.TestCase):
+class TestICMModuleWithReachability(unittest.TestCase):
+    """Test reachability integration in the modified ICMModule."""
+    
     def setUp(self):
-        self.base_curiosity = MockICMModule()
-        self.reachability_extractor = MockReachabilityExtractor()
-        self.curiosity = ReachabilityAwareCuriosity(
-            self.base_curiosity, self.reachability_extractor,
-            observation_space=create_mock_obs_space(),
-            action_space=create_mock_action_space()
+        self.observation_space = create_mock_obs_space()
+        self.action_space = create_mock_action_space()
+        
+        # Test the modified existing ICM with reachability features enabled
+        self.icm_with_reachability = ICMModule(
+            observation_space=self.observation_space,
+            action_space=self.action_space,
+        )
+        
+        # Test backward compatibility with reachability disabled
+        self.icm_baseline = ICMModule(
+            observation_space=self.observation_space,
+            action_space=self.action_space,
         )
     
     def test_reachability_scaling(self):
@@ -563,13 +773,13 @@ class TestReachabilityAwareCuriosity(unittest.TestCase):
         
         # Mock reachable target
         info_reachable = {'reachability': {'target_reachable': True}}
-        reward_reachable = self.curiosity.compute_intrinsic_reward(
+        reward_reachable = self.icm_with_reachability.compute_intrinsic_reward(
             obs, action, next_obs, info_reachable
         )
         
         # Mock unreachable target
         info_unreachable = {'reachability': {'target_reachable': False}}
-        reward_unreachable = self.curiosity.compute_intrinsic_reward(
+        reward_unreachable = self.icm_with_reachability.compute_intrinsic_reward(
             obs, action, next_obs, info_unreachable
         )
         
@@ -584,11 +794,11 @@ class TestReachabilityAwareCuriosity(unittest.TestCase):
         
         # First call - establish baseline
         info1 = {'reachability': {'reachable_positions': {(10, 10), (10, 11)}}}
-        reward1 = self.curiosity.compute_intrinsic_reward(obs, action, next_obs, info1)
+        reward1 = self.icm_with_reachability.compute_intrinsic_reward(obs, action, next_obs, info1)
         
         # Second call - new area becomes reachable
         info2 = {'reachability': {'reachable_positions': {(10, 10), (10, 11), (12, 12)}}}
-        reward2 = self.curiosity.compute_intrinsic_reward(obs, action, next_obs, info2)
+        reward2 = self.icm_with_reachability.compute_intrinsic_reward(obs, action, next_obs, info2)
         
         # Should detect frontier and boost curiosity
         self.assertGreater(reward2, reward1)
@@ -606,7 +816,7 @@ class TestReachabilityAwareCuriosity(unittest.TestCase):
                 'target_position': (10, 10)
             }
         }
-        reward_near = self.curiosity.compute_intrinsic_reward(obs, action, next_obs, info_near)
+        reward_near = self.icm_with_reachability.compute_intrinsic_reward(obs, action, next_obs, info_near)
         
         # Far from objectives
         info_far = {
@@ -615,7 +825,7 @@ class TestReachabilityAwareCuriosity(unittest.TestCase):
                 'target_position': (50, 50)
             }
         }
-        reward_far = self.curiosity.compute_intrinsic_reward(obs, action, next_obs, info_far)
+        reward_far = self.icm_with_reachability.compute_intrinsic_reward(obs, action, next_obs, info_far)
         
         # Near objective should have higher curiosity
         self.assertGreater(reward_near, reward_far)
@@ -623,13 +833,20 @@ class TestReachabilityAwareCuriosity(unittest.TestCase):
 
 ### Integration Tests
 ```python
-class TestCuriosityTrainingIntegration(unittest.TestCase):
+class TestICMTrainingIntegration(unittest.TestCase):
+    """Test training integration with reachability-aware ICM."""
+    
     def setUp(self):
-        self.env = ReachabilityEnhancedNPPEnv(render_mode='rgb_array')
-        self.training_manager = ReachabilityAwareTrainingManager(
+        # Test with modified existing environment and training manager
+        self.env = NPPEnv(
+            render_mode='rgb_array',
+        )
+        self.training_manager = PPOTrainingManager(
             env=self.env,
             model_config={'features_dim': 512},
-            curiosity_config={'reachability_scale_factor': 2.0}
+            curiosity_config={
+                'reachability_scale_factor': 2.0
+            }
         )
     
     def test_training_step_integration(self):
@@ -747,18 +964,12 @@ class TestCuriosityPerformance(unittest.TestCase):
 
 ## Deliverables
 
-1. **ReachabilityAwareCuriosity**: Enhanced curiosity module with reachability awareness
-2. **Supporting Components**: Frontier detection, strategic weighting, exploration history
-3. **Training Integration**: Complete integration with PPO training pipeline
-4. **Performance Analysis**: Comprehensive evaluation of exploration efficiency improvements
-5. **Documentation**: Complete API documentation and usage guide
-
-## Timeline
-
-- **Week 1**: Core curiosity enhancement and basic integration
-- **Week 2**: Supporting components and advanced features
-- **Week 3**: Training integration and hyperparameter tuning
-- **Week 4**: Evaluation, optimization, and documentation
+1. **Modified ICMModule**: Existing ICM architecture extended with reachability awareness functionality
+2. **Enhanced Novelty Detection**: Existing novelty detection updated with reachability filtering  
+3. **Training Pipeline Updates**: Modified training managers supporting reachability-aware curiosity
+4. **Performance Analysis**: Comprehensive evaluation of exploration efficiency improvements on existing systems
+5. **Documentation**: Updated module docstrings and inline documentation with theoretical foundations
+6. **Integration Testing**: Test suites validating reachability integration in existing components
 
 ## Dependencies
 
