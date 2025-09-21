@@ -119,12 +119,20 @@ fi
 # Python version check
 log_message "[INFO] Checking Python version..."
 PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-REQUIRED_VERSION="3.8"
+REQUIRED_MAJOR=3
+REQUIRED_MINOR=8
 
-if [[ $(log_message "$PYTHON_VERSION >= $REQUIRED_VERSION" | bc -l 2>/dev/null || log_message "0") == "1" ]] || [[ "$PYTHON_VERSION" > "$REQUIRED_VERSION" ]] || [[ "$PYTHON_VERSION" == "$REQUIRED_VERSION" ]]; then
-    log_message "[SUCCESS] Python $PYTHON_VERSION detected (>= $REQUIRED_VERSION required)"
+# Extract major and minor version numbers
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+log_message "Detected Python $PYTHON_VERSION (required: >= $REQUIRED_MAJOR.$REQUIRED_MINOR)"
+
+# Simple numeric comparison
+if [[ $PYTHON_MAJOR -gt $REQUIRED_MAJOR ]] || [[ $PYTHON_MAJOR -eq $REQUIRED_MAJOR && $PYTHON_MINOR -ge $REQUIRED_MINOR ]]; then
+    log_message "[SUCCESS] Python $PYTHON_VERSION is compatible (>= $REQUIRED_MAJOR.$REQUIRED_MINOR required)"
 else
-    log_message "[ERROR] Python $PYTHON_VERSION is too old. Please install Python >= $REQUIRED_VERSION"
+    log_message "[ERROR] Python $PYTHON_VERSION is too old. Please install Python >= $REQUIRED_MAJOR.$REQUIRED_MINOR"
     exit 1
 fi
 
