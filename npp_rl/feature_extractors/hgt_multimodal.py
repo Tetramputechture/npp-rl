@@ -283,8 +283,10 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
 
         # Initialize reachability extractor directly - nclone is required dependency
         from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
-        from nclone.graph.reachability.feature_extractor import ReachabilityFeatureExtractor
-        
+        from nclone.graph.reachability.feature_extractor import (
+            ReachabilityFeatureExtractor,
+        )
+
         tiered_system = TieredReachabilitySystem()
         self.reachability_extractor = ReachabilityFeatureExtractor(tiered_system)
 
@@ -454,8 +456,6 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         # Initialize weights
         self._initialize_weights()
 
-
-
     def _extract_reachability_features(
         self, observations: Dict[str, torch.Tensor]
     ) -> torch.Tensor:
@@ -463,8 +463,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         Extract compact reachability features from observations.
 
         This method expects reachability features to be pre-computed by the
-        NppEnvironment (with enable_reachability_features=True) and included 
-        in the observations. If not present, it returns zero features as fallback.
+        NppEnvironment and included  in the observations
 
         Args:
             observations: Dictionary of observation tensors
@@ -472,20 +471,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         Returns:
             torch.Tensor: 64-dimensional reachability feature tensor
         """
-        batch_size = next(iter(observations.values())).shape[0]
-        device = next(iter(observations.values())).device
-
-        # Check if reachability features are pre-computed in observations
-        if "reachability_features" in observations:
-            return observations["reachability_features"]
-
-        # Fallback: zero features if not provided by environment
-        print("Warning: No reachability features found in observations. Enable reachability_features in NppEnvironment.")
-        return torch.zeros(
-            batch_size, self.reachability_dim, dtype=torch.float32, device=device
-        )
-
-
+        return observations["reachability_features"]
 
     def _initialize_weights(self):
         """Initialize network weights."""
@@ -566,14 +552,11 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
                 edge_mask=observations["graph_edge_mask"],
             )
 
-        # Reachability: Extract compact spatial reasoning features from nclone
-        # These provide approximate reachability guidance without ground truth dependency
-        # Features should be pre-computed by ReachabilityWrapper
-        reachability_features = self._extract_reachability_features(observations)
-
         # Encode reachability features through dedicated neural pathway
         # Batch normalization stabilizes training with heterogeneous feature scales
-        processed_reachability = self.reachability_encoder(reachability_features)
+        processed_reachability = self.reachability_encoder(
+            observations["reachability_features"]
+        )
 
         # Cross-modal attention fusion integrating all modalities with reachability
         # Allows model to learn optimal weighting of reachability guidance

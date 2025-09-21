@@ -36,8 +36,6 @@ def create_dynamic_graph_env(
     if env_kwargs is None:
         env_kwargs = {
             "render_mode": "rgb_array",
-            "enable_frame_stack": True,
-            "observation_profile": "rich",
             "enable_pbrs": True,
             "pbrs_weights": {
                 "objective_weight": 1.0,

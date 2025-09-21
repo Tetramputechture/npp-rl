@@ -25,8 +25,6 @@ class VectorizationWrapper(gym.Wrapper):
         if env_kwargs is None:
             env_kwargs = {
                 "render_mode": "rgb_array",
-                "enable_frame_stack": True,
-                "observation_profile": "rich",
                 "enable_pbrs": True,
                 "pbrs_weights": {
                     "objective_weight": 1.0,
@@ -35,7 +33,6 @@ class VectorizationWrapper(gym.Wrapper):
                     "exploration_weight": 0.2,
                 },
                 "pbrs_gamma": 0.99,
-                "enable_reachability_features": False,  # Can be overridden
             }
 
         self.env_kwargs = env_kwargs

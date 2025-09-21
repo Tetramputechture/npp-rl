@@ -677,7 +677,6 @@ class TestNPPEnvironmentReachabilityIntegration(unittest.TestCase):
         self.env = NPPEnv(
             render_mode='rgb_array',
             custom_map_path='test_maps/simple_level',
-            enable_reachability_features=True  # Enable reachability integration
         )
     
     def test_observation_space_extension(self):
@@ -745,7 +744,6 @@ class TestReachabilityIntegratedTraining(unittest.TestCase):
         # Create environment with reachability features enabled
         env = NPPEnv(
             render_mode='rgb_array',
-            enable_reachability_features=True
         )
         
         # Create model with modified HGT extractor (reachability integration enabled)

@@ -87,7 +87,6 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
         # Create base environment
         base_env = NppEnvironment(
             render_mode=render_mode,
-            enable_frame_stack=True,  # Enable 12-frame stacking
             enable_animation=False,
             enable_logging=False,
             enable_debug_overlay=False,
@@ -369,7 +368,6 @@ def main():
         eval_freq=args.eval_freq,
         log_interval=args.log_interval,
         extractor_type=args.extractor_type,
-        enable_reachability=not args.disable_reachability,
     )
 
 

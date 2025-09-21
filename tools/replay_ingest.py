@@ -227,14 +227,10 @@ class ReplayValidator:
 class ObservationProcessor:
     """Processes raw replay data into environment-compatible observations."""
 
-    def __init__(self, observation_profile: str = "rich"):
+    def __init__(self):
         """
         Initialize observation processor.
-
-        Args:
-            observation_profile: 'minimal' or 'rich' feature profile
         """
-        self.observation_profile = observation_profile
         self.env = None  # Will be created lazily for observation processing
 
     def _get_env(self) -> NppEnvironment:
@@ -242,8 +238,6 @@ class ObservationProcessor:
         if self.env is None:
             self.env = NppEnvironment(
                 render_mode="rgb_array",
-                observation_profile=self.observation_profile,
-                enable_frame_stack=False,
             )
         return self.env
 
@@ -298,10 +292,7 @@ class ObservationProcessor:
         global_view = np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
 
         # Mock game state vector
-        if self.observation_profile == "rich":
-            game_state_dim = 31
-        else:
-            game_state_dim = 17
+        game_state_dim = 31
 
         # Create realistic game state based on frame data
         game_state = np.zeros(game_state_dim, dtype=np.float32)
@@ -337,17 +328,15 @@ class ObservationProcessor:
 class ReplayIngester:
     """Main class for ingesting and processing replay data."""
 
-    def __init__(self, observation_profile: str = "rich", output_format: str = "npz"):
+    def __init__(self, output_format: str = "npz"):
         """
         Initialize replay ingester.
 
         Args:
-            observation_profile: 'minimal' or 'rich' feature profile
             output_format: 'npz' or 'parquet' output format
         """
-        self.observation_profile = observation_profile
         self.output_format = output_format
-        self.processor = ObservationProcessor(observation_profile)
+        self.processor = ObservationProcessor()
         self.validator = ReplayValidator()
 
         # Statistics
@@ -699,9 +688,7 @@ Examples:
         parser.error("--output is required (unless using --dry-run)")
 
     # Initialize ingester
-    ingester = ReplayIngester(
-        observation_profile=args.profile, output_format=args.format
-    )
+    ingester = ReplayIngester(output_format=args.format)
 
     if args.dry_run:
         logger.info("Dry run mode - validating data only")
