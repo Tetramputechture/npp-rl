@@ -281,9 +281,12 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
             nn.Linear(64, 32),  # Compact representation for attention mechanisms
         )
 
-        # Lazy initialization to handle nclone dependency gracefully
-        # Allows fallback behavior if reachability system is unavailable
-        self.reachability_extractor = None
+        # Initialize reachability extractor directly - nclone is required dependency
+        from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+        from nclone.graph.reachability.feature_extractor import ReachabilityFeatureExtractor
+        
+        tiered_system = TieredReachabilitySystem()
+        self.reachability_extractor = ReachabilityFeatureExtractor(tiered_system)
 
         # Visual processing branch (temporal frames)
         if "player_frame" in observation_space.spaces:
@@ -451,22 +454,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         # Initialize weights
         self._initialize_weights()
 
-    def _initialize_reachability_extractor(self):
-        """
-        Lazy initialization of reachability feature extractor.
-        """
-        if self.reachability_extractor is None:
-            # Import at runtime to avoid hard dependency on nclone at module level
-            # Use TieredReachabilitySystem for performance-optimized feature extraction
-            from nclone.graph.reachability.tiered_system import (
-                TieredReachabilitySystem,
-            )
-            from nclone.graph.reachability.feature_extractor import (
-                ReachabilityFeatureExtractor,
-            )
 
-            tiered_system = TieredReachabilitySystem()
-            self.reachability_extractor = ReachabilityFeatureExtractor(tiered_system)
 
     def _extract_reachability_features(
         self, observations: Dict[str, torch.Tensor]
@@ -474,9 +462,9 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         """
         Extract compact reachability features from observations.
 
-        This method extracts game state information and uses the nclone reachability
-        system to compute compact spatial reasoning features. It includes fallback
-        mechanisms for graceful degradation when extraction fails.
+        This method expects reachability features to be pre-computed by the
+        ReachabilityWrapper and included in the observations. If not present,
+        it returns zero features as fallback.
 
         Args:
             observations: Dictionary of observation tensors
@@ -491,63 +479,13 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         if "reachability_features" in observations:
             return observations["reachability_features"]
 
-        # Extract game state information for reachability computation
-        ninja_positions = self._extract_ninja_positions(observations)
-        level_data = self._extract_level_data(observations)
-        switch_states = self._extract_switch_states(observations)
+        # Fallback: zero features if not provided by wrapper
+        print("Warning: No reachability features found in observations. Use ReachabilityWrapper.")
+        return torch.zeros(
+            batch_size, self.reachability_dim, dtype=torch.float32, device=device
+        )
 
-        # Batch process reachability features
-        reachability_features = []
 
-        for i in range(batch_size):
-            try:
-                features = self.reachability_extractor.extract_features(
-                    ninja_pos=ninja_positions[i]
-                    if ninja_positions is not None
-                    else (0.0, 0.0),
-                    level_data=level_data[i] if level_data is not None else None,
-                    switch_states=switch_states[i] if switch_states is not None else {},
-                    performance_target="fast",  # Use Tier 1 for real-time performance
-                )
-                # Convert to tensor if needed
-                if isinstance(features, np.ndarray):
-                    features = torch.from_numpy(features).float()
-                elif not isinstance(features, torch.Tensor):
-                    features = torch.tensor(features, dtype=torch.float32)
-                reachability_features.append(features)
-            except Exception as e:
-                # Fallback: zero features if extraction fails
-                print(f"Warning: Reachability extraction failed: {e}")
-                features = torch.zeros(
-                    self.reachability_dim, dtype=torch.float32, device=device
-                )
-                reachability_features.append(features)
-
-        return torch.stack(reachability_features).to(device)
-
-    def _extract_ninja_positions(
-        self, observations: Dict[str, torch.Tensor]
-    ) -> Optional[List[Tuple[float, float]]]:
-        """Extract ninja positions from observations."""
-        # This is a placeholder - actual implementation would depend on observation format
-        # For now, return None to trigger fallback behavior
-        return None
-
-    def _extract_level_data(
-        self, observations: Dict[str, torch.Tensor]
-    ) -> Optional[List[Any]]:
-        """Extract level data from observations."""
-        # This is a placeholder - actual implementation would depend on observation format
-        # For now, return None to trigger fallback behavior
-        return None
-
-    def _extract_switch_states(
-        self, observations: Dict[str, torch.Tensor]
-    ) -> Optional[List[Dict[str, bool]]]:
-        """Extract switch states from observations."""
-        # This is a placeholder - actual implementation would depend on observation format
-        # For now, return None to trigger fallback behavior
-        return None
 
     def _initialize_weights(self):
         """Initialize network weights."""
@@ -630,10 +568,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
 
         # Reachability: Extract compact spatial reasoning features from nclone
         # These provide approximate reachability guidance without ground truth dependency
-        # Lazy initialization ensures graceful handling of missing dependencies
-        if self.reachability_extractor is None:
-            self._initialize_reachability_extractor()
-
+        # Features should be pre-computed by ReachabilityWrapper
         reachability_features = self._extract_reachability_features(observations)
 
         # Encode reachability features through dedicated neural pathway

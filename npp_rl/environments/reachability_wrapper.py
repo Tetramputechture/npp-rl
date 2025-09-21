@@ -24,7 +24,7 @@ References:
 
 # Standard library imports
 import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 # Third-party imports
 import numpy as np
@@ -111,6 +111,7 @@ class ReachabilityWrapper(gym.Wrapper):
         from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
         from nclone.graph.reachability.feature_extractor import (
             ReachabilityFeatureExtractor,
+            PerformanceMode,
         )
 
         tiered_system = TieredReachabilitySystem(debug=self.debug)
@@ -228,6 +229,7 @@ class ReachabilityWrapper(gym.Wrapper):
             # Get current game state
             ninja_pos = self._get_ninja_position()
             level_data = self._get_level_data()
+            entities = self._get_entities()
             switch_states = self._get_switch_states()
 
             # Check cache first
@@ -246,11 +248,16 @@ class ReachabilityWrapper(gym.Wrapper):
             # Extract features using nclone reachability system
             if hasattr(self.reachability_extractor, "extract_features"):
                 # Use ReachabilityFeatureExtractor interface
+                # Convert performance target to PerformanceMode enum
+                from nclone.graph.reachability.feature_extractor import PerformanceMode
+                perf_mode = getattr(PerformanceMode, self.performance_target.upper(), PerformanceMode.FAST)
+                
                 features_result = self.reachability_extractor.extract_features(
-                    ninja_pos=ninja_pos,
+                    ninja_position=ninja_pos,
                     level_data=level_data,
+                    entities=entities,
                     switch_states=switch_states,
-                    performance_mode=self.performance_target,
+                    performance_mode=perf_mode,
                 )
 
                 # Handle different return types
@@ -309,21 +316,56 @@ class ReachabilityWrapper(gym.Wrapper):
 
     def _get_ninja_position(self) -> Tuple[float, float]:
         """Extract ninja position from environment state."""
-        # This is a placeholder - actual implementation would depend on environment
-        # For now, return default position
-        return (0.0, 0.0)
+        # Check if this is an nclone environment
+        if hasattr(self.env, 'ninja_position'):
+            return self.env.ninja_position()
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'ninja_position'):
+            return self.env.unwrapped.ninja_position()
+        else:
+            # Fallback for non-nclone environments
+            return (0.0, 0.0)
 
     def _get_level_data(self) -> Optional[Any]:
         """Extract level data from environment state."""
-        # This is a placeholder - actual implementation would depend on environment
-        # For now, return None to trigger fallback behavior
-        return None
+        # Check if this is an nclone environment
+        if hasattr(self.env, 'level_data'):
+            return self.env.level_data
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'level_data'):
+            return self.env.unwrapped.level_data
+        else:
+            # Fallback for non-nclone environments
+            return None
 
     def _get_switch_states(self) -> Dict[str, bool]:
         """Extract switch states from environment state."""
-        # This is a placeholder - actual implementation would depend on environment
-        # For now, return empty dict
-        return {}
+        # Check if this is an nclone environment
+        if hasattr(self.env, 'entities'):
+            entities = self.env.entities
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'entities'):
+            entities = self.env.unwrapped.entities
+        else:
+            # Fallback for non-nclone environments
+            return {}
+        
+        # Extract switch states from entities
+        switch_states = {}
+        for entity in entities:
+            if hasattr(entity, 'entity_id') and hasattr(entity, 'activated'):
+                # This is a switch entity
+                switch_states[str(entity.entity_id)] = entity.activated
+        
+        return switch_states
+
+    def _get_entities(self) -> List[Any]:
+        """Extract entities from environment state."""
+        # Check if this is an nclone environment
+        if hasattr(self.env, 'entities'):
+            return self.env.entities
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'entities'):
+            return self.env.unwrapped.entities
+        else:
+            # Fallback for non-nclone environments
+            return []
 
     def _generate_cache_key(
         self, ninja_pos: Tuple[float, float], switch_states: Dict[str, bool]
