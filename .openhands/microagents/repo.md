@@ -37,7 +37,6 @@ npp-rl/
 │   ├── wrappers/              # Custom environment wrappers
 │   └── config/                # Configuration management
 ├── bc_pretrain.py             # Behavioral cloning pretraining script
-├── train_phase2.py           # Enhanced training with all Phase 2 features
 ├── ppo_train.py              # Simple training wrapper (legacy)
 ├── tests/                    # Comprehensive test suite
 ├── docs/                     # Technical documentation and implementation plans
@@ -79,9 +78,6 @@ pip install -r requirements.txt
 # Primary training with all enhancements (recommended)
 python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000
 
-# Phase 2 training with ICM and graph observations
-python train_phase2.py --preset full_phase2 --experiment_name full_experiment
-
 # Behavioral cloning pretraining
 python bc_pretrain.py --dataset_dir datasets/shards --epochs 20
 ```
@@ -122,13 +118,6 @@ make lint        # Check code quality with ruff
 make fix         # Auto-fix linting issues
 make imports     # Remove unused imports
 make dev-setup   # Install development tools
-```
-
-### Testing
-```bash
-pytest tests/                    # Run all tests
-pytest tests/test_phase2_basic.py   # Run specific tests
-pytest -v tests/                # Verbose output
 ```
 
 ## Monitoring and Logging
