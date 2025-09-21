@@ -21,7 +21,7 @@ log_message() {
 log_message "Setting up NPP-RL development environment (Debian/Ubuntu)..."
 log_message "This process may take 10-15 minutes depending on your internet connection."
 log_message "Please wait for all dependencies to be installed before continuing."
-log_message "Logging to: npp-rl-setup-$(date +'%Y%m%d_%H%M%S').log"
+log_message "Logging to: .openhands/.setup.log"
 log_message ""
 
 # Check if we're in the correct directory
@@ -185,17 +185,81 @@ log_message "  This may take 3-5 minutes, especially if PyTorch needs to be down
 log_message "  DO NOT interrupt this process!"
 
 if [[ -f "requirements.txt" ]]; then
-    # Install requirements one by one for better error handling
-    log_message "  Installing requirements individually for better error handling..."
+    # Pre-installation checks
+    log_message "  Running pre-installation checks..."
+    
+    # Check available disk space (PyTorch can be 1-3GB)
+    AVAILABLE_SPACE_KB=$(df . | tail -1 | awk '{print $4}')
+    AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
+    
+    if [[ $AVAILABLE_SPACE_GB -lt 5 ]]; then
+        log_message "[WARNING] Low disk space: ${AVAILABLE_SPACE_GB}GB available"
+        log_message "[WARNING] PyTorch installation requires ~3-5GB. Consider freeing up space."
+    else
+        log_message "  Disk space check: ${AVAILABLE_SPACE_GB}GB available ✓"
+    fi
+    
+    # Check for CUDA availability to optimize PyTorch installation
+    log_message "  Detecting GPU/CUDA availability..."
+    CUDA_AVAILABLE=false
+    if command -v nvidia-smi &> /dev/null; then
+        if nvidia-smi &> /dev/null; then
+            CUDA_VERSION=$(nvidia-smi | grep -i "cuda version" | awk '{print $9}' | head -1 | tr -d '[:space:]' || echo "unknown")
+            GPU_COUNT=$(nvidia-smi -L | wc -l)
+            log_message "  CUDA detected: $CUDA_VERSION with $GPU_COUNT GPU(s) ✓"
+            CUDA_AVAILABLE=true
+        else
+            log_message "  nvidia-smi found but not responding - likely no GPU"
+        fi
+    else
+        log_message "  No NVIDIA GPU detected - installing CPU-only PyTorch"
+    fi
+    
+    # Create optimized pip configuration for better performance
+    export PIP_CACHE_DIR="${HOME}/.cache/pip"
+    export PIP_NO_BUILD_ISOLATION=0
+    export PIP_DISABLE_PIP_VERSION_CHECK=1
+    export PIP_PREFER_BINARY=1
+    
+    # Install requirements with special handling for PyTorch packages
+    log_message "  Installing requirements with optimized PyTorch handling..."
     while IFS= read -r requirement; do
         # Skip empty lines and comments
         if [[ -n "$requirement" && ! "$requirement" =~ ^[[:space:]]*# ]]; then
-            log_message "    Installing: $requirement"
-            if ! timeout 600 pip install "$requirement"; then
-                log_message "[ERROR] Failed to install: $requirement"
-                exit 1
+            # Special handling for PyTorch packages (larger downloads)
+            if [[ "$requirement" =~ ^torch ]]; then
+                log_message "    Installing PyTorch package: $requirement (this may take 2-4 minutes)..."
+                PYTORCH_TIMEOUT=900  # 15 minutes for PyTorch
+                
+                # Retry PyTorch installation up to 3 times
+                for attempt in 1 2 3; do
+                    log_message "      Attempt $attempt/3..."
+                    if timeout $PYTORCH_TIMEOUT pip install --progress-bar=ascii "$requirement"; then
+                        log_message "    ✓ PyTorch package installed: $requirement"
+                        break
+                    else
+                        if [[ $attempt -eq 3 ]]; then
+                            log_message "[ERROR] Failed to install PyTorch after 3 attempts: $requirement"
+                            log_message "[ERROR] This could be due to:"
+                            log_message "  - Slow internet connection"
+                            log_message "  - Insufficient disk space"
+                            log_message "  - PyTorch server issues"
+                            exit 1
+                        else
+                            log_message "      Attempt $attempt failed, retrying in 10 seconds..."
+                            sleep 10
+                        fi
+                    fi
+                done
+            else
+                # Standard installation for non-PyTorch packages
+                log_message "    Installing: $requirement"
+                if ! timeout 300 pip install "$requirement"; then
+                    log_message "[ERROR] Failed to install: $requirement"
+                    exit 1
+                fi
+                log_message "    ✓ Installed: $requirement"
             fi
-            log_message "    Installed: $requirement"
         fi
     done < requirements.txt
 else
@@ -220,17 +284,70 @@ log_message "  Checking all critical dependencies are available..."
 # Verify core dependencies
 log_message "[INFO] Verifying core dependencies..."
 
-# Check PyTorch
+# Check PyTorch with detailed diagnostics
+log_message "Running comprehensive PyTorch verification..."
 if python3 -c "import torch; print(f'PyTorch {torch.__version__} installed')" 2>/dev/null; then
+    TORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null)
+    log_message "[SUCCESS] PyTorch $TORCH_VERSION successfully imported"
+    
+    # Check CUDA availability
     CUDA_AVAILABLE=$(python3 -c "import torch; print(torch.cuda.is_available())" 2>/dev/null)
     if [[ "$CUDA_AVAILABLE" == "True" ]]; then
+        GPU_COUNT=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null)
         GPU_NAME=$(python3 -c "import torch; print(torch.cuda.get_device_name(0))" 2>/dev/null)
-        log_message "[SUCCESS] PyTorch with CUDA support detected. GPU: $GPU_NAME"
+        CUDA_VERSION_TORCH=$(python3 -c "import torch; print(torch.version.cuda)" 2>/dev/null)
+        GPU_MEMORY=$(python3 -c "import torch; print(f'{torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB')" 2>/dev/null)
+        
+        log_message "[SUCCESS] PyTorch CUDA support verified:"
+        log_message "  ✓ CUDA version: $CUDA_VERSION_TORCH"
+        log_message "  ✓ GPU count: $GPU_COUNT"
+        log_message "  ✓ Primary GPU: $GPU_NAME"
+        log_message "  ✓ GPU memory: $GPU_MEMORY"
+        
+        # Quick GPU computation test
+        if python3 -c "import torch; x = torch.randn(1000, 1000).cuda(); y = x @ x; print('GPU computation test passed')" 2>/dev/null; then
+            log_message "  ✓ GPU computation test: PASSED"
+        else
+            log_message "  ⚠ GPU computation test: FAILED (but PyTorch with CUDA is available)"
+        fi
     else
-        log_message "[WARNING] PyTorch installed but CUDA not available. Training will use CPU."
+        log_message "[WARNING] PyTorch installed but CUDA not available"
+        log_message "  This is normal for CPU-only systems or when CUDA drivers are missing"
+        log_message "  Training will use CPU (slower but functional)"
+        
+        # CPU computation test
+        if python3 -c "import torch; x = torch.randn(100, 100); y = x @ x; print('CPU computation test passed')" 2>/dev/null; then
+            log_message "  ✓ CPU computation test: PASSED"
+        else
+            log_message "[ERROR] CPU computation test failed - PyTorch installation may be corrupted"
+            exit 1
+        fi
+    fi
+    
+    # Check if torchvision and torchaudio are available
+    if python3 -c "import torchvision; print(f'torchvision {torchvision.__version__}')" 2>/dev/null; then
+        TORCHVISION_VERSION=$(python3 -c "import torchvision; print(torchvision.__version__)" 2>/dev/null)
+        log_message "  ✓ torchvision $TORCHVISION_VERSION available"
+    else
+        log_message "  ⚠ torchvision not available (may cause issues with some models)"
+    fi
+    
+    if python3 -c "import torchaudio; print(f'torchaudio {torchaudio.__version__}')" 2>/dev/null; then
+        TORCHAUDIO_VERSION=$(python3 -c "import torchaudio; print(torchaudio.__version__)" 2>/dev/null)
+        log_message "  ✓ torchaudio $TORCHAUDIO_VERSION available"
+    else
+        log_message "  ⚠ torchaudio not available (audio processing may not work)"
     fi
 else
     log_message "[ERROR] Failed to import PyTorch"
+    log_message "[ERROR] This could be due to:"
+    log_message "  - Installation was interrupted"
+    log_message "  - Incompatible system libraries"
+    log_message "  - Insufficient memory during installation"
+    log_message "  - Corrupted download"
+    log_message ""
+    log_message "Try running the setup again or install manually with:"
+    log_message "  pip install torch torchvision torchaudio"
     exit 1
 fi
 

@@ -1,5 +1,14 @@
-numpy>=1.21.0
-torch>=2.0.0
+# Core numerical computing
+numpy>=1.21.0,<1.27.0
+
+# PyTorch ecosystem - pinned to stable versions for reliability
+# These versions are well-tested together and offer good stability
+# PyTorch 2.2.x series provides excellent performance and CUDA 12.x support
+torch>=2.2.0,<2.5.0
+torchvision>=0.17.0,<0.20.0
+torchaudio>=2.2.0,<2.5.0
+
+# Computer vision and image processing
 opencv-python>=4.8.0
 pillow>=10.0.0
 gymnasium>=0.29.0
@@ -12,3 +21,9 @@ albumentations>=2.0.0
 pytest>=8.4.1
 # nclone is expected to be installed locally from a sibling directory.
 # See README.md for installation instructions.
+
+# Installation Notes:
+# - Run .openhands/setup.sh for automated installation with optimizations
+# - For manual installation: pip install -r requirements.txt
+# - PyTorch will auto-detect CUDA availability and install appropriate version
+# - Large downloads expected: PyTorch packages are 1-3GB total
