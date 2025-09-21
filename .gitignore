@@ -59,5 +59,7 @@ tune_logs/
 # OpenHands tasks
 .openhands/TASKS.md
 
+.openhands/.setup.log
+
 # Mermaid diagrams
 *.mmd
