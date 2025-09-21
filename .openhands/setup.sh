@@ -14,7 +14,8 @@ log_message() {
     # Echo to console
     echo "$message"
     
-    # Write to log file with timestamp
+    # Ensure log directory exists and write to log file with timestamp
+    mkdir -p ".openhands"
     echo "[$timestamp] $message" >> ".openhands/.setup.log"
 }
 
@@ -144,12 +145,32 @@ if [[ ! -d "$NCLONE_PATH" ]]; then
     log_message "[WARNING] nclone not found at $NCLONE_PATH"
     log_message "[INFO] Cloning nclone repository..."
     
-    cd ..
-    if [[ ! -d "nclone" ]]; then
-        git clone https://github.com/tetramputechture/nclone.git
-        log_message "[SUCCESS] nclone repository cloned"
+    # Ensure we can navigate to parent directory
+    if ! cd ..; then
+        log_message "[ERROR] Cannot navigate to parent directory"
+        exit 1
     fi
-    cd npp-rl
+    
+    if [[ ! -d "nclone" ]]; then
+        log_message "  Cloning from GitHub (this may take 1-2 minutes)..."
+        if ! timeout 300 git clone --depth 1 https://github.com/tetramputechture/nclone.git; then
+            log_message "[ERROR] Failed to clone nclone repository"
+            log_message "[ERROR] This could be due to:"
+            log_message "  - Network connectivity issues"
+            log_message "  - GitHub being unreachable"
+            log_message "  - Git not being installed"
+            exit 1
+        fi
+        log_message "[SUCCESS] nclone repository cloned"
+    else
+        log_message "[INFO] nclone directory already exists, skipping clone"
+    fi
+    
+    # Return to npp-rl directory with error checking
+    if ! cd npp-rl; then
+        log_message "[ERROR] Cannot return to npp-rl directory"
+        exit 1
+    fi
 else
     log_message "[SUCCESS] nclone found at $NCLONE_PATH"
 fi
@@ -164,7 +185,7 @@ log_message ""
 log_message "[INFO] Step 1/6: Installing nclone in editable mode..."
 cd ../nclone
 log_message "  Installing nclone (this may take 1-2 minutes)..."
-if ! timeout 300 pip install -e .; then
+if ! timeout 300 python3 -m pip install -e .; then
     log_message "[ERROR] nclone installation timed out or failed"
     exit 1
 fi
@@ -212,14 +233,19 @@ if [[ -f "requirements.txt" ]]; then
     log_message "  Running pre-installation checks..."
     
     # Check available disk space (PyTorch can be 1-3GB)
-    AVAILABLE_SPACE_KB=$(df . | tail -1 | awk '{print $4}')
-    AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
-    
-    if [[ $AVAILABLE_SPACE_GB -lt 5 ]]; then
-        log_message "[WARNING] Low disk space: ${AVAILABLE_SPACE_GB}GB available"
-        log_message "[WARNING] PyTorch installation requires ~3-5GB. Consider freeing up space."
+    log_message "  Checking available disk space..."
+    if AVAILABLE_SPACE_KB=$(df . 2>/dev/null | tail -1 | awk '{print $4}') && [[ -n "$AVAILABLE_SPACE_KB" ]] && [[ "$AVAILABLE_SPACE_KB" =~ ^[0-9]+$ ]]; then
+        AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
+        
+        if [[ $AVAILABLE_SPACE_GB -lt 5 ]]; then
+            log_message "[WARNING] Low disk space: ${AVAILABLE_SPACE_GB}GB available"
+            log_message "[WARNING] PyTorch installation requires ~3-5GB. Consider freeing up space."
+        else
+            log_message "  Disk space check: ${AVAILABLE_SPACE_GB}GB available ✓"
+        fi
     else
-        log_message "  Disk space check: ${AVAILABLE_SPACE_GB}GB available ✓"
+        log_message "[WARNING] Could not determine available disk space"
+        log_message "  Ensure you have at least 5GB free for PyTorch installation"
     fi
     
     # Check for CUDA availability to optimize PyTorch installation
@@ -227,10 +253,23 @@ if [[ -f "requirements.txt" ]]; then
     CUDA_AVAILABLE=false
     if command -v nvidia-smi &> /dev/null; then
         if nvidia-smi &> /dev/null; then
-            CUDA_VERSION=$(nvidia-smi | grep -i "cuda version" | awk '{print $9}' | head -1 | tr -d '[:space:]' || echo "unknown")
-            GPU_COUNT=$(nvidia-smi -L | wc -l)
-            log_message "  CUDA detected: $CUDA_VERSION with $GPU_COUNT GPU(s) ✓"
-            CUDA_AVAILABLE=true
+            # More robust CUDA version parsing
+            CUDA_VERSION=""
+            if CUDA_VERSION=$(nvidia-smi 2>/dev/null | grep -i "cuda version" | sed -n 's/.*CUDA Version: \([0-9]\+\.[0-9]\+\).*/\1/p' | head -1); then
+                if [[ -z "$CUDA_VERSION" ]]; then
+                    CUDA_VERSION="detected"  # Fallback if version parsing fails
+                fi
+            else
+                CUDA_VERSION="unknown"
+            fi
+            
+            # Count GPUs more reliably
+            if GPU_COUNT=$(nvidia-smi -L 2>/dev/null | wc -l) && [[ $GPU_COUNT -gt 0 ]]; then
+                log_message "  CUDA detected: v$CUDA_VERSION with $GPU_COUNT GPU(s) ✓"
+                CUDA_AVAILABLE=true
+            else
+                log_message "  NVIDIA driver found but no GPUs detected"
+            fi
         else
             log_message "  nvidia-smi found but not responding - likely no GPU"
         fi
@@ -257,7 +296,7 @@ if [[ -f "requirements.txt" ]]; then
                 # Retry PyTorch installation up to 3 times
                 for attempt in 1 2 3; do
                     log_message "      Attempt $attempt/3..."
-                    if timeout $PYTORCH_TIMEOUT pip install --progress-bar=ascii "$requirement"; then
+                    if timeout $PYTORCH_TIMEOUT python3 -m pip install --progress-bar=ascii "$requirement"; then
                         log_message "    ✓ PyTorch package installed: $requirement"
                         break
                     else
@@ -277,7 +316,7 @@ if [[ -f "requirements.txt" ]]; then
             else
                 # Standard installation for non-PyTorch packages
                 log_message "    Installing: $requirement"
-                if ! timeout 300 pip install "$requirement"; then
+                if ! timeout 300 python3 -m pip install "$requirement"; then
                     log_message "[ERROR] Failed to install: $requirement"
                     exit 1
                 fi
@@ -294,11 +333,23 @@ log_message "[SUCCESS] Core dependencies installed successfully"
 
 # Install development tools
 log_message "[INFO] Step 5/6: Installing development tools..."
-log_message "  Setting up development environment (this may take 1-2 minutes)..."
-if ! timeout 300 make dev-setup; then
-    log_message "[WARNING] Development setup timed out - you may need to run 'make dev-setup' manually later"
+if [[ -f "Makefile" ]] && command -v make &> /dev/null; then
+    log_message "  Setting up development environment (this may take 1-2 minutes)..."
+    if ! timeout 300 make dev-setup 2>/dev/null; then
+        log_message "[WARNING] Development setup failed or timed out"
+        log_message "  This is optional - you can run 'make dev-setup' manually later"
+        log_message "  Check if dev dependencies are defined in your Makefile"
+    else
+        log_message "[SUCCESS] Development tools installed successfully"
+    fi
+elif [[ ! -f "Makefile" ]]; then
+    log_message "[INFO] No Makefile found - skipping development tool setup"
+    log_message "  You can install development tools manually if needed"
+elif ! command -v make &> /dev/null; then
+    log_message "[WARNING] 'make' command not found - skipping development setup"
+    log_message "  Install 'make' if you need to use the project's Makefile"
 else
-    log_message "[SUCCESS] Development tools installed successfully"
+    log_message "[INFO] Development tool setup skipped"
 fi
 
 log_message "[INFO] Step 6/6: Final dependency verification..."
@@ -400,9 +451,12 @@ log_message "[INFO] Setting up environment variables..."
 
 # Create .env file if it doesn't exist
 if [[ ! -f ".env" ]]; then
-    cat > .env << EOF
+    # Use absolute path for PYTHONPATH to avoid shell expansion issues
+    PROJECT_PATH=$(pwd)
+    cat > .env << 'EOF'
 # NPP-RL Environment Configuration
-PYTHONPATH=\${PYTHONPATH}:\$(pwd)
+# Add current directory to Python path (will be expanded when sourced)
+PYTHONPATH=${PYTHONPATH}:${PWD}
 
 # Performance optimization
 CUDA_LAUNCH_BLOCKING=0
@@ -415,6 +469,9 @@ NPP_RL_TOTAL_TIMESTEPS=1000000
 NPP_RL_LOG_LEVEL=INFO
 NPP_RL_LOG_DIR=./training_logs
 EOF
+    
+    # Add a comment with the actual current path for reference
+    echo "# Current project path: $PROJECT_PATH" >> .env
     log_message "[SUCCESS] Created .env file with default configuration"
 else
     log_message "[SUCCESS] .env file already exists"
