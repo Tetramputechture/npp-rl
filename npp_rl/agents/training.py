@@ -91,7 +91,6 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
             enable_animation=False,
             enable_logging=False,
             enable_debug_overlay=False,
-            use_graph_obs=True,  # Enable graph observations for hierarchical processing
             **kwargs,
         )
 

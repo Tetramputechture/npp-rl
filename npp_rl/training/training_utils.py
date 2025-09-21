@@ -17,7 +17,6 @@ def create_training_policy(
     observation_space: SpacesDict,
     action_space: Discrete,
     policy_class: str = "npp",
-    use_graph_obs: bool = False,
     features_dim: int = 512,
 ) -> nn.Module:
     """
@@ -30,7 +29,6 @@ def create_training_policy(
         observation_space: Environment observation space
         action_space: Environment action space
         policy_class: Policy architecture ('npp' or 'simple')
-        use_graph_obs: Whether to use graph observations
         features_dim: Feature extractor output dimension
 
     Returns:
@@ -41,7 +39,6 @@ def create_training_policy(
         features_extractor = create_hgt_multimodal_extractor(
             observation_space=observation_space,
             features_dim=features_dim,
-            use_graph_obs=use_graph_obs,
         )
 
         # Create policy network with appropriate architecture

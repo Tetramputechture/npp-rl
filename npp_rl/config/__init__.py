@@ -1,1 +1,0 @@
-"""Configuration management for Phase 2 features."""

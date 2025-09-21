@@ -35,7 +35,6 @@ class BCTrainer:
         observation_space: SpacesDict,
         action_space: Discrete,
         policy_class: str = "npp",
-        use_graph_obs: bool = False,
         learning_rate: float = 3e-4,
         entropy_coef: float = 0.01,
         freeze_backbone_steps: int = 0,
@@ -48,7 +47,6 @@ class BCTrainer:
             observation_space: Environment observation space
             action_space: Environment action space
             policy_class: Policy architecture ('npp' or 'simple')
-            use_graph_obs: Whether to use graph observations
             learning_rate: Learning rate for optimization
             entropy_coef: Entropy regularization coefficient
             freeze_backbone_steps: Number of steps to freeze backbone for
@@ -56,7 +54,6 @@ class BCTrainer:
         """
         self.observation_space = observation_space
         self.action_space = action_space
-        self.use_graph_obs = use_graph_obs
         self.entropy_coef = entropy_coef
         self.freeze_backbone_steps = freeze_backbone_steps
 
@@ -69,7 +66,6 @@ class BCTrainer:
             observation_space=observation_space,
             action_space=action_space,
             policy_class=policy_class,
-            use_graph_obs=use_graph_obs,
         )
         self.policy.to(self.device)
 
@@ -321,7 +317,7 @@ class BCTrainer:
             path: Path to save the exported policy
         """
         # Create a dummy environment to get the right structure
-        dummy_env = create_graph_enhanced_env(use_graph_obs=self.use_graph_obs)
+        dummy_env = create_graph_enhanced_env()
 
         try:
             # Create PPO model with matching architecture for compatibility
@@ -334,7 +330,6 @@ class BCTrainer:
                     else None,
                     "features_extractor_kwargs": {
                         "features_dim": 512,
-                        "use_graph_obs": self.use_graph_obs,
                     },
                 },
             )
@@ -345,7 +340,6 @@ class BCTrainer:
                     "policy_state_dict": self.policy.state_dict(),
                     "observation_space": self.observation_space,
                     "action_space": self.action_space,
-                    "use_graph_obs": self.use_graph_obs,
                 },
                 path,
             )

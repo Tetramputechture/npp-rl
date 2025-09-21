@@ -42,9 +42,6 @@ def parse_arguments():
         choices=["npp", "simple"],
         help="Policy architecture",
     )
-    parser.add_argument(
-        "--use_graph_obs", action="store_true", help="Use graph observations"
-    )
 
     # Training arguments
     parser.add_argument(
@@ -109,7 +106,7 @@ def setup_data(args):
         return None, None, None
 
     # Create environment to get observation/action spaces
-    env = create_graph_enhanced_env(use_graph_obs=args.use_graph_obs)
+    env = create_graph_enhanced_env()
     observation_space = env.observation_space
     action_space = env.action_space
     env.close()
@@ -126,7 +123,6 @@ def setup_data(args):
             action_space=action_space,
             batch_size=args.batch_size,
             max_episodes=args.max_episodes,
-            use_graph_obs=args.use_graph_obs,
         )
 
         # Print dataset statistics
@@ -159,7 +155,6 @@ def run_training(args, train_dataloader, observation_space, action_space):
         observation_space=observation_space,
         action_space=action_space,
         policy_class=args.policy,
-        use_graph_obs=args.use_graph_obs,
         learning_rate=args.lr,
         entropy_coef=args.entropy_coef,
         freeze_backbone_steps=args.freeze_backbone_steps,
