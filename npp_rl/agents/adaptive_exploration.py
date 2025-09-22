@@ -28,7 +28,7 @@ nclone Integration:
 import math
 import time
 from collections import defaultdict, deque
-from typing import Dict, Tuple, List, Optional, Any
+from typing import Dict, Tuple, List
 
 # Third-party imports
 import numpy as np
@@ -36,13 +36,10 @@ import torch
 import torch.nn as nn
 
 # nclone imports (reachability and planning components)
-from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
-from nclone.constants.entity_types import EntityType
 from nclone.graph.reachability.compact_features import CompactReachabilityFeatures
 from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
 from nclone.planning import (
-    Subgoal, NavigationSubgoal, SwitchActivationSubgoal, CollectionSubgoal,
-    CompletionStep, CompletionStrategy, LevelCompletionPlanner, SubgoalPrioritizer
+    Subgoal, NavigationSubgoal, SwitchActivationSubgoal, CompletionStrategy, LevelCompletionPlanner, SubgoalPrioritizer
 )
 
 
