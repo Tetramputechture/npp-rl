@@ -35,25 +35,75 @@ from npp_rl.agents.adaptive_exploration import (
     CompletionStrategy, CompletionStep,
     LevelCompletionPlanner, SubgoalPrioritizer
 )
+from nclone.constants.entity_types import EntityType
 
 
 class MockLevelData:
-    """Mock level data for testing."""
+    """Mock level data for testing using actual NppEnvironment data structures."""
     
     def __init__(self):
+        # Import EntityType for proper constants
+        from nclone.constants.entity_types import EntityType
+        
         self.level_id = "test_level_001"
-        self.objectives = [
-            {'type': 'exit_door', 'id': 'exit_door_1', 'x': 500, 'y': 300}
+        
+        # Use entities structure like actual NppEnvironment
+        self.entities = [
+            # Exit door
+            {
+                'type': EntityType.EXIT_DOOR,
+                'entity_id': 'exit_door_1',
+                'x': 500,
+                'y': 300,
+                'active': True,
+                'state': 1.0
+            },
+            # Exit switches (not activated initially)
+            {
+                'type': EntityType.EXIT_SWITCH,
+                'entity_id': 'switch_1',
+                'x': 200,
+                'y': 200,
+                'active': True,  # For exit switches, active=True means not activated
+                'state': 0.0
+            },
+            {
+                'type': EntityType.EXIT_SWITCH,
+                'entity_id': 'switch_2',
+                'x': 300,
+                'y': 400,
+                'active': True,  # For exit switches, active=True means not activated
+                'state': 0.0
+            },
+            {
+                'type': EntityType.EXIT_SWITCH,
+                'entity_id': 'switch_3',
+                'x': 100,
+                'y': 100,
+                'active': True,  # For exit switches, active=True means not activated
+                'state': 0.0
+            },
+            # Gold collectibles
+            {
+                'type': EntityType.GOLD,
+                'entity_id': 'gold_1',
+                'x': 250,
+                'y': 250,
+                'value': 10,
+                'collected': False
+            },
+            {
+                'type': EntityType.GOLD,
+                'entity_id': 'gold_2',
+                'x': 400,
+                'y': 350,
+                'value': 5,
+                'collected': False
+            }
         ]
-        self.switches = [
-            {'type': 'door_switch', 'id': 'switch_1', 'x': 200, 'y': 200, 'controls_exit': True},
-            {'type': 'door_switch', 'id': 'switch_2', 'x': 300, 'y': 400, 'controls_exit': False},
-            {'type': 'door_switch', 'id': 'switch_3', 'x': 100, 'y': 100, 'controls_exit': False}
-        ]
-        self.collectibles = [
-            {'type': 'gold', 'id': 'gold_1', 'x': 250, 'y': 250, 'value': 10, 'collected': False},
-            {'type': 'gold', 'id': 'gold_2', 'x': 400, 'y': 350, 'value': 5, 'collected': False}
-        ]
+        
+        # Environment observation data
+        self.switch_activated = False  # Direct boolean from NppEnvironment
 
 
 class TestSubgoalFramework(unittest.TestCase):
@@ -105,7 +155,17 @@ class TestSubgoalFramework(unittest.TestCase):
         # Test completion when switch is activated
         activated_states = self.switch_states.copy()
         activated_states['switch_1'] = True
-        self.assertTrue(subgoal.is_completed(self.ninja_pos, self.level_data, activated_states))
+        
+        # Also update level_data to reflect activated switch (using real data structure)
+        activated_level_data = MockLevelData()
+        # Find and activate switch_1 in entities
+        for entity in activated_level_data.entities:
+            if entity.get('entity_id') == 'switch_1' and entity.get('type') == EntityType.EXIT_SWITCH:
+                entity['active'] = False  # For exit switches, active=False means activated
+                entity['state'] = 1.0
+                break
+        
+        self.assertTrue(subgoal.is_completed(self.ninja_pos, activated_level_data, activated_states))
         
         # Test reward shaping includes reachability bonus
         reward = subgoal.get_reward_shaping((180, 180))
@@ -548,7 +608,7 @@ class TestIntegrationWithNeuralFeatures(unittest.TestCase):
         
         # Verify reachability system was called with correct parameters
         self.manager.reachability_system.analyze_reachability.assert_called_with(
-            self.ninja_pos, self.level_data, performance_target="balanced"
+            self.level_data, self.ninja_pos, self.switch_states, performance_target="balanced"
         )
         
         # Verify subgoals were generated

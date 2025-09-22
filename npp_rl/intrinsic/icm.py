@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional
 from collections import deque
 
 from .reachability_exploration import ReachabilityAwareExplorationCalculator
@@ -368,8 +368,3 @@ class ICMTrainer:
     def reset(self):
         """Reset for new episode."""
         self.icm_network.reset()
-
-
-# Backward compatibility aliases
-ConsolidatedICMNetwork = ICMNetwork
-ConsolidatedICMTrainer = ICMTrainer
