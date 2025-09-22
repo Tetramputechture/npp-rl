@@ -6,11 +6,11 @@ Implement a hierarchical reachability manager that provides filtered subgoals fo
 ## Context & Justification
 
 ### Hierarchical RL Requirements
-Based on analysis of npp-rl architecture and `/workspace/npp-rl/tasks/TASK_002_integrate_reachability_system.md`:
-- **Subgoal Selection**: Filter available subgoals based on reachability analysis
-- **Strategic Planning**: Provide level completion strategies for high-level policy
-- **Dynamic Adaptation**: Update subgoals as switch states change
-- **Performance**: Real-time subgoal filtering for 60 FPS gameplay
+Based on analysis of npp-rl architecture and integration with fast neural reachability system:
+- **Switch-Focused Subgoals**: Generate subgoals for switch activation and navigation using fast reachability analysis
+- **Performance-First Strategy**: Use neural network features (graph transformer + 3D CNN + MLPs) rather than expensive physics calculations
+- **NPP Completion Algorithm**: Implement the definitive two-phase switch-based level progression algorithm
+- **Real-Time Performance**: <3ms subgoal generation for 60 FPS gameplay using neural feature caching
 
 ### Current Limitations
 - **No Strategic Guidance**: Agent explores randomly without level completion strategy
@@ -20,10 +20,12 @@ Based on analysis of npp-rl architecture and `/workspace/npp-rl/tasks/TASK_002_i
 
 ### Research Foundation
 From `/workspace/nclone/docs/reachability_analysis_integration_strategy.md`:
-- **Level Completion Heuristic**: Strategic switch activation sequences
-- **Reachability-Guided HRL**: Filter subgoals based on current reachability
-- **Dynamic Subgoal Updates**: Adapt to changing game state
-- **Performance Benefits**: 2-3x improvement in level completion rates
+- **NPP Level Completion Heuristic**: Two-phase algorithm for systematic switch-based level progression
+  1. Phase 1: Ensure exit door switch accessibility through locked door switch activation
+  2. Phase 2: Ensure exit door accessibility through additional locked door switch activation
+- **Reachability-Guided HRL**: Filter subgoals based on neural network reachability analysis
+- **Dynamic Subgoal Updates**: Real-time adaptation to switch state changes
+- **Performance Benefits**: 2-3x improvement in level completion rates through systematic progression
 
 ### Theoretical Background
 - **Sutton et al. (1999)**: Options framework for hierarchical RL
@@ -33,34 +35,145 @@ From `/workspace/nclone/docs/reachability_analysis_integration_strategy.md`:
 
 ## Technical Specification
 
-### Hierarchical Reachability Manager Architecture
+### Code Organization and Documentation Requirements
+
+**Import Requirements**:
+- Always prefer top-level imports at the module level
+- Import all dependencies at the top of the file before any class or function definitions
+- Group imports by: standard library, third-party, nclone, npp_rl modules
+
+**Documentation Requirements**:
+- **Top-level module docstrings**: Every modified module must have comprehensive docstrings explaining the hierarchical reachability integration approach and theoretical foundation
+- **Inline documentation**: Complex planning algorithms require detailed inline comments explaining the hierarchical reasoning and reachability-guided subgoal generation
+- **Paper references**: All hierarchical RL and planning techniques must reference original research papers in docstrings and comments
+- **Integration notes**: Document how each component integrates with existing nclone reachability systems and existing agent architecture
+
+**Module Modification Approach**:
+- **Update existing agent modules in place** rather than creating separate hierarchical managers
+- Extend existing adaptive exploration and agent classes with hierarchical planning functionality
+- Add hierarchical reachability management directly to existing modules in `/npp_rl/agents/`
+
+**Defensive Programming Guidelines**:
+- **Avoid defensive try/catch blocks** around imports or critical functionality
+- **Fail fast and clearly** when dependencies are missing or components are misconfigured
+- **No redundant components** - integrate with existing systems rather than duplicating functionality
+
+**Performance and Implementation Guidelines**:
+- **Avoid expensive physics calculations** - use the fast reachability analysis system instead of complex physics approximations
+- **Leverage existing neural architecture** - remember we have a sophisticated neural network with graph transformer, 3D CNN, and MLPs for reachability and game state analysis
+- **No redundant physics validation** - trust the reachability analysis rather than implementing additional physics checks
+- **Performance-first approach** - prioritize the <3ms subgoal generation target over physics accuracy
+
+**Production Implementation Requirements**:
+- **NO simplified implementations** - avoid placeholder code, stub methods, or "simplified for demonstration" approaches
+- **NO "in practice" notes** - implement complete, production-ready functionality from the start
+- **Holistic and thorough implementations** - every component must be fully functional and ready for production deployment
+- **Complete error handling** - implement robust error handling without defensive programming anti-patterns
+
+### Agent Module Modifications
+**Target File**: Extend existing `/npp_rl/agents/adaptive_exploration.py`
+
+**Required Documentation Additions**:
 ```python
-class HierarchicalReachabilityManager:
+"""
+Adaptive Exploration with Hierarchical Reachability-Guided Planning
+
+This module extends the existing adaptive exploration strategies with hierarchical
+reinforcement learning capabilities based on reachability analysis from nclone.
+The integration provides strategic subgoal generation and level completion planning.
+
+Integration Strategy:
+- Hierarchical subgoal extraction converts reachability analysis to actionable objectives
+- Strategic planning generates level completion sequences based on switch dependencies  
+- Dynamic subgoal updates adapt to changing game state for optimal exploration
+- Performance-optimized caching for real-time subgoal management (<3ms target)
+
+Theoretical Foundation:
+- Options framework: Sutton et al. (1999) "Between MDPs and semi-MDPs"
+- Option-Critic: Bacon et al. (2017) "The Option-Critic Architecture"  
+- Data-efficient HRL: Nachum et al. (2018) "Data-Efficient Hierarchical Reinforcement Learning"
+- Reachability-guided HRL: Levy et al. (2019) "Hierarchical Actor-Critic with reachability constraints"
+- Strategic planning: Custom integration with nclone physics and level completion heuristics
+
+nclone Integration:
+- Uses compact reachability features from nclone.graph.reachability for subgoal filtering
+- Integrates with TieredReachabilitySystem for performance-optimized planning queries
+- Maintains compatibility with existing NPP physics constants and level objective analysis
+"""
+
+# Standard library imports
+import math
+import time
+from abc import ABC, abstractmethod
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import Dict, Tuple, List, Optional, Any
+
+# Third-party imports
+import numpy as np
+import torch
+import torch.nn as nn
+
+# nclone imports (top-level imports preferred)
+from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
+from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
+from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+
+# npp_rl imports  
+from npp_rl.agents.base import BaseExplorationManager
+from npp_rl.utils.level_analysis import LevelAnalyzer
+
+
+class AdaptiveExplorationManager:
     """
-    Manages hierarchical subgoals based on reachability analysis.
+    Adaptive exploration manager with integrated hierarchical reachability-guided planning.
     
-    Key Components:
-    1. Subgoal Extraction: Convert reachability analysis to actionable subgoals
-    2. Strategic Planning: Level completion strategy generation
-    3. Dynamic Updates: Adapt subgoals to changing game state
-    4. Caching: Efficient subgoal caching and invalidation
+    This manager extends the existing curiosity-driven exploration with hierarchical
+    reinforcement learning capabilities that provide strategic subgoals based on
+    reachability analysis for improved sample efficiency.
+    
+    Architecture Extensions:
+    1. Base Exploration: ICM + Novelty detection (existing functionality preserved)
+    2. Subgoal Extraction: Convert reachability analysis to actionable hierarchical objectives
+    3. Strategic Planning: Level completion strategy generation using switch dependency analysis
+    4. Dynamic Updates: Real-time subgoal adaptation to changing game state
+    5. Performance Optimization: Efficient subgoal caching and invalidation system
+    
+    Hierarchical Integration:
+    - Lazy initialization of reachability extractor for dependency management
+    - Subgoal prioritization based on strategic value and completion likelihood
+    - Dynamic cache management for real-time performance (<3ms subgoal generation)
+    
+    References:
+    - Base exploration: Pathak et al. (2017) "Curiosity-driven Exploration by Self-supervised Prediction"
+    - Hierarchical RL: Sutton et al. (1999) "Between MDPs and semi-MDPs" 
+    - Strategic planning: Bacon et al. (2017) "The Option-Critic Architecture"
+    - Reachability integration: Custom design for NPP level completion
     """
     
-    def __init__(self, reachability_extractor, level_analyzer=None):
-        self.reachability_extractor = reachability_extractor
-        self.level_analyzer = level_analyzer or LevelAnalyzer()
+    def __init__(self, observation_space, action_space, **kwargs):
+        # Initialize base exploration components (existing functionality preserved)
+        super().__init__(observation_space, action_space, **kwargs)
         
-        # Subgoal management
-        self.subgoal_cache = {}
-        self.cache_ttl = 200  # milliseconds
-        self.last_switch_states = {}
-        self.last_ninja_pos = None
+        # Hierarchical planning components (always enabled, no defensive programming)
+        # Direct initialization - fail fast if dependencies are missing
+        self.reachability_extractor = ReachabilityFeatureExtractor(TieredReachabilitySystem())
+        self.level_analyzer = LevelAnalyzer()
         
-        # Strategic planning
+        # Subgoal management system for hierarchical planning
+        # Based on Options framework from Sutton et al. (1999)
+        self.subgoal_cache = {}                    # Cached subgoals for performance optimization
+        self.cache_ttl = 200                       # Cache time-to-live in milliseconds  
+        self.last_switch_states = {}               # State tracking for dynamic updates
+        self.last_ninja_pos = None                 # Position tracking for cache invalidation
+        
+        # Strategic planning components based on NPP level completion heuristics
+        # Implementation follows completion strategies from nclone strategic analysis
         self.completion_planner = LevelCompletionPlanner()
         self.subgoal_prioritizer = SubgoalPrioritizer()
         
-        # Performance monitoring
+        # Performance monitoring for real-time optimization
+        # Target: <3ms subgoal generation, >70% cache hit rate
         self.cache_hit_rate = 0.0
         self.avg_subgoal_count = 0.0
         self.planning_time_ms = 0.0
@@ -68,45 +181,57 @@ class HierarchicalReachabilityManager:
     def get_available_subgoals(self, ninja_pos, level_data, switch_states, 
                               max_subgoals=8) -> List[Subgoal]:
         """
-        Get currently available subgoals based on reachability analysis.
+        Get hierarchical subgoals based on reachability analysis and strategic planning.
+        
+        This method implements the core hierarchical RL subgoal extraction following
+        the Options framework from Sutton et al. (1999). Subgoals are generated from
+        reachability analysis and prioritized based on strategic value for level completion.
         
         Args:
-            ninja_pos: Current ninja position
-            level_data: Level data structure
-            switch_states: Current switch states
-            max_subgoals: Maximum number of subgoals to return
+            ninja_pos: Current ninja position tuple (x, y)
+            level_data: Level data structure containing objectives, switches, hazards
+            switch_states: Dictionary of current switch states {switch_id: bool}
+            max_subgoals: Maximum number of subgoals to return (default 8)
         
         Returns:
-            List of available subgoals, prioritized by strategic value
+            List of hierarchical subgoals, prioritized by strategic completion value
+            
+        Note:
+            Performance target is <3ms for real-time HRL training compatibility.
+            Uses cached results when available for efficiency optimization.
         """
         start_time = time.perf_counter()
         
-        # Check cache first
+        # Check performance-optimized cache for previously computed subgoals
+        # Cache implementation follows real-time system design patterns
         cache_key = self._generate_cache_key(ninja_pos, switch_states, level_data)
         if self._is_cache_valid(cache_key):
             cached_result = self.subgoal_cache[cache_key]
             self._update_cache_metrics(True)
             return cached_result['subgoals'][:max_subgoals]
         
-        # Extract reachability features
+        # Extract compact reachability features using nclone integration
+        # Uses TieredReachabilitySystem for performance-optimized analysis
         reachability_features = self.reachability_extractor.extract_features(
             ninja_pos, level_data, switch_states, performance_target="balanced"
         )
         
-        # Generate subgoals
+        # Generate hierarchical subgoals from reachability analysis
+        # Implementation based on strategic level completion heuristics
         subgoals = self._generate_subgoals(
             ninja_pos, level_data, switch_states, reachability_features
         )
         
-        # Prioritize subgoals
+        # Prioritize subgoals using strategic value computation
+        # Prioritization follows completion-oriented planning principles
         prioritized_subgoals = self.subgoal_prioritizer.prioritize(
             subgoals, ninja_pos, level_data, reachability_features
         )
         
-        # Cache result
+        # Cache result for future performance optimization
         self._cache_subgoals(cache_key, prioritized_subgoals, reachability_features)
         
-        # Update metrics
+        # Update performance metrics for monitoring and optimization
         self.planning_time_ms = (time.perf_counter() - start_time) * 1000
         self.avg_subgoal_count = len(prioritized_subgoals)
         self._update_cache_metrics(False)
@@ -153,29 +278,31 @@ class HierarchicalReachabilityManager:
         """
         Generate subgoals from reachability analysis and level data.
         """
+        # Generate switch-focused subgoals from fast reachability analysis
+        # Uses neural network output (graph transformer + 3D CNN + MLPs) rather than expensive physics
         subgoals = []
         
-        # Extract objective distances from reachability features
+        # Extract compact features from neural reachability analysis
+        # Trust the sophisticated neural architecture output rather than recalculating physics
         objective_distances = reachability_features[0:8].numpy()
         switch_features = reachability_features[8:24].numpy()
         
-        # Generate navigation subgoals
+        # Generate navigation subgoals to key objectives (exit, switches)
+        # Focus on level completion path rather than general exploration
         navigation_subgoals = self._generate_navigation_subgoals(
             ninja_pos, level_data, objective_distances
         )
         subgoals.extend(navigation_subgoals)
         
-        # Generate switch activation subgoals
+        # Generate switch activation subgoals (primary focus for NPP level completion)
+        # Switch-based subgoals are the core of the strategic completion heuristic
         switch_subgoals = self._generate_switch_subgoals(
             level_data, switch_states, switch_features
         )
         subgoals.extend(switch_subgoals)
         
-        # Generate avoidance subgoals
-        avoidance_subgoals = self._generate_avoidance_subgoals(
-            ninja_pos, level_data, reachability_features
-        )
-        subgoals.extend(avoidance_subgoals)
+        # Note: Hazard avoidance subgoals removed - focusing on switch-based completion strategy
+        # The neural reachability analysis already incorporates hazard accessibility in its features
         
         return subgoals
     
@@ -227,45 +354,38 @@ class HierarchicalReachabilityManager:
         
         return subgoals
     
-    def _generate_avoidance_subgoals(self, ninja_pos, level_data, 
-                                   reachability_features) -> List[Subgoal]:
-        """
-        Generate hazard avoidance subgoals.
-        """
-        subgoals = []
-        
-        # Extract hazard proximity features
-        hazard_proximities = reachability_features[24:40].numpy()
-        
-        # Get hazards from level data
-        hazards = self.level_analyzer.get_hazards(level_data)
-        
-        for i, hazard in enumerate(hazards[:16]):  # Match feature dimensions
-            if i < len(hazard_proximities) and hazard_proximities[i] > 0.7:  # High threat
-                subgoal = AvoidanceSubgoal(
-                    hazard_position=hazard.position,
-                    hazard_type=hazard.type,
-                    threat_level=hazard_proximities[i],
-                    safe_distance=hazard.get_safe_distance(),
-                    priority=self._calculate_avoidance_priority(hazard, hazard_proximities[i])
-                )
-                subgoals.append(subgoal)
-        
-        return subgoals
 ```
 
 ### Subgoal Types and Structures
-```python
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Tuple, Dict, Any
+**Add to existing agent module** rather than creating separate files
 
-@dataclass
+**Target File**: Add to existing `/npp_rl/agents/adaptive_exploration.py`
+
+```python
+@dataclass  
 class Subgoal(ABC):
-    """Base class for all subgoals."""
-    priority: float
-    estimated_time: float
-    success_probability: float
+    """
+    Base class for hierarchical subgoals in the Options framework.
+    
+    This abstract base class defines the interface for all hierarchical subgoals
+    used in the reachability-guided HRL system. Implementation follows the Options
+    framework from Sutton et al. (1999) adapted for NPP level completion.
+    
+    Subgoals represent temporally extended actions with clear termination conditions
+    and progress measurement capabilities for reward shaping integration.
+    
+    References:
+    - Options framework: Sutton et al. (1999) "Between MDPs and semi-MDPs"
+    - Hierarchical planning: Bacon et al. (2017) "The Option-Critic Architecture"
+    - NPP-specific implementation: Custom design for level completion objectives
+    
+    Note:
+        All subgoal classes should be integrated into the existing adaptive_exploration.py
+        module to maintain architectural cohesion and avoid module proliferation.
+    """
+    priority: float              # Strategic priority for subgoal selection (0.0-1.0)
+    estimated_time: float        # Estimated completion time in seconds
+    success_probability: float   # Likelihood of successful completion (0.0-1.0)
     
     @abstractmethod
     def get_target_position(self) -> Tuple[float, float]:
@@ -347,9 +467,9 @@ class CollectionSubgoal(Subgoal):
     
     def is_completed(self, ninja_pos: Tuple[float, float], 
                     level_data, switch_states: Dict) -> bool:
-        # Check if item still exists at position
-        # This would need integration with level data to track collected items
-        return False  # Simplified - would need proper item tracking
+        # Production implementation: Check if item still exists at position
+        # Full integration with level data to track collected items
+        return self._check_item_collected(self.target_position, level_data)
     
     def get_reward_shaping(self, ninja_pos: Tuple[float, float]) -> float:
         distance = math.sqrt((ninja_pos[0] - self.target_position[0])**2 + 
@@ -363,49 +483,43 @@ class CollectionSubgoal(Subgoal):
         
         return proximity_reward + value_bonus + connectivity_bonus
 
-@dataclass
-class AvoidanceSubgoal(Subgoal):
-    """Avoid a specific hazard."""
-    hazard_position: Tuple[float, float]
-    hazard_type: str
-    threat_level: float
-    safe_distance: float
-    
-    def get_target_position(self) -> Tuple[float, float]:
-        # Return position that maintains safe distance
-        # This is a simplified implementation
-        return self.hazard_position
-    
-    def is_completed(self, ninja_pos: Tuple[float, float], 
-                    level_data, switch_states: Dict) -> bool:
-        # Check if ninja is at safe distance from hazard
-        distance = math.sqrt((ninja_pos[0] - self.hazard_position[0])**2 + 
-                           (ninja_pos[1] - self.hazard_position[1])**2)
-        return distance >= self.safe_distance
-    
-    def get_reward_shaping(self, ninja_pos: Tuple[float, float]) -> float:
-        distance = math.sqrt((ninja_pos[0] - self.hazard_position[0])**2 + 
-                           (ninja_pos[1] - self.hazard_position[1])**2)
-        
-        if distance >= self.safe_distance:
-            return 1.0  # Safe
-        else:
-            # Penalty increases as ninja gets closer to hazard
-            danger_ratio = distance / self.safe_distance
-            return danger_ratio * self.threat_level
 ```
 
 ### Level Completion Planner
+**Target File**: Add to existing `/npp_rl/agents/adaptive_exploration.py`
+
 ```python
 class LevelCompletionPlanner:
     """
-    Strategic planner for level completion using reachability analysis.
+    Strategic planner for hierarchical level completion using fast reachability analysis.
     
-    Implements the completion heuristic from the strategic analysis:
-    1. Check path to exit switch
-    2. If blocked, find required door switches
-    3. Plan switch activation sequence
-    4. Navigate to exit
+    This planner implements the production-ready NPP level completion heuristic that leverages
+    the sophisticated neural architecture (graph transformer + 3D CNN + MLPs) rather than
+    expensive physics calculations. The strategy focuses on systematic switch activation
+    sequences following the definitive NPP level completion algorithm.
+    
+    NPP Level Completion Strategy (Production Implementation):
+    1. Check if exit door switch is reachable using neural reachability features
+       - If reachable: trigger exit door switch, proceed to step 2
+       - If not reachable: find nearest reachable locked door switch, trigger it, return to step 1
+    2. Check if exit door is reachable using neural reachability analysis
+       - If reachable: navigate to exit door and complete level
+       - If not reachable: find nearest reachable locked door switch, trigger it, return to step 2
+    
+    Performance Optimization:
+    - Avoids expensive physics calculations in favor of neural reachability features
+    - Trusts graph transformer + CNN + MLP output for spatial reasoning
+    - Maintains <3ms planning target through fast feature-based decisions
+    - Removes complex hazard avoidance in favor of switch-focused strategy
+    
+    References:
+    - Strategic analysis: nclone reachability analysis integration strategy
+    - Hierarchical planning: Sutton et al. (1999) "Between MDPs and semi-MDPs"  
+    - Strategic RL: Bacon et al. (2017) "The Option-Critic Architecture"
+    
+    Note:
+        Integrated into existing adaptive_exploration.py to avoid creating
+        redundant planning modules and maintain architectural coherence.
     """
     
     def __init__(self):
@@ -415,68 +529,125 @@ class LevelCompletionPlanner:
     def plan_completion(self, ninja_pos, level_data, switch_states, 
                        reachability_extractor) -> 'CompletionStrategy':
         """
-        Generate strategic plan for level completion.
+        Generate strategic plan for NPP level completion using production-ready algorithm.
+        
+        Implementation uses fast neural reachability analysis rather than expensive
+        physics calculations. Relies on graph transformer + 3D CNN + MLP features
+        for spatial reasoning and switch accessibility determination.
+        
+        NPP Level Completion Algorithm (Production Implementation):
+        1. Check if exit door switch is reachable using neural reachability features
+           - If reachable: create subgoal to trigger exit door switch, proceed to step 2
+           - If not reachable: find nearest reachable locked door switch, create activation subgoal, return to step 1
+        2. Check if exit door is reachable using neural reachability analysis
+           - If reachable: create navigation subgoal to exit door for level completion
+           - If not reachable: find nearest reachable locked door switch, create activation subgoal, return to step 2
+        
+        This algorithm ensures systematic progression through switch dependencies for level completion.
         """
-        # Extract reachability features
+        # Extract neural reachability features - production-ready feature extraction
+        # Trust the sophisticated graph transformer + CNN + MLP architecture
         reachability_features = reachability_extractor.extract_features(
             ninja_pos, level_data, switch_states, performance_target="balanced"
         )
         
-        # Identify key objectives
+        # Identify level objectives using production-ready level analysis
         exit_door = self._find_exit_door(level_data)
         exit_switch = self._find_exit_switch(level_data)
         
         if not exit_door or not exit_switch:
             return CompletionStrategy([], "No exit found", 0.0)
         
-        # Plan completion sequence
+        # Implement NPP Level Completion Algorithm (Production Implementation)
         completion_steps = []
+        current_state = "check_exit_switch"
         
-        # Step 1: Check if exit switch is reachable
-        exit_switch_reachable = self._is_objective_reachable(
-            exit_switch.position, reachability_features
-        )
-        
-        if not exit_switch_reachable:
-            # Find blocking doors and required switches
-            blocking_analysis = self._analyze_blocking_doors(
-                ninja_pos, exit_switch.position, level_data, switch_states
-            )
+        while current_state != "complete":
+            if current_state == "check_exit_switch":
+                # Step 1: Check if exit door switch is reachable
+                exit_switch_reachable = self._is_objective_reachable(
+                    exit_switch.position, reachability_features
+                )
+                
+                if exit_switch_reachable and not switch_states.get(exit_switch.id, False):
+                    # Exit switch is reachable - create activation subgoal
+                    completion_steps.append(CompletionStep(
+                        action_type='navigate_and_activate',
+                        target_position=exit_switch.position,
+                        target_id=exit_switch.id,
+                        description=f"Activate exit door switch at {exit_switch.position}",
+                        priority=1.0
+                    ))
+                    current_state = "check_exit_door"
+                    
+                elif not exit_switch_reachable:
+                    # Exit switch not reachable - find nearest reachable locked door switch
+                    nearest_switch = self._find_nearest_reachable_locked_door_switch(
+                        ninja_pos, level_data, switch_states, reachability_features
+                    )
+                    
+                    if nearest_switch:
+                        completion_steps.append(CompletionStep(
+                            action_type='navigate_and_activate',
+                            target_position=nearest_switch.position,
+                            target_id=nearest_switch.id,
+                            description=f"Activate blocking switch {nearest_switch.id} at {nearest_switch.position}",
+                            priority=0.8
+                        ))
+                        # Return to step 1 after activating blocking switch
+                        current_state = "check_exit_switch"
+                    else:
+                        # No reachable switches found - level may be impossible
+                        current_state = "complete"
+                else:
+                    # Exit switch already activated
+                    current_state = "check_exit_door"
             
-            # Plan switch activation sequence
-            switch_sequence = self._plan_switch_sequence(
-                blocking_analysis, level_data, switch_states, reachability_features
-            )
-            
-            completion_steps.extend(switch_sequence)
+            elif current_state == "check_exit_door":
+                # Step 2: Check if exit door is reachable
+                exit_door_reachable = self._is_objective_reachable(
+                    exit_door.position, reachability_features
+                )
+                
+                if exit_door_reachable:
+                    # Exit door is reachable - create navigation subgoal for level completion
+                    completion_steps.append(CompletionStep(
+                        action_type='navigate_to_exit',
+                        target_position=exit_door.position,
+                        target_id=exit_door.id,
+                        description=f"Navigate to exit door at {exit_door.position}",
+                        priority=1.0
+                    ))
+                    current_state = "complete"
+                    
+                else:
+                    # Exit door not reachable - find nearest reachable locked door switch
+                    nearest_switch = self._find_nearest_reachable_locked_door_switch(
+                        ninja_pos, level_data, switch_states, reachability_features
+                    )
+                    
+                    if nearest_switch:
+                        completion_steps.append(CompletionStep(
+                            action_type='navigate_and_activate',
+                            target_position=nearest_switch.position,
+                            target_id=nearest_switch.id,
+                            description=f"Activate blocking switch {nearest_switch.id} at {nearest_switch.position}",
+                            priority=0.8
+                        ))
+                        # Return to step 2 after activating blocking switch
+                        current_state = "check_exit_door"
+                    else:
+                        # No reachable switches found - level may be impossible
+                        current_state = "complete"
         
-        # Step 2: Navigate to and activate exit switch
-        if not switch_states.get(exit_switch.id, False):
-            completion_steps.append(CompletionStep(
-                action_type='navigate_and_activate',
-                target_position=exit_switch.position,
-                target_id=exit_switch.id,
-                description=f"Activate exit switch at {exit_switch.position}",
-                priority=0.9
-            ))
-        
-        # Step 3: Navigate to exit door
-        completion_steps.append(CompletionStep(
-            action_type='navigate_to_exit',
-            target_position=exit_door.position,
-            target_id=exit_door.id,
-            description=f"Navigate to exit door at {exit_door.position}",
-            priority=1.0
-        ))
-        
-        # Calculate strategy confidence
-        confidence = self._calculate_strategy_confidence(
+        # Calculate confidence using production-ready feature analysis
+        confidence = self._calculate_strategy_confidence_from_features(
             completion_steps, reachability_features
         )
         
         return CompletionStrategy(
             steps=completion_steps,
-            description="Strategic level completion plan",
+            description="NPP Level Completion Strategy (Production Implementation)",
             confidence=confidence
         )
     
@@ -565,58 +736,80 @@ class CompletionStep:
 
 ## Implementation Plan
 
-### Phase 1: Core Manager Implementation (Week 1)
-**Deliverables**:
-1. **HierarchicalReachabilityManager**: Main manager class
-2. **Subgoal Types**: All subgoal classes and structures
-3. **Basic Subgoal Generation**: Core subgoal extraction logic
+### Core Hierarchical Integration
+**Objective**: Integrate hierarchical reachability planning into existing agent architecture
 
-**Key Files**:
-- `npp_rl/planning/hierarchical_reachability_manager.py` (NEW)
-- `npp_rl/planning/subgoals.py` (NEW)
-- `npp_rl/planning/level_analyzer.py` (NEW)
+**Approach**:
+- **Modify existing adaptive exploration module in place** rather than creating separate hierarchical managers
+- Extend existing exploration classes with hierarchical subgoal functionality while maintaining backward compatibility
+- Follow top-level import patterns and comprehensive documentation standards
 
-### Phase 2: Strategic Planning (Week 2)
-**Deliverables**:
-1. **LevelCompletionPlanner**: Strategic level completion planning
-2. **SubgoalPrioritizer**: Intelligent subgoal prioritization
-3. **DependencyAnalyzer**: Switch-door dependency analysis
+**Key Modifications**:
+1. **Adaptive Exploration Manager**: Extend existing `AdaptiveExplorationManager` in `/npp_rl/agents/adaptive_exploration.py`
+2. **Subgoal Framework**: Add all subgoal classes to same file for architectural cohesion
+3. **Strategic Planning**: Integrate `LevelCompletionPlanner` and related components into existing module
 
-**Key Files**:
-- `npp_rl/planning/completion_planner.py` (NEW)
-- `npp_rl/planning/subgoal_prioritizer.py` (NEW)
-- `npp_rl/planning/dependency_analyzer.py` (NEW)
+**Documentation Requirements**:
+- Add comprehensive module-level docstrings with hierarchical RL theoretical foundations
+- Include inline documentation explaining reachability-guided subgoal generation and strategic planning
+- Reference all relevant research papers (Sutton et al. 1999, Bacon et al. 2017, etc.) in docstrings and comments
+- Document nclone integration points and performance optimization strategies
 
-### Phase 3: HRL Integration (Week 3)
-**Deliverables**:
-1. **HRL Environment Wrapper**: Integration with hierarchical RL
-2. **Subgoal Reward Shaping**: Reward shaping for subgoal progress
-3. **Dynamic Subgoal Updates**: Real-time subgoal adaptation
+### HRL Environment Integration
+**Objective**: Extend existing environment wrappers to support hierarchical RL
 
-**Implementation**:
+**Approach**:
+- **Modify existing environment wrappers** rather than creating separate HRL wrappers  
+- Extend existing observation and reward systems with hierarchical subgoal information
+- Implement efficient subgoal reward shaping integrated with existing reward processing
+
+**Target Environment Wrapper**: Modify existing environment wrappers
+
+**Implementation Example** (extend existing environment wrapper):
 ```python
-class HierarchicalRLWrapper(gym.Wrapper):
+# Modify existing NPPEnv or environment wrapper in npp_rl/environments/
+
+class NPPEnv:  # or existing wrapper class
     """
-    Environment wrapper that provides hierarchical RL with reachability-based subgoals.
+    NPP Environment with integrated hierarchical reachability-guided subgoal support.
+    
+    This environment extends the existing NPP gameplay with hierarchical RL capabilities
+    that provide strategic subgoals based on reachability analysis. Subgoal information
+    is provided as part of the observation space and reward system.
+    
+    Hierarchical Integration Components:
+    - Subgoal observation space extension for hierarchical policy training
+    - Reward shaping integration with subgoal progress tracking
+    - Dynamic subgoal updates based on environment state changes
+    - Performance-optimized subgoal caching for real-time gameplay
+    
+    References:
+    - Hierarchical RL: Sutton et al. (1999) "Between MDPs and semi-MDPs"
+    - Environment design: Gym environment standards and best practices
+    - Performance optimization: Real-time RL training requirements
     """
     
-    def __init__(self, env, max_subgoals=8, subgoal_reward_scale=0.1):
-        super().__init__(env)
+    def __init__(self, max_subgoals=8, subgoal_reward_scale=0.1, **kwargs):
+        super().__init__(**kwargs)
         
         self.max_subgoals = max_subgoals
         self.subgoal_reward_scale = subgoal_reward_scale
         
-        # Initialize hierarchical manager
-        self.reachability_manager = HierarchicalReachabilityManager(
-            reachability_extractor=env.reachability_extractor
+        # Initialize hierarchical planning components (always enabled, fail fast if missing)
+        # Direct initialization without defensive programming - dependencies must be available
+        self.hierarchical_manager = AdaptiveExplorationManager(
+            observation_space=self.observation_space,
+            action_space=self.action_space
         )
         
-        # Current subgoals and strategy
-        self.current_subgoals = []
-        self.completion_strategy = None
-        self.active_subgoal = None
+        # Hierarchical state tracking for subgoal management
+        # Implementation based on Options framework from Sutton et al. (1999)
+        self.current_subgoals = []           # Currently available subgoals from reachability analysis
+        self.completion_strategy = None      # Strategic level completion plan
+        self.active_subgoal = None          # Currently pursued subgoal for reward shaping
         
-        # Extend observation space for subgoals
+        # Extend observation space to include hierarchical subgoal information
+        # This enables hierarchical policies to condition on current subgoals
         self._extend_observation_space()
     
     def step(self, action):
@@ -652,14 +845,16 @@ class HierarchicalRLWrapper(gym.Wrapper):
         return obs, total_reward, done, info
     
     def _update_subgoals(self, ninja_pos, level_data, switch_states):
-        """Update available subgoals based on current state."""
-        # Get available subgoals
-        self.current_subgoals = self.reachability_manager.get_available_subgoals(
+        """Update available subgoals using integrated hierarchical manager."""
+        # Get available subgoals from integrated hierarchical planning system
+        # Uses reachability-guided subgoal generation with strategic prioritization  
+        self.current_subgoals = self.hierarchical_manager.get_available_subgoals(
             ninja_pos, level_data, switch_states, self.max_subgoals
         )
         
-        # Update completion strategy
-        self.completion_strategy = self.reachability_manager.get_completion_strategy(
+        # Update strategic level completion plan using integrated planner
+        # Implementation follows nclone strategic analysis completion heuristics
+        self.completion_strategy = self.hierarchical_manager.get_completion_strategy(
             ninja_pos, level_data, switch_states
         )
         
@@ -703,22 +898,43 @@ class HierarchicalRLWrapper(gym.Wrapper):
                     self.active_subgoal = None
         
         return total_subgoal_reward
-```
 
-### Phase 4: Testing and Optimization (Week 4)
-**Deliverables**:
-1. **Comprehensive Testing**: Unit and integration tests
-2. **Performance Optimization**: Caching and performance tuning
-3. **HRL Evaluation**: Performance comparison with baseline
+### Testing and Optimization
+**Objective**: Validate hierarchical integration and optimize performance
+
+**Testing Approach**:
+- Unit tests for hierarchical subgoal generation and strategic planning components
+- Integration tests validating hierarchical RL with existing training pipeline
+- Performance tests ensuring <3ms subgoal generation and >70% cache hit rate
+
+**Optimization Focus**:
+- Memory efficiency for subgoal caching and completion strategy management
+- Computational optimization for real-time hierarchical planning
+- Integration efficiency with existing exploration and reward systems
+
+**Key Modifications**:
+1. **Test Framework**: Extend existing test suites to include hierarchical components
+2. **Performance Monitoring**: Add hierarchical metrics to existing monitoring systems  
+3. **Integration Validation**: Ensure seamless integration with existing agent architecture
 
 ## Testing Strategy
 
 ### Unit Tests
+**Test existing modified classes with hierarchical integration**
+
 ```python
-class TestHierarchicalReachabilityManager(unittest.TestCase):
+class TestAdaptiveExplorationManagerWithHierarchical(unittest.TestCase):
+    """Test hierarchical integration in the modified AdaptiveExplorationManager."""
+    
     def setUp(self):
-        self.reachability_extractor = MockReachabilityExtractor()
-        self.manager = HierarchicalReachabilityManager(self.reachability_extractor)
+        self.observation_space = create_mock_obs_space()
+        self.action_space = create_mock_action_space()
+        
+        # Test the modified existing manager with hierarchical features integrated
+        self.manager = AdaptiveExplorationManager(
+            observation_space=self.observation_space,
+            action_space=self.action_space
+        )
         self.test_level = load_test_level("complex-path-switch-required")
     
     def test_subgoal_generation(self):
@@ -804,9 +1020,15 @@ class TestHierarchicalReachabilityManager(unittest.TestCase):
 ### Integration Tests
 ```python
 class TestHierarchicalRLIntegration(unittest.TestCase):
+    """Test hierarchical RL integration with modified existing components."""
+    
     def setUp(self):
-        base_env = ReachabilityEnhancedNPPEnv(render_mode='rgb_array')
-        self.env = HierarchicalRLWrapper(base_env)
+        # Test with modified existing environment with hierarchical features
+        self.env = NPPEnv(
+            render_mode='rgb_array',
+            max_subgoals=8,
+            subgoal_reward_scale=0.1
+        )
     
     def test_hierarchical_wrapper(self):
         """Test hierarchical RL wrapper functionality."""
@@ -888,10 +1110,11 @@ class TestHierarchicalRLIntegration(unittest.TestCase):
 - **Cache Hit Rate**: >70% during typical training
 
 ### Quality Requirements
-- **Subgoal Relevance**: Generated subgoals should be achievable and strategic
-- **Priority Accuracy**: Higher priority subgoals should lead to faster level completion
-- **Strategy Effectiveness**: Completion strategies should improve success rates
-- **Dynamic Adaptation**: Subgoals should update appropriately when game state changes
+- **Production-Ready Implementation**: All components fully functional without placeholder code or simplified implementations
+- **Algorithm Compliance**: Level completion must follow the exact two-phase NPP heuristic (exit switch → exit door)
+- **Neural Feature Integration**: Complete integration with graph transformer + 3D CNN + MLP reachability analysis
+- **Strategic Effectiveness**: Systematic switch activation sequences leading to measurable level completion improvements
+- **Dynamic Adaptation**: Real-time subgoal updates following switch state changes without performance degradation
 
 ### Training Requirements
 - **Sample Efficiency**: 30-50% improvement in sample efficiency on complex levels
@@ -912,18 +1135,17 @@ class TestHierarchicalRLIntegration(unittest.TestCase):
 
 ## Deliverables
 
-1. **HierarchicalReachabilityManager**: Complete subgoal management system
-2. **Subgoal Framework**: All subgoal types and supporting structures
-3. **Strategic Planning**: Level completion planning and dependency analysis
-4. **HRL Integration**: Complete integration with hierarchical RL training
-5. **Performance Analysis**: Comprehensive evaluation of hierarchical benefits
+1. **Modified AdaptiveExplorationManager**: Existing exploration manager extended with hierarchical reachability-guided planning
+2. **Integrated Subgoal Framework**: All hierarchical subgoal types and strategic planning integrated into existing modules
+3. **Enhanced Environment Support**: Existing environment wrappers updated with hierarchical RL subgoal information
+4. **Training Pipeline Integration**: Complete integration with existing PPO training systems
+5. **Performance Analysis**: Comprehensive evaluation of hierarchical benefits within existing architecture
+6. **Integration Testing**: Test suites validating hierarchical integration in existing components
 
-## Timeline
-
-- **Week 1**: Core manager implementation and subgoal types
-- **Week 2**: Strategic planning and completion strategy generation
-- **Week 3**: HRL integration and environment wrapper
-- **Week 4**: Testing, optimization, and performance evaluation
+**Key Principles**: 
+- All modifications integrate seamlessly with existing architecture while providing hierarchical capabilities
+- Implementation must be production-ready with complete functionality (no placeholders or simplified code)
+- Level completion algorithm must follow the exact two-phase NPP heuristic specification
 
 ## Dependencies
 
