@@ -111,7 +111,6 @@ class ReachabilityWrapper(gym.Wrapper):
         from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
         from nclone.graph.reachability.feature_extractor import (
             ReachabilityFeatureExtractor,
-            PerformanceMode,
         )
 
         tiered_system = TieredReachabilitySystem(debug=self.debug)

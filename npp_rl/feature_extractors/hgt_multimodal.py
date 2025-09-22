@@ -23,10 +23,9 @@ nclone Integration:
 """
 
 # Standard library imports
-from typing import Dict, Tuple, Optional, Any, List
+from typing import Dict
 
 # Third-party imports
-import numpy as np
 import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor

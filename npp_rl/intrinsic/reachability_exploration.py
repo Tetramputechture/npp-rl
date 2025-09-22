@@ -6,17 +6,8 @@ compact feature extraction, and frontier detection systems, avoiding duplication
 and leveraging the optimized OpenCV-based implementations.
 """
 
-import sys
-import os
-from typing import Dict, Any, Optional, List, Tuple, Set
+from typing import Dict, Any, Optional, List, Tuple
 import numpy as np
-
-# Add nclone to path for imports
-nclone_path = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "nclone"
-)
-if os.path.exists(nclone_path) and nclone_path not in sys.path:
-    sys.path.insert(0, nclone_path)
 
 # Import nclone reachability systems
 from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
@@ -26,10 +17,8 @@ from nclone.graph.reachability.compact_features import (
 )
 from nclone.graph.reachability.frontier_detector import (
     FrontierDetector,
-    Frontier,
-    FrontierType,
 )
-from nclone.graph.reachability.rl_integration import RLIntegrationAPI, RLState
+from nclone.graph.reachability.rl_integration import RLIntegrationAPI
 from nclone.gym_environment.reward_calculation.exploration_reward_calculator import (
     ExplorationRewardCalculator,
 )
