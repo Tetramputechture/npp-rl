@@ -217,99 +217,85 @@ class ReachabilityWrapper(gym.Wrapper):
         """Extract reachability features for current game state."""
         start_time = time.perf_counter()
 
-        try:
-            # Get current game state
-            ninja_pos = self._get_ninja_position()
-            level_data = self._get_level_data()
-            entities = self._get_entities()
-            switch_states = self._get_switch_states()
+        # Get current game state
+        ninja_pos = self._get_ninja_position()
+        level_data = self._get_level_data()
+        entities = self._get_entities()
+        switch_states = self._get_switch_states()
 
-            # Check cache first
-            cache_key = self._generate_cache_key(ninja_pos, switch_states)
-            if self._is_cache_valid(cache_key):
-                self.cache_hits += 1
-                cached_entry = self.reachability_cache[cache_key]
-                cached_entry["cache_hits"] += 1
-                features = cached_entry["features"]
-                features.from_cache = True
-                features.extraction_time = 0.0  # Cache hit
-                return features
+        # Check cache first
+        cache_key = self._generate_cache_key(ninja_pos, switch_states)
+        if self._is_cache_valid(cache_key):
+            self.cache_hits += 1
+            cached_entry = self.reachability_cache[cache_key]
+            cached_entry["cache_hits"] += 1
+            features = cached_entry["features"]
+            features.from_cache = True
+            features.extraction_time = 0.0  # Cache hit
+            return features
 
-            self.cache_misses += 1
+        self.cache_misses += 1
 
-            # Extract features using nclone reachability system
-            if hasattr(self.reachability_extractor, "extract_features"):
-                # Use ReachabilityFeatureExtractor interface
-                # Convert performance target to PerformanceMode enum
-                from nclone.graph.reachability.feature_extractor import PerformanceMode
+        # Extract features using nclone reachability system
+        if hasattr(self.reachability_extractor, "extract_features"):
+            # Use ReachabilityFeatureExtractor interface
+            # Convert performance target to PerformanceMode enum
+            from nclone.graph.reachability.feature_extractor import PerformanceMode
 
-                perf_mode = getattr(
-                    PerformanceMode,
-                    self.performance_target.upper(),
-                    PerformanceMode.FAST,
-                )
+            perf_mode = getattr(
+                PerformanceMode,
+                self.performance_target.upper(),
+                PerformanceMode.FAST,
+            )
 
-                features_result = self.reachability_extractor.extract_features(
-                    ninja_position=ninja_pos,
-                    level_data=level_data,
-                    entities=entities,
-                    switch_states=switch_states,
-                    performance_mode=perf_mode,
-                )
+            features_result = self.reachability_extractor.extract_features(
+                ninja_position=ninja_pos,
+                level_data=level_data,
+                entities=entities,
+                switch_states=switch_states,
+                performance_mode=perf_mode,
+            )
 
-                # Handle different return types
-                if hasattr(features_result, "features"):
-                    features = features_result.features
-                else:
-                    features = features_result
+            # Handle different return types
+            if hasattr(features_result, "features"):
+                features = features_result.features
             else:
-                # Fallback for dummy extractor
-                features = self.reachability_extractor.extract_features(
-                    ninja_pos, level_data, switch_states, self.performance_target
-                )
+                features = features_result
+        else:
+            # Fallback for dummy extractor
+            features = self.reachability_extractor.extract_features(
+                ninja_pos, level_data, switch_states, self.performance_target
+            )
 
-            # Ensure numpy array format
-            if not isinstance(features, np.ndarray):
-                features = np.array(features, dtype=np.float32)
+        # Ensure numpy array format
+        if not isinstance(features, np.ndarray):
+            features = np.array(features, dtype=np.float32)
 
-            # Validate feature dimensions
-            if features.shape != (64,):
-                if self.debug:
-                    print(f"Warning: Expected 64 features, got {features.shape}")
-                # Pad or truncate to 64 dimensions
-                if len(features) < 64:
-                    features = np.pad(features, (0, 64 - len(features)), "constant")
-                else:
-                    features = features[:64]
-
-            extraction_time = (time.perf_counter() - start_time) * 1000
-
-            # Add metadata
-            features.extraction_time = extraction_time
-            features.from_cache = False
-            features.confidence = 1.0
-
-            # Cache result
-            self._cache_features(cache_key, features, extraction_time)
-
-            # Performance monitoring
-            if self.performance_monitor:
-                self.performance_monitor.record_timing(extraction_time)
-
-            return features
-
-        except Exception as e:
+        # Validate feature dimensions
+        if features.shape != (64,):
             if self.debug:
-                print(f"Warning: Reachability feature extraction failed: {e}")
+                print(f"Warning: Expected 64 features, got {features.shape}")
+            # Pad or truncate to 64 dimensions
+            if len(features) < 64:
+                features = np.pad(features, (0, 64 - len(features)), "constant")
+            else:
+                features = features[:64]
 
-            # Return zero features as fallback
-            extraction_time = (time.perf_counter() - start_time) * 1000
-            features = np.zeros(64, dtype=np.float32)
-            features.extraction_time = extraction_time
-            features.from_cache = False
-            features.confidence = 0.0
+        extraction_time = (time.perf_counter() - start_time) * 1000
 
-            return features
+        # Add metadata
+        features.extraction_time = extraction_time
+        features.from_cache = False
+        features.confidence = 1.0
+
+        # Cache result
+        self._cache_features(cache_key, features, extraction_time)
+
+        # Performance monitoring
+        if self.performance_monitor:
+            self.performance_monitor.record_timing(extraction_time)
+
+        return features
 
     def _get_ninja_position(self) -> Tuple[float, float]:
         """Extract ninja position from environment state."""

@@ -149,14 +149,9 @@ class ICMNetwork(nn.Module):
 
         # Skip if no level data to avoid expensive failed computations
         if observations is not None and observations.get("level_data") is not None:
-            try:
-                modulated_curiosity = self._apply_reachability_modulation(
-                    base_curiosity, observations
-                )
-            except Exception as e:
-                if self.debug:
-                    print(f"Reachability modulation failed: {e}")
-                modulated_curiosity = base_curiosity
+            modulated_curiosity = self._apply_reachability_modulation(
+                base_curiosity, observations
+            )
         else:
             modulated_curiosity = base_curiosity
 
@@ -239,35 +234,29 @@ class ICMNetwork(nn.Module):
         if self.reachability_calculator is None:
             return {"available": False}
 
-        try:
-            # Extract first observation
-            obs = self._extract_single_observation(observations, 0)
+        # Extract first observation
+        obs = self._extract_single_observation(observations, 0)
 
-            # Get compact features
-            compact_features = self.reachability_calculator.extract_compact_features(
-                level_data=obs.get("level_data"),
-                player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
-                switch_states=obs.get("switch_states", {}),
-            )
+        # Get compact features
+        compact_features = self.reachability_calculator.extract_compact_features(
+            level_data=obs.get("level_data"),
+            player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
+            switch_states=obs.get("switch_states", {}),
+        )
 
-            # Get frontier information
-            frontiers = self.reachability_calculator.get_frontier_information(
-                level_data=obs.get("level_data"),
-                player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
-                switch_states=obs.get("switch_states", {}),
-            )
+        # Get frontier information
+        frontiers = self.reachability_calculator.get_frontier_information(
+            level_data=obs.get("level_data"),
+            player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
+            switch_states=obs.get("switch_states", {}),
+        )
 
-            return {
-                "available": True,
-                "compact_features": compact_features,
-                "frontiers": frontiers,
-                "num_frontiers": len(frontiers),
-            }
-
-        except Exception as e:
-            if self.debug:
-                print(f"Reachability info extraction failed: {e}")
-            return {"available": False, "error": str(e)}
+        return {
+            "available": True,
+            "compact_features": compact_features,
+            "frontiers": frontiers,
+            "num_frontiers": len(frontiers),
+        }
 
     def reset(self):
         """Reset for new episode."""

@@ -25,16 +25,9 @@ import gymnasium as gym
 from nclone.graph import HierarchicalGraphBuilder, GraphData, EdgeType, E_MAX_EDGES
 from nclone.constants.entity_types import EntityType
 
-# Import our simplified entity association system
-try:
-    from ..utils.entity_associations import (
-        EntityAssociationManager,
-        LevelCompletionInfo,
-    )
-except ImportError:
-    # Fallback if import fails
-    EntityAssociationManager = None
-    LevelCompletionInfo = None
+from ..utils.entity_associations import (
+    EntityAssociationManager,
+)
 
 
 class EventType(IntEnum):
@@ -553,28 +546,24 @@ class DynamicGraphWrapper(gym.Wrapper):
         if not hasattr(self.env, "get_current_state"):
             return
 
-        try:
-            # Get current environment state
-            state = self.env.get_current_state()
+        # Get current environment state
+        state = self.env.get_current_state()
 
-            # Build new graph
-            # Build hierarchical graph and extract sub-cell level for compatibility
-            hierarchical_graph = self.graph_builder.build_graph(
-                level_data=state.get("level_data", {}),
-                ninja_position=state.get("ninja_position", (0, 0)),
-                entities=state.get("entities", []),
-                ninja_velocity=state.get("ninja_velocity"),
-                ninja_state=state.get("ninja_state"),
-            )
-            # Use sub-cell graph for current compatibility
-            self.current_graph = hierarchical_graph.sub_cell_graph
+        # Build new graph
+        # Build hierarchical graph and extract sub-cell level for compatibility
+        hierarchical_graph = self.graph_builder.build_graph(
+            level_data=state.get("level_data", {}),
+            ninja_position=state.get("ninja_position", (0, 0)),
+            entities=state.get("entities", []),
+            ninja_velocity=state.get("ninja_velocity"),
+            ninja_state=state.get("ninja_state"),
+        )
+        # Use sub-cell graph for current compatibility
+        self.current_graph = hierarchical_graph.sub_cell_graph
 
-            logging.debug(
-                f"Rebuilt full graph: {self.current_graph.num_nodes} nodes, {self.current_graph.num_edges} edges"
-            )
-
-        except Exception as e:
-            logging.warning(f"Failed to rebuild full graph: {e}")
+        logging.debug(
+            f"Rebuilt full graph: {self.current_graph.num_nodes} nodes, {self.current_graph.num_edges} edges"
+        )
 
     def _find_edges_near_position(
         self, position: Tuple[float, float], radius: float

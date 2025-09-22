@@ -147,41 +147,36 @@ def validate_dynamic_graph_environment(env: gym.Env) -> bool:
     Returns:
         True if environment is valid, False otherwise
     """
-    try:
-        # Check if environment has dynamic graph wrapper
-        if not isinstance(env, DynamicGraphWrapper):
-            current_env = env
-            while hasattr(current_env, "env"):
-                current_env = current_env.env
-                if isinstance(current_env, DynamicGraphWrapper):
-                    break
-            else:
-                logging.error("Environment does not have DynamicGraphWrapper")
-                return False
-
-        # Check observation space
-        if not hasattr(env, "observation_space"):
-            logging.error("Environment missing observation_space")
+    # Check if environment has dynamic graph wrapper
+    if not isinstance(env, DynamicGraphWrapper):
+        current_env = env
+        while hasattr(current_env, "env"):
+            current_env = current_env.env
+            if isinstance(current_env, DynamicGraphWrapper):
+                break
+        else:
+            logging.error("Environment does not have DynamicGraphWrapper")
             return False
 
-        # Test environment reset and step
-        obs, info = env.reset()
-        if "dynamic_graph_metadata" in obs:
-            metadata = obs["dynamic_graph_metadata"]
-            if len(metadata) != 10:
-                logging.error(f"Invalid dynamic graph metadata shape: {metadata.shape}")
-                return False
-
-        # Test a single step
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-
-        logging.info("Dynamic graph environment validation passed")
-        return True
-
-    except Exception as e:
-        logging.error(f"Dynamic graph environment validation failed: {e}")
+    # Check observation space
+    if not hasattr(env, "observation_space"):
+        logging.error("Environment missing observation_space")
         return False
+
+    # Test environment reset and step
+    obs, info = env.reset()
+    if "dynamic_graph_metadata" in obs:
+        metadata = obs["dynamic_graph_metadata"]
+        if len(metadata) != 10:
+            logging.error(f"Invalid dynamic graph metadata shape: {metadata.shape}")
+            return False
+
+    # Test a single step
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    logging.info("Dynamic graph environment validation passed")
+    return True
 
 
 def benchmark_dynamic_graph_performance(
