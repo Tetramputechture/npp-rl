@@ -91,7 +91,7 @@ class CuriosityModule(nn.Module):
         phi_next_state = self.feature_encoder(next_state)
         
         # Forward model prediction
-        action_onehot = torch.zeros(action.size(0), 5)
+        action_onehot = torch.zeros(action.size(0), 5, device=action.device)
         action_onehot.scatter_(1, action.long().unsqueeze(1), 1)
         
         forward_input = torch.cat([phi_state, action_onehot], dim=1)
@@ -129,7 +129,8 @@ class NoveltyDetector:
         # Handle both single samples and batches
         if state_features.dim() > 1:
             state_features = state_features[0]  # Take first sample from batch
-        state_hash = hash(tuple(state_features.detach().numpy().round(2).tolist())) % self.hash_dim
+        # Handle GPU tensors by moving to CPU before numpy conversion
+        state_hash = hash(tuple(state_features.detach().cpu().numpy().round(2).tolist())) % self.hash_dim
         
         self.visit_counts[state_hash] += 1
         self.total_visits += 1
@@ -259,7 +260,7 @@ class AdaptiveExplorationManager:
                 # Performance stagnating, increase exploration
                 self.exploration_scale = min(2.0, self.exploration_scale * 1.05)
     
-    def get_hierarchical_subgoals(self, ninja_pos: Tuple[float, float], level_data, 
+    def get_available_subgoals(self, ninja_pos: Tuple[float, float], level_data, 
                                  switch_states: Dict, max_subgoals: int = 5) -> List[Subgoal]:
         """
         Generate hierarchical subgoals using reachability-guided planning.
@@ -359,7 +360,7 @@ class AdaptiveExplorationManager:
             self.reachability_system, self.reachability_features
         )
     
-    def _generate_cache_key(self, ninja_pos: Tuple[float, float], switch_states: Dict) -> str:
+    def _generate_cache_key(self, ninja_pos: Tuple[float, float], switch_states: Dict, level_data=None) -> str:
         """Generate cache key for subgoal caching."""
         # Round position to reduce cache fragmentation
         pos_key = f"{int(ninja_pos[0]/24)},{int(ninja_pos[1]/24)}"
@@ -367,7 +368,12 @@ class AdaptiveExplorationManager:
         # Sort switch states for consistent key generation
         switch_key = ",".join(f"{k}:{v}" for k, v in sorted(switch_states.items()))
         
-        return f"{pos_key}|{switch_key}"
+        # Include level data hash if provided for more specific caching
+        level_key = ""
+        if level_data is not None:
+            level_key = f"|{hash(str(level_data))}"
+        
+        return f"{pos_key}|{switch_key}{level_key}"
     
     def _cleanup_cache(self):
         """Remove expired cache entries."""
@@ -385,6 +391,45 @@ class AdaptiveExplorationManager:
         if switch_states != self.last_switch_states:
             self.subgoal_cache.clear()
             self.last_switch_states = switch_states.copy()
+    
+    def update_subgoals_on_switch_change(self, ninja_pos: Tuple[float, float], level_data, 
+                                       old_switch_states: Dict, new_switch_states: Dict) -> Tuple[List[Subgoal], List[Subgoal]]:
+        """
+        Update subgoals when switch states change.
+        
+        Args:
+            ninja_pos: Current ninja position
+            level_data: Level data for reachability analysis
+            old_switch_states: Previous switch states
+            new_switch_states: New switch states
+            
+        Returns:
+            Tuple of (new_subgoals, newly_available_subgoals)
+        """
+        # Invalidate cache due to switch state change
+        self.invalidate_cache_on_switch_change(new_switch_states)
+        
+        # Get old subgoals for comparison
+        old_subgoals = self.get_available_subgoals(ninja_pos, level_data, old_switch_states)
+        
+        # Get new subgoals with updated switch states
+        new_subgoals = self.get_available_subgoals(ninja_pos, level_data, new_switch_states)
+        
+        # Find newly available subgoals (simple comparison by position for now)
+        old_positions = {(s.position[0], s.position[1]) for s in old_subgoals}
+        newly_available = [s for s in new_subgoals if (s.position[0], s.position[1]) not in old_positions]
+        
+        return new_subgoals, newly_available
+    
+    def get_hierarchical_stats(self) -> Dict[str, Any]:
+        """Get hierarchical planning statistics."""
+        return {
+            'cache_size': len(self.subgoal_cache),
+            'cache_hit_rate': self.cache_hit_rate,
+            'avg_subgoal_count': self.avg_subgoal_count,
+            'planning_time_ms': self.planning_time_ms,
+            'total_subgoals_generated': getattr(self, 'total_subgoals_generated', 0)
+        }
     
     def get_statistics(self) -> Dict[str, float]:
         """Get performance and exploration statistics."""
