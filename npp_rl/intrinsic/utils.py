@@ -12,7 +12,7 @@ import numpy as np
 from typing import Dict, Any, Optional, Union, List, Tuple, Set
 
 # Import real nclone integration
-from .nclone_integration import extract_reachability_info_from_observations as _real_extract_reachability_info
+from .reachability_exploration import extract_reachability_info_from_observations as _real_extract_reachability_info
 
 
 def extract_features_from_policy(

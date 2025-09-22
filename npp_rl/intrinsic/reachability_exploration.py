@@ -16,41 +16,12 @@ nclone_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fil
 if os.path.exists(nclone_path) and nclone_path not in sys.path:
     sys.path.insert(0, nclone_path)
 
-try:
-    # Import nclone reachability systems
-    from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
-    from nclone.graph.reachability.compact_features import CompactReachabilityFeatures, FeatureConfig
-    from nclone.graph.reachability.frontier_detector import FrontierDetector, Frontier, FrontierType
-    from nclone.graph.reachability.rl_integration import RLIntegrationAPI, RLState
-    from nclone.gym_environment.reward_calculation.exploration_reward_calculator import ExplorationRewardCalculator
-    
-    NCLONE_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: nclone not available for integration: {e}")
-    NCLONE_AVAILABLE = False
-    
-    # Fallback classes for when nclone is not available
-    class TieredReachabilitySystem:
-        def __init__(self, *args, **kwargs): pass
-        def analyze_reachability(self, *args, **kwargs): return None
-    
-    class CompactReachabilityFeatures:
-        def __init__(self, *args, **kwargs): pass
-        def extract_features(self, *args, **kwargs): return np.zeros(64)
-    
-    class FrontierDetector:
-        def __init__(self, *args, **kwargs): pass
-        def detect_frontiers(self, *args, **kwargs): return []
-    
-    class RLIntegrationAPI:
-        def __init__(self, *args, **kwargs): pass
-        def get_rl_state(self, *args, **kwargs): return None
-    
-    class ExplorationRewardCalculator:
-        def __init__(self, *args, **kwargs): pass
-        def calculate_exploration_reward(self, *args, **kwargs): return 0.0
-        def reset(self): pass
-
+# Import nclone reachability systems
+from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.compact_features import CompactReachabilityFeatures, FeatureConfig
+from nclone.graph.reachability.frontier_detector import FrontierDetector, Frontier, FrontierType
+from nclone.graph.reachability.rl_integration import RLIntegrationAPI, RLState
+from nclone.gym_environment.reward_calculation.exploration_reward_calculator import ExplorationRewardCalculator
 
 class ReachabilityAwareExplorationCalculator:
     """
@@ -72,26 +43,19 @@ class ReachabilityAwareExplorationCalculator:
         
         # Core nclone systems
         self.base_calculator = ExplorationRewardCalculator()
-        
-        if NCLONE_AVAILABLE:
-            self.reachability_system = TieredReachabilitySystem(debug=debug)
-            self.feature_extractor = CompactReachabilityFeatures(
-                config=FeatureConfig(
-                    objective_slots=8,
-                    switch_slots=16,
-                    hazard_slots=16,
-                    area_slots=8,
-                    movement_slots=8,
-                    meta_slots=8
-                )
+        self.reachability_system = TieredReachabilitySystem(debug=debug)
+        self.feature_extractor = CompactReachabilityFeatures(
+            config=FeatureConfig(
+                objective_slots=8,
+                switch_slots=16,
+                hazard_slots=16,
+                area_slots=8,
+                movement_slots=8,
+                meta_slots=8
             )
-            self.frontier_detector = FrontierDetector(debug=debug)
-            self.rl_api = RLIntegrationAPI(self.reachability_system, debug=debug)
-        else:
-            self.reachability_system = None
-            self.feature_extractor = None
-            self.frontier_detector = None
-            self.rl_api = None
+        )
+        self.frontier_detector = FrontierDetector(debug=debug)
+        self.rl_api = RLIntegrationAPI(self.reachability_system, debug=debug)
         
         # Reachability-aware exploration tracking
         self.reachable_visit_bonus = 1.0  # Full reward for reachable areas
@@ -127,7 +91,7 @@ class ReachabilityAwareExplorationCalculator:
         # Get base exploration reward from existing system
         base_reward = self.base_calculator.calculate_exploration_reward(player_x, player_y)
         
-        if not NCLONE_AVAILABLE or level_data is None:
+        if level_data is None:
             return {
                 "base_exploration": base_reward,
                 "reachability_modulation": 1.0,
@@ -274,9 +238,6 @@ class ReachabilityAwareExplorationCalculator:
         Returns:
             64-dimensional feature vector
         """
-        if not NCLONE_AVAILABLE or self.feature_extractor is None:
-            return np.zeros(64, dtype=np.float32)
-        
         try:
             # Get reachability analysis
             reachability_info = self._get_reachability_analysis(
@@ -318,9 +279,6 @@ class ReachabilityAwareExplorationCalculator:
         Returns:
             List of frontier information dictionaries
         """
-        if not NCLONE_AVAILABLE:
-            return []
-        
         reachability_info = self._get_reachability_analysis(
             player_position[0], player_position[1], level_data, switch_states
         )
@@ -352,7 +310,7 @@ class ReachabilityAwareExplorationCalculator:
     
     def is_nclone_available(self) -> bool:
         """Check if nclone integration is available."""
-        return NCLONE_AVAILABLE
+        return True
 
 
 def extract_reachability_info_from_observations(observations: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -368,9 +326,6 @@ def extract_reachability_info_from_observations(observations: Dict[str, Any]) ->
     Returns:
         Reachability information dictionary or None if not available
     """
-    if not NCLONE_AVAILABLE:
-        return None
-    
     # Extract relevant data from observations
     player_x = observations.get("player_x")
     player_y = observations.get("player_y")

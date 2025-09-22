@@ -12,9 +12,9 @@ import torch
 from typing import Dict, Any
 
 # Import consolidated implementation
-from npp_rl.intrinsic.consolidated_icm import ConsolidatedICMNetwork, ConsolidatedICMTrainer
-from npp_rl.intrinsic.nclone_integration import ReachabilityAwareExplorationCalculator, NCLONE_AVAILABLE
-from npp_rl.intrinsic.utils import extract_reachability_info_from_observations
+from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
+from npp_rl.intrinsic.reachability_exploration import ReachabilityAwareExplorationCalculator
+from npp_rl.intrinsic.reachability_exploration import extract_reachability_info_from_observations
 
 
 def create_mock_observations(batch_size: int = 4) -> Dict[str, Any]:
@@ -34,12 +34,12 @@ def create_mock_features(batch_size: int = 4, feature_dim: int = 512) -> torch.T
     return torch.randn(batch_size, feature_dim)
 
 
-def test_consolidated_icm_basic_functionality():
+def test_icm_basic_functionality():
     """Test basic ICM functionality with consolidated implementation."""
     print("Testing consolidated ICM basic functionality...")
     
     # Create ICM network
-    icm = ConsolidatedICMNetwork(
+    icm = ICMNetwork(
         feature_dim=512,
         action_dim=6,
         enable_reachability_awareness=True,
@@ -72,7 +72,7 @@ def test_reachability_integration():
     print("Testing reachability integration...")
     
     # Create ICM with reachability awareness
-    icm = ConsolidatedICMNetwork(
+    icm = ICMNetwork(
         feature_dim=512,
         action_dim=6,
         enable_reachability_awareness=True,
@@ -98,11 +98,10 @@ def test_reachability_integration():
     reachability_info = icm.get_reachability_info(observations)
     assert "available" in reachability_info
     
-    if NCLONE_AVAILABLE:
-        print(f"✓ nclone integration available: {reachability_info.get('available', False)}")
-        if reachability_info.get("available"):
-            assert "compact_features" in reachability_info
-            assert "frontiers" in reachability_info
+    print(f"✓ nclone integration available: {reachability_info.get('available', False)}")
+    if reachability_info.get("available"):
+        assert "compact_features" in reachability_info
+        assert "frontiers" in reachability_info
     else:
         print("✓ nclone not available, using fallback implementation")
     
@@ -112,10 +111,6 @@ def test_reachability_integration():
 def test_exploration_calculator_integration():
     """Test integration with ReachabilityAwareExplorationCalculator."""
     print("Testing exploration calculator integration...")
-    
-    if not NCLONE_AVAILABLE:
-        print("⚠ Skipping exploration calculator test - nclone not available")
-        return
     
     # Create exploration calculator
     calculator = ReachabilityAwareExplorationCalculator(debug=True)
@@ -150,7 +145,7 @@ def test_performance_requirements():
     print("Testing performance requirements...")
     
     # Create ICM network
-    icm = ConsolidatedICMNetwork(
+    icm = ICMNetwork(
         feature_dim=512,
         action_dim=6,
         enable_reachability_awareness=True,
@@ -198,14 +193,14 @@ def test_trainer_integration():
     print("Testing trainer integration...")
     
     # Create ICM and trainer
-    icm = ConsolidatedICMNetwork(
+    icm = ICMNetwork(
         feature_dim=512,
         action_dim=6,
         enable_reachability_awareness=True,
         debug=True
     )
     
-    trainer = ConsolidatedICMTrainer(
+    trainer = ICMTrainer(
         icm_network=icm,
         learning_rate=1e-3,
         device="cpu"
@@ -243,16 +238,12 @@ def test_reachability_info_extraction():
     # Test extraction
     reachability_info = extract_reachability_info_from_observations(observations)
     
-    if NCLONE_AVAILABLE:
-        if reachability_info is not None:
-            print("✓ Real nclone reachability extraction successful")
-            assert "nclone_available" in reachability_info
-            assert reachability_info["nclone_available"] == True
-        else:
-            print("⚠ nclone available but extraction returned None (expected with mock data)")
+    if reachability_info is not None:
+        print("✓ Real nclone reachability extraction successful")
+        assert "nclone_available" in reachability_info
+        assert reachability_info["nclone_available"] == True
     else:
-        print("✓ nclone not available, extraction returned None as expected")
-        assert reachability_info is None
+        print("⚠ nclone available but extraction returned None (expected with mock data)")
     
     print("✓ Reachability info extraction works")
 
@@ -263,12 +254,12 @@ def run_all_tests():
     print("=" * 60)
     
     # System info
-    print(f"nclone available: {NCLONE_AVAILABLE}")
+    print(f"nclone available: True")
     print(f"PyTorch version: {torch.__version__}")
     print()
     
     try:
-        test_consolidated_icm_basic_functionality()
+        test_icm_basic_functionality()
         test_reachability_integration()
         test_exploration_calculator_integration()
         test_performance_requirements()
