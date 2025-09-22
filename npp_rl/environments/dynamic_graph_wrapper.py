@@ -25,10 +25,6 @@ import gymnasium as gym
 from nclone.graph import HierarchicalGraphBuilder, GraphData, EdgeType, E_MAX_EDGES
 from nclone.constants.entity_types import EntityType
 
-from ..utils.entity_associations import (
-    EntityAssociationManager,
-)
-
 
 class EventType(IntEnum):
     """Types of events that can trigger graph updates."""
@@ -238,9 +234,6 @@ class DynamicGraphWrapper(gym.Wrapper):
         # Core components
         self.graph_builder = HierarchicalGraphBuilder()
         self.constraint_propagator = DynamicConstraintPropagator()
-        self.entity_manager = (
-            EntityAssociationManager() if EntityAssociationManager else None
-        )
 
         # Event management
         self.event_queue = deque(maxlen=event_buffer_size)
@@ -634,112 +627,9 @@ class DynamicGraphWrapper(gym.Wrapper):
 
         return None
 
-    def get_level_completion_info(self) -> Optional[Any]:
-        """
-        Get level completion information using simplified entity associations.
-
-        Returns:
-            LevelCompletionInfo object with all entity relationships, or None if unavailable
-        """
-        if not self.entity_manager or not hasattr(self.env, "nplay_headless"):
-            return None
-
-        try:
-            sim = self.env.nplay_headless.sim
-            return self.entity_manager.extract_entity_pairs_from_sim(sim)
-        except Exception as e:
-            logging.warning(f"Failed to extract level completion info: {e}")
-            return None
-
-    def find_best_exit_strategy(
-        self, ninja_position: Tuple[float, float]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Find the best exit strategy using graph-based pathfinding.
-
-        Args:
-            ninja_position: Current ninja position (x, y)
-
-        Returns:
-            Best exit strategy dict or None if not available
-        """
-        if not self.entity_manager:
-            return None
-
-        completion_info = self.get_level_completion_info()
-        if not completion_info:
-            return None
-
-        # Use current graph data for pathfinding
-        best_exit = self.entity_manager.find_best_exit_option(
-            completion_info, ninja_position, self.current_graph
-        )
-
-        if not best_exit:
-            return None
-
-        # Convert to strategy dict format
-        if best_exit in completion_info.accessible_exits:
-            return {
-                "strategy": "direct_exit",
-                "target_exit": best_exit.door_pos,
-                "target_switch": None,
-                "exit_pair": best_exit,
-                "graph_cost": self.entity_manager._calculate_path_cost(
-                    ninja_position, best_exit.door_pos, self.current_graph
-                ),
-            }
-        else:
-            switch_cost = self.entity_manager._calculate_path_cost(
-                ninja_position, best_exit.switch_pos, self.current_graph
-            )
-            door_cost = self.entity_manager._calculate_path_cost(
-                best_exit.switch_pos, best_exit.door_pos, self.current_graph
-            )
-
-            return {
-                "strategy": "via_switch",
-                "target_exit": best_exit.door_pos,
-                "target_switch": best_exit.switch_pos,
-                "exit_pair": best_exit,
-                "switch_cost": switch_cost,
-                "door_cost": door_cost,
-                "total_cost": switch_cost + door_cost,
-            }
-
     def update_entity_cache(self, entities: List[Dict[str, Any]]):
         """Update cached entity data for switch-door associations."""
         self.current_entities = entities
-
-    def get_completion_requirements(self) -> List[Dict[str, Any]]:
-        """
-        Get structured completion requirements using simplified entity associations.
-
-        Returns:
-            List of completion requirements in priority order
-        """
-        completion_info = self.get_level_completion_info()
-        if not completion_info or not self.entity_manager:
-            return []
-
-        return self.entity_manager.get_completion_requirements(completion_info)
-
-    def is_level_completable(self) -> bool:
-        """
-        Check if the level is completable in its current state.
-
-        Returns:
-            True if at least one exit path exists
-        """
-        completion_info = self.get_level_completion_info()
-        if not completion_info:
-            return False
-
-        # Level is completable if there are accessible exits or activatable switches
-        return (
-            len(completion_info.accessible_exits) > 0
-            or len(completion_info.required_switches) > 0
-        )
 
     def _get_dynamic_graph_metadata(self) -> np.ndarray:
         """Get dynamic graph metadata for observation."""

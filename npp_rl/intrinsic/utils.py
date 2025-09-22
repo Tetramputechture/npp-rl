@@ -9,10 +9,12 @@ Updated to use real nclone integration instead of placeholder implementations.
 
 import torch
 import numpy as np
-from typing import Dict, Any, Optional, Union, List, Tuple, Set
+from typing import Dict, Any, Optional, Union
 
 # Import real nclone integration
-from .reachability_exploration import extract_reachability_info_from_observations as _real_extract_reachability_info
+from .reachability_exploration import (
+    extract_reachability_info_from_observations as _real_extract_reachability_info,
+)
 
 
 def extract_features_from_policy(
@@ -216,22 +218,19 @@ def extract_reachability_info_from_observations(
 ) -> Optional[Dict[str, Any]]:
     """
     Extract reachability information from environment observations using real nclone systems.
-    
+
     This function now uses the real nclone reachability analysis instead of placeholder
     implementations, providing accurate reachability information for ICM modulation.
-    
+
     Args:
         observations: Dictionary of observations from environment
         batch_size: Expected batch size (for validation)
-        
+
     Returns:
         Dictionary containing reachability information or None if not available
     """
     # Use real nclone integration
     return _real_extract_reachability_info(observations)
-
-
-# Placeholder functions removed - now using real nclone integration
 
 
 def create_reachability_aware_icm_config(
@@ -253,7 +252,7 @@ def create_reachability_aware_icm_config(
 ) -> Dict[str, Any]:
     """
     Create a reachability-aware ICM configuration.
-    
+
     Args:
         feature_dim: Dimension of feature representations
         action_dim: Number of discrete actions
@@ -270,7 +269,7 @@ def create_reachability_aware_icm_config(
         frontier_boost_factor: Extra boost for newly accessible areas
         strategic_weight_factor: Weight for objective-proximate areas
         unreachable_penalty: Penalty for confirmed unreachable areas
-        
+
     Returns:
         Enhanced ICM configuration dictionary
     """
@@ -285,15 +284,17 @@ def create_reachability_aware_icm_config(
         alpha=alpha,
         r_int_clip=r_int_clip,
     )
-    
+
     # Add reachability-specific parameters
-    config.update({
-        "enable_reachability_awareness": enable_reachability_awareness,
-        "reachability_dim": reachability_dim,
-        "reachability_scale_factor": reachability_scale_factor,
-        "frontier_boost_factor": frontier_boost_factor,
-        "strategic_weight_factor": strategic_weight_factor,
-        "unreachable_penalty": unreachable_penalty,
-    })
-    
+    config.update(
+        {
+            "enable_reachability_awareness": enable_reachability_awareness,
+            "reachability_dim": reachability_dim,
+            "reachability_scale_factor": reachability_scale_factor,
+            "frontier_boost_factor": frontier_boost_factor,
+            "strategic_weight_factor": strategic_weight_factor,
+            "unreachable_penalty": unreachable_penalty,
+        }
+    )
+
     return config

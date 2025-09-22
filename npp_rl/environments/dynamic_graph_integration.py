@@ -8,7 +8,6 @@ with existing environments and training pipelines.
 import logging
 from typing import Dict, Any, Optional, Callable
 import gymnasium as gym
-from gymnasium.spaces import Dict as SpacesDict
 
 from .dynamic_graph_wrapper import DynamicGraphWrapper, UpdateBudget
 from .vectorization_wrapper import VectorizationWrapper
