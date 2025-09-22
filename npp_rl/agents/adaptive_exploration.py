@@ -39,6 +39,7 @@ import torch.nn as nn
 
 # nclone imports (top-level imports preferred)
 from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
+from nclone.constants.entity_types import EntityType
 from nclone.graph.reachability.compact_features import CompactReachabilityFeatures
 from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
 
@@ -119,7 +120,8 @@ class SwitchActivationSubgoal(Subgoal):
     
     def is_completed(self, ninja_pos: Tuple[float, float], 
                     level_data, switch_states: Dict) -> bool:
-        return switch_states.get(self.switch_id, False)
+        # Use authoritative simulation data first, fall back to passed states
+        return self._is_switch_activated_authoritative(self.switch_id, level_data, switch_states)
     
     def get_reward_shaping(self, ninja_pos: Tuple[float, float]) -> float:
         # Reward for getting closer to switch
@@ -132,6 +134,29 @@ class SwitchActivationSubgoal(Subgoal):
         reachability_bonus = self.reachability_score * 0.5
         
         return proximity_reward + reachability_bonus
+    
+    def _is_switch_activated_authoritative(self, switch_id: str, level_data, switch_states: Dict) -> bool:
+        """
+        Check switch activation using authoritative simulation data first.
+        Falls back to passed switch_states if simulation data unavailable.
+        
+        Uses actual NppEnvironment data structures from nclone.
+        """
+        # Method 1: Check level_data.entities for switch with matching entity_id
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if (entity.get('entity_id') == switch_id and 
+                    entity.get('type') == EntityType.EXIT_SWITCH):
+                    # For exit switches, activated means active=False (inverted logic in nclone)
+                    return not entity.get('active', True)
+        
+        # Method 2: Check if level_data has direct switch state info (from environment observation)
+        if hasattr(level_data, 'switch_activated'):
+            # This is the direct boolean from NppEnvironment observation
+            return level_data.switch_activated
+        
+        # Method 3: Fall back to passed switch_states (legacy compatibility)
+        return switch_states.get(switch_id, False)
 
 
 @dataclass
@@ -147,9 +172,14 @@ class CollectionSubgoal(Subgoal):
     
     def is_completed(self, ninja_pos: Tuple[float, float], 
                     level_data, switch_states: Dict) -> bool:
-        # Production implementation: Check if item still exists at position
-        # Full integration with level data to track collected items
-        return self._check_item_collected(self.target_position, level_data)
+        # For functional switches (our focus), check if switch is activated
+        # For other collectibles, check if item has been collected
+        if self.item_type in ['door_switch', 'exit_switch', 'functional_switch', 'locked_door_switch']:
+            # This is actually a functional switch, check activation status
+            return self._check_functional_switch_activated(self.target_position, level_data)
+        else:
+            # This is a traditional collectible, check if collected
+            return self._check_item_collected(self.target_position, level_data)
     
     def get_reward_shaping(self, ninja_pos: Tuple[float, float]) -> float:
         distance = math.sqrt((ninja_pos[0] - self.target_position[0])**2 + 
@@ -168,10 +198,63 @@ class CollectionSubgoal(Subgoal):
         # Production implementation: Check level data for item existence
         if hasattr(level_data, 'collectibles'):
             for item in level_data.collectibles:
-                if (abs(item.x - position[0]) < 12.0 and 
-                    abs(item.y - position[1]) < 12.0):
-                    return not item.collected
+                # Handle both dictionary and object access patterns
+                item_x = item.get('x', 0) if isinstance(item, dict) else getattr(item, 'x', 0)
+                item_y = item.get('y', 0) if isinstance(item, dict) else getattr(item, 'y', 0)
+                item_collected = item.get('collected', False) if isinstance(item, dict) else getattr(item, 'collected', False)
+                
+                if (abs(item_x - position[0]) < 12.0 and 
+                    abs(item_y - position[1]) < 12.0):
+                    return item_collected  # Return True if collected, False if not collected
+        return False  # Item not found, assume not collected
+    
+    def _check_functional_switch_activated(self, position: Tuple[float, float], level_data) -> bool:
+        """
+        Check if a functional switch at the given position is activated.
+        Uses actual NppEnvironment data structures from nclone.
+        """
+        # Method 1: Check level_data.entities for switches near the position
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_SWITCH:
+                    entity_x = entity.get('x', 0)
+                    entity_y = entity.get('y', 0)
+                    
+                    # Check if this entity is at the target position (within radius)
+                    if (abs(entity_x - position[0]) < 12.0 and 
+                        abs(entity_y - position[1]) < 12.0):
+                        # For exit switches, activated means active=False (inverted logic)
+                        return not entity.get('active', True)
+        
+        # Method 2: Check if level_data has direct switch state info (from environment observation)
+        if hasattr(level_data, 'switch_activated'):
+            # This is the direct boolean from NppEnvironment observation
+            # Check if the switch position matches
+            if (hasattr(level_data, 'switch_x') and hasattr(level_data, 'switch_y')):
+                switch_x = getattr(level_data, 'switch_x', 0)
+                switch_y = getattr(level_data, 'switch_y', 0)
+                if (abs(switch_x - position[0]) < 12.0 and 
+                    abs(switch_y - position[1]) < 12.0):
+                    return level_data.switch_activated
+        
+        # Default: assume not activated
         return False
+    
+    def _find_switch_id_by_position(self, position: Tuple[float, float], level_data) -> str:
+        """Find switch ID by position using actual NppEnvironment data structures."""
+        # Check level_data.entities for switches near the position
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_SWITCH:
+                    entity_x = entity.get('x', 0)
+                    entity_y = entity.get('y', 0)
+                    
+                    # Check if this entity is at the target position (within radius)
+                    if (abs(entity_x - position[0]) < 12.0 and 
+                        abs(entity_y - position[1]) < 12.0):
+                        return entity.get('entity_id')
+        
+        return None
 
 
 @dataclass
@@ -501,25 +584,25 @@ class LevelCompletionPlanner:
         )
     
     def _find_exit_door(self, level_data) -> Optional[Dict]:
-        """Find the exit door in level data."""
-        if hasattr(level_data, 'objectives'):
-            for obj in level_data.objectives:
-                if obj.get('type') == 'exit_door':
+        """Find the exit door in level data using actual NppEnvironment data structures."""
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_DOOR:
                     return {
-                        'id': obj.get('id', 'exit_door'),
-                        'position': (obj.get('x', 0), obj.get('y', 0)),
+                        'id': entity.get('entity_id', 'exit_door'),
+                        'position': (entity.get('x', 0), entity.get('y', 0)),
                         'type': 'exit_door'
                     }
         return None
     
     def _find_exit_switch(self, level_data) -> Optional[Dict]:
-        """Find the exit door switch in level data."""
-        if hasattr(level_data, 'switches'):
-            for switch in level_data.switches:
-                if switch.get('controls_exit', False):
+        """Find the exit door switch in level data using actual NppEnvironment data structures."""
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_SWITCH:
                     return {
-                        'id': switch.get('id', 'exit_switch'),
-                        'position': (switch.get('x', 0), switch.get('y', 0)),
+                        'id': entity.get('entity_id', 'exit_switch'),
+                        'position': (entity.get('x', 0), entity.get('y', 0)),
                         'type': 'exit_switch'
                     }
         return None
@@ -538,35 +621,40 @@ class LevelCompletionPlanner:
     
     def _find_nearest_reachable_locked_door_switch(self, ninja_pos, level_data, 
                                                   switch_states, reachability_features) -> Optional[Dict]:
-        """Find nearest reachable locked door switch using neural features."""
-        if not hasattr(level_data, 'switches'):
+        """Find nearest reachable locked door switch using neural features and actual NppEnvironment data structures."""
+        if not hasattr(level_data, 'entities') or not level_data.entities:
             return None
         
         reachable_switches = []
         switch_features = reachability_features[8:24].numpy() if len(reachability_features) >= 24 else []
         
-        for i, switch in enumerate(level_data.switches):
-            # Skip already activated switches
-            if switch_states.get(switch.get('id'), False):
+        switch_index = 0
+        for entity in level_data.entities:
+            # Only consider exit switches
+            if entity.get('type') != EntityType.EXIT_SWITCH:
                 continue
             
-            # Skip non-door switches
-            if switch.get('type') != 'door_switch':
+            switch_id = entity.get('entity_id')
+            
+            # Skip already activated switches (using authoritative method)
+            if self._is_switch_activated_authoritative(switch_id, level_data, switch_states):
                 continue
             
             # Check reachability using neural features
-            if i < len(switch_features) and switch_features[i] > 0.1:
+            if switch_index < len(switch_features) and switch_features[switch_index] > 0.1:
                 distance = math.sqrt(
-                    (ninja_pos[0] - switch.get('x', 0))**2 + 
-                    (ninja_pos[1] - switch.get('y', 0))**2
+                    (ninja_pos[0] - entity.get('x', 0))**2 + 
+                    (ninja_pos[1] - entity.get('y', 0))**2
                 )
                 reachable_switches.append({
-                    'id': switch.get('id'),
-                    'position': (switch.get('x', 0), switch.get('y', 0)),
-                    'type': switch.get('type'),
+                    'id': switch_id,
+                    'position': (entity.get('x', 0), entity.get('y', 0)),
+                    'type': 'exit_switch',
                     'distance': distance,
-                    'reachability_score': switch_features[i]
+                    'reachability_score': switch_features[switch_index]
                 })
+            
+            switch_index += 1
         
         # Return nearest reachable switch
         if reachable_switches:
@@ -584,6 +672,29 @@ class LevelCompletionPlanner:
         step_penalty = max(0.0, 1.0 - len(completion_steps) * 0.1)
         
         return min(1.0, feature_confidence * step_penalty)
+    
+    def _is_switch_activated_authoritative(self, switch_id: str, level_data, switch_states: Dict) -> bool:
+        """
+        Check switch activation using authoritative simulation data first.
+        Falls back to passed switch_states if simulation data unavailable.
+        
+        Uses actual NppEnvironment data structures from nclone.
+        """
+        # Method 1: Check level_data.entities for switch with matching entity_id
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if (entity.get('entity_id') == switch_id and 
+                    entity.get('type') == EntityType.EXIT_SWITCH):
+                    # For exit switches, activated means active=False (inverted logic in nclone)
+                    return not entity.get('active', True)
+        
+        # Method 2: Check if level_data has direct switch state info (from environment observation)
+        if hasattr(level_data, 'switch_activated'):
+            # This is the direct boolean from NppEnvironment observation
+            return level_data.switch_activated
+        
+        # Method 3: Fall back to passed switch_states (legacy compatibility)
+        return switch_states.get(switch_id, False)
 
 
 class PathAnalyzer:
@@ -1049,20 +1160,22 @@ class AdaptiveExplorationManager:
     
     def _generate_navigation_subgoals(self, ninja_pos, level_data, 
                                     objective_distances) -> List[NavigationSubgoal]:
-        """Generate navigation subgoals to key objectives."""
+        """Generate navigation subgoals to key objectives using actual NppEnvironment data structures."""
         subgoals = []
         
-        # Generate exit door navigation subgoal
-        if hasattr(level_data, 'objectives'):
-            for obj in level_data.objectives:
-                if obj.get('type') == 'exit_door':
-                    distance = math.sqrt((ninja_pos[0] - obj.get('x', 0))**2 + 
-                                       (ninja_pos[1] - obj.get('y', 0))**2)
+        # Generate exit door navigation subgoal from level_data.entities
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_DOOR:
+                    entity_x = entity.get('x', 0)
+                    entity_y = entity.get('y', 0)
+                    distance = math.sqrt((ninja_pos[0] - entity_x)**2 + 
+                                       (ninja_pos[1] - entity_y)**2)
                     subgoals.append(NavigationSubgoal(
                         priority=0.9,
                         estimated_time=distance / 50.0,  # Rough time estimate
                         success_probability=0.8,
-                        target_position=(obj.get('x', 0), obj.get('y', 0)),
+                        target_position=(entity_x, entity_y),
                         target_type='exit_door',
                         distance=distance
                     ))
@@ -1071,56 +1184,110 @@ class AdaptiveExplorationManager:
     
     def _generate_switch_subgoals(self, level_data, switch_states, 
                                 switch_features) -> List[SwitchActivationSubgoal]:
-        """Generate switch activation subgoals."""
+        """Generate switch activation subgoals using actual NppEnvironment data structures."""
         subgoals = []
         
-        if hasattr(level_data, 'switches'):
-            for i, switch in enumerate(level_data.switches):
-                # Skip already activated switches
-                if switch_states.get(switch.get('id'), False):
-                    continue
-                
-                # Get reachability score from neural features
-                reachability_score = switch_features[i] if i < len(switch_features) else 0.5
-                
-                # Only include reachable switches
-                if reachability_score > 0.1:
-                    subgoals.append(SwitchActivationSubgoal(
-                        priority=0.8,
-                        estimated_time=30.0,
-                        success_probability=min(0.9, reachability_score),
-                        switch_id=switch.get('id'),
-                        switch_position=(switch.get('x', 0), switch.get('y', 0)),
-                        switch_type=switch.get('type', 'door_switch'),
-                        reachability_score=reachability_score
-                    ))
+        # Use level_data.entities to find exit switches
+        if hasattr(level_data, 'entities') and level_data.entities:
+            switch_index = 0
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_SWITCH:
+                    entity_id = entity.get('entity_id')
+                    
+                    # Skip already activated switches using authoritative data
+                    if entity_id and self._is_switch_activated_from_entity(entity):
+                        continue
+                    
+                    # Get reachability score from neural features
+                    reachability_score = switch_features[switch_index] if switch_index < len(switch_features) else 0.5
+                    switch_index += 1
+                    
+                    # Only include reachable switches
+                    if reachability_score > 0.1:
+                        subgoals.append(SwitchActivationSubgoal(
+                            priority=0.8,
+                            estimated_time=30.0,
+                            success_probability=min(0.9, reachability_score),
+                            switch_id=entity_id,
+                            switch_position=(entity.get('x', 0), entity.get('y', 0)),
+                            switch_type='exit_switch',
+                            reachability_score=reachability_score
+                        ))
         
         return subgoals
     
     def _generate_collection_subgoals(self, ninja_pos, level_data, 
                                     reachability_features) -> List[CollectionSubgoal]:
-        """Generate collection subgoals for valuable items."""
+        """
+        Generate collection subgoals for functional switches only.
+        
+        Uses actual NppEnvironment data structures from nclone.
+        We focus on functional switches (exit switches) rather than arbitrary 
+        collectibles like gold, as these are the only 'collectibles' that matter 
+        for level completion.
+        """
         subgoals = []
         
-        if hasattr(level_data, 'collectibles'):
-            for item in level_data.collectibles:
-                if not item.get('collected', False):
-                    distance = math.sqrt((ninja_pos[0] - item.get('x', 0))**2 + 
-                                       (ninja_pos[1] - item.get('y', 0))**2)
-                    
-                    # Only include nearby collectibles to avoid distraction
-                    if distance < 200.0:
-                        subgoals.append(CollectionSubgoal(
-                            priority=0.3,
-                            estimated_time=distance / 50.0,
-                            success_probability=0.7,
-                            target_position=(item.get('x', 0), item.get('y', 0)),
-                            item_type=item.get('type', 'gold'),
-                            value=item.get('value', 1.0),
-                            area_connectivity=0.5  # Default connectivity
-                        ))
+        # Focus on exit switches from level_data.entities
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('type') == EntityType.EXIT_SWITCH:
+                    # Check if switch is not yet activated using actual simulation data
+                    entity_id = entity.get('entity_id')
+                    if entity_id and not self._is_switch_activated_from_entity(entity):
+                        entity_x = entity.get('x', 0)
+                        entity_y = entity.get('y', 0)
+                        
+                        distance = math.sqrt((ninja_pos[0] - entity_x)**2 + 
+                                           (ninja_pos[1] - entity_y)**2)
+                        
+                        # Only include reachable functional switches
+                        if distance < 300.0:  # Reasonable activation range
+                            subgoals.append(CollectionSubgoal(
+                                priority=0.6,  # Higher priority than arbitrary collectibles
+                                estimated_time=distance / 50.0,
+                                success_probability=0.8,  # Higher success rate for switches
+                                target_position=(entity_x, entity_y),
+                                item_type='exit_switch',
+                                value=1.0,  # Exit switches are always important
+                                area_connectivity=0.7  # Switches typically have good connectivity
+                            ))
         
         return subgoals
+    
+    def _is_switch_activated_from_entity(self, entity: Dict) -> bool:
+        """
+        Check if a switch entity is activated using actual NppEnvironment data.
+        
+        For exit switches, activated means active=False (inverted logic in nclone).
+        """
+        if entity.get('type') == EntityType.EXIT_SWITCH:
+            # For exit switches, activated means active=False (inverted logic)
+            return not entity.get('active', True)
+        
+        # For other switch types, use state field or active field directly
+        return entity.get('state', 0.0) > 0.5 or entity.get('active', False)
+    
+    def _is_switch_activated(self, switch_id: str, level_data) -> bool:
+        """
+        Check if a switch is activated using actual NppEnvironment data structures.
+        
+        This method should be the authoritative source for switch states,
+        using actual simulation data from nclone.
+        """
+        # Method 1: Check level_data.entities for switch with matching entity_id
+        if hasattr(level_data, 'entities') and level_data.entities:
+            for entity in level_data.entities:
+                if entity.get('entity_id') == switch_id:
+                    return self._is_switch_activated_from_entity(entity)
+        
+        # Method 2: Check if level_data has direct switch state info (from environment observation)
+        if hasattr(level_data, 'switch_activated'):
+            # This is the direct boolean from NppEnvironment observation
+            return level_data.switch_activated
+        
+        # Default: assume not activated if we can't find the switch
+        return False
     
     def _generate_cache_key(self, ninja_pos, switch_states, level_data) -> str:
         """Generate cache key for subgoal caching."""
