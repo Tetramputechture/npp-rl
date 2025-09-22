@@ -175,7 +175,6 @@ SUBTASK_DEFINITIONS = [
     'navigate_to_exit_switch',
     'navigate_to_exit_door', 
     'activate_door_switch',
-    'collect_gold',
     'avoid_hazard',
     'perform_wall_jump',
     'use_launch_pad',
@@ -254,8 +253,6 @@ class PhysicsAwareSubtaskEnv(gym.Wrapper):
         elif self.subtask.startswith('activate_door_switch'):
             door_id = self._extract_door_id_from_subtask(self.subtask)
             return self._find_door_switch_position(level_data, door_id)
-        elif self.subtask == 'collect_gold':
-            return self._find_nearest_gold_position(obs)
         elif self.subtask == 'avoid_hazard':
             return self._find_safe_position(obs)
         else:
@@ -339,7 +336,6 @@ class SubgoalCompletionDetector:
         self.completion_thresholds = {
             'position_threshold': 20.0,  # pixels
             'switch_activation_delay': 5,  # frames
-            'gold_collection_delay': 3,   # frames
         }
         
     def is_subtask_completed(self, subtask: str, observation: dict) -> bool:
@@ -351,8 +347,6 @@ class SubgoalCompletionDetector:
         elif subtask.startswith('activate_door_switch'):
             door_id = self._extract_door_id_from_subtask(subtask)
             return self._is_switch_activated(observation, f'door_{door_id}')
-        elif subtask == 'collect_gold':
-            return self._is_gold_collected(observation)
         elif subtask == 'avoid_hazard':
             return self._is_hazard_avoided(observation)
         elif subtask == 'perform_wall_jump':
@@ -387,12 +381,6 @@ class SubgoalCompletionDetector:
         """Check if a switch has been activated."""
         switch_states = self._extract_switch_states(observation)
         return switch_states.get(switch_id, False)
-    
-    def _is_gold_collected(self, observation: dict) -> bool:
-        """Check if gold has been collected (simplified - check score increase)."""
-        # This would need to track score changes or gold entity states
-        current_score = self._extract_score(observation)
-        return hasattr(self, 'last_score') and current_score > self.last_score
     
     def _is_hazard_avoided(self, observation: dict) -> bool:
         """Check if hazard has been successfully avoided."""
@@ -458,8 +446,6 @@ class SubtaskRewardShaper:
             )
         elif self.subtask.startswith('activate_'):
             shaped_reward += self._activation_reward_shaping(observation)
-        elif self.subtask == 'collect_gold':
-            shaped_reward += self._collection_reward_shaping(observation)
         elif self.subtask == 'avoid_hazard':
             shaped_reward += self._avoidance_reward_shaping(observation)
         elif self.subtask.startswith('perform_'):
@@ -520,31 +506,6 @@ class SubtaskRewardShaper:
             return 0.1
         elif min_distance < 60.0:  # Moderately close
             return 0.05
-        else:
-            return 0.0
-    
-    def _collection_reward_shaping(self, observation: dict) -> float:
-        """Reward shaping for gold collection subtasks."""
-        ninja_pos = self._extract_ninja_position(observation)
-        gold_positions = self._extract_gold_positions(observation)
-        
-        if not gold_positions:
-            return 0.0
-        
-        # Find nearest gold
-        min_distance = float('inf')
-        for gold_pos in gold_positions:
-            distance = np.sqrt(
-                (ninja_pos[0] - gold_pos[0])**2 + 
-                (ninja_pos[1] - gold_pos[1])**2
-            )
-            min_distance = min(min_distance, distance)
-        
-        # Distance-based reward
-        if min_distance < 20.0:
-            return 0.2  # Very close to gold
-        elif min_distance < 50.0:
-            return 0.1  # Close to gold
         else:
             return 0.0
     
@@ -741,7 +702,7 @@ class TestHRLIntegration(unittest.TestCase):
         
         # Mock reachability manager to return specific subgoals
         agent.reachability_manager.get_reachable_subgoals = Mock(
-            return_value=['activate_door_switch_1', 'collect_gold']
+            return_value=['activate_door_switch_1']
         )
         
         # Force subtask selection
@@ -749,7 +710,7 @@ class TestHRLIntegration(unittest.TestCase):
         action = agent.select_action(obs)
         
         # Should have selected a reachable subtask
-        self.assertIn(agent.current_subtask, ['activate_door_switch_1', 'collect_gold'])
+        self.assertIn(agent.current_subtask, ['activate_door_switch_1'])
     
     def test_subtask_specialization(self):
         """Test that low-level policies specialize for their subtasks."""

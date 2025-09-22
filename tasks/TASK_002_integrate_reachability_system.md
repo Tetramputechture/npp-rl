@@ -48,7 +48,6 @@ class HierarchicalReachabilityManager:
         - 'navigate_to_exit_switch'
         - 'navigate_to_exit_door' 
         - 'activate_door_switch_X'
-        - 'collect_gold_X_Y'
         - 'avoid_hazard_X_Y'
         """
         # Check cache first
@@ -93,11 +92,6 @@ class HierarchicalReachabilityManager:
             if not switch_states.get(f'door_{door_id}', False):
                 if self._is_position_reachable(door_switch_pos, reachability_state):
                     subgoals.append(f'activate_door_switch_{door_id}')
-        
-        # Check gold collection
-        for gold_id, gold_pos in self._find_gold_positions(level_data):
-            if self._is_position_reachable(gold_pos, reachability_state):
-                subgoals.append(f'collect_gold_{gold_pos[0]}_{gold_pos[1]}')
         
         return subgoals
 ```

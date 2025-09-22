@@ -132,11 +132,7 @@ class HierarchicalReachabilityManager:
             if self._is_position_reachable(exit_door_pos):
                 reachable_subgoals.append('navigate_to_exit_door')
                 
-        # Check gold collection opportunities
-        for gold_pos in level_data.get_gold_positions():
-            if self._is_position_reachable(gold_pos):
-                reachable_subgoals.append(f'collect_gold_{gold_pos}')
-                
+
         # Check locked door switches
         for door_id, switch_pos in level_data.get_door_switch_pairs():
             if not current_switch_states.get(door_id, False):
@@ -476,11 +472,6 @@ subtasks = {
         'termination': 'hazard cleared or death',
         'reward': 'safety bonus - damage penalty'
     },
-    'collect_gold': {
-        'goal': 'gather collectible items',
-        'termination': 'all gold collected or timeout',
-        'reward': 'collection bonus + efficiency'
-    }
 }
 ```
 
@@ -1332,7 +1323,7 @@ class TestHRLFramework(unittest.TestCase):
         # Validate subtask definitions
         expected_subtasks = [
             'navigate_to_exit_switch', 'navigate_to_exit_door',
-            'collect_gold', 'activate_door_switch', 'avoid_hazard'
+            'activate_door_switch', 'avoid_hazard'
         ]
         for subtask in expected_subtasks:
             self.assertIn(subtask, agent.low_level_policies)
@@ -1382,7 +1373,7 @@ class TestHRLFramework(unittest.TestCase):
         
         # Should transition to new subtask (exit switch now reachable)
         self.assertNotEqual(agent.current_subtask, 'activate_door_switch_1')
-        self.assertIn(agent.current_subtask, ['navigate_to_exit_switch', 'collect_gold'])
+        self.assertIn(agent.current_subtask, ['navigate_to_exit_switch'])
         
     def test_strategic_planning_integration(self):
         """Test integration with strategic level completion planner."""

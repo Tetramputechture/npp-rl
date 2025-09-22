@@ -39,7 +39,6 @@ Input Streams:
 
 **Subtasks**:
 - `activate_switch`: Navigate to and trigger exit switch
-- `collect_gold`: Navigate to and collect gold pieces  
 - `reach_exit_door`: Navigate to activated exit
 - `navigate_hazard_zone`: Traverse dangerous areas safely
 - `perform_wall_jump`: Execute precise wall jump maneuvers
@@ -57,7 +56,7 @@ Input Streams:
 - IEM-PPO for uncertainty-driven exploration of difficult transitions
 
 **Potential-Based Reward Shaping**:
-- Distance-to-objective potentials (gold, switch, exit)
+- Distance-to-objective potentials (switch, exit)
 - Progress-on-subtasks potentials  
 - Hazard-avoidance negative potentials
 

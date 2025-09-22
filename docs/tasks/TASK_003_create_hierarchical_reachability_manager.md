@@ -171,12 +171,6 @@ class HierarchicalReachabilityManager:
         )
         subgoals.extend(switch_subgoals)
         
-        # Generate collection subgoals
-        collection_subgoals = self._generate_collection_subgoals(
-            level_data, reachability_features
-        )
-        subgoals.extend(collection_subgoals)
-        
         # Generate avoidance subgoals
         avoidance_subgoals = self._generate_avoidance_subgoals(
             ninja_pos, level_data, reachability_features
@@ -230,35 +224,6 @@ class HierarchicalReachabilityManager:
                         priority=self._calculate_switch_priority(switch, switch_feature)
                     )
                     subgoals.append(subgoal)
-        
-        return subgoals
-    
-    def _generate_collection_subgoals(self, level_data, 
-                                    reachability_features) -> List[Subgoal]:
-        """
-        Generate gold collection subgoals.
-        """
-        subgoals = []
-        
-        # Get gold pieces from level data
-        gold_pieces = self.level_analyzer.get_gold_pieces(level_data)
-        
-        # Use area connectivity features to assess gold reachability
-        area_connectivity = reachability_features[40:48].numpy()
-        
-        for gold in gold_pieces:
-            # Determine which area the gold is in
-            gold_area = self._determine_area(gold.position, level_data)
-            
-            if gold_area < len(area_connectivity) and area_connectivity[gold_area] > 0.3:
-                subgoal = CollectionSubgoal(
-                    target_position=gold.position,
-                    item_type='gold',
-                    value=gold.value,
-                    area_connectivity=area_connectivity[gold_area],
-                    priority=self._calculate_collection_priority(gold, area_connectivity[gold_area])
-                )
-                subgoals.append(subgoal)
         
         return subgoals
     

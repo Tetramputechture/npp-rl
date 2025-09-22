@@ -175,11 +175,7 @@ class NPPMetricsCallback(BaseCallback):
         if 'level_completed' in self.locals.get('infos', [{}])[0]:
             completion_rate = self._calculate_completion_rate()
             self.logger.record('npp/completion_rate', completion_rate)
-        
-        if 'gold_collected' in self.locals.get('infos', [{}])[0]:
-            gold_efficiency = self._calculate_gold_efficiency()
-            self.logger.record('npp/gold_efficiency', gold_efficiency)
-        
+
         return True
     
     def _calculate_completion_rate(self) -> float:

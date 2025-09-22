@@ -106,7 +106,6 @@ ReachabilityAwareCuriosity:
 **Subgoal Types**:
 - **NavigationSubgoal**: Navigate to specific positions (switches, doors, exit)
 - **SwitchActivationSubgoal**: Activate specific switches with dependency awareness
-- **CollectionSubgoal**: Collect gold pieces and items
 - **AvoidanceSubgoal**: Avoid hazards and dangerous areas
 
 **Strategic Planning**:

@@ -4,7 +4,7 @@ A Deep Reinforcement Learning Agent for the game N++, implementing PPO (Proximal
 
 ## Project Overview
 
-This project trains an agent to play the game [N++](https://en.wikipedia.org/wiki/N%2B%2B). The agent learns to navigate complex, physics-based levels, collect gold, activate switches, and reach exits by interacting with a custom Gym-compatible environment derived from the `nclone` simulator.
+This project trains an agent to play the game [N++](https://en.wikipedia.org/wiki/N%2B%2B). The agent learns to navigate complex, physics-based levels, activate switches, and reach exits by interacting with a custom Gym-compatible environment derived from the `nclone` simulator.
 
 The agent architecture incorporates several features informed by recent deep reinforcement learning research to enhance performance, generalization, and sample efficiency.
 
@@ -86,7 +86,6 @@ The agent interacts with the environment using a discrete action set:
 
 The extrinsic reward signal from the environment is designed to guide the agent towards completing levels efficiently. It typically includes:
 *   Small penalty for each time step (encouraging speed).
-*   Positive reward for collecting gold (if applicable to the specific environment variant).
 *   Positive reward for activating switches.
 *   Large positive reward for reaching the exit.
 *   Large negative penalty for dying.
