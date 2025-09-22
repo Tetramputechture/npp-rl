@@ -34,6 +34,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+# Local imports
+from .nclone_integration import ReachabilityAwareExplorationCalculator, NCLONE_AVAILABLE
+
 
 class ExplorationHistory:
     """
