@@ -32,9 +32,12 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 # Import hierarchical components
-from npp_rl.agents.adaptive_exploration import (
-    AdaptiveExplorationManager,
-    Subgoal, NavigationSubgoal, SwitchActivationSubgoal, CollectionSubgoal
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+
+# Import planning components from nclone
+from nclone.planning import (
+    Subgoal, NavigationSubgoal, SwitchActivationSubgoal, CollectionSubgoal,
+    CompletionStrategy, CompletionStep
 )
 
 # Mock imports for demonstration (replace with actual imports in production)
