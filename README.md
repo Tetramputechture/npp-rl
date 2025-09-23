@@ -70,6 +70,300 @@ To encourage efficient exploration and improve learning in sparse reward environ
 *   **Adaptive Scaling**:
     *   The overall magnitude of the exploration bonus (combined from ICM and novelty) is dynamically adjusted based on the agent's training progress (e.g., rate of extrinsic reward improvement).
 
+## ICM + PPO Integration Guide
+
+This section provides detailed guidance on how to effectively combine the Intrinsic Curiosity Module (ICM) with the regular PPO agent for enhanced exploration and learning performance.
+
+### Overview
+
+The ICM integration provides intrinsic motivation to the PPO agent by generating curiosity-driven exploration bonuses. This is particularly valuable in sparse reward environments like N++ where the agent may need to explore extensively before finding successful strategies.
+
+### Architecture Integration
+
+The ICM system integrates with PPO through the `AdaptiveExplorationManager` class, which acts as a bridge between the curiosity mechanisms and the standard PPO training loop:
+
+```python
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+
+# Initialize the exploration manager
+exploration_manager = AdaptiveExplorationManager()
+
+# Initialize ICM with appropriate dimensions
+exploration_manager.initialize_curiosity_module(
+    feature_dim=128,  # Match your feature extractor output
+    action_dim=6      # N++ action space size
+)
+```
+
+### Integration Workflow
+
+#### 1. Training Loop Integration
+
+The ICM should be integrated into your PPO training loop as follows:
+
+```python
+# During environment step
+obs, reward, done, info = env.step(action)
+
+# Calculate intrinsic reward bonus
+intrinsic_bonus = exploration_manager.get_exploration_bonus(
+    state=previous_features,
+    action=action,
+    next_state=current_features
+)
+
+# Combine extrinsic and intrinsic rewards
+total_reward = reward + intrinsic_bonus
+
+# Update ICM networks (important!)
+exploration_manager.update_curiosity_module(
+    state=previous_features,
+    action=action,
+    next_state=current_features
+)
+```
+
+#### 2. Feature Extraction Compatibility
+
+The ICM requires feature representations of the game state. Ensure your feature extractor outputs are compatible:
+
+```python
+# Your feature extractor should output consistent feature dimensions
+features = feature_extractor(observation)  # Shape: [batch_size, feature_dim]
+
+# ICM expects these features for curiosity calculation
+curiosity_bonus = exploration_manager.get_exploration_bonus(
+    state=features,
+    action=action_tensor,
+    next_state=next_features
+)
+```
+
+#### 3. Hierarchical Subgoal Integration
+
+The system also supports hierarchical planning through reachability-guided subgoals:
+
+```python
+# Get strategic subgoals for the current state
+subgoals = exploration_manager.get_available_subgoals(
+    ninja_pos=(player_x, player_y),
+    level_data=level_info,
+    switch_states=current_switches
+)
+
+# Use subgoals for reward shaping
+for subgoal in subgoals:
+    reward_bonus = subgoal.get_reward_shaping(ninja_pos)
+    total_reward += reward_bonus * subgoal.priority
+```
+
+### Configuration Parameters
+
+#### ICM Hyperparameters
+
+Key parameters for ICM integration:
+
+```python
+# ICM Network Architecture
+FEATURE_DIM = 128           # Feature representation size
+HIDDEN_DIM = 256           # ICM network hidden layer size
+LEARNING_RATE_ICM = 1e-3   # ICM learning rate (separate from PPO)
+
+# Curiosity Scaling
+CURIOSITY_SCALE = 0.1      # Scale factor for intrinsic rewards
+NOVELTY_SCALE = 0.05       # Scale factor for novelty bonuses
+ADAPTIVE_SCALING = True    # Enable adaptive exploration scaling
+
+# Update Frequencies
+ICM_UPDATE_FREQ = 1        # Update ICM every N steps
+SUBGOAL_UPDATE_FREQ = 100  # Update subgoals every N steps
+```
+
+#### PPO Hyperparameter Adjustments
+
+When using ICM, consider adjusting these PPO parameters:
+
+```python
+# Recommended adjustments for ICM integration
+PPO_CONFIG = {
+    'learning_rate': 3e-4,      # Standard rate works well
+    'gamma': 0.999,             # High discount for long-term planning
+    'gae_lambda': 0.95,         # Standard GAE parameter
+    'ent_coef': 0.01,           # Slightly higher entropy for exploration
+    'vf_coef': 0.5,             # Standard value coefficient
+    'max_grad_norm': 0.5,       # Gradient clipping
+    'n_steps': 2048,            # Longer rollouts for better ICM training
+    'batch_size': 64,           # Smaller batches for stability
+}
+```
+
+### Best Practices
+
+#### 1. Reward Balance
+
+Carefully balance extrinsic and intrinsic rewards:
+
+```python
+# Adaptive reward scaling based on training progress
+def get_reward_scaling(episode_count, success_rate):
+    if success_rate < 0.1:
+        # High exploration phase
+        return {'extrinsic': 1.0, 'intrinsic': 0.5}
+    elif success_rate < 0.5:
+        # Balanced phase
+        return {'extrinsic': 1.0, 'intrinsic': 0.2}
+    else:
+        # Exploitation phase
+        return {'extrinsic': 1.0, 'intrinsic': 0.05}
+```
+
+#### 2. Feature Normalization
+
+Ensure consistent feature scaling for ICM:
+
+```python
+# Normalize features before passing to ICM
+features = torch.nn.functional.normalize(raw_features, dim=-1)
+curiosity_bonus = exploration_manager.get_exploration_bonus(
+    state=features, action=action, next_state=next_features
+)
+```
+
+#### 3. Monitoring and Debugging
+
+Track key metrics for ICM performance:
+
+```python
+# Log ICM statistics
+stats = exploration_manager.get_statistics()
+logger.log({
+    'icm/forward_loss': stats.get('forward_loss', 0),
+    'icm/inverse_loss': stats.get('inverse_loss', 0),
+    'icm/curiosity_reward': stats.get('avg_curiosity_reward', 0),
+    'icm/novelty_bonus': stats.get('avg_novelty_bonus', 0),
+    'exploration/total_intrinsic_reward': stats['total_intrinsic_reward'],
+    'exploration/exploration_scale': stats['exploration_scale'],
+})
+```
+
+### Common Issues and Solutions
+
+#### Issue 1: ICM Overpowering Extrinsic Rewards
+
+**Symptoms:** Agent explores endlessly without completing objectives
+**Solution:** Reduce curiosity scaling or implement adaptive scaling
+
+```python
+# Implement curiosity decay
+curiosity_scale = initial_scale * (decay_rate ** episode_count)
+```
+
+#### Issue 2: Feature Dimension Mismatch
+
+**Symptoms:** Runtime errors during ICM forward pass
+**Solution:** Ensure feature extractor output matches ICM input dimensions
+
+```python
+# Add dimension checking
+assert features.shape[-1] == exploration_manager.feature_dim, \
+    f"Feature dim mismatch: {features.shape[-1]} vs {exploration_manager.feature_dim}"
+```
+
+#### Issue 3: Poor Subgoal Quality
+
+**Symptoms:** Subgoals lead to suboptimal behavior
+**Solution:** Tune subgoal prioritization and reachability analysis
+
+```python
+# Adjust subgoal filtering
+filtered_subgoals = [s for s in subgoals if s.success_probability > 0.7]
+```
+
+### Performance Optimization
+
+#### Memory Management
+
+ICM can be memory-intensive. Consider these optimizations:
+
+```python
+# Use gradient checkpointing for ICM networks
+exploration_manager.enable_gradient_checkpointing()
+
+# Limit replay buffer size for novelty detection
+exploration_manager.set_novelty_buffer_size(10000)
+```
+
+#### Computational Efficiency
+
+Optimize ICM updates for better performance:
+
+```python
+# Batch ICM updates
+if step_count % ICM_BATCH_SIZE == 0:
+    exploration_manager.batch_update_curiosity_module(
+        states_batch, actions_batch, next_states_batch
+    )
+```
+
+### Example Training Script Integration
+
+Here's a complete example of integrating ICM with PPO training:
+
+```python
+import torch
+from stable_baselines3 import PPO
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+
+def train_with_icm(env, total_timesteps=1000000):
+    # Initialize exploration manager
+    exploration_manager = AdaptiveExplorationManager()
+    exploration_manager.initialize_curiosity_module(
+        feature_dim=128, action_dim=env.action_space.n
+    )
+    
+    # Initialize PPO agent
+    model = PPO("MultiInputPolicy", env, verbose=1)
+    
+    # Training loop with ICM integration
+    obs = env.reset()
+    for step in range(total_timesteps):
+        # Get action from PPO
+        action, _states = model.predict(obs, deterministic=False)
+        
+        # Environment step
+        next_obs, reward, done, info = env.step(action)
+        
+        # Extract features (assuming custom feature extractor)
+        features = model.policy.extract_features(obs)
+        next_features = model.policy.extract_features(next_obs)
+        
+        # Calculate intrinsic reward
+        intrinsic_reward = exploration_manager.get_exploration_bonus(
+            state=features, action=torch.tensor([action]), 
+            next_state=next_features
+        )
+        
+        # Combine rewards
+        total_reward = reward + 0.1 * intrinsic_reward
+        
+        # Update ICM
+        exploration_manager.update_curiosity_module(
+            state=features, action=torch.tensor([action]),
+            next_state=next_features
+        )
+        
+        # Store experience with modified reward
+        model.replay_buffer.add(obs, next_obs, action, total_reward, done, info)
+        
+        obs = next_obs
+        if done:
+            obs = env.reset()
+    
+    return model
+```
+
+This integration approach ensures that the ICM enhances exploration while maintaining the stability and performance of the underlying PPO algorithm.
+
 ### 5. Action Space
 
 The agent interacts with the environment using a discrete action set:

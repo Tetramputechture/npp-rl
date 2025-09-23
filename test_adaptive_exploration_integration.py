@@ -150,11 +150,11 @@ class TestAdaptiveExplorationManagerRL(unittest.TestCase):
         # This test just verifies the method exists and returns a list
         # The actual functionality is tested in the nclone planning module tests
         try:
-            subgoals = self.manager.get_hierarchical_subgoals(ninja_pos, self.level_data, switch_states)
+            subgoals = self.manager.get_available_subgoals(ninja_pos, self.level_data, switch_states)
             self.assertIsInstance(subgoals, list)
         except Exception as e:
             # If there are dependency issues, just verify the method exists
-            self.assertTrue(hasattr(self.manager, 'get_hierarchical_subgoals'))
+            self.assertTrue(hasattr(self.manager, 'get_available_subgoals'))
     
     def test_cache_management(self):
         """Test subgoal cache management."""
