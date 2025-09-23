@@ -40,8 +40,7 @@ from nclone.graph.reachability.compact_features import CompactReachabilityFeatur
 from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
 from nclone.planning import (
     Subgoal,
-    NavigationSubgoal,
-    SwitchActivationSubgoal,
+    EntityInteractionSubgoal,
     CompletionStrategy,
     LevelCompletionPlanner,
     SubgoalPrioritizer,
@@ -322,34 +321,37 @@ class AdaptiveExplorationManager:
             level_data,
             switch_states,
             self.reachability_system,
-            self.reachability_features,
         )
 
-        # Convert completion steps to hierarchical subgoals
+        # Convert completion steps to hierarchical subgoals using unified EntityInteractionSubgoal
         for step in completion_strategy.steps[:max_subgoals]:
             if step.action_type == "navigate_and_activate":
-                subgoal = SwitchActivationSubgoal(
-                    switch_id=step.target_id,
-                    switch_position=step.target_position,
-                    switch_type="exit_switch",
-                    reachability_score=0.8,
+                subgoal = EntityInteractionSubgoal(
                     priority=step.priority,
                     estimated_time=5.0,
                     success_probability=0.9,
+                    entity_id=step.target_id,
+                    entity_position=step.target_position,
+                    entity_type="exit_switch",
+                    interaction_type="activate",
+                    reachability_score=0.8,
                 )
                 subgoals.append(subgoal)
 
             elif step.action_type == "navigate_to_exit":
-                subgoal = NavigationSubgoal(
-                    target_position=step.target_position,
-                    target_type="exit_door",
-                    distance=math.sqrt(
-                        (ninja_pos[0] - step.target_position[0]) ** 2
-                        + (ninja_pos[1] - step.target_position[1]) ** 2
-                    ),
+                distance = math.sqrt(
+                    (ninja_pos[0] - step.target_position[0]) ** 2
+                    + (ninja_pos[1] - step.target_position[1]) ** 2
+                )
+                subgoal = EntityInteractionSubgoal(
                     priority=step.priority,
                     estimated_time=3.0,
                     success_probability=0.95,
+                    entity_id=step.target_id if hasattr(step, 'target_id') else "exit_door",
+                    entity_position=step.target_position,
+                    entity_type="exit_door",
+                    interaction_type="complete",
+                    distance=distance,
                 )
                 subgoals.append(subgoal)
 
@@ -390,7 +392,6 @@ class AdaptiveExplorationManager:
             level_data,
             switch_states,
             self.reachability_system,
-            self.reachability_features,
         )
 
     def _generate_cache_key(

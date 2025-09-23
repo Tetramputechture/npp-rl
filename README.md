@@ -95,6 +95,33 @@ exploration_manager.initialize_curiosity_module(
 )
 ```
 
+### nclone Planning System Integration
+
+The ICM system leverages nclone's planning and reachability analysis for strategic exploration guidance:
+
+```python
+# The AdaptiveExplorationManager automatically integrates with nclone components:
+# - EntityInteractionSubgoal: Unified subgoal representation
+# - LevelCompletionPlanner: Strategic level completion planning  
+# - SubgoalPrioritizer: Intelligent subgoal ranking and selection
+# - ReachabilitySystem: Spatial analysis for feasible paths
+
+# These components work together to provide structured exploration targets
+# that guide the ICM's curiosity-driven learning process
+```
+
+**Key Integration Points:**
+
+1. **Subgoal Generation**: nclone's planning system generates `EntityInteractionSubgoal` instances that represent strategic targets (switches, exits, navigation points)
+
+2. **Reachability Analysis**: nclone's spatial analysis determines which subgoals are feasible from the current state
+
+3. **Strategic Planning**: The `LevelCompletionPlanner` provides structured completion strategies that guide long-term exploration
+
+4. **Priority-Based Selection**: The `SubgoalPrioritizer` ranks subgoals based on strategic value, reachability, and current game state
+
+5. **ICM Feature Integration**: Subgoal information is incorporated into ICM feature representations to bias curiosity toward strategically relevant exploration
+
 ### Integration Workflow
 
 #### 1. Training Loop Integration
@@ -141,7 +168,7 @@ curiosity_bonus = exploration_manager.get_exploration_bonus(
 
 #### 3. Hierarchical Subgoal Integration
 
-The system also supports hierarchical planning through reachability-guided subgoals:
+The system supports hierarchical planning through reachability-guided subgoals using the unified `EntityInteractionSubgoal` architecture from nclone:
 
 ```python
 # Get strategic subgoals for the current state
@@ -155,7 +182,24 @@ subgoals = exploration_manager.get_available_subgoals(
 for subgoal in subgoals:
     reward_bonus = subgoal.get_reward_shaping(ninja_pos)
     total_reward += reward_bonus * subgoal.priority
+
+# Get level completion strategy using nclone's planning system
+completion_strategy = exploration_manager.get_completion_strategy(
+    ninja_pos=(player_x, player_y),
+    level_data=level_info,
+    switch_states=current_switches
+)
+
+# The completion strategy provides structured steps for level completion
+for step in completion_strategy.steps:
+    print(f"Step: {step.action_type} -> {step.target_position}")
 ```
+
+**Subgoal Architecture:**
+- **EntityInteractionSubgoal**: Unified subgoal class handling both navigation and switch activation
+- **Backward Compatibility**: Legacy `NavigationSubgoal` and `SwitchActivationSubgoal` classes are maintained as aliases
+- **nclone Integration**: Subgoals are generated using nclone's reachability analysis and planning system
+- **Strategic Planning**: Level completion strategies provide structured guidance for ICM exploration
 
 ### Configuration Parameters
 

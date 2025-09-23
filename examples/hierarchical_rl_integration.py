@@ -37,8 +37,9 @@ from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 # Import planning components from nclone
 from nclone.planning import (
     Subgoal,
-    NavigationSubgoal,
-    SwitchActivationSubgoal,
+    EntityInteractionSubgoal,
+    NavigationSubgoal,  # Backward compatibility
+    SwitchActivationSubgoal,  # Backward compatibility
     CompletionStrategy,
     CompletionStep,
 )

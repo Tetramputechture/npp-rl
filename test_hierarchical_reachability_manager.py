@@ -29,11 +29,12 @@ import numpy as np
 import torch
 
 # Import the hierarchical components
-from npp_rl.agents.adaptive_exploration import (
-    AdaptiveExplorationManager,
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+from nclone.planning import (
     Subgoal,
-    NavigationSubgoal,
-    SwitchActivationSubgoal,
+    EntityInteractionSubgoal,
+    NavigationSubgoal,  # Backward compatibility
+    SwitchActivationSubgoal,  # Backward compatibility
     CompletionStrategy,
     CompletionStep,
     LevelCompletionPlanner,
@@ -376,6 +377,12 @@ class TestAdaptiveExplorationManagerHierarchical(unittest.TestCase):
 
         # Mock the reachability system and features
         self.manager.reachability_system = Mock()
+        
+        # Set up reachability system mock to return proper result
+        mock_reachability_result = Mock()
+        mock_reachability_result.coverage_ratio = 0.8
+        self.manager.reachability_system.analyze_reachability.return_value = mock_reachability_result
+        
         self.manager.reachability_features = Mock()
         self.manager.reachability_features.encode_reachability.return_value = np.array(
             [
