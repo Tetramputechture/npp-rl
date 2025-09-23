@@ -34,7 +34,7 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-*   **`HGTMultimodalExtractor` (Primary Architecture - RECOMMENDED)**:
+*   **`HGTMultimodalExtractor`:
     *   Implements **Heterogeneous Graph Transformers** with type-specific attention mechanisms.
     *   **Type-aware processing**: Specialized handling for different node types (grid cells, entities, hazards, switches).
     *   **Edge-type specialization**: Distinct processing for movement edges (walk, jump, fall) vs functional relationships.
@@ -43,8 +43,6 @@ The agent receives multi-modal observations:
     *   **Advanced multimodal fusion**: Cross-modal attention with spatial awareness for optimal feature integration.
 
 The extractor processes the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs, graph representations, and the game state vector are then fused and passed to the policy and value networks.
-
-**Note**: Legacy extractors (temporal, basic multimodal) have been moved to `archive/` for reference. The HGT multimodal extractor provides superior performance and is the recommended approach for new projects.
 
 ### 3. Network Architecture & Hyperparameters
 
@@ -107,13 +105,6 @@ Consolidated architecture focused on hierarchical multimodal processing:
 - Top-level scripts
   - `ppo_train.py`: Thin wrapper to launch PPO via enhanced training.
   - `tools/`: Small utilities (e.g., `convert_actions.py`, `rotate_videos.py`).
-- `archive/`: **Deprecated strategies** moved for reference:
-  - `temporal.py`: Legacy temporal feature extractor
-  - `multimodal.py`: Legacy multimodal extractors  
-  - `training.py`: Legacy training script
-  - `npp_agent_ppo.py`: Legacy training utilities
-
-See `archive/README.md` for details on what was moved and why.
 
 ## Training the Agent
 

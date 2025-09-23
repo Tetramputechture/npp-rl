@@ -74,7 +74,7 @@ class PhysicsStateExtractor:
             [11-15]: Input buffers (jump, floor, wall, launch_pad, input_state)
             [16-17]: Physics capabilities (can_jump, can_wall_jump)
             [18-19]: Contact normal vector (nx, ny)
-            [20-22]: Entity proximity (launch_pad, hazard, collectible)
+            [20-22]: Entity proximity (launch_pad, hazard)
             [23-25]: Advanced buffer states (wall_slide_buffer, air_time, ground_time)
             [26-27]: Physics constraints (max_jump_height, remaining_air_accel)
             [28-30]: Multi-exit path finding (closest_exit_distance, switch_completion_ratio, path_efficiency)

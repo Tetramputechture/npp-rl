@@ -73,11 +73,6 @@ class EntityTypeSystem:
         """Build mapping from entity types to categories."""
         mapping = {}
 
-        # Collectibles
-        collectibles = {EntityType.GOLD}
-        for entity_type in collectibles:
-            mapping[entity_type] = EntityCategory.COLLECTIBLE
-
         # Movement aids (always safe to traverse)
         movement_aids = {
             EntityType.LAUNCH_PAD,
@@ -125,13 +120,6 @@ class EntityTypeSystem:
     def _build_category_properties(self) -> Dict[EntityCategory, Dict]:
         """Build properties for each entity category."""
         return {
-            EntityCategory.COLLECTIBLE: {
-                "attention_weight": 1.2,  # Higher attention for rewards
-                "hazard_level": 0.0,
-                "interaction_range": 1.0,
-                "movement_impact": False,
-                "traversable": True,
-            },
             EntityCategory.MOVEMENT: {
                 "attention_weight": 1.1,
                 "hazard_level": 0.0,

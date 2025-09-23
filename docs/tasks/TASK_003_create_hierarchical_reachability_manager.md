@@ -454,35 +454,6 @@ class SwitchActivationSubgoal(Subgoal):
         
         return proximity_reward + reachability_bonus
 
-@dataclass
-class CollectionSubgoal(Subgoal):
-    """Collect a specific item."""
-    target_position: Tuple[float, float]
-    item_type: str
-    value: float
-    area_connectivity: float
-    
-    def get_target_position(self) -> Tuple[float, float]:
-        return self.target_position
-    
-    def is_completed(self, ninja_pos: Tuple[float, float], 
-                    level_data, switch_states: Dict) -> bool:
-        # Production implementation: Check if item still exists at position
-        # Full integration with level data to track collected items
-        return self._check_item_collected(self.target_position, level_data)
-    
-    def get_reward_shaping(self, ninja_pos: Tuple[float, float]) -> float:
-        distance = math.sqrt((ninja_pos[0] - self.target_position[0])**2 + 
-                           (ninja_pos[1] - self.target_position[1])**2)
-        max_distance = 500.0
-        proximity_reward = (max_distance - distance) / max_distance
-        
-        # Scale by item value and area connectivity
-        value_bonus = self.value * 0.1
-        connectivity_bonus = self.area_connectivity * 0.3
-        
-        return proximity_reward + value_bonus + connectivity_bonus
-
 ```
 
 ### Level Completion Planner
