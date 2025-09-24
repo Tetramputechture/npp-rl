@@ -300,14 +300,34 @@ class MultimodalHGTSystem(nn.Module):
         Returns:
             Multimodal embeddings [batch_size, output_dim]
         """
-        # Process graph through HGT encoder
-        graph_embeddings = self.hgt_encoder(graph_obs)  # [batch_size, graph_dim]
+        # Use individual processing methods for consistency
+        graph_features = self.process_graph(graph_obs)
+        visual_processed = self.process_visual(visual_features)
+        state_processed = self.process_state(state_features)
         
-        batch_size = graph_embeddings.size(0)
-        
+        return self.fuse_features(graph_features, visual_processed, state_processed)
+    
+    def process_graph(self, graph_obs: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Process graph observations through HGT encoder."""
+        return self.hgt_encoder(graph_obs)
+    
+    def process_visual(self, visual_features: torch.Tensor) -> torch.Tensor:
+        """Process visual features (identity for now)."""
+        return visual_features
+    
+    def process_state(self, state_features: torch.Tensor) -> torch.Tensor:
+        """Process state features (identity for now)."""
+        return state_features
+    
+    def fuse_features(
+        self,
+        graph_features: torch.Tensor,
+        visual_features: torch.Tensor,
+        state_features: torch.Tensor
+    ) -> torch.Tensor:
+        """Fuse multimodal features."""
         # Apply cross-modal attention (simplified for batch processing)
-        # In practice, you might want more sophisticated cross-modal fusion
-        enhanced_graph = graph_embeddings
+        enhanced_graph = graph_features
         
         # Simple feature concatenation and fusion
         multimodal_features = torch.cat([

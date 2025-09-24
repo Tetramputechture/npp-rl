@@ -306,3 +306,44 @@ def create_simple_dynamic_graph_wrapper(
         enable_graph_updates=enable_updates,
         debug=debug
     )
+
+
+# Backward compatibility aliases
+DynamicGraphWrapper = SimpleDynamicGraphWrapper
+
+# Legacy classes for backward compatibility (minimal implementations)
+class EventType:
+    """Legacy event type enumeration."""
+    NINJA_MOVE = "ninja_move"
+    HAZARD_TRIGGER = "hazard_trigger"
+    COLLECTIBLE_PICKUP = "collectible_pickup"
+    SWITCH_TOGGLE = "switch_toggle"
+    EXIT_REACH = "exit_reach"
+
+class GraphEvent:
+    """Legacy graph event class."""
+    def __init__(self, event_type, data=None):
+        self.event_type = event_type
+        self.data = data or {}
+
+class UpdateBudget:
+    """Legacy update budget class."""
+    def __init__(self, max_updates=100):
+        self.max_updates = max_updates
+        self.current_updates = 0
+
+class TemporalEdge:
+    """Legacy temporal edge class."""
+    def __init__(self, source, target, edge_type, timestamp=0):
+        self.source = source
+        self.target = target
+        self.edge_type = edge_type
+        self.timestamp = timestamp
+
+class DynamicConstraintPropagator:
+    """Legacy constraint propagator class."""
+    def __init__(self):
+        pass
+    
+    def propagate(self, graph, constraints):
+        return graph

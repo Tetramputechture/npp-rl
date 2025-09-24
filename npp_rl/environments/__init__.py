@@ -1,6 +1,8 @@
 # Environment utilities
 
 from .dynamic_graph_wrapper import (
+    SimpleDynamicGraphWrapper,
+    # Legacy imports for backward compatibility
     DynamicGraphWrapper,
     EventType,
     GraphEvent,
@@ -23,6 +25,7 @@ from .reachability_wrapper import (
 )
 
 __all__ = [
+    'SimpleDynamicGraphWrapper',
     'DynamicGraphWrapper',
     'EventType',
     'GraphEvent', 
