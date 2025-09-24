@@ -197,7 +197,6 @@ for step in completion_strategy.steps:
 
 **Subgoal Architecture:**
 - **EntityInteractionSubgoal**: Unified subgoal class handling both navigation and switch activation
-- **Backward Compatibility**: Legacy `NavigationSubgoal` and `SwitchActivationSubgoal` classes are maintained as aliases
 - **nclone Integration**: Subgoals are generated using nclone's reachability analysis and planning system
 - **Strategic Planning**: Level completion strategies provide structured guidance for ICM exploration
 
