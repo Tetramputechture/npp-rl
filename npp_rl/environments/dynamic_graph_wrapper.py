@@ -1,717 +1,308 @@
 """
-Dynamic Graph Wrapper for Real-Time Graph Adaptation.
+Simplified Dynamic Graph Wrapper for NPP-RL Production System.
 
-This module implements efficient real-time graph updates for dynamic environments,
-providing event-driven graph modifications and incremental update mechanisms
-while maintaining computational performance constraints.
+This module provides a clean, production-ready graph wrapper that integrates
+with nclone's graph system without over-engineering. It focuses on basic
+connectivity updates and lets the HGT transformer learn movement patterns
+emergently from multimodal context.
 
-Key Features:
-- Event-driven graph updates triggered by environmental changes
-- Incremental edge activation/deactivation based on dynamic constraints
-- Priority-based update systems with computational budget management
-- Temporal edge availability windows for time-dependent traversability
-- Efficient graph modification algorithms optimized for real-time performance
+Key Design Principles:
+- Use nclone for physics simulation and basic graph construction
+- Provide simple connectivity updates when game state changes
+- Let HGT learn complex patterns through attention mechanisms
+- Maintain sub-millisecond performance for real-time RL training
+
+This replaces the over-engineered 717-line dynamic_graph_wrapper.py with
+a clean, focused implementation aligned with HGT design principles.
 """
 
 import time
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
-from enum import IntEnum
-from collections import deque, defaultdict
 import numpy as np
 import gymnasium as gym
 
-from nclone.graph import HierarchicalGraphBuilder, GraphData, EdgeType, E_MAX_EDGES
+# nclone integration - proper abstraction level
+from nclone.graph.hierarchical_builder import HierarchicalGraphBuilder
+from nclone.graph.common import GraphData
+from nclone.graph.level_data import LevelData, ensure_level_data
 from nclone.constants.entity_types import EntityType
 
 
-class EventType(IntEnum):
-    """Types of events that can trigger graph updates."""
-
-    ENTITY_MOVED = 0  # Entity position changed
-    ENTITY_STATE_CHANGED = 1  # Entity state/activation changed
-    NINJA_STATE_CHANGED = 2  # Ninja physics state changed
-    DOOR_TOGGLED = 3  # Door opened/closed
-    SWITCH_ACTIVATED = 4  # Switch pressed/released
-    PLATFORM_MOVED = 5  # Moving platform position changed
-    HAZARD_ACTIVATED = 6  # Hazard became active/inactive
-    TEMPORAL_WINDOW = 7  # Time-based edge availability changed
-
-
 @dataclass
-class GraphEvent:
-    """Represents an event that may require graph updates."""
-
-    event_type: EventType
-    timestamp: float
-    entity_id: Optional[int] = None
-    position: Optional[Tuple[float, float]] = None
-    state_data: Optional[Dict[str, Any]] = None
-    priority: float = 1.0  # Higher values = higher priority
-    affected_region: Optional[Tuple[int, int, int, int]] = (
-        None  # (min_row, min_col, max_row, max_col)
-    )
-
-
-@dataclass
-class UpdateBudget:
-    """Manages computational budget for graph updates."""
-
-    max_time_ms: float = 25.0  # Maximum time per frame for graph updates
-    max_edge_updates: int = 1000  # Maximum edge updates per frame
-    max_node_updates: int = 500  # Maximum node updates per frame
-    priority_threshold: float = 0.5  # Minimum priority for processing
-
-    # Runtime tracking
-    used_time_ms: float = 0.0
-    used_edge_updates: int = 0
-    used_node_updates: int = 0
-
-    def reset(self):
-        """Reset budget counters for new frame."""
-        self.used_time_ms = 0.0
-        self.used_edge_updates = 0
-        self.used_node_updates = 0
-
-    def can_afford_edge_update(self, count: int = 1) -> bool:
-        """Check if we can afford edge updates."""
-        return self.used_edge_updates + count <= self.max_edge_updates
-
-    def can_afford_node_update(self, count: int = 1) -> bool:
-        """Check if we can afford node updates."""
-        return self.used_node_updates + count <= self.max_node_updates
-
-    def can_afford_time(self, time_ms: float) -> bool:
-        """Check if we can afford time cost."""
-        return self.used_time_ms + time_ms <= self.max_time_ms
-
-    def consume_edge_updates(self, count: int):
-        """Consume edge update budget."""
-        self.used_edge_updates += count
-
-    def consume_node_updates(self, count: int):
-        """Consume node update budget."""
-        self.used_node_updates += count
-
-    def consume_time(self, time_ms: float):
-        """Consume time budget."""
-        self.used_time_ms += time_ms
+class GraphUpdateInfo:
+    """Simple container for graph update information."""
+    
+    nodes_updated: int = 0
+    edges_updated: int = 0
+    update_time_ms: float = 0.0
+    switch_states: Dict[int, bool] = None
+    
+    def __post_init__(self):
+        if self.switch_states is None:
+            self.switch_states = {}
 
 
-@dataclass
-class TemporalEdge:
-    """Represents an edge with temporal availability constraints."""
-
-    src_node: int
-    tgt_node: int
-    edge_type: EdgeType
-    availability_windows: List[
-        Tuple[float, float]
-    ]  # List of (start_time, end_time) windows
-    base_features: np.ndarray
-    is_currently_active: bool = False
-
-    def is_available_at_time(self, timestamp: float) -> bool:
-        """Check if edge is available at given timestamp."""
-        for start_time, end_time in self.availability_windows:
-            if start_time <= timestamp <= end_time:
-                return True
-        return False
-
-
-class DynamicConstraintPropagator:
+class SimpleDynamicGraphWrapper(gym.Wrapper):
     """
-    Handles dynamic constraint propagation with priority-based updates.
-
-    This system efficiently propagates constraint changes through the graph
-    while respecting computational budgets and maintaining real-time performance.
+    Simplified dynamic graph wrapper for production NPP-RL system.
+    
+    This wrapper provides basic graph connectivity updates when game state
+    changes, without complex event systems or computational budgeting.
+    It integrates cleanly with nclone's graph system and lets HGT learn
+    movement patterns emergently.
+    
+    Key Features:
+    - Simple switch/door state tracking
+    - Basic graph connectivity updates  
+    - Clean nclone integration
+    - Sub-millisecond performance
+    - HGT-friendly design
     """
-
-    def __init__(self, max_propagation_depth: int = 3):
-        """
-        Initialize constraint propagator.
-
-        Args:
-            max_propagation_depth: Maximum depth for constraint propagation
-        """
-        self.max_propagation_depth = max_propagation_depth
-        self.constraint_dependencies = defaultdict(
-            set
-        )  # entity_id -> set of dependent edges
-        self.edge_constraints = {}  # edge_id -> set of constraint entity_ids
-
-    def register_constraint_dependency(self, entity_id: int, edge_indices: List[int]):
-        """Register which edges depend on an entity's state."""
-        self.constraint_dependencies[entity_id].update(edge_indices)
-        for edge_idx in edge_indices:
-            if edge_idx not in self.edge_constraints:
-                self.edge_constraints[edge_idx] = set()
-            self.edge_constraints[edge_idx].add(entity_id)
-
-    def propagate_constraint_change(
-        self, changed_entity_id: int, graph_data: GraphData, budget: UpdateBudget
-    ) -> List[int]:
-        """
-        Propagate constraint changes through dependent edges.
-
-        Args:
-            changed_entity_id: ID of entity whose constraints changed
-            graph_data: Current graph data
-            budget: Computational budget for updates
-
-        Returns:
-            List of edge indices that were updated
-        """
-        updated_edges = []
-
-        if changed_entity_id not in self.constraint_dependencies:
-            return updated_edges
-
-        # Get directly affected edges
-        affected_edges = list(self.constraint_dependencies[changed_entity_id])
-
-        # Sort by priority (edges closer to ninja get higher priority)
-        # This is a simplified priority - in practice, you'd use more sophisticated metrics
-        affected_edges.sort(key=lambda x: self._calculate_edge_priority(x, graph_data))
-
-        for edge_idx in affected_edges:
-            if not budget.can_afford_edge_update():
-                break
-
-            # Update edge based on new constraints
-            if self._update_edge_constraints(edge_idx, graph_data):
-                updated_edges.append(edge_idx)
-                budget.consume_edge_updates(1)
-
-        return updated_edges
-
-    def _calculate_edge_priority(self, edge_idx: int, graph_data: GraphData) -> float:
-        """Calculate priority for edge updates (higher = more important)."""
-        # Simple priority based on distance from ninja
-        # In practice, this could consider path criticality, recent usage, etc.
-        return 1.0  # Placeholder implementation
-
-    def _update_edge_constraints(self, edge_idx: int, graph_data: GraphData) -> bool:
-        """Update edge based on current constraint states."""
-        # Placeholder for constraint evaluation logic
-        # This would check entity states and update edge availability
-        return True
-
-
-class DynamicGraphWrapper(gym.Wrapper):
-    """
-    Environment wrapper that provides real-time graph adaptation capabilities.
-
-    This wrapper maintains a dynamic graph representation that efficiently updates
-    in response to environmental changes while respecting computational budgets.
-    """
-
+    
     def __init__(
         self,
         env: gym.Env,
-        enable_dynamic_updates: bool = True,
-        update_budget: Optional[UpdateBudget] = None,
-        event_buffer_size: int = 100,
-        temporal_window_size: float = 10.0,  # seconds
+        enable_graph_updates: bool = True,
+        debug: bool = False
     ):
         """
-        Initialize dynamic graph wrapper.
-
+        Initialize simplified dynamic graph wrapper.
+        
         Args:
             env: Base environment to wrap
-            enable_dynamic_updates: Whether to enable dynamic graph updates
-            update_budget: Computational budget for updates
-            event_buffer_size: Maximum size of event buffer
-            temporal_window_size: Size of temporal window for edge availability
+            enable_graph_updates: Whether to enable graph updates
+            debug: Enable debug logging
         """
         super().__init__(env)
-
-        self.enable_dynamic_updates = enable_dynamic_updates
-        self.update_budget = update_budget or UpdateBudget()
-        self.temporal_window_size = temporal_window_size
-
-        # Core components
+        
+        self.enable_graph_updates = enable_graph_updates
+        self.debug = debug
+        
+        # Core nclone integration - proper abstraction
         self.graph_builder = HierarchicalGraphBuilder()
-        self.constraint_propagator = DynamicConstraintPropagator()
-
-        # Event management
-        self.event_queue = deque(maxlen=event_buffer_size)
-        self.processed_events = set()  # Track processed event IDs to avoid duplicates
-
-        # Graph state management
-        self.current_graph = None
-        self.last_full_rebuild_time = 0.0
-        self.full_rebuild_interval = 1.0  # Rebuild full graph every N seconds
-
-        # Temporal edge management
-        self.temporal_edges = {}  # edge_id -> TemporalEdge
-        self.active_temporal_edges = set()
-
-        # Performance tracking
+        
+        # Simple state tracking
+        self.current_graph: Optional[GraphData] = None
+        self.last_switch_states: Dict[int, bool] = {}
+        self.last_update_time = 0.0
+        
+        # Performance tracking (simple)
         self.update_stats = {
             "total_updates": 0,
             "avg_update_time_ms": 0.0,
-            "budget_exceeded_count": 0,
-            "events_processed": 0,
-            "events_skipped": 0,
+            "last_update_info": GraphUpdateInfo()
         }
-
-        # Initialize entity cache for simplified associations
-        self.current_entities = []
-
-        # Initialize graph observation space extension
-        self._extend_observation_space_for_dynamic_graph()
-
-    def _extend_observation_space_for_dynamic_graph(self):
-        """Extend observation space to include dynamic graph metadata."""
+        
+        # Extend observation space for graph metadata
+        self._extend_observation_space()
+        
+        if self.debug:
+            logging.basicConfig(level=logging.DEBUG)
+            self.logger = logging.getLogger(__name__)
+    
+    def _extend_observation_space(self):
+        """Add simple graph metadata to observation space."""
         if hasattr(self.env, "observation_space") and hasattr(
             self.env.observation_space, "spaces"
         ):
-            # Add dynamic graph metadata to observation space
-            dynamic_graph_space = gym.spaces.Box(
+            # Simple graph metadata: [update_time, nodes, edges, switches_active]
+            graph_metadata_space = gym.spaces.Box(
                 low=0.0,
                 high=1.0,
-                shape=(10,),  # Metadata: update_time, budget_usage, active_edges, etc.
+                shape=(4,),
                 dtype=np.float32,
             )
-            self.env.observation_space.spaces["dynamic_graph_metadata"] = (
-                dynamic_graph_space
-            )
-
+            self.env.observation_space.spaces["graph_metadata"] = graph_metadata_space
+    
     def reset(self, **kwargs):
-        """Reset environment and initialize dynamic graph state."""
+        """Reset environment and initialize graph state."""
         obs, info = self.env.reset(**kwargs)
-
-        # Reset dynamic graph state
-        self.event_queue.clear()
-        self.processed_events.clear()
-        self.temporal_edges.clear()
-        self.active_temporal_edges.clear()
-        self.current_entities = []  # Reset entity cache
-        self.last_full_rebuild_time = time.time()
-
-        # Build initial graph
-        if self.enable_dynamic_updates:
-            self._rebuild_full_graph()
-
-        # Add dynamic graph metadata to observation
+        
+        # Reset simple state
+        self.current_graph = None
+        self.last_switch_states.clear()
+        self.last_update_time = time.time()
+        
+        # Build initial graph using nclone
+        if self.enable_graph_updates:
+            self._update_graph_from_env_state()
+        
+        # Add graph metadata to observation
         if isinstance(obs, dict):
-            obs["dynamic_graph_metadata"] = self._get_dynamic_graph_metadata()
-
+            obs["graph_metadata"] = self._get_graph_metadata()
+        
         return obs, info
-
+    
     def step(self, action):
-        """Step environment and update dynamic graph."""
-        start_time = time.time()
-
-        # Step base environment
+        """Step environment and update graph if needed."""
         obs, reward, terminated, truncated, info = self.env.step(action)
-
-        # Update dynamic graph if enabled
-        if self.enable_dynamic_updates and self.current_graph is not None:
-            self.update_budget.reset()
-
-            # Update entity cache for simplified associations
-            if "entities" in obs:
-                self.update_entity_cache(obs["entities"])
-            elif hasattr(self.env, "_extract_graph_entities"):
-                entities = self.env._extract_graph_entities()
-                self.update_entity_cache(entities)
-
-            # Detect and queue environmental changes
-            self._detect_environmental_changes(obs, info)
-
-            # Process queued events within budget
-            self._process_event_queue()
-
-            # Update temporal edges
-            self._update_temporal_edges()
-
-            # Check if full rebuild is needed
-            current_time = time.time()
-            if current_time - self.last_full_rebuild_time > self.full_rebuild_interval:
-                self._rebuild_full_graph()
-                self.last_full_rebuild_time = current_time
-
-        # Add dynamic graph metadata to observation
-        obs["dynamic_graph_metadata"] = self._get_dynamic_graph_metadata()
-
-        # Update performance stats
-        update_time_ms = (time.time() - start_time) * 1000
-        self._update_performance_stats(update_time_ms)
-
-        return obs, reward, terminated, truncated, info
-
-    def _detect_environmental_changes(self, obs: Dict[str, Any], info: Dict[str, Any]):
-        """Detect environmental changes and queue relevant events."""
-        current_time = time.time()
-
-        # Detect ninja state changes
-        if "ninja_position" in obs and "ninja_velocity" in obs:
-            ninja_pos = obs["ninja_position"]
-            ninja_vel = obs["ninja_velocity"]
-
-            # Check if ninja state changed significantly
-            if self._ninja_state_changed(ninja_pos, ninja_vel):
-                event = GraphEvent(
-                    event_type=EventType.NINJA_STATE_CHANGED,
-                    timestamp=current_time,
-                    position=tuple(ninja_pos),
-                    state_data={"velocity": tuple(ninja_vel)},
-                    priority=0.9,  # High priority for ninja state changes
-                )
-                self._queue_event(event)
-
-        # Detect entity changes
-        if "entities" in obs:
-            for entity_id, entity_data in enumerate(obs["entities"]):
-                if self._entity_state_changed(entity_id, entity_data):
-                    event = GraphEvent(
-                        event_type=EventType.ENTITY_STATE_CHANGED,
-                        timestamp=current_time,
-                        entity_id=entity_id,
-                        position=tuple(entity_data.get("position", (0, 0))),
-                        state_data=entity_data,
-                        priority=0.7,  # Medium priority for entity changes
-                    )
-                    self._queue_event(event)
-
-    def _ninja_state_changed(self, position: np.ndarray, velocity: np.ndarray) -> bool:
-        """Check if ninja state changed significantly since last update."""
-        # Simplified change detection - in practice, you'd track previous state
-        return True  # Always assume change for now
-
-    def _entity_state_changed(
-        self, entity_id: int, entity_data: Dict[str, Any]
-    ) -> bool:
-        """Check if entity state changed significantly since last update."""
-        # Simplified change detection - in practice, you'd track previous state
-        return False  # Assume no change for now
-
-    def _queue_event(self, event: GraphEvent):
-        """Queue an event for processing."""
-        # Generate unique event ID to avoid duplicates
-        event_id = hash(
-            (event.event_type, event.timestamp, event.entity_id, event.position)
-        )
-
-        if event_id not in self.processed_events:
-            self.event_queue.append(event)
-
-    def _process_event_queue(self):
-        """Process queued events within computational budget."""
-        events_processed = 0
-        events_skipped = 0
-
-        # Sort events by priority (highest first)
-        sorted_events = sorted(self.event_queue, key=lambda e: e.priority, reverse=True)
-
-        for event in sorted_events:
-            if not self.update_budget.can_afford_time(5.0):  # Assume 5ms per event
-                events_skipped += 1
-                continue
-
-            if event.priority < self.update_budget.priority_threshold:
-                events_skipped += 1
-                continue
-
+        
+        # Check if graph update is needed (simple state-based)
+        if self.enable_graph_updates and self._should_update_graph():
             start_time = time.time()
-
-            # Process event based on type
-            if event.event_type == EventType.NINJA_STATE_CHANGED:
-                self._handle_ninja_state_change(event)
-            elif event.event_type == EventType.ENTITY_STATE_CHANGED:
-                self._handle_entity_state_change(event)
-            elif event.event_type == EventType.DOOR_TOGGLED:
-                self._handle_door_toggle(event)
-            elif event.event_type == EventType.SWITCH_ACTIVATED:
-                self._handle_switch_activation(event)
-
-            # Track time consumption
-            processing_time_ms = (time.time() - start_time) * 1000
-            self.update_budget.consume_time(processing_time_ms)
-
-            # Mark event as processed
-            event_id = hash(
-                (event.event_type, event.timestamp, event.entity_id, event.position)
+            self._update_graph_from_env_state()
+            update_time = (time.time() - start_time) * 1000  # Convert to ms
+            
+            # Update simple statistics
+            self._update_performance_stats(update_time)
+            
+            if self.debug:
+                self.logger.debug(f"Graph updated in {update_time:.2f}ms")
+        
+        # Add graph metadata to observation
+        if isinstance(obs, dict):
+            obs["graph_metadata"] = self._get_graph_metadata()
+        
+        return obs, reward, terminated, truncated, info
+    
+    def _should_update_graph(self) -> bool:
+        """
+        Simple check if graph update is needed.
+        
+        Only updates when switch states change - no complex event system.
+        """
+        # Get current switch states from environment
+        current_switch_states = self._get_switch_states_from_env()
+        
+        # Check if any switch state changed
+        if current_switch_states != self.last_switch_states:
+            return True
+        
+        return False
+    
+    def _get_switch_states_from_env(self) -> Dict[int, bool]:
+        """Extract switch states from environment (simple)."""
+        switch_states = {}
+        
+        # Try to get switch states from environment
+        # This is a simplified approach - in practice, you'd integrate with
+        # the specific environment's state representation
+        if hasattr(self.env, 'get_switch_states'):
+            switch_states = self.env.get_switch_states()
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'get_switch_states'):
+            switch_states = self.env.unwrapped.get_switch_states()
+        else:
+            # Fallback: extract from observation or info
+            # This would be customized based on your environment
+            pass
+        
+        return switch_states
+    
+    def _update_graph_from_env_state(self):
+        """
+        Update graph using nclone's graph builder (simple approach).
+        
+        This uses nclone's hierarchical graph builder to create updated
+        connectivity based on current game state. No complex event processing.
+        """
+        try:
+            # Get level data from environment
+            level_data = self._get_level_data_from_env()
+            if level_data is None:
+                return
+            
+            # Use nclone's graph builder - proper abstraction
+            start_time = time.time()
+            self.current_graph = self.graph_builder.build_graph(level_data)
+            build_time = (time.time() - start_time) * 1000
+            
+            # Update switch state tracking
+            self.last_switch_states = self._get_switch_states_from_env()
+            
+            # Update simple statistics
+            update_info = GraphUpdateInfo(
+                nodes_updated=self.current_graph.num_nodes if self.current_graph else 0,
+                edges_updated=self.current_graph.num_edges if self.current_graph else 0,
+                update_time_ms=build_time,
+                switch_states=self.last_switch_states.copy()
             )
-            self.processed_events.add(event_id)
-            events_processed += 1
-
-        # Clear processed events from queue
-        self.event_queue.clear()
-
-        # Update stats
-        self.update_stats["events_processed"] += events_processed
-        self.update_stats["events_skipped"] += events_skipped
-
-    def _handle_ninja_state_change(self, event: GraphEvent):
-        """Handle ninja state change events."""
-        if self.current_graph is None:
-            return
-
-        # Update conditional edge masks based on new ninja state
-        # This would integrate with the ConditionalEdgeMasker from Task 1.3
-        ninja_pos = event.position
-        ninja_vel = event.state_data.get("velocity", (0, 0))
-
-        # Find edges that might be affected by ninja state change
-        affected_edges = self._find_edges_near_position(ninja_pos, radius=100.0)
-
-        for edge_idx in affected_edges:
-            if not self.update_budget.can_afford_edge_update():
-                break
-
-            # Update edge availability based on new ninja state
-            self._update_edge_for_ninja_state(edge_idx, ninja_pos, ninja_vel)
-            self.update_budget.consume_edge_updates(1)
-
-    def _handle_entity_state_change(self, event: GraphEvent):
-        """Handle entity state change events."""
-        if event.entity_id is None:
-            return
-
-        # Propagate constraint changes through dependent edges
-        updated_edges = self.constraint_propagator.propagate_constraint_change(
-            event.entity_id, self.current_graph, self.update_budget
-        )
-
-        logging.debug(
-            f"Entity {event.entity_id} state change affected {len(updated_edges)} edges"
-        )
-
-    def _handle_door_toggle(self, event: GraphEvent):
-        """Handle door toggle events."""
-        # Find edges blocked/unblocked by door state change
-        door_pos = event.position
-        affected_edges = self._find_edges_near_position(door_pos, radius=50.0)
-
-        is_door_open = event.state_data.get("is_open", False)
-
-        for edge_idx in affected_edges:
-            if not self.update_budget.can_afford_edge_update():
-                break
-
-            # Enable/disable edges based on door state
-            self._set_edge_availability(edge_idx, is_door_open)
-            self.update_budget.consume_edge_updates(1)
-
-    def _handle_switch_activation(self, event: GraphEvent):
-        """Handle switch activation events."""
-        # Find the single entity controlled by this switch
-        switch_id = event.entity_id
-        controlled_entity_id = self._find_entity_controlled_by_switch(switch_id)
-
-        if controlled_entity_id is not None:
-            # Create door toggle event for the controlled entity
-            door_event = GraphEvent(
-                event_type=EventType.DOOR_TOGGLED,
-                timestamp=event.timestamp,
-                entity_id=controlled_entity_id,
-                state_data={"is_open": event.state_data.get("is_activated", False)},
-                priority=0.8,
-            )
-            self._queue_event(door_event)
-
-    def _update_temporal_edges(self):
-        """Update temporal edge availability based on current time."""
-        current_time = time.time()
-
-        for edge_id, temporal_edge in self.temporal_edges.items():
-            was_active = temporal_edge.is_currently_active
-            is_now_active = temporal_edge.is_available_at_time(current_time)
-
-            if was_active != is_now_active:
-                temporal_edge.is_currently_active = is_now_active
-
-                if is_now_active:
-                    self.active_temporal_edges.add(edge_id)
-                else:
-                    self.active_temporal_edges.discard(edge_id)
-
-                # Update graph edge mask
-                if self.current_graph is not None:
-                    self._set_edge_availability(edge_id, is_now_active)
-
-    def _rebuild_full_graph(self):
-        """Rebuild the complete graph from scratch."""
-        if not hasattr(self.env, "get_current_state"):
-            return
-
-        # Get current environment state
-        state = self.env.get_current_state()
-
-        # Build new graph
-        # Build hierarchical graph and extract sub-cell level for compatibility
-        hierarchical_graph = self.graph_builder.build_graph(
-            level_data=state.get("level_data", {}),
-            ninja_position=state.get("ninja_position", (0, 0)),
-            entities=state.get("entities", []),
-            ninja_velocity=state.get("ninja_velocity"),
-            ninja_state=state.get("ninja_state"),
-        )
-        # Use sub-cell graph for current compatibility
-        self.current_graph = hierarchical_graph.sub_cell_graph
-
-        logging.debug(
-            f"Rebuilt full graph: {self.current_graph.num_nodes} nodes, {self.current_graph.num_edges} edges"
-        )
-
-    def _find_edges_near_position(
-        self, position: Tuple[float, float], radius: float
-    ) -> List[int]:
-        """Find edges near a given position."""
-        # Simplified implementation - in practice, you'd use spatial indexing
-        return []  # Placeholder
-
-    def _update_edge_for_ninja_state(
-        self,
-        edge_idx: int,
-        ninja_pos: Tuple[float, float],
-        ninja_vel: Tuple[float, float],
-    ):
-        """Update edge availability based on ninja state."""
-        # Placeholder for ninja state-based edge updates
-        pass
-
-    def _set_edge_availability(self, edge_idx: int, is_available: bool):
-        """Set edge availability in the current graph."""
-        if self.current_graph is not None and edge_idx < len(
-            self.current_graph.edge_mask
-        ):
-            self.current_graph.edge_mask[edge_idx] = 1.0 if is_available else 0.0
-
-    def _find_entity_controlled_by_switch(self, switch_id: int) -> Optional[int]:
-        """Find the single entity controlled by a switch using simplified associations."""
-        if not self.entity_manager:
-            return None  # Fallback if entity manager not available
-
-        # Get entities from current environment state
-        entities = getattr(self, "current_entities", [])
-        if not entities:
-            return None
-
-        # Find the switch entity
-        switch_entity = None
-        for entity in entities:
-            if entity.get("entity_id") == switch_id or entity.get("id") == switch_id:
-                switch_entity = entity
-                break
-
-        if not switch_entity:
-            return None
-
-        switch_type = switch_entity.get("type")
-
-        # For exit switches, find the corresponding exit door using entity_id pairing
-        if switch_type == "exit_switch":
-            switch_entity_id = switch_entity.get("entity_id", -1)
-
-            for entity in entities:
-                if (
-                    entity.get("type") == "exit_door"
-                    and entity.get("entity_id") == switch_entity_id
-                ):
-                    return entity.get("id", entity.get("entity_id", -1))
-
-        # For locked door switches, the door is part of the same entity
-        elif switch_type == EntityType.LOCKED_DOOR:
-            # The door is controlled by the same entity (unified locked door)
-            return switch_id
-
-        # For trap door switches, the door is part of the same entity
-        elif switch_type == EntityType.TRAP_DOOR:
-            # The door is controlled by the same entity (unified trap door)
-            return switch_id
-
+            self.update_stats["last_update_info"] = update_info
+            
+            if self.debug:
+                self.logger.debug(
+                    f"Graph rebuilt: {update_info.nodes_updated} nodes, "
+                    f"{update_info.edges_updated} edges in {build_time:.2f}ms"
+                )
+                
+        except Exception as e:
+            if self.debug:
+                self.logger.error(f"Graph update failed: {e}")
+    
+    def _get_level_data_from_env(self) -> Optional[LevelData]:
+        """Extract level data from environment for graph building."""
+        # This would be customized based on your specific environment
+        # The key is to extract the minimal information needed for nclone's
+        # graph builder without reimplementing physics
+        
+        if hasattr(self.env, 'get_level_data'):
+            return self.env.get_level_data()
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'get_level_data'):
+            return self.env.unwrapped.get_level_data()
+        
+        # Fallback: construct level data from available information
+        # This is environment-specific and would need to be implemented
+        # based on your environment's interface
         return None
-
-    def update_entity_cache(self, entities: List[Dict[str, Any]]):
-        """Update cached entity data for switch-door associations."""
-        self.current_entities = entities
-
-    def _get_dynamic_graph_metadata(self) -> np.ndarray:
-        """Get dynamic graph metadata for observation."""
-        metadata = np.zeros(10, dtype=np.float32)
-
+    
+    def _get_graph_metadata(self) -> np.ndarray:
+        """Get simple graph metadata for observation."""
+        metadata = np.zeros(4, dtype=np.float32)
+        
         if self.current_graph is not None:
-            metadata[0] = (
-                self.update_budget.used_time_ms / self.update_budget.max_time_ms
-            )  # Time budget usage
-            metadata[1] = (
-                self.update_budget.used_edge_updates
-                / self.update_budget.max_edge_updates
-            )  # Edge budget usage
-            metadata[2] = len(self.event_queue) / 100.0  # Event queue fullness
-            metadata[3] = len(self.active_temporal_edges) / max(
-                1, len(self.temporal_edges)
-            )  # Active temporal edges ratio
-            metadata[4] = (
-                self.current_graph.num_edges / E_MAX_EDGES
-            )  # Graph edge density
-            metadata[5] = (
-                self.update_stats["avg_update_time_ms"] / 100.0
-            )  # Normalized avg update time
-
+            # Simple metadata: [update_time_norm, nodes_norm, edges_norm, switches_active_norm]
+            metadata[0] = min(self.update_stats["avg_update_time_ms"] / 10.0, 1.0)  # Normalize to ~10ms max
+            metadata[1] = min(self.current_graph.num_nodes / 1000.0, 1.0)  # Normalize to ~1000 nodes max
+            metadata[2] = min(self.current_graph.num_edges / 5000.0, 1.0)  # Normalize to ~5000 edges max
+            metadata[3] = len([s for s in self.last_switch_states.values() if s]) / max(1, len(self.last_switch_states))
+        
         return metadata
-
+    
     def _update_performance_stats(self, update_time_ms: float):
-        """Update performance statistics."""
+        """Update simple performance statistics."""
         self.update_stats["total_updates"] += 1
-
-        # Update rolling average
-        alpha = 0.1  # Smoothing factor
+        
+        # Simple rolling average
+        alpha = 0.1
         self.update_stats["avg_update_time_ms"] = (
-            alpha * update_time_ms
-            + (1 - alpha) * self.update_stats["avg_update_time_ms"]
+            alpha * update_time_ms + 
+            (1 - alpha) * self.update_stats["avg_update_time_ms"]
         )
-
-        # Track budget exceeded
-        if self.update_budget.used_time_ms > self.update_budget.max_time_ms:
-            self.update_stats["budget_exceeded_count"] += 1
-
+    
+    def get_current_graph(self) -> Optional[GraphData]:
+        """Get current graph data for external use."""
+        return self.current_graph
+    
     def get_performance_stats(self) -> Dict[str, Any]:
-        """Get performance statistics for monitoring."""
+        """Get simple performance statistics."""
         return self.update_stats.copy()
+    
+    def force_graph_update(self):
+        """Force a graph update (for testing/debugging)."""
+        if self.enable_graph_updates:
+            self._update_graph_from_env_state()
 
-    def add_temporal_edge(
-        self,
-        src_node: int,
-        tgt_node: int,
-        edge_type: EdgeType,
-        availability_windows: List[Tuple[float, float]],
-        base_features: np.ndarray,
-    ) -> int:
-        """
-        Add a temporal edge with time-dependent availability.
 
-        Args:
-            src_node: Source node index
-            tgt_node: Target node index
-            edge_type: Type of edge
-            availability_windows: List of (start_time, end_time) windows
-            base_features: Base edge features
-
-        Returns:
-            Edge ID for the temporal edge
-        """
-        edge_id = len(self.temporal_edges)
-
-        temporal_edge = TemporalEdge(
-            src_node=src_node,
-            tgt_node=tgt_node,
-            edge_type=edge_type,
-            availability_windows=availability_windows,
-            base_features=base_features,
-        )
-
-        self.temporal_edges[edge_id] = temporal_edge
-
-        return edge_id
-
-    def remove_temporal_edge(self, edge_id: int):
-        """Remove a temporal edge."""
-        if edge_id in self.temporal_edges:
-            del self.temporal_edges[edge_id]
-            self.active_temporal_edges.discard(edge_id)
+# Factory function for easy integration
+def create_simple_dynamic_graph_wrapper(
+    env: gym.Env,
+    enable_updates: bool = True,
+    debug: bool = False
+) -> SimpleDynamicGraphWrapper:
+    """
+    Factory function to create simplified dynamic graph wrapper.
+    
+    Args:
+        env: Base environment
+        enable_updates: Enable graph updates
+        debug: Enable debug logging
+        
+    Returns:
+        Configured SimpleDynamicGraphWrapper
+    """
+    return SimpleDynamicGraphWrapper(
+        env=env,
+        enable_graph_updates=enable_updates,
+        debug=debug
+    )

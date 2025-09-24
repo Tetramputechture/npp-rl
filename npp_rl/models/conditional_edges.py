@@ -1,40 +1,69 @@
 """
-Conditional edge activation system for physics-aware graph neural networks.
+Simplified Graph Processor for NPP-RL.
 
-This module implements dynamic edge masking based on ninja's current physics state
-and movement capabilities, enabling more realistic pathfinding decisions.
+This module replaces the complex conditional edge system with a simplified
+approach that performs basic logical masking only. Complex physics-based
+edge filtering is removed to allow HGT emergent learning.
+
+Key simplifications:
+- Simple switch/door state masking only
+- No complex physics-based edge filtering  
+- No trajectory analysis or movement state filtering
+- Let HGT learn movement constraints emergently
+
+This aligns with HGT design principles: provide basic logical constraints
+and let the network learn complex movement patterns through attention.
 """
 
 import torch
 import torch.nn as nn
-from typing import Dict, Any
-import logging
+from typing import Dict, Any, List, Tuple
+from dataclasses import dataclass
+from enum import IntEnum
+import numpy as np
 
-# Import EdgeType from nclone graph builder
-from nclone.graph.graph_builder import EdgeType
+# Use nclone physics constants
+TILE_PIXEL_SIZE = 24  # Standard N++ tile size
 
-# Physics constraint constants
-MIN_WALL_JUMP_SPEED = 1.0  # Minimum horizontal speed for wall jumps
-MIN_JUMP_ENERGY = 0.5  # Minimum energy for upward jumps
-MIN_VELOCITY_THRESHOLD = 0.1  # Minimum velocity for movement-dependent edges
-PHYSICS_STATE_THRESHOLD = 0.5  # Threshold for binary physics state flags
+
+class EdgeType(IntEnum):
+    """Simplified edge types for basic connectivity."""
+    ADJACENT = 0    # Basic 4-connectivity between traversable tiles
+    LOGICAL = 1     # Switch-door relationships
+    REACHABLE = 2   # Simple flood-fill connectivity
+
+
+@dataclass
+class EdgeInfo:
+    """Simple edge information."""
+    source: Tuple[float, float]
+    target: Tuple[float, float]
+    edge_type: EdgeType
+    features: np.ndarray
 
 
 class ConditionalEdgeMasker(nn.Module):
     """
-    Dynamic edge masker that filters edges based on ninja's current physics state.
-
-    This module computes which edges are physically feasible given the ninja's
-    current velocity, movement state, and contact conditions.
+    Simplified graph processor for NPP-RL.
+    
+    Replaces complex physics-based edge filtering with simple logical masking.
+    This allows the HGT multimodal network to learn movement constraints
+    emergently rather than having them hard-coded.
+    
+    Only performs:
+    - Switch/door state masking
+    - Basic logical relationship filtering
+    - No complex physics calculations
     """
-
-    def __init__(self):
-        """Initialize conditional edge masker with physics constraints."""
+    
+    def __init__(self, debug: bool = False):
+        """Initialize simplified graph processor."""
         super().__init__()
-
+        self.debug = debug
+        
         # Register buffers for device compatibility
         self.register_buffer("_device_check", torch.tensor(0.0))
-
+    
     def compute_dynamic_edge_mask(
         self,
         edge_features: torch.Tensor,
@@ -42,223 +71,115 @@ class ConditionalEdgeMasker(nn.Module):
         base_edge_mask: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Compute which edges are available based on current ninja state.
-
+        Compute simplified edge mask with basic logical filtering only.
+        
         Args:
-            edge_features: Edge features [num_edges, 16] with trajectory info from Task 1.1
-            ninja_physics_state: Physics features [18] from Task 1.2
+            edge_features: Edge features [num_edges, 4] with basic connectivity info
+            ninja_physics_state: Physics features [8] from simplified extractor
             base_edge_mask: Base edge mask [num_edges] indicating valid edges
-
+            
         Returns:
-            Dynamic edge mask [num_edges] with physics constraints applied
+            torch.Tensor: Updated edge mask [num_edges] with logical filtering applied
         """
-        if edge_features.dim() == 3:
-            # Handle batched input [batch_size, num_edges, edge_feat_dim]
-            return self._compute_batched_mask(
-                edge_features, ninja_physics_state, base_edge_mask
-            )
-        else:
-            # Handle single graph [num_edges, edge_feat_dim]
-            return self._compute_single_mask(
-                edge_features, ninja_physics_state, base_edge_mask
-            )
-
-    def _compute_single_mask(
-        self,
-        edge_features: torch.Tensor,
-        ninja_physics_state: torch.Tensor,
-        base_edge_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute dynamic mask for a single graph."""
-        device = edge_features.device
+        if edge_features.size(0) == 0:
+            return base_edge_mask
+            
+        # Start with base mask
         dynamic_mask = base_edge_mask.clone()
-
-        # Extract ninja physics state components
-        # Based on Task 1.2 physics state structure:
-        # [vx, vy, vel_magnitude, movement_state, ground_contact, wall_contact, airborne,
-        #  momentum_x, momentum_y, kinetic_energy, potential_energy,
-        #  jump_buffer, floor_buffer, wall_buffer, launch_pad_buffer, input_state,
-        #  can_jump, can_wall_jump]
-
-        if ninja_physics_state.numel() < 18:
-            logging.warning(
-                f"Insufficient physics state features: {ninja_physics_state.numel()}, expected 18"
-            )
-            return dynamic_mask
-
-        vx = ninja_physics_state[0]  # Normalized velocity x
-        vy = ninja_physics_state[1]  # Normalized velocity y
-        vel_magnitude = ninja_physics_state[2]  # Velocity magnitude
-        movement_state = ninja_physics_state[3] * 9.0  # Denormalize to 0-9
-        ground_contact = ninja_physics_state[4]
-        wall_contact = ninja_physics_state[5]
-        airborne = ninja_physics_state[6]
-        kinetic_energy = ninja_physics_state[9]
-        can_jump = ninja_physics_state[16]
-        can_wall_jump = ninja_physics_state[17]
-
-        # Process each edge
-        num_edges = edge_features.shape[0]
-        for edge_idx in range(num_edges):
-            if not base_edge_mask[edge_idx]:
-                continue
-
-            # Extract edge type (one-hot encoded in first 6 positions)
-            edge_type_onehot = edge_features[edge_idx, :6]
-            edge_type = torch.argmax(edge_type_onehot).item()
-
-            # Extract trajectory requirements from Task 1.1 features
-            # Edge features structure: [edge_type(6), direction(2), cost(1),
-            #                          trajectory_params(3), physics_constraints(2), requirements(2)]
-            if edge_features.shape[1] >= 16:
-                min_velocity = edge_features[edge_idx, 12]  # min_velocity requirement
-                max_velocity = edge_features[edge_idx, 13]  # max_velocity requirement
-                requires_jump = edge_features[edge_idx, 14]  # requires_jump flag
-                requires_wall_contact = edge_features[
-                    edge_idx, 15
-                ]  # requires_wall_contact flag
-            else:
-                # Fallback for older edge feature format
-                min_velocity = 0.0
-                max_velocity = 10.0
-                requires_jump = 0.0
-                requires_wall_contact = 0.0
-
-            # Apply physics-based edge filtering
-            should_disable = False
-
-            # Check jump capability constraints
-            if edge_type == EdgeType.JUMP and can_jump < PHYSICS_STATE_THRESHOLD:
-                should_disable = True
-
-            # Check wall slide constraints
-            elif edge_type == EdgeType.WALL_SLIDE:
-                if wall_contact < PHYSICS_STATE_THRESHOLD:
-                    should_disable = True
-                # Wall sliding requires some horizontal velocity to maintain contact
-                elif vel_magnitude < MIN_VELOCITY_THRESHOLD:
-                    should_disable = True
-
-            # Check velocity requirements for trajectory-based edges
-            elif requires_jump > PHYSICS_STATE_THRESHOLD:
-                if can_jump < PHYSICS_STATE_THRESHOLD:
-                    should_disable = True
-                elif vel_magnitude < min_velocity:
-                    should_disable = True
-
-            # Check wall contact requirements
-            elif requires_wall_contact > PHYSICS_STATE_THRESHOLD:
-                if wall_contact < PHYSICS_STATE_THRESHOLD:
-                    should_disable = True
-                # Wall jumps require sufficient horizontal velocity
-                if (
-                    can_wall_jump < PHYSICS_STATE_THRESHOLD
-                    and vel_magnitude < MIN_WALL_JUMP_SPEED
-                ):
-                    should_disable = True
-
-            # Check energy requirements for high-cost movements
-            elif edge_type == EdgeType.JUMP:
-                # Extract energy cost from trajectory parameters
-                if edge_features.shape[1] >= 11:
-                    energy_cost = edge_features[
-                        edge_idx, 10
-                    ]  # energy_cost from trajectory
-                    if kinetic_energy < energy_cost * MIN_JUMP_ENERGY:
-                        should_disable = True
-
-            # Check velocity bounds (only if max_velocity is set)
-            if max_velocity > 0.0 and vel_magnitude > max_velocity:
-                should_disable = True
-            elif vel_magnitude < min_velocity:
-                should_disable = True
-
-            # Apply the mask
-            if should_disable:
-                dynamic_mask[edge_idx] = 0.0
-
+        
+        # Extract switch activation state from ninja physics state
+        # Assuming switch_activated is the last feature (index 7)
+        switch_activated = ninja_physics_state[7] > 0.5 if ninja_physics_state.size(0) > 7 else False
+        
+        # Simple logical masking: disable door edges if switch not activated
+        # Assuming edge type is stored in edge_features[:, 0]
+        if edge_features.size(1) > 0:
+            edge_types = edge_features[:, 0]
+            
+            # Disable LOGICAL edges (switch-door relationships) if switch not activated
+            logical_edges = (edge_types == EdgeType.LOGICAL)
+            if not switch_activated:
+                dynamic_mask = dynamic_mask & ~logical_edges
+                
+        if self.debug:
+            print(f"Edge mask: {base_edge_mask.sum().item()} → {dynamic_mask.sum().item()} edges")
+            
         return dynamic_mask
-
-    def _compute_batched_mask(
+    
+    def process_edges(
         self,
-        edge_features: torch.Tensor,
-        ninja_physics_state: torch.Tensor,
-        base_edge_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute dynamic mask for batched graphs."""
-        batch_size = edge_features.shape[0]
-        dynamic_masks = []
-
-        for b in range(batch_size):
-            # Handle case where ninja_physics_state might be batched or single
-            if ninja_physics_state.dim() == 2:
-                batch_physics_state = ninja_physics_state[b]
-            else:
-                batch_physics_state = ninja_physics_state
-
-            batch_mask = self._compute_single_mask(
-                edge_features[b], batch_physics_state, base_edge_mask[b]
-            )
-            dynamic_masks.append(batch_mask)
-
-        return torch.stack(dynamic_masks, dim=0)
-
-    def get_constraint_summary(
-        self,
-        edge_features: torch.Tensor,
-        ninja_physics_state: torch.Tensor,
-        base_edge_mask: torch.Tensor,
-    ) -> Dict[str, Any]:
+        edges: List[EdgeInfo],
+        game_state: Dict[str, Any]
+    ) -> List[EdgeInfo]:
         """
-        Get a summary of applied constraints for debugging and analysis.
-
+        Process edges with simple logical filtering.
+        
         Args:
-            edge_features: Edge features tensor
-            ninja_physics_state: Physics state tensor
-            base_edge_mask: Base edge mask tensor
-
+            edges: List of edge information
+            game_state: Current game state (switches, etc.)
+            
         Returns:
-            Dictionary with constraint statistics
+            List of processed edges with logical filtering applied
         """
-        dynamic_mask = self.compute_dynamic_edge_mask(
-            edge_features, ninja_physics_state, base_edge_mask
-        )
-
-        base_active = base_edge_mask.sum().item()
-        dynamic_active = dynamic_mask.sum().item()
-        disabled_count = base_active - dynamic_active
-
-        # Extract ninja state for summary
-        if ninja_physics_state.numel() >= 18:
-            vel_magnitude = ninja_physics_state[2].item()
-            ground_contact = ninja_physics_state[4].item() > PHYSICS_STATE_THRESHOLD
-            wall_contact = ninja_physics_state[5].item() > PHYSICS_STATE_THRESHOLD
-            can_jump = ninja_physics_state[16].item() > PHYSICS_STATE_THRESHOLD
-            can_wall_jump = ninja_physics_state[17].item() > PHYSICS_STATE_THRESHOLD
+        processed_edges = []
+        switch_activated = game_state.get("exit_switch_activated", False)
+        
+        for edge in edges:
+            # Keep all edges except logical edges when switch not activated
+            if edge.edge_type == EdgeType.LOGICAL and not switch_activated:
+                continue  # Skip this edge
+            else:
+                processed_edges.append(edge)
+                
+        if self.debug:
+            print(f"Processed edges: {len(edges)} → {len(processed_edges)}")
+            
+        return processed_edges
+    
+    def create_edge_features(self, edge: EdgeInfo) -> np.ndarray:
+        """
+        Create simplified edge features (4 dimensions).
+        
+        Args:
+            edge: Edge information
+            
+        Returns:
+            Array of 4 edge features:
+            [0]: Edge type (normalized)
+            [1]: Distance (normalized)
+            [2]: Direction X (normalized)
+            [3]: Direction Y (normalized)
+        """
+        sx, sy = edge.source
+        tx, ty = edge.target
+        
+        # Calculate basic features
+        distance = np.sqrt((tx - sx) ** 2 + (ty - sy) ** 2)
+        max_distance = TILE_PIXEL_SIZE * 10  # Reasonable max distance
+        distance_norm = min(distance / max_distance, 1.0)
+        
+        # Direction vector (normalized)
+        if distance > 0:
+            dir_x = (tx - sx) / distance
+            dir_y = (ty - sy) / distance
         else:
-            vel_magnitude = 0.0
-            ground_contact = wall_contact = can_jump = can_wall_jump = False
+            dir_x = dir_y = 0.0
+            
+        # Normalize direction to [0,1] range
+        dir_x_norm = (dir_x + 1.0) / 2.0
+        dir_y_norm = (dir_y + 1.0) / 2.0
+        
+        features = np.array([
+            edge.edge_type / 3.0,  # Normalize edge type
+            distance_norm,
+            dir_x_norm,
+            dir_y_norm
+        ], dtype=np.float32)
+        
+        return np.clip(features, 0.0, 1.0)
 
-        return {
-            "base_edges": int(base_active),
-            "dynamic_edges": int(dynamic_active),
-            "disabled_edges": int(disabled_count),
-            "disable_rate": disabled_count / max(base_active, 1),
-            "ninja_state": {
-                "velocity_magnitude": vel_magnitude,
-                "ground_contact": ground_contact,
-                "wall_contact": wall_contact,
-                "can_jump": can_jump,
-                "can_wall_jump": can_wall_jump,
-            },
-        }
-
-
-def create_conditional_edge_masker() -> ConditionalEdgeMasker:
-    """
-    Create a conditional edge masker with default parameters.
-
-    Returns:
-        Configured ConditionalEdgeMasker instance
-    """
-    return ConditionalEdgeMasker()
+    # Legacy compatibility methods
+    def forward(self, edge_features: torch.Tensor, ninja_state: torch.Tensor) -> torch.Tensor:
+        """Legacy forward method for compatibility."""
+        base_mask = torch.ones(edge_features.size(0), dtype=torch.bool, device=edge_features.device)
+        return self.compute_dynamic_edge_mask(edge_features, ninja_state, base_mask)
