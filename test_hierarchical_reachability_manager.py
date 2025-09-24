@@ -21,19 +21,16 @@ References:
 
 import unittest
 import time
-import math
-from unittest.mock import Mock, MagicMock, patch
-from typing import Dict, List, Tuple
+from unittest.mock import Mock, patch
 
 import numpy as np
 import torch
 
 # Import the hierarchical components
-from npp_rl.agents.adaptive_exploration import (
-    AdaptiveExplorationManager,
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+from nclone.planning import (
     Subgoal,
-    NavigationSubgoal,
-    SwitchActivationSubgoal,
+    EntityInteractionSubgoal,
     CompletionStrategy,
     CompletionStep,
     LevelCompletionPlanner,
@@ -121,17 +118,18 @@ class TestSubgoalFramework(unittest.TestCase):
 
     def test_navigation_subgoal_creation(self):
         """Test NavigationSubgoal creation and methods."""
-        subgoal = NavigationSubgoal(
+        subgoal = EntityInteractionSubgoal(
             priority=0.9,
             estimated_time=20.0,
             success_probability=0.8,
-            target_position=(500, 300),
-            target_type="exit_door",
+            entity_position=(500, 300),
+            entity_type="exit_door",
+            interaction_type="complete",
             distance=400.0,
         )
 
         self.assertEqual(subgoal.get_target_position(), (500, 300))
-        self.assertEqual(subgoal.target_type, "exit_door")
+        self.assertEqual(subgoal.entity_type, "exit_door")
         self.assertFalse(
             subgoal.is_completed((100, 100), self.level_data, self.switch_states)
         )
@@ -146,13 +144,14 @@ class TestSubgoalFramework(unittest.TestCase):
 
     def test_switch_activation_subgoal_creation(self):
         """Test SwitchActivationSubgoal creation and methods."""
-        subgoal = SwitchActivationSubgoal(
+        subgoal = EntityInteractionSubgoal(
             priority=0.8,
             estimated_time=30.0,
             success_probability=0.9,
             switch_id="switch_1",
-            switch_position=(200, 200),
-            switch_type="door_switch",
+            entity_position=(200, 200),
+            entity_type="door_switch",
+            interaction_type="activate",
             reachability_score=0.85,
         )
 
@@ -325,8 +324,8 @@ class TestSubgoalPrioritizer(unittest.TestCase):
 
         # Create test subgoals
         self.subgoals = [
-            NavigationSubgoal(0.5, 20.0, 0.8, (500, 300), "exit_door", 400.0),
-            SwitchActivationSubgoal(
+            EntityInteractionSubgoal(0.5, 20.0, 0.8, (500, 300), "exit_door", 400.0),
+            EntityInteractionSubgoal(
                 0.6, 30.0, 0.9, "switch_1", (200, 200), "door_switch", 0.85
             ),
         ]
@@ -376,6 +375,14 @@ class TestAdaptiveExplorationManagerHierarchical(unittest.TestCase):
 
         # Mock the reachability system and features
         self.manager.reachability_system = Mock()
+
+        # Set up reachability system mock to return proper result
+        mock_reachability_result = Mock()
+        mock_reachability_result.coverage_ratio = 0.8
+        self.manager.reachability_system.analyze_reachability.return_value = (
+            mock_reachability_result
+        )
+
         self.manager.reachability_features = Mock()
         self.manager.reachability_features.encode_reachability.return_value = np.array(
             [
