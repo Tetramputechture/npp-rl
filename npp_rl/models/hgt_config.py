@@ -65,6 +65,9 @@ class DefaultConfig:
     # State processing defaults
     state_hidden_dim: int = 128
     
+    # Reachability processing defaults
+    reachability_hidden_dim: int = 128
+    
     # Spatial attention defaults
     spatial_height: int = 16
     spatial_width: int = 16
