@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 import numpy as np
 
 # Import nclone reachability systems
-from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.reachability_system import ReachabilitySystem
 from nclone.graph.reachability.compact_features import (
     CompactReachabilityFeatures,
     FeatureConfig,
@@ -44,7 +44,7 @@ class ReachabilityAwareExplorationCalculator:
 
         # Core nclone systems
         self.base_calculator = ExplorationRewardCalculator()
-        self.reachability_system = TieredReachabilitySystem(debug=debug)
+        self.reachability_system = ReachabilitySystem(debug=debug)
         self.feature_extractor = CompactReachabilityFeatures(
             config=FeatureConfig(
                 objective_slots=8,

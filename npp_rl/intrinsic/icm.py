@@ -12,7 +12,7 @@ Key Design Principles:
 5. Maintain performance requirements (<1ms computation)
 
 Integration with nclone:
-- TieredReachabilitySystem for multi-tier reachability analysis
+- ReachabilitySystem for multi-tier reachability analysis
 - CompactReachabilityFeatures for 64-dimensional feature encoding
 - FrontierDetector for boundary detection and classification
 - ExplorationRewardCalculator for multi-scale exploration tracking

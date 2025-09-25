@@ -369,7 +369,7 @@ class TestAdaptiveExplorationManagerHierarchical(unittest.TestCase):
         # Mock the nclone dependencies to avoid import issues during testing
         with (
             patch("npp_rl.agents.adaptive_exploration.CompactReachabilityFeatures"),
-            patch("npp_rl.agents.adaptive_exploration.TieredReachabilitySystem"),
+            patch("npp_rl.agents.adaptive_exploration.ReachabilitySystem"),
         ):
             self.manager = AdaptiveExplorationManager()
 
@@ -539,7 +539,7 @@ class TestPerformanceRequirements(unittest.TestCase):
         # Mock the nclone dependencies
         with (
             patch("npp_rl.agents.adaptive_exploration.CompactReachabilityFeatures"),
-            patch("npp_rl.agents.adaptive_exploration.TieredReachabilitySystem"),
+            patch("npp_rl.agents.adaptive_exploration.ReachabilitySystem"),
         ):
             self.manager = AdaptiveExplorationManager()
 
@@ -665,7 +665,7 @@ class TestIntegrationWithNeuralFeatures(unittest.TestCase):
         """Set up test fixtures."""
         with (
             patch("npp_rl.agents.adaptive_exploration.CompactReachabilityFeatures"),
-            patch("npp_rl.agents.adaptive_exploration.TieredReachabilitySystem"),
+            patch("npp_rl.agents.adaptive_exploration.ReachabilitySystem"),
         ):
             self.manager = AdaptiveExplorationManager()
 

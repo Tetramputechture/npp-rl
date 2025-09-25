@@ -21,7 +21,7 @@ The agent receives multi-modal observations:
     *   Temporal Stacking: 12 consecutive frames are stacked to provide temporal context.
         *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/gym_environment/constants.py`).
     *   Preprocessing: Grayscale conversion, centering on the player, cropping, and normalization.
-    *   Augmentation: Random cutout is applied to player frames with a 50% chance to improve generalization (inspired by DeVries & Taylor, 2017, "Improved Regularization of Convolutional Neural Networks with Cutout").
+    *   Augmentation: Game-optimized augmentation pipeline including random translation, horizontal flipping, cutout, and brightness/contrast variations for improved generalization (implemented in `nclone/gym_environment/frame_augmentation.py`).
 
 *   **Global View**:
     *   A downsampled 176x100 pixel grayscale view of the entire level.
@@ -34,17 +34,186 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-*   **`HGTMultimodalExtractor`:
-    *   Implements **Heterogeneous Graph Transformers** with type-specific attention mechanisms.
-    *   **Type-aware processing**: Specialized handling for different node types (grid cells, entities, hazards, switches).
-    *   **Edge-type specialization**: Distinct processing for movement edges (walk, jump, fall) vs functional relationships.
-    *   **Multi-head attention**: Advanced attention mechanisms adapted for heterogeneous graph structures.
-    *   **Entity-aware embeddings**: Specialized processing for different entity types with hazard-aware attention.
-    *   **Advanced multimodal fusion**: Cross-modal attention with spatial awareness for optimal feature integration.
+The agent uses an **HGTMultimodalExtractor** that combines multiple neural architectures for comprehensive multimodal processing:
 
-The extractor processes the game state vector through a dedicated Multi-Layer Perceptron (MLP). The features from visual inputs, graph representations, and the game state vector are then fused and passed to the policy and value networks.
+*   **Temporal Processing (3D CNN)**:
+    *   Processes 12-frame temporal stacks using 3D convolutional networks
+    *   Captures movement patterns and temporal dynamics essential for NPP gameplay
+    *   Uses batch normalization and dropout for stable training
+    *   Adaptive pooling ensures consistent output dimensions
 
-### 3. Network Architecture & Hyperparameters
+*   **Spatial Processing (2D CNN with Attention)**:
+    *   Processes global level view (176x100 pixels) through 2D CNN
+    *   Integrates spatial attention mechanisms for enhanced spatial reasoning
+    *   Multi-scale feature extraction captures level structure at different resolutions
+
+*   **Graph Processing (Heterogeneous Graph Transformer)**:
+    *   Full HGT implementation with type-specific attention mechanisms
+    *   **Type-aware processing**: Specialized handling for different node types (tiles, entities, hazards, switches)
+    *   **Edge-type specialization**: Distinct processing for movement edges (adjacent, reachable, functional)
+    *   **Multi-head attention**: Attention mechanisms adapted for heterogeneous graph structures
+    *   **Entity-aware embeddings**: Specialized processing with hazard-aware attention
+
+*   **Cross-Modal Fusion**:
+    *   Attention mechanisms for multimodal integration
+    *   Layer normalization and residual connections for stable training
+    *   Cross-modal attention between temporal, spatial, graph, and state features
+    *   Designed for robust performance across diverse level configurations
+
+*   **Architecture Design**:
+    *   Modular design with clear separation of concerns
+    *   Comprehensive error handling and fallback mechanisms
+    *   Optimized for both accuracy and computational efficiency
+    *   Extensive logging and debugging capabilities
+
+The extractor combines all modalities through fusion mechanisms, producing feature representations that enable generalization across different NPP level designs and difficulty configurations.
+
+#### Usage
+
+```python
+from npp_rl.feature_extractors import HGTMultimodalExtractor
+
+extractor = HGTMultimodalExtractor(
+    observation_space=env.observation_space,
+    features_dim=512,
+    debug=False  # Set to True for detailed logging
+)
+```
+
+## System Architecture
+
+### Environment Integration
+
+The NPP-RL system integrates with the nclone N++ simulator through a layered architecture:
+
+#### Core Components
+
+**Base Environment (`nclone`)**:
+- Provides physics simulation and basic observations
+- Generates player-centric frames (84x84x12), global view (176x100x1), game state (16 features), and reachability features (64 features)
+- Handles N++ physics constants and movement mechanics
+
+**Environment Wrappers (`npp_rl/environments/`)**:
+- **DynamicGraphWrapper**: Adds graph observations from nclone's hierarchical graph builder
+- **ReachabilityWrapper**: Integrates nclone's tiered reachability analysis system  
+- **VectorizationWrapper**: Enables parallel environment processing
+
+#### Graph Processing Pipeline
+
+The system uses nclone's graph construction capabilities without over-engineering:
+
+1. **Graph Construction**: nclone's HierarchicalGraphBuilder creates multi-resolution spatial graphs
+2. **Dynamic Updates**: Simple state-based updates when switch/door states change
+3. **Graph Observations**: Fixed-size arrays compatible with Gym (N_MAX_NODES=18000, E_MAX_EDGES=144000)
+4. **HGT Processing**: Type-specific attention for heterogeneous node/edge types
+
+#### Model Architecture (`npp_rl/models/`)
+
+**Core Models**:
+- **hgt_gnn.py**: Complete Heterogeneous Graph Transformer implementation
+- **entity_type_system.py**: Entity-specialized embeddings and hazard-aware attention
+- **conditional_edges.py**: Conditional edge processing for dynamic graphs
+- **spatial_attention.py**: Graph-guided spatial attention mechanisms
+- **physics_state_extractor.py**: Physics state extraction with momentum features
+
+**Intrinsic Curiosity Components (`npp_rl/intrinsic/`)**:
+- **icm.py**: Reachability-aware ICM with forward/inverse prediction models
+- **reachability_exploration.py**: Integration with nclone reachability systems for spatial modulation
+- **IntrinsicRewardWrapper**: Environment wrapper for seamless ICM integration with PPO
+
+**Configuration Management**:
+- **hgt_config.py**: Centralized configuration with sensible defaults
+- Modular design enables easy hyperparameter tuning
+
+### Data Flow
+
+```
+nclone Environment
+    ↓
+Environment Wrappers (Graph, Reachability, Vectorization)
+    ↓
+Multimodal Observations:
+├── Temporal: player_frames [84,84,12]
+├── Spatial: global_view [176,100,1] 
+├── Vector: game_state [16], reachability_features [64]
+└── Graph: node_feats, edge_feats, connectivity, masks, types
+    ↓
+HGTMultimodalExtractor:
+├── 3D CNN → Temporal Features [512]
+├── 2D CNN + Attention → Spatial Features [256]
+├── Full HGT → Graph Features [256] 
+├── MLPs → State [128] + Reachability [128]
+└── Cross-Modal Fusion → Combined Features [512]
+    ↓
+    ├── PPO Policy/Value Networks → Action Selection
+    └── ICM Network (Intrinsic Curiosity):
+        ├── Forward Model: (state_t, action) → predicted_state_{t+1}
+        ├── Inverse Model: (state_t, state_{t+1}) → predicted_action
+        └── Reachability Modulation → Scaled Intrinsic Rewards
+    ↓
+Reward Combination: Extrinsic + Intrinsic Rewards → Total Reward
+    ↓
+PPO Training Updates (Policy, Value, ICM parameters)
+```
+
+### Performance Characteristics
+
+- **Graph Updates**: Sub-millisecond performance suitable for real-time RL training
+- **Feature Extraction**: ~5.6ms average inference time (target: <10ms)
+- **Memory Usage**: Efficient with fixed-size arrays for Gym compatibility
+- **Batch Processing**: Supports vectorized environments for parallel training
+
+### Integration Points
+
+**nclone Integration**:
+- Clean abstraction layer using nclone for physics simulation and basic graph construction
+- Avoids over-engineering by letting HGT learn complex patterns through attention mechanisms
+- Uses simple reachability metrics rather than expensive physics calculations
+
+**Graph Processing**:
+- Seamless flow from nclone → DynamicGraphWrapper → HGT processing
+- Type-specific attention for different node types (tiles, entities, hazards, switches)
+- Edge-type specialization for movement relationships (adjacent, reachable, functional)
+
+**Multimodal Fusion**:
+- Cross-modal attention enables optimal integration of temporal, spatial, graph, and state information
+- Layer normalization and residual connections ensure stable training
+- Designed for generalizability across diverse NPP level configurations
+
+**ICM Integration with PPO**:
+- **Feature Sharing**: ICM uses the same 512-dimensional features from HGTMultimodalExtractor
+- **Reward Combination**: IntrinsicRewardWrapper seamlessly combines extrinsic and intrinsic rewards
+- **Reachability Modulation**: ICM curiosity is spatially modulated using nclone's reachability analysis
+- **Training Synchronization**: ICM parameters update alongside PPO policy/value networks
+- **Performance Optimization**: <0.5ms ICM computation maintains real-time training requirements
+
+### Network Architecture & Hyperparameters
+
+#### Technical Specifications
+
+*   **3D CNN Architecture**:
+    *   Layer 1: Conv3D(1→32, kernel=(4,7,7), stride=(2,2,2)) + BatchNorm + ReLU + Dropout
+    *   Layer 2: Conv3D(32→64, kernel=(3,5,5), stride=(1,2,2)) + BatchNorm + ReLU + Dropout  
+    *   Layer 3: Conv3D(64→128, kernel=(2,3,3), stride=(1,2,2)) + BatchNorm + ReLU
+    *   Adaptive pooling to (1,4,4) + Feature projection to 512D
+
+*   **2D CNN Architecture**:
+    *   Layer 1: Conv2D(1→32, kernel=7, stride=2) + BatchNorm + ReLU + Dropout
+    *   Layer 2: Conv2D(32→64, kernel=5, stride=2) + BatchNorm + ReLU + Dropout
+    *   Layer 3: Conv2D(64→128, kernel=3, stride=2) + BatchNorm + ReLU
+    *   Spatial attention integration + Adaptive pooling + Feature projection to 256D
+
+*   **HGT Configuration**:
+    *   Node feature dimension: 8 (optimized for efficiency)
+    *   Edge feature dimension: 4 (adjacent, reachable, functional)
+    *   Hidden dimension: 128, Layers: 3, Attention heads: 8
+    *   Node types: 6 (tile, ninja, hazard, collectible, switch, exit)
+    *   Edge types: 3 (adjacent, reachable, functional)
+
+*   **Cross-Modal Fusion**:
+    *   Input dimensions: Temporal(512) + Spatial(256) + Graph(256) + State(128) + Reachability(128)
+    *   Fusion network with layer normalization and residual connections
+    *   Progressive dimension reduction with attention mechanisms
 
 *   **Policy and Value Networks**:
     *   The PPO agent uses separate MLP heads for the policy (actor) and value (critic) functions, following the feature extraction stage.
@@ -58,29 +227,38 @@ The extractor processes the game state vector through a dedicated Multi-Layer Pe
 
 ### 4. Adaptive Exploration Strategies
 
-To encourage efficient exploration and improve learning in sparse reward environments, the agent can utilize an `AdaptiveExplorationManager` (from `agents/adaptive_exploration.py`). This system combines:
+The system includes an `AdaptiveExplorationManager` (from `npp_rl/agents/adaptive_exploration.py`) that provides hierarchical exploration capabilities:
 
-*   **Intrinsic Curiosity Module (ICM)**:
-    *   Based on Pathak et al. (2017), "Curiosity-driven Exploration by Self-supervised Prediction."
-    *   The module consists of a forward model (predicting the next state's feature representation given the current state and action) and an inverse model (predicting the action taken between two consecutive states).
-    *   The prediction error of the forward model serves as an intrinsic reward signal, encouraging the agent to visit states where its understanding of the environment dynamics is poor.
-*   **Novelty Detection**:
-    *   Employs a count-based approach where states (discretized player positions) are tracked.
-    *   A novelty bonus is awarded for visiting less frequently encountered states, decaying over time. This is inspired by classic count-based exploration algorithms.
-*   **Adaptive Scaling**:
-    *   The overall magnitude of the exploration bonus (combined from ICM and novelty) is dynamically adjusted based on the agent's training progress (e.g., rate of extrinsic reward improvement).
+*   **Hierarchical Subgoal Generation**:
+    *   Uses nclone's reachability analysis to generate strategic subgoals
+    *   Integrates with `EntityInteractionSubgoal` for unified subgoal representation
+    *   Provides level completion planning through `LevelCompletionPlanner`
+*   **Reachability-Guided Exploration**:
+    *   Leverages nclone's `ReachabilitySystem` for performance-optimized planning
+    *   Uses compact reachability features for subgoal filtering
+    *   Maintains compatibility with NPP physics constants and level objectives
+*   **Strategic Planning**:
+    *   Dynamic subgoal updates adapt to changing game state
+    *   Performance-optimized caching for real-time subgoal management (<3ms target)
+    *   Integrates with existing NPP physics and level completion heuristics
 
-## ICM + PPO Integration Guide
+## Training and Usage
 
-This section provides detailed guidance on how to effectively combine the Intrinsic Curiosity Module (ICM) with the regular PPO agent for enhanced exploration and learning performance.
+### Basic Training
 
-### Overview
+The system provides multiple training entry points:
 
-The ICM integration provides intrinsic motivation to the PPO agent by generating curiosity-driven exploration bonuses. This is particularly valuable in sparse reward environments like N++ where the agent may need to explore extensively before finding successful strategies.
+```bash
+# Basic PPO training
+python ppo_train.py --num-envs 64 --render-mode rgb_array
 
-### Architecture Integration
+# Advanced training with hierarchical exploration
+python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extractor_type hgt
+```
 
-The ICM system integrates with PPO through the `AdaptiveExplorationManager` class, which acts as a bridge between the curiosity mechanisms and the standard PPO training loop:
+### Hierarchical Exploration Integration
+
+The system integrates hierarchical exploration through the `AdaptiveExplorationManager` class:
 
 ```python
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
@@ -90,319 +268,41 @@ exploration_manager = AdaptiveExplorationManager()
 
 # Initialize ICM with appropriate dimensions
 exploration_manager.initialize_curiosity_module(
-    feature_dim=128,  # Match your feature extractor output
+    feature_dim=512,  # Match HGTMultimodalExtractor output
     action_dim=6      # N++ action space size
 )
-```
 
-### nclone Planning System Integration
-
-The ICM system leverages nclone's planning and reachability analysis for strategic exploration guidance:
-
-```python
-# The AdaptiveExplorationManager automatically integrates with nclone components:
-# - EntityInteractionSubgoal: Unified subgoal representation
-# - LevelCompletionPlanner: Strategic level completion planning  
-# - SubgoalPrioritizer: Intelligent subgoal ranking and selection
-# - ReachabilitySystem: Spatial analysis for feasible paths
-
-# These components work together to provide structured exploration targets
-# that guide the ICM's curiosity-driven learning process
-```
-
-**Key Integration Points:**
-
-1. **Subgoal Generation**: nclone's planning system generates `EntityInteractionSubgoal` instances that represent strategic targets (switches, exits, navigation points)
-
-2. **Reachability Analysis**: nclone's spatial analysis determines which subgoals are feasible from the current state
-
-3. **Strategic Planning**: The `LevelCompletionPlanner` provides structured completion strategies that guide long-term exploration
-
-4. **Priority-Based Selection**: The `SubgoalPrioritizer` ranks subgoals based on strategic value, reachability, and current game state
-
-5. **ICM Feature Integration**: Subgoal information is incorporated into ICM feature representations to bias curiosity toward strategically relevant exploration
-
-### Integration Workflow
-
-#### 1. Training Loop Integration
-
-The ICM should be integrated into your PPO training loop as follows:
-
-```python
-# During environment step
-obs, reward, done, info = env.step(action)
-
-# Calculate intrinsic reward bonus
+# Get exploration bonus during training
 intrinsic_bonus = exploration_manager.get_exploration_bonus(
     state=previous_features,
     action=action,
     next_state=current_features
 )
-
-# Combine extrinsic and intrinsic rewards
-total_reward = reward + intrinsic_bonus
-
-# Update ICM networks (important!)
-exploration_manager.update_curiosity_module(
-    state=previous_features,
-    action=action,
-    next_state=current_features
-)
 ```
 
-#### 2. Feature Extraction Compatibility
+### nclone Planning System Integration
 
-The ICM requires feature representations of the game state. Ensure your feature extractor outputs are compatible:
+The exploration system integrates with nclone's planning components:
 
-```python
-# Your feature extractor should output consistent feature dimensions
-features = feature_extractor(observation)  # Shape: [batch_size, feature_dim]
+- **EntityInteractionSubgoal**: Unified subgoal representation for navigation and switch activation
+- **LevelCompletionPlanner**: Strategic level completion planning using reachability analysis
+- **SubgoalPrioritizer**: Intelligent subgoal ranking based on strategic value and feasibility
+- **ReachabilitySystem**: Performance-optimized spatial analysis for feasible paths
 
-# ICM expects these features for curiosity calculation
-curiosity_bonus = exploration_manager.get_exploration_bonus(
-    state=features,
-    action=action_tensor,
-    next_state=next_features
-)
-```
+### Configuration
 
-#### 3. Hierarchical Subgoal Integration
-
-The system supports hierarchical planning through reachability-guided subgoals using the unified `EntityInteractionSubgoal` architecture from nclone:
+Key parameters for hierarchical exploration:
 
 ```python
-# Get strategic subgoals for the current state
-subgoals = exploration_manager.get_available_subgoals(
-    ninja_pos=(player_x, player_y),
-    level_data=level_info,
-    switch_states=current_switches
-)
+# ICM Configuration
+FEATURE_DIM = 512           # Match feature extractor output
+CURIOSITY_SCALE = 0.1       # Scale factor for intrinsic rewards
+NOVELTY_SCALE = 0.05        # Scale factor for novelty bonuses
 
-# Use subgoals for reward shaping
-for subgoal in subgoals:
-    reward_bonus = subgoal.get_reward_shaping(ninja_pos)
-    total_reward += reward_bonus * subgoal.priority
-
-# Get level completion strategy using nclone's planning system
-completion_strategy = exploration_manager.get_completion_strategy(
-    ninja_pos=(player_x, player_y),
-    level_data=level_info,
-    switch_states=current_switches
-)
-
-# The completion strategy provides structured steps for level completion
-for step in completion_strategy.steps:
-    print(f"Step: {step.action_type} -> {step.target_position}")
-```
-
-**Subgoal Architecture:**
-- **EntityInteractionSubgoal**: Unified subgoal class handling both navigation and switch activation
-- **nclone Integration**: Subgoals are generated using nclone's reachability analysis and planning system
-- **Strategic Planning**: Level completion strategies provide structured guidance for ICM exploration
-
-### Configuration Parameters
-
-#### ICM Hyperparameters
-
-Key parameters for ICM integration:
-
-```python
-# ICM Network Architecture
-FEATURE_DIM = 128           # Feature representation size
-HIDDEN_DIM = 256           # ICM network hidden layer size
-LEARNING_RATE_ICM = 1e-3   # ICM learning rate (separate from PPO)
-
-# Curiosity Scaling
-CURIOSITY_SCALE = 0.1      # Scale factor for intrinsic rewards
-NOVELTY_SCALE = 0.05       # Scale factor for novelty bonuses
-ADAPTIVE_SCALING = True    # Enable adaptive exploration scaling
-
-# Update Frequencies
-ICM_UPDATE_FREQ = 1        # Update ICM every N steps
-SUBGOAL_UPDATE_FREQ = 100  # Update subgoals every N steps
-```
-
-#### PPO Hyperparameter Adjustments
-
-When using ICM, consider adjusting these PPO parameters:
-
-```python
-# Recommended adjustments for ICM integration
-PPO_CONFIG = {
-    'learning_rate': 3e-4,      # Standard rate works well
-    'gamma': 0.999,             # High discount for long-term planning
-    'gae_lambda': 0.95,         # Standard GAE parameter
-    'ent_coef': 0.01,           # Slightly higher entropy for exploration
-    'vf_coef': 0.5,             # Standard value coefficient
-    'max_grad_norm': 0.5,       # Gradient clipping
-    'n_steps': 2048,            # Longer rollouts for better ICM training
-    'batch_size': 64,           # Smaller batches for stability
-}
-```
-
-### Best Practices
-
-#### 1. Reward Balance
-
-Carefully balance extrinsic and intrinsic rewards:
-
-```python
-# Adaptive reward scaling based on training progress
-def get_reward_scaling(episode_count, success_rate):
-    if success_rate < 0.1:
-        # High exploration phase
-        return {'extrinsic': 1.0, 'intrinsic': 0.5}
-    elif success_rate < 0.5:
-        # Balanced phase
-        return {'extrinsic': 1.0, 'intrinsic': 0.2}
-    else:
-        # Exploitation phase
-        return {'extrinsic': 1.0, 'intrinsic': 0.05}
-```
-
-#### 2. Feature Normalization
-
-Ensure consistent feature scaling for ICM:
-
-```python
-# Normalize features before passing to ICM
-features = torch.nn.functional.normalize(raw_features, dim=-1)
-curiosity_bonus = exploration_manager.get_exploration_bonus(
-    state=features, action=action, next_state=next_features
-)
-```
-
-#### 3. Monitoring and Debugging
-
-Track key metrics for ICM performance:
-
-```python
-# Log ICM statistics
-stats = exploration_manager.get_statistics()
-logger.log({
-    'icm/forward_loss': stats.get('forward_loss', 0),
-    'icm/inverse_loss': stats.get('inverse_loss', 0),
-    'icm/curiosity_reward': stats.get('avg_curiosity_reward', 0),
-    'icm/novelty_bonus': stats.get('avg_novelty_bonus', 0),
-    'exploration/total_intrinsic_reward': stats['total_intrinsic_reward'],
-    'exploration/exploration_scale': stats['exploration_scale'],
-})
-```
-
-### Common Issues and Solutions
-
-#### Issue 1: ICM Overpowering Extrinsic Rewards
-
-**Symptoms:** Agent explores endlessly without completing objectives
-**Solution:** Reduce curiosity scaling or implement adaptive scaling
-
-```python
-# Implement curiosity decay
-curiosity_scale = initial_scale * (decay_rate ** episode_count)
-```
-
-#### Issue 2: Feature Dimension Mismatch
-
-**Symptoms:** Runtime errors during ICM forward pass
-**Solution:** Ensure feature extractor output matches ICM input dimensions
-
-```python
-# Add dimension checking
-assert features.shape[-1] == exploration_manager.feature_dim, \
-    f"Feature dim mismatch: {features.shape[-1]} vs {exploration_manager.feature_dim}"
-```
-
-#### Issue 3: Poor Subgoal Quality
-
-**Symptoms:** Subgoals lead to suboptimal behavior
-**Solution:** Tune subgoal prioritization and reachability analysis
-
-```python
-# Adjust subgoal filtering
-filtered_subgoals = [s for s in subgoals if s.success_probability > 0.7]
-```
-
-### Performance Optimization
-
-#### Memory Management
-
-ICM can be memory-intensive. Consider these optimizations:
-
-```python
-# Use gradient checkpointing for ICM networks
-exploration_manager.enable_gradient_checkpointing()
-
-# Limit replay buffer size for novelty detection
-exploration_manager.set_novelty_buffer_size(10000)
-```
-
-#### Computational Efficiency
-
-Optimize ICM updates for better performance:
-
-```python
-# Batch ICM updates
-if step_count % ICM_BATCH_SIZE == 0:
-    exploration_manager.batch_update_curiosity_module(
-        states_batch, actions_batch, next_states_batch
-    )
-```
-
-### Example Training Script Integration
-
-Here's a complete example of integrating ICM with PPO training:
-
-```python
-import torch
-from stable_baselines3 import PPO
-from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
-
-def train_with_icm(env, total_timesteps=1000000):
-    # Initialize exploration manager
-    exploration_manager = AdaptiveExplorationManager()
-    exploration_manager.initialize_curiosity_module(
-        feature_dim=128, action_dim=env.action_space.n
-    )
-    
-    # Initialize PPO agent
-    model = PPO("MultiInputPolicy", env, verbose=1)
-    
-    # Training loop with ICM integration
-    obs = env.reset()
-    for step in range(total_timesteps):
-        # Get action from PPO
-        action, _states = model.predict(obs, deterministic=False)
-        
-        # Environment step
-        next_obs, reward, done, info = env.step(action)
-        
-        # Extract features (assuming custom feature extractor)
-        features = model.policy.extract_features(obs)
-        next_features = model.policy.extract_features(next_obs)
-        
-        # Calculate intrinsic reward
-        intrinsic_reward = exploration_manager.get_exploration_bonus(
-            state=features, action=torch.tensor([action]), 
-            next_state=next_features
-        )
-        
-        # Combine rewards
-        total_reward = reward + 0.1 * intrinsic_reward
-        
-        # Update ICM
-        exploration_manager.update_curiosity_module(
-            state=features, action=torch.tensor([action]),
-            next_state=next_features
-        )
-        
-        # Store experience with modified reward
-        model.replay_buffer.add(obs, next_obs, action, total_reward, done, info)
-        
-        obs = next_obs
-        if done:
-            obs = env.reset()
-    
-    return model
+# Subgoal Configuration  
+MAX_SUBGOALS_PER_STEP = 5   # Limit active subgoals
+MIN_REACHABILITY_SCORE = 0.3 # Filter unreachable subgoals
+SUBGOAL_UPDATE_FREQ = 100   # Update frequency (steps)
 ```
 
 This integration approach ensures that the ICM enhances exploration while maintaining the stability and performance of the underlying PPO algorithm.
@@ -426,6 +326,93 @@ The extrinsic reward signal from the environment is designed to guide the agent 
 *   Large negative penalty for dying.
 *   Exploration rewards at multiple spatial scales.
 
+### 7. ICM Configuration and Usage
+
+The **Reachability-Aware Intrinsic Curiosity Module** is integrated into the main architecture pipeline (see System Architecture → Data Flow above). This section covers configuration and usage details.
+
+#### Basic Usage
+
+```python
+from npp_rl.agents.training import train_agent
+
+# ICM is automatically integrated when using adaptive exploration
+config = {
+    "enable_adaptive_exploration": True,
+    "icm_config": {
+        "feature_dim": 512,        # Match HGTMultimodalExtractor output
+        "enable_reachability_awareness": True,
+        "alpha": 0.1,              # Intrinsic reward weight
+        "eta": 0.01,               # ICM learning rate
+        "lambda_inv": 0.1,         # Inverse model loss weight
+        "lambda_fwd": 0.9,         # Forward model loss weight
+    }
+}
+
+# Train with ICM-enhanced exploration
+model = train_agent(config)
+```
+
+#### Manual Integration
+
+For custom environments or advanced usage:
+
+```python
+from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
+from npp_rl.wrappers.intrinsic_reward_wrapper import IntrinsicRewardWrapper
+
+# Create reachability-aware ICM
+icm = ICMNetwork(
+    feature_dim=512,           # Match HGT feature extractor output
+    action_dim=6,              # N++ action space size
+    enable_reachability_awareness=True,
+    reachability_dim=64,       # nclone reachability features
+)
+
+# Wrap environment with intrinsic rewards
+env = IntrinsicRewardWrapper(
+    env=base_env,
+    icm_trainer=ICMTrainer(icm),
+    alpha=0.1,                 # Intrinsic reward weight
+    r_int_clip=1.0,           # Maximum intrinsic reward
+)
+```
+
+#### Training Phase Configuration
+
+```python
+# Early training: Conservative exploration
+early_config = {
+    "alpha": 0.05,             # Lower intrinsic weight
+    "eta": 0.005,              # Slower ICM learning
+    "reachability_scale_factor": 1.5,
+}
+
+# Mid training: Balanced exploration
+mid_config = {
+    "alpha": 0.1,              # Standard intrinsic weight
+    "eta": 0.01,               # Standard ICM learning
+    "frontier_boost_factor": 3.0,
+}
+
+# Late training: Focused exploration
+late_config = {
+    "alpha": 0.15,             # Higher intrinsic weight
+    "strategic_weight_factor": 2.0,  # More goal-directed
+    "unreachable_penalty": 0.05,     # Stronger penalty
+}
+```
+
+#### Key Configuration Parameters
+
+- **alpha**: Intrinsic reward weight (0.05-0.15 typical range)
+- **eta**: ICM learning rate (0.005-0.01 typical range)  
+- **lambda_inv/lambda_fwd**: Loss balancing for inverse/forward models
+- **reachability_scale_factor**: Modulation strength for spatial accessibility
+- **frontier_boost_factor**: Temporary boost for newly accessible areas
+- **strategic_weight_factor**: Goal-directed exploration weighting
+
+For detailed implementation and usage examples, see [`npp_rl/intrinsic/README.md`](npp_rl/intrinsic/README.md).
+
 ## Project Structure
 
 Consolidated architecture focused on hierarchical multimodal processing:
@@ -436,8 +423,15 @@ Consolidated architecture focused on hierarchical multimodal processing:
     - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
     - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
   - `feature_extractors/`
-    - `hierarchical_multimodal.py`: **Primary feature extractor** with multi-resolution graph processing, DiffPool GNNs, and adaptive fusion.
+    - `hgt_multimodal.py`: **Primary feature extractor** with HGT-based multimodal processing and graph neural networks.
     - `__init__.py`: Unified interface with factory functions for hierarchical extractor.
+  - `intrinsic/`
+    - `icm.py`: **Reachability-aware ICM implementation** with forward/inverse models and spatial modulation.
+    - `reachability_exploration.py`: Integration with nclone reachability systems for enhanced exploration.
+    - `utils.py`: Utility functions for feature extraction, reward combination, and ICM configuration.
+    - `README.md`: Comprehensive documentation for ICM usage and integration.
+  - `wrappers/`
+    - `intrinsic_reward_wrapper.py`: Environment wrapper for seamless ICM integration with PPO training.
   - (other subpackages may be added in later phases)
 - Top-level scripts
   - `ppo_train.py`: Thin wrapper to launch PPO via enhanced training.
@@ -563,18 +557,15 @@ Work on a generalized agent capable of playing a wide variety of N++ levels is a
 
 ## Key Research References
 
-The architecture and training procedures are informed by principles and findings from various research papers, including:
+The architecture and training procedures are informed by principles and findings from various research papers:
 
-*   Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017). Proximal Policy Optimization Algorithms.
-*   Pathak, D., Agrawal, P., Efros, A. A., & Darrell, T. (2017). Curiosity-driven Exploration by Self-supervised Prediction.
-*   Cobbe, K., Hesse, C., Hilton, J., & Schulman, J. (2020). Leveraging Procedural Generation to Benchmark Reinforcement Learning. (Influenced choices for network scaling and temporal modeling).
-*   Ji, S., Xu, W., Yang, M., & Yu, K. (2013). 3D convolutional neural networks for human action recognition. (Early work on 3D CNNs relevant to spatiotemporal feature learning).
-*   DeVries, T., & Taylor, G. W. (2017). Improved Regularization of Convolutional Neural Networks with Cutout.
-*   Ecoffet, A., Huizinga, J., Lehman, J., Stanley, K. O., & Clune, J. (2019). Go-Explore: a New Approach for Hard-Exploration Problems. (Inspired adaptive novelty components).
-*   Mnih, V., et al. (2013). Playing Atari with Deep Reinforcement Learning. (Foundation for CNNs in RL).
-*   Kaplan, J., et al. (2020). Scaling Laws for Neural Language Models. (General insights into model scaling).
-*   Ying, R., et al. (2018). Hierarchical Graph Representation Learning with Differentiable Pooling. (DiffPool implementation for hierarchical GNNs).
-*   Hamilton, W., Ying, Z., & Leskovec, J. (2017). Inductive Representation Learning on Large Graphs. (GraphSAGE foundation for graph neural networks).
+*   **Reinforcement Learning**: Schulman, J., et al. (2017). Proximal Policy Optimization Algorithms.
+*   **3D CNNs**: Ji, S., et al. (2013). 3D convolutional neural networks for human action recognition.
+*   **Graph Neural Networks**: Hamilton, W., et al. (2017). Inductive Representation Learning on Large Graphs.
+*   **Hierarchical RL**: Nachum, O., et al. (2018). Data-Efficient Hierarchical Reinforcement Learning with Goal-Conditioned Policies.
+*   **Exploration**: Pathak, D., et al. (2017). Curiosity-driven Exploration by Self-supervised Prediction.
+*   **Attention Mechanisms**: Vaswani, A., et al. (2017). Attention Is All You Need.
+*   **Graph Transformers**: Dwivedi, V. P., & Bresson, X. (2020). A Generalization of Transformer Networks to Graphs.
 
 ### Multi-Resolution Graph Architecture
 
@@ -591,27 +582,22 @@ The hierarchical graph system processes N++ levels at three resolution levels:
     *   Maintains cross-scale connectivity for information flow
     *   Aggregates features from fine to coarse levels with statistical summaries
 
-*   **DiffPool GNN** (`npp_rl/models/diffpool_gnn.py`):
-    *   Implements differentiable graph pooling with soft cluster assignments
-    *   Enables end-to-end training of hierarchical representations
-    *   Includes auxiliary losses (link prediction, entropy, orthogonality) for stable training
-
 *   **Multi-Scale Fusion** (`npp_rl/models/multi_scale_fusion.py`):
     *   Context-aware attention mechanisms that adapt to ninja physics state
     *   Learned routing between resolution levels
     *   Dynamic scale selection based on current task requirements
 
-*   **Hierarchical Multimodal Extractor** (`npp_rl/feature_extractors/hierarchical_multimodal.py`):
-    *   Integrates hierarchical graph processing with existing CNN/MLP architectures
-    *   Supports auxiliary loss training for improved representations
-    *   Graceful fallback when hierarchical graph data is unavailable
+*   **HGT Multimodal Extractor** (`npp_rl/feature_extractors/hgt_multimodal.py`):
+    *   Integrates HGT-based graph processing with CNN/MLP architectures
+    *   Supports multimodal fusion of visual, graph, and state features
+    *   Optimized for real-time RL training with efficient processing
 
 ### Usage Example
 
 ```python
-from npp_rl.feature_extractors import create_hgt_multimodal_extractor, create_hierarchical_multimodal_extractor
+from npp_rl.feature_extractors import create_hgt_multimodal_extractor
 
-# PRIMARY: Create HGT-based feature extractor (RECOMMENDED)
+# Create HGT-based feature extractor (PRIMARY)
 hgt_extractor = create_hgt_multimodal_extractor(
     observation_space=env.observation_space,
     features_dim=512,
@@ -619,16 +605,9 @@ hgt_extractor = create_hgt_multimodal_extractor(
     hgt_num_layers=3
 )
 
-# SECONDARY: Create hierarchical feature extractor
-hierarchical_extractor = create_hierarchical_multimodal_extractor(
-    observation_space=env.observation_space,
-    features_dim=512,
-    use_hierarchical_graph=True
-)
-
-# Use in PPO training with auxiliary losses
+# Use in PPO training
 policy_kwargs = {
-    'features_extractor_class': type(extractor),
+    'features_extractor_class': type(hgt_extractor),
     'features_extractor_kwargs': {
         'enable_auxiliary_losses': True,
         'hierarchical_hidden_dim': 128,

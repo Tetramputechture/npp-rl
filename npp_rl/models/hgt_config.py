@@ -65,6 +65,9 @@ class DefaultConfig:
     # State processing defaults
     state_hidden_dim: int = 128
     
+    # Reachability processing defaults
+    reachability_hidden_dim: int = 128
+    
     # Spatial attention defaults
     spatial_height: int = 16
     spatial_width: int = 16
@@ -88,6 +91,24 @@ class MultiplierConfig:
     feature_expansion_factor: int = 2  # General feature expansion
     guidance_dim_reduction_factor: int = 2
     attention_head_reduction_factor: int = 2
+
+
+@dataclass(frozen=True)
+class HGTConfig:
+    """Configuration for Heterogeneous Graph Transformer (SIMPLIFIED)."""
+    # SIMPLIFIED: Node feature dimensions reduced from 31 to 8
+    node_feat_dim: int = 8   # Simplified node features (position, tile, entity, distances)
+    edge_feat_dim: int = 4   # Simplified edge features (type + weight)
+    
+    # HGT architecture
+    hidden_dim: int = 128
+    num_heads: int = 8
+    num_layers: int = 3
+    dropout: float = 0.1
+    
+    # SIMPLIFIED: Node and edge type counts
+    num_node_types: int = 6  # From entity_type_system.py (unchanged)
+    num_edge_types: int = 3  # Simplified: ADJACENT, LOGICAL, REACHABLE
 
 
 # === Configuration Instances ===
@@ -138,6 +159,9 @@ FACTORY_CONFIG = FactoryConfig()
 
 # Multiplier Configuration
 MULTIPLIER_CONFIG = MultiplierConfig()
+
+# HGT Configuration (SIMPLIFIED)
+HGT_CONFIG = HGTConfig()
 
 
 # === Additional Constants (not in configs) ===

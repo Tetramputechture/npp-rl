@@ -1,463 +1,499 @@
 """
-Reachability-Aware Environment Wrapper
+Simplified Reachability Wrapper for NPP-RL.
 
-This module provides a wrapper for NPP environments that adds reachability feature
-extraction to the observation space. It integrates with the nclone reachability
-system to provide compact spatial reasoning features for RL training.
+This module replaces the complex tiered reachability system with a simple
+flood fill approach optimized for real-time RL training.
 
-Integration Strategy:
-- Extends observation space to include 64-dimensional reachability features
-- Implements efficient caching for real-time performance (<2ms target)
-- Provides graceful fallback when nclone components are unavailable
-- Maintains compatibility with existing training pipelines
+Key simplifications:
+- Uses only Tier 1 flood fill (<1ms performance target)
+- No complex physics analysis or trajectory calculation
+- Basic 4-connectivity reachability analysis
+- Minimal feature extraction (8 dimensions vs 64)
 
-Performance Optimizations:
-- Intelligent caching with TTL for repeated computations
-- Tier-1 reachability extraction for real-time requirements
-- Batch processing support for vectorized environments
-
-References:
-- Reachability analysis: Custom integration with nclone physics system
-- Observation space design: Gym environment standards
-- Performance optimization: Real-time RL training requirements
+This aligns with the principle that HGT should learn complex movement
+patterns emergently rather than having them pre-computed.
 """
 
-# Standard library imports
 import time
-from typing import Dict, Any, Optional, Tuple, List
-
-# Third-party imports
 import numpy as np
+from typing import Dict, Any, Tuple, Set, Optional, List
 import gymnasium as gym
 from gymnasium import spaces
 
-# npp_rl imports
-from npp_rl.utils.performance_monitor import PerformanceMonitor
+# Use nclone physics constants
+TILE_PIXEL_SIZE = 24  # Standard N++ tile size
+FULL_MAP_WIDTH_PX = 1056  # Standard N++ level width
+FULL_MAP_HEIGHT_PX = 600  # Standard N++ level height
 
 
 class ReachabilityWrapper(gym.Wrapper):
     """
-    Environment wrapper that adds reachability features to observations.
+    Simplified reachability wrapper that provides basic connectivity analysis.
 
-    This wrapper extends any NPP environment with compact reachability features
-    extracted from the nclone physics system. It provides spatial reasoning
-    guidance for RL agents while maintaining real-time performance requirements.
-
-    Features:
-    - 64-dimensional compact reachability feature encoding
-    - Intelligent caching with configurable TTL
-    - Performance monitoring and optimization
-    - Graceful degradation when nclone is unavailable
-    - Batch processing support for vectorized environments
-
-    Example usage:
-        base_env = NppEnvironment(...)
-        env = ReachabilityWrapper(base_env, cache_ttl_ms=100.0)
-        obs = env.reset()
-        # obs now includes 'reachability_features' key
+    Replaces complex 64-dimensional reachability features with 8-dimensional
+    simplified features focused on basic connectivity and strategic information.
     """
 
-    def __init__(
-        self,
-        env: gym.Env,
-        cache_ttl_ms: float = 100.0,
-        max_cache_size: int = 1000,
-        performance_target: str = "fast",
-        enable_monitoring: bool = True,
-        debug: bool = False,
-    ):
+    def __init__(self, env, debug: bool = False):
         """
-        Initialize reachability wrapper.
+        Initialize simplified reachability wrapper.
 
         Args:
-            env: Base NPP environment to wrap
-            cache_ttl_ms: Cache time-to-live in milliseconds
-            max_cache_size: Maximum number of cached entries
-            performance_target: Reachability extraction performance target
-            enable_monitoring: Whether to enable performance monitoring
-            debug: Enable debug output
+            env: Base environment to wrap
+            debug: Enable debug output and performance logging
         """
         super().__init__(env)
-
-        self.cache_ttl_ms = cache_ttl_ms
-        self.max_cache_size = max_cache_size
-        self.performance_target = performance_target
         self.debug = debug
 
-        # Initialize reachability components
-        self.reachability_extractor = self._initialize_reachability_extractor()
-        self.reachability_cache = {}
-        self.cache_hits = 0
-        self.cache_misses = 0
+        # Performance tracking
+        self.reachability_times = []
+        self.max_time_samples = 100
 
-        # Performance monitoring
-        if enable_monitoring:
-            self.performance_monitor = PerformanceMonitor("reachability_extraction")
-        else:
-            self.performance_monitor = None
+        # Simple cache for performance
+        self._last_ninja_pos = None
+        self._cached_reachability = None
+        self._cache_valid = False
 
-        # Extend observation space
-        self._extend_observation_space()
-
-        if self.debug:
-            print(
-                f"ReachabilityWrapper initialized with cache_ttl={cache_ttl_ms}ms, "
-                f"performance_target={performance_target}"
+        # Update observation space to include simplified reachability features
+        original_space = env.observation_space
+        if isinstance(original_space, spaces.Dict):
+            # Add simplified reachability features to existing dict space
+            new_spaces = original_space.spaces.copy()
+            new_spaces["reachability_features"] = spaces.Box(
+                low=0.0, high=1.0, shape=(8,), dtype=np.float32
             )
-
-    def _initialize_reachability_extractor(self):
-        """Initialize reachability feature extractor."""
-        # Import at runtime to avoid hard dependency on nclone
-        from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
-        from nclone.graph.reachability.feature_extractor import (
-            ReachabilityFeatureExtractor,
-        )
-
-        tiered_system = TieredReachabilitySystem(debug=self.debug)
-        extractor = ReachabilityFeatureExtractor(
-            tiered_system=tiered_system,
-            cache_ttl_ms=self.cache_ttl_ms,
-            debug=self.debug,
-        )
-
-        if self.debug:
-            print("Successfully initialized nclone reachability extractor")
-        return extractor
-
-    def _extend_observation_space(self):
-        """Extend observation space to include reachability features."""
-        # Add reachability features to observation space
-        reachability_space = spaces.Box(
-            low=0.0,
-            high=2.0,
-            shape=(64,),
-            dtype=np.float32,
-            name="reachability_features",
-        )
-
-        # Update observation space
-        if isinstance(self.observation_space, spaces.Dict):
-            # Add to existing Dict space
-            new_spaces = dict(self.observation_space.spaces)
-            new_spaces["reachability_features"] = reachability_space
             self.observation_space = spaces.Dict(new_spaces)
         else:
-            # Convert to Dict space
-            original_space = self.observation_space
+            # Fallback: create new dict space
             self.observation_space = spaces.Dict(
                 {
-                    "original_obs": original_space,
-                    "reachability_features": reachability_space,
+                    "original": original_space,
+                    "reachability_features": spaces.Box(
+                        low=0.0, high=1.0, shape=(8,), dtype=np.float32
+                    ),
                 }
             )
 
-        if self.debug:
-            print(
-                f"Extended observation space with reachability features: {reachability_space}"
-            )
-
     def reset(self, **kwargs):
-        """Reset environment and extract initial reachability features."""
-        obs, info = self.env.reset(**kwargs)
-
-        # Extract reachability features for initial state
-        reachability_features = self._extract_reachability_features()
-
-        # Add to observation
-        obs["reachability_features"] = self._extract_reachability_features()
-
-        # Add reachability info for debugging
-        if "reachability" not in info:
-            info["reachability"] = {}
-        info["reachability"].update(
-            {
-                "extraction_time_ms": getattr(
-                    reachability_features, "extraction_time", 0.0
-                ),
-                "cache_hit": getattr(reachability_features, "from_cache", False),
-                "confidence": getattr(reachability_features, "confidence", 1.0),
-            }
-        )
-
-        return obs, info
+        """Reset environment and clear reachability cache."""
+        obs = self.env.reset(**kwargs)
+        self._clear_cache()
+        return self._add_reachability_features(obs)
 
     def step(self, action):
-        """Step environment and extract reachability features."""
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        """Step environment and update reachability features."""
+        obs, reward, done, info = self.env.step(action)
+        obs = self._add_reachability_features(obs)
 
-        # Extract reachability features
-        reachability_features = self._extract_reachability_features()
+        # Add performance info
+        if self.reachability_times:
+            avg_time = np.mean(self.reachability_times[-10:])  # Last 10 samples
+            info["reachability_time_ms"] = avg_time * 1000
+
+        return obs, reward, done, info
+
+    def _add_reachability_features(self, obs: Dict[str, Any]) -> Dict[str, Any]:
+        """Add simplified reachability features to observation."""
+        start_time = time.time()
+
+        # Extract ninja position
+        ninja_pos = self._extract_ninja_position(obs)
+        if ninja_pos is None:
+            # Fallback: return zero features
+            reachability_features = np.zeros(8, dtype=np.float32)
+        else:
+            reachability_features = self._compute_simple_reachability(obs, ninja_pos)
+
+        # Track performance
+        elapsed_time = time.time() - start_time
+        self.reachability_times.append(elapsed_time)
+        if len(self.reachability_times) > self.max_time_samples:
+            self.reachability_times.pop(0)
+
+        if self.debug and elapsed_time > 0.001:  # Warn if >1ms
+            print(f"Warning: Reachability computation took {elapsed_time * 1000:.2f}ms")
 
         # Add to observation
-        obs["reachability_features"] = reachability_features
+        if isinstance(obs, dict):
+            obs["reachability_features"] = reachability_features
+        else:
+            obs = {"original": obs, "reachability_features": reachability_features}
 
-        # Add reachability info for debugging
-        if "reachability" not in info:
-            info["reachability"] = {}
-        info["reachability"].update(
-            {
-                "extraction_time_ms": getattr(
-                    reachability_features, "extraction_time", 0.0
-                ),
-                "cache_hit": getattr(reachability_features, "from_cache", False),
-                "confidence": getattr(reachability_features, "confidence", 1.0),
-                "cache_stats": {
-                    "hits": self.cache_hits,
-                    "misses": self.cache_misses,
-                    "hit_rate": self.cache_hits
-                    / max(1, self.cache_hits + self.cache_misses),
-                },
-            }
+        return obs
+
+    def _extract_ninja_position(self, obs: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+        """Extract ninja position from observation."""
+        # Try different possible keys for ninja position
+        position_keys = ["ninja_position", "player_position", "position"]
+
+        for key in position_keys:
+            if key in obs:
+                pos = obs[key]
+                if isinstance(pos, (list, tuple, np.ndarray)) and len(pos) >= 2:
+                    return (int(pos[0]), int(pos[1]))
+
+        # Try extracting from player_x, player_y
+        if "player_x" in obs and "player_y" in obs:
+            return (int(obs["player_x"]), int(obs["player_y"]))
+
+        return None
+
+    def _compute_simple_reachability(
+        self, obs: Dict[str, Any], ninja_pos: Tuple[int, int]
+    ) -> np.ndarray:
+        """
+        Compute simplified 8-dimensional reachability features.
+
+        Features:
+        1. Reachable area ratio (0-1)
+        2. Distance to nearest switch (normalized)
+        3. Distance to exit (normalized)
+        4. Reachable switches count (normalized)
+        5. Reachable hazards count (normalized)
+        6. Connectivity score (0-1)
+        7. Exit reachable flag (0-1)
+        8. Switch-to-exit path exists (0-1)
+        """
+        # Check cache validity
+        if (
+            self._cache_valid
+            and self._last_ninja_pos == ninja_pos
+            and self._cached_reachability is not None
+        ):
+            return self._cached_reachability
+
+        # Get level data
+        level_data = self._extract_level_data(obs)
+        if level_data is None:
+            return np.zeros(8, dtype=np.float32)
+
+        # Perform simple flood fill reachability analysis
+        reachable_positions = self._flood_fill_reachability(ninja_pos, level_data)
+
+        # Compute 8 simplified features
+        features = self._compute_reachability_features(
+            ninja_pos, reachable_positions, level_data
         )
 
-        return obs, reward, terminated, truncated, info
-
-    def _extract_reachability_features(self) -> np.ndarray:
-        """Extract reachability features for current game state."""
-        start_time = time.perf_counter()
-
-        # Get current game state
-        ninja_pos = self._get_ninja_position()
-        level_data = self._get_level_data()
-        entities = self._get_entities()
-        switch_states = self._get_switch_states()
-
-        # Check cache first
-        cache_key = self._generate_cache_key(ninja_pos, switch_states)
-        if self._is_cache_valid(cache_key):
-            self.cache_hits += 1
-            cached_entry = self.reachability_cache[cache_key]
-            cached_entry["cache_hits"] += 1
-            features = cached_entry["features"]
-            features.from_cache = True
-            features.extraction_time = 0.0  # Cache hit
-            return features
-
-        self.cache_misses += 1
-
-        # Extract features using nclone reachability system
-        if hasattr(self.reachability_extractor, "extract_features"):
-            # Use ReachabilityFeatureExtractor interface
-            # Convert performance target to PerformanceMode enum
-            from nclone.graph.reachability.feature_extractor import PerformanceMode
-
-            perf_mode = getattr(
-                PerformanceMode,
-                self.performance_target.upper(),
-                PerformanceMode.FAST,
-            )
-
-            features_result = self.reachability_extractor.extract_features(
-                ninja_position=ninja_pos,
-                level_data=level_data,
-                entities=entities,
-                switch_states=switch_states,
-                performance_mode=perf_mode,
-            )
-
-            # Handle different return types
-            if hasattr(features_result, "features"):
-                features = features_result.features
-            else:
-                features = features_result
-        else:
-            # Fallback for dummy extractor
-            features = self.reachability_extractor.extract_features(
-                ninja_pos, level_data, switch_states, self.performance_target
-            )
-
-        # Ensure numpy array format
-        if not isinstance(features, np.ndarray):
-            features = np.array(features, dtype=np.float32)
-
-        # Validate feature dimensions
-        if features.shape != (64,):
-            if self.debug:
-                print(f"Warning: Expected 64 features, got {features.shape}")
-            # Pad or truncate to 64 dimensions
-            if len(features) < 64:
-                features = np.pad(features, (0, 64 - len(features)), "constant")
-            else:
-                features = features[:64]
-
-        extraction_time = (time.perf_counter() - start_time) * 1000
-
-        # Add metadata
-        features.extraction_time = extraction_time
-        features.from_cache = False
-        features.confidence = 1.0
-
-        # Cache result
-        self._cache_features(cache_key, features, extraction_time)
-
-        # Performance monitoring
-        if self.performance_monitor:
-            self.performance_monitor.record_timing(extraction_time)
+        # Update cache
+        self._last_ninja_pos = ninja_pos
+        self._cached_reachability = features
+        self._cache_valid = True
 
         return features
 
-    def _get_ninja_position(self) -> Tuple[float, float]:
-        """Extract ninja position from environment state."""
-        # Check if this is an nclone environment
-        if hasattr(self.env, "ninja_position"):
-            return self.env.ninja_position()
-        elif hasattr(self.env, "unwrapped") and hasattr(
-            self.env.unwrapped, "ninja_position"
-        ):
-            return self.env.unwrapped.ninja_position()
+    def _extract_level_data(self, obs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract level data from observation."""
+        # Try to get level data from observation
+        if "level_data" in obs:
+            return obs["level_data"]
+
+        # Try to construct from available information
+        level_data = {}
+
+        # Get tile information
+        if "tiles" in obs:
+            level_data["tiles"] = obs["tiles"]
+        elif "level_tiles" in obs:
+            level_data["tiles"] = obs["level_tiles"]
+
+        # Get entity information
+        if "entities" in obs:
+            level_data["entities"] = obs["entities"]
+        elif "level_entities" in obs:
+            level_data["entities"] = obs["level_entities"]
+
+        return level_data if level_data else None
+
+    def _flood_fill_reachability(
+        self, start_pos: Tuple[int, int], level_data: Dict[str, Any]
+    ) -> Set[Tuple[int, int]]:
+        """
+        Perform simple flood fill reachability analysis.
+
+        This is the core simplification - uses basic 4-connectivity
+        instead of complex physics-based reachability.
+        """
+        # Get traversable positions from tiles
+        traversable = self._get_traversable_positions(level_data)
+
+        if not traversable:
+            return {start_pos}
+
+        # Snap start position to grid
+        start_grid = self._snap_to_grid(start_pos)
+        if start_grid not in traversable:
+            # Find nearest traversable position
+            start_grid = self._find_nearest_traversable(start_pos, traversable)
+
+        # Simple flood fill with 4-connectivity
+        visited = set()
+        queue = [start_grid]
+        visited.add(start_grid)
+
+        directions = [
+            (0, TILE_PIXEL_SIZE),  # Down
+            (0, -TILE_PIXEL_SIZE),  # Up
+            (TILE_PIXEL_SIZE, 0),  # Right
+            (-TILE_PIXEL_SIZE, 0),  # Left
+        ]
+
+        while queue:
+            current = queue.pop(0)
+            x, y = current
+
+            for dx, dy in directions:
+                neighbor = (x + dx, y + dy)
+                if neighbor in traversable and neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        return visited
+
+    def _get_traversable_positions(
+        self, level_data: Dict[str, Any]
+    ) -> Set[Tuple[int, int]]:
+        """Get traversable positions from level data."""
+        traversable = set()
+
+        tiles = level_data.get("tiles")
+        if tiles is None:
+            return traversable
+
+        if isinstance(tiles, np.ndarray):
+            height, width = tiles.shape
         else:
-            # Fallback for non-nclone environments
-            return (0.0, 0.0)
+            # Assume standard N++ dimensions
+            width, height = 42, 23
 
-    def _get_level_data(self) -> Optional[Any]:
-        """Extract level data from environment state."""
-        # Check if this is an nclone environment
-        if hasattr(self.env, "level_data"):
-            return self.env.level_data
-        elif hasattr(self.env, "unwrapped") and hasattr(
-            self.env.unwrapped, "level_data"
-        ):
-            return self.env.unwrapped.level_data
-        else:
-            # Fallback for non-nclone environments
-            return None
+        for row in range(height):
+            for col in range(width):
+                if isinstance(tiles, np.ndarray):
+                    tile_id = tiles[row, col]
+                else:
+                    tile_id = 0  # Default to traversable
 
-    def _get_switch_states(self) -> Dict[str, bool]:
-        """Extract switch states from environment state."""
-        # Check if this is an nclone environment
-        if hasattr(self.env, "entities"):
-            entities = self.env.entities
-        elif hasattr(self.env, "unwrapped") and hasattr(self.env.unwrapped, "entities"):
-            entities = self.env.unwrapped.entities
-        else:
-            # Fallback for non-nclone environments
-            return {}
+                # Tile type 0 is empty space (traversable)
+                if tile_id == 0:
+                    pixel_x = col * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
+                    pixel_y = row * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
+                    traversable.add((pixel_x, pixel_y))
 
-        # Extract switch states from entities
-        switch_states = {}
-        for entity in entities:
-            if hasattr(entity, "entity_id") and hasattr(entity, "activated"):
-                # This is a switch entity
-                switch_states[str(entity.entity_id)] = entity.activated
+        return traversable
 
-        return switch_states
+    def _snap_to_grid(self, position: Tuple[int, int]) -> Tuple[int, int]:
+        """Snap position to tile grid."""
+        x, y = position
+        grid_x = int(x // TILE_PIXEL_SIZE) * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
+        grid_y = int(y // TILE_PIXEL_SIZE) * TILE_PIXEL_SIZE + TILE_PIXEL_SIZE // 2
+        return (grid_x, grid_y)
 
-    def _get_entities(self) -> List[Any]:
-        """Extract entities from environment state."""
-        # Check if this is an nclone environment
-        if hasattr(self.env, "entities"):
-            return self.env.entities
-        elif hasattr(self.env, "unwrapped") and hasattr(self.env.unwrapped, "entities"):
-            return self.env.unwrapped.entities
-        else:
-            # Fallback for non-nclone environments
-            return []
+    def _find_nearest_traversable(
+        self, pos: Tuple[int, int], traversable: Set[Tuple[int, int]]
+    ) -> Tuple[int, int]:
+        """Find nearest traversable position."""
+        if not traversable:
+            return pos
 
-    def _generate_cache_key(
-        self, ninja_pos: Tuple[float, float], switch_states: Dict[str, bool]
-    ) -> str:
-        """Generate cache key for current state."""
-        # Simple cache key based on position and switch states
-        pos_key = f"{ninja_pos[0]:.2f},{ninja_pos[1]:.2f}"
-        switch_key = ",".join(f"{k}:{v}" for k, v in sorted(switch_states.items()))
-        return f"{pos_key}|{switch_key}"
+        min_dist = float("inf")
+        nearest = pos
 
-    def _is_cache_valid(self, cache_key: str) -> bool:
-        """Check if cache entry is valid."""
-        if cache_key not in self.reachability_cache:
-            return False
+        for t_pos in traversable:
+            dist = (pos[0] - t_pos[0]) ** 2 + (pos[1] - t_pos[1]) ** 2
+            if dist < min_dist:
+                min_dist = dist
+                nearest = t_pos
 
-        entry = self.reachability_cache[cache_key]
-        current_time = time.perf_counter() * 1000  # Convert to ms
+        return nearest
 
-        return (current_time - entry["timestamp"]) < self.cache_ttl_ms
-
-    def _cache_features(
-        self, cache_key: str, features: np.ndarray, extraction_time: float
-    ):
-        """Cache reachability features."""
-        # Clean old entries if cache is full
-        if len(self.reachability_cache) >= self.max_cache_size:
-            self._clean_cache()
-
-        self.reachability_cache[cache_key] = {
-            "features": features,
-            "timestamp": time.perf_counter() * 1000,  # Convert to ms
-            "extraction_time": extraction_time,
-            "cache_hits": 0,
-        }
-
-    def _clean_cache(self):
-        """Remove oldest cache entries."""
-        if not self.reachability_cache:
-            return
-
-        # Remove oldest 25% of entries
-        entries_to_remove = max(1, len(self.reachability_cache) // 4)
-
-        # Sort by timestamp and remove oldest
-        sorted_entries = sorted(
-            self.reachability_cache.items(), key=lambda x: x[1]["timestamp"]
+    def _compute_reachability_features(
+        self,
+        ninja_pos: Tuple[int, int],
+        reachable_positions: Set[Tuple[int, int]],
+        level_data: Dict[str, Any],
+    ) -> np.ndarray:
+        """Compute 8-dimensional reachability feature vector."""
+        # Total level area (approximate)
+        total_area = (FULL_MAP_WIDTH_PX // TILE_PIXEL_SIZE) * (
+            FULL_MAP_HEIGHT_PX // TILE_PIXEL_SIZE
         )
 
-        for key, _ in sorted_entries[:entries_to_remove]:
-            del self.reachability_cache[key]
+        # 1. Reachable area ratio
+        reachable_ratio = len(reachable_positions) / max(total_area, 1)
+        reachable_ratio = np.clip(reachable_ratio, 0.0, 1.0)
 
-        if self.debug:
-            print(
-                f"Cleaned {entries_to_remove} cache entries, "
-                f"{len(self.reachability_cache)} remaining"
-            )
+        # Get entities for remaining features
+        entities = level_data.get("entities", [])
 
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """Get performance statistics for reachability extraction."""
-        stats = {
-            "cache_hits": self.cache_hits,
-            "cache_misses": self.cache_misses,
-            "cache_hit_rate": self.cache_hits
-            / max(1, self.cache_hits + self.cache_misses),
-            "cache_size": len(self.reachability_cache),
+        # 2. Distance to nearest switch (normalized)
+        switch_distance = self._get_distance_to_entity_type(
+            ninja_pos, entities, "switch"
+        )
+        switch_distance_norm = np.clip(
+            switch_distance / 1000.0, 0.0, 1.0
+        )  # Normalize by max level width
+
+        # 3. Distance to exit (normalized)
+        exit_distance = self._get_distance_to_entity_type(ninja_pos, entities, "exit")
+        exit_distance_norm = np.clip(exit_distance / 1000.0, 0.0, 1.0)
+
+        # 4. Reachable switches count (normalized)
+        reachable_switches = self._count_reachable_entities(
+            reachable_positions, entities, "switch"
+        )
+        switches_norm = np.clip(
+            reachable_switches / 5.0, 0.0, 1.0
+        )  # Assume max 5 switches
+
+        # 5. Reachable hazards count (normalized)
+        reachable_hazards = self._count_reachable_entities(
+            reachable_positions, entities, "hazard"
+        )
+        hazards_norm = np.clip(
+            reachable_hazards / 10.0, 0.0, 1.0
+        )  # Assume max 10 hazards
+
+        # 6. Connectivity score (simple metric)
+        connectivity = min(
+            len(reachable_positions) / 100.0, 1.0
+        )  # Simple connectivity metric
+
+        # 7. Exit reachable flag
+        exit_reachable = float(
+            self._is_entity_reachable(reachable_positions, entities, "exit")
+        )
+
+        # 8. Switch-to-exit path exists (simplified)
+        switch_to_exit_path = float(reachable_switches > 0 and exit_reachable > 0)
+
+        return np.array(
+            [
+                reachable_ratio,
+                switch_distance_norm,
+                exit_distance_norm,
+                switches_norm,
+                hazards_norm,
+                connectivity,
+                exit_reachable,
+                switch_to_exit_path,
+            ],
+            dtype=np.float32,
+        )
+
+    def _get_distance_to_entity_type(
+        self, pos: Tuple[int, int], entities: List, entity_type: str
+    ) -> float:
+        """Get distance to nearest entity of specified type."""
+        min_distance = 1000.0  # Default large distance
+
+        for entity in entities:
+            if self._get_entity_type(entity) == entity_type:
+                entity_pos = self._get_entity_position(entity)
+                if entity_pos:
+                    distance = np.sqrt(
+                        (pos[0] - entity_pos[0]) ** 2 + (pos[1] - entity_pos[1]) ** 2
+                    )
+                    min_distance = min(min_distance, distance)
+
+        return min_distance
+
+    def _count_reachable_entities(
+        self,
+        reachable_positions: Set[Tuple[int, int]],
+        entities: List,
+        entity_type: str,
+    ) -> int:
+        """Count reachable entities of specified type."""
+        count = 0
+
+        for entity in entities:
+            if self._get_entity_type(entity) == entity_type:
+                entity_pos = self._get_entity_position(entity)
+                if entity_pos:
+                    entity_grid = self._snap_to_grid(entity_pos)
+                    if entity_grid in reachable_positions:
+                        count += 1
+
+        return count
+
+    def _is_entity_reachable(
+        self,
+        reachable_positions: Set[Tuple[int, int]],
+        entities: List,
+        entity_type: str,
+    ) -> bool:
+        """Check if any entity of specified type is reachable."""
+        return (
+            self._count_reachable_entities(reachable_positions, entities, entity_type)
+            > 0
+        )
+
+    def _get_entity_type(self, entity) -> str:
+        """Get simplified entity type string."""
+        if isinstance(entity, dict):
+            entity_id = entity.get("type", 0)
+        else:
+            entity_id = getattr(entity, "type", 0)
+
+        # Map entity IDs to simplified types
+        if entity_id == 3:
+            return "exit"
+        elif entity_id == 4:
+            return "switch"
+        elif entity_id in [1, 14, 20, 25, 26]:  # Various hazards
+            return "hazard"
+        else:
+            return "other"
+
+    def _get_entity_position(self, entity) -> Optional[Tuple[int, int]]:
+        """Get entity position."""
+        if isinstance(entity, dict):
+            x = entity.get("x", entity.get("position", [0, 0])[0])
+            y = entity.get("y", entity.get("position", [0, 0])[1])
+        else:
+            x = getattr(entity, "x", getattr(entity, "position", [0, 0])[0])
+            y = getattr(entity, "y", getattr(entity, "position", [0, 0])[1])
+
+        return (int(x), int(y))
+
+    def _clear_cache(self):
+        """Clear reachability cache."""
+        self._last_ninja_pos = None
+        self._cached_reachability = None
+        self._cache_valid = False
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """Get performance statistics."""
+        if not self.reachability_times:
+            return {}
+
+        times_ms = [t * 1000 for t in self.reachability_times]
+        return {
+            "avg_time_ms": np.mean(times_ms),
+            "max_time_ms": np.max(times_ms),
+            "min_time_ms": np.min(times_ms),
+            "std_time_ms": np.std(times_ms),
         }
 
-        if self.performance_monitor:
-            stats.update(self.performance_monitor.get_stats())
 
-        return stats
-
-    def reset_performance_stats(self):
-        """Reset performance statistics."""
-        self.cache_hits = 0
-        self.cache_misses = 0
-        self.reachability_cache.clear()
-
-        if self.performance_monitor:
-            self.performance_monitor.reset()
-
-
-def create_reachability_aware_env(
-    base_env: gym.Env,
-    cache_ttl_ms: float = 100.0,
-    performance_target: str = "fast",
-    enable_monitoring: bool = True,
-    debug: bool = False,
-) -> ReachabilityWrapper:
+def create_reachability_aware_env(env_kwargs=None, debug=False):
     """
-    Factory function to create a reachability-aware environment.
-
+    Create a reachability-aware environment.
+    
     Args:
-        base_env: Base NPP environment to wrap
-        cache_ttl_ms: Cache time-to-live in milliseconds
-        performance_target: Reachability extraction performance target
-        enable_monitoring: Whether to enable performance monitoring
+        env_kwargs: Keyword arguments for the base environment
         debug: Enable debug output
-
+        
     Returns:
-        ReachabilityWrapper: Environment with reachability features
+        ReachabilityWrapper: Environment with reachability analysis
     """
-    return ReachabilityWrapper(
-        env=base_env,
-        cache_ttl_ms=cache_ttl_ms,
-        performance_target=performance_target,
-        enable_monitoring=enable_monitoring,
-        debug=debug,
-    )
+    from nclone.gym_environment.npp_environment import NPPEnvironment
+    
+    if env_kwargs is None:
+        env_kwargs = {}
+    
+    # Create base environment
+    base_env = NPPEnvironment(**env_kwargs)
+    
+    # Wrap with reachability analysis
+    return ReachabilityWrapper(base_env, debug=debug)

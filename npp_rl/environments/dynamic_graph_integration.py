@@ -9,29 +9,31 @@ import logging
 from typing import Dict, Any, Optional, Callable
 import gymnasium as gym
 
-from .dynamic_graph_wrapper import DynamicGraphWrapper, UpdateBudget
+from .dynamic_graph_wrapper import DynamicGraphWrapper
 from .vectorization_wrapper import VectorizationWrapper
 
 
 def create_dynamic_graph_env(
     env_kwargs: Optional[Dict[str, Any]] = None,
-    enable_dynamic_updates: bool = True,
-    update_budget: Optional[UpdateBudget] = None,
-    performance_mode: str = "balanced",  # "fast", "balanced", "accurate"
+    enable_graph_updates: bool = True,
+    debug: bool = False,
 ) -> gym.Env:
     """
     Create an environment with dynamic graph capabilities.
+    
+    This function creates a production-ready environment with nclone graph integration,
+    optimized for accuracy and HGT processing. No performance mode options are provided
+    as the system is designed to prefer accuracy always.
 
     Args:
         env_kwargs: Environment configuration parameters
-        enable_dynamic_updates: Whether to enable dynamic graph updates
-        update_budget: Custom update budget, or None for defaults
-        performance_mode: Performance/accuracy tradeoff mode
+        enable_graph_updates: Whether to enable dynamic graph updates
+        debug: Enable debug logging for graph operations
 
     Returns:
         Environment with dynamic graph wrapper applied
     """
-    # Set default environment kwargs
+    # Set default environment kwargs optimized for accuracy
     if env_kwargs is None:
         env_kwargs = {
             "render_mode": "rgb_array",
@@ -48,39 +50,11 @@ def create_dynamic_graph_env(
     # Create base environment
     base_env = VectorizationWrapper(env_kwargs)
 
-    # Configure update budget based on performance mode
-    if update_budget is None:
-        if performance_mode == "fast":
-            update_budget = UpdateBudget(
-                max_time_ms=15.0,
-                max_edge_updates=500,
-                max_node_updates=250,
-                priority_threshold=0.7,
-            )
-        elif performance_mode == "balanced":
-            update_budget = UpdateBudget(
-                max_time_ms=25.0,
-                max_edge_updates=1000,
-                max_node_updates=500,
-                priority_threshold=0.5,
-            )
-        elif performance_mode == "accurate":
-            update_budget = UpdateBudget(
-                max_time_ms=40.0,
-                max_edge_updates=2000,
-                max_node_updates=1000,
-                priority_threshold=0.3,
-            )
-        else:
-            raise ValueError(f"Unknown performance mode: {performance_mode}")
-
-    # Apply dynamic graph wrapper
+    # Apply dynamic graph wrapper with accuracy-focused configuration
     dynamic_env = DynamicGraphWrapper(
         env=base_env,
-        enable_dynamic_updates=enable_dynamic_updates,
-        update_budget=update_budget,
-        event_buffer_size=100,
-        temporal_window_size=10.0,
+        enable_graph_updates=enable_graph_updates,
+        debug=debug,
     )
 
     return dynamic_env
@@ -123,8 +97,7 @@ def add_dynamic_graph_monitoring(
                 logging.info(
                     f"Dynamic Graph Stats (step {self.step_count}): "
                     f"avg_update_time={stats['avg_update_time_ms']:.2f}ms, "
-                    f"events_processed={stats['events_processed']}, "
-                    f"budget_exceeded={stats['budget_exceeded_count']}"
+                    f"total_updates={stats['total_updates']}"
                 )
 
                 # Call performance callback if provided
@@ -164,10 +137,10 @@ def validate_dynamic_graph_environment(env: gym.Env) -> bool:
 
     # Test environment reset and step
     obs, info = env.reset()
-    if "dynamic_graph_metadata" in obs:
-        metadata = obs["dynamic_graph_metadata"]
-        if len(metadata) != 10:
-            logging.error(f"Invalid dynamic graph metadata shape: {metadata.shape}")
+    if "graph_metadata" in obs:
+        metadata = obs["graph_metadata"]
+        if len(metadata) != 4:  # Current metadata has 4 elements
+            logging.error(f"Invalid graph metadata shape: {metadata.shape}")
             return False
 
     # Test a single step

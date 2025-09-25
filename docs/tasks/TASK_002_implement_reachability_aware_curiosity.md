@@ -78,7 +78,7 @@ Theoretical Foundation:
 
 nclone Integration:
 - Uses compact reachability features from nclone.graph.reachability for accessibility assessment
-- Integrates with TieredReachabilitySystem for performance-optimized reachability queries
+- Integrates with ReachabilitySystem for performance-optimized reachability queries
 - Maintains compatibility with existing NPP physics constants and level objectives
 """
 
@@ -97,7 +97,7 @@ import torch.nn.functional as F
 # nclone imports (top-level imports preferred)
 from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
 from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
-from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.reachability_system import ReachabilitySystem
 
 # npp_rl imports
 from npp_rl.intrinsic.base import BaseIntrinsicModule
