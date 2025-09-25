@@ -21,6 +21,7 @@ The agent receives multi-modal observations:
     *   Temporal Stacking: 12 consecutive frames are stacked to provide temporal context.
         *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/gym_environment/constants.py`).
     *   Preprocessing: Grayscale conversion, centering on the player, cropping, and normalization.
+    *   Augmentation: Research-backed augmentation pipeline including random translation, color jitter, cutout, and Gaussian noise for improved generalization (implemented in `nclone/gym_environment/frame_augmentation.py`).
 
 *   **Global View**:
     *   A downsampled 176x100 pixel grayscale view of the entire level.
@@ -284,9 +285,6 @@ MIN_REACHABILITY_SCORE = 0.3 # Filter unreachable subgoals
 SUBGOAL_UPDATE_FREQ = 100   # Update frequency (steps)
 ```
 
-    return model
-```
-
 This integration approach ensures that the ICM enhances exploration while maintaining the stability and performance of the underlying PPO algorithm.
 
 ### 5. Action Space
@@ -318,7 +316,7 @@ Consolidated architecture focused on hierarchical multimodal processing:
     - `adaptive_exploration.py`: Optional curiosity/novelty exploration manager and helpers.
     - `hyperparameters/ppo_hyperparameters.py`: Tuned PPO defaults and `NET_ARCH_SIZE`.
   - `feature_extractors/`
-    - `hierarchical_multimodal.py`: **Primary feature extractor** with multi-resolution graph processing, DiffPool GNNs, and adaptive fusion.
+    - `hgt_multimodal.py`: **Primary feature extractor** with HGT-based multimodal processing and graph neural networks.
     - `__init__.py`: Unified interface with factory functions for hierarchical extractor.
   - (other subpackages may be added in later phases)
 - Top-level scripts
@@ -480,17 +478,17 @@ The hierarchical graph system processes N++ levels at three resolution levels:
     *   Learned routing between resolution levels
     *   Dynamic scale selection based on current task requirements
 
-*   **Hierarchical Multimodal Extractor** (`npp_rl/feature_extractors/hierarchical_multimodal.py`):
-    *   Integrates hierarchical graph processing with existing CNN/MLP architectures
-    *   Supports auxiliary loss training for improved representations
-    *   Graceful fallback when hierarchical graph data is unavailable
+*   **HGT Multimodal Extractor** (`npp_rl/feature_extractors/hgt_multimodal.py`):
+    *   Integrates HGT-based graph processing with CNN/MLP architectures
+    *   Supports multimodal fusion of visual, graph, and state features
+    *   Optimized for real-time RL training with efficient processing
 
 ### Usage Example
 
 ```python
-from npp_rl.feature_extractors import create_hgt_multimodal_extractor, create_hierarchical_multimodal_extractor
+from npp_rl.feature_extractors import create_hgt_multimodal_extractor
 
-# PRIMARY: Create HGT-based feature extractor (RECOMMENDED)
+# Create HGT-based feature extractor (PRIMARY)
 hgt_extractor = create_hgt_multimodal_extractor(
     observation_space=env.observation_space,
     features_dim=512,
@@ -498,16 +496,9 @@ hgt_extractor = create_hgt_multimodal_extractor(
     hgt_num_layers=3
 )
 
-# SECONDARY: Create hierarchical feature extractor
-hierarchical_extractor = create_hierarchical_multimodal_extractor(
-    observation_space=env.observation_space,
-    features_dim=512,
-    use_hierarchical_graph=True
-)
-
-# Use in PPO training with auxiliary losses
+# Use in PPO training
 policy_kwargs = {
-    'features_extractor_class': type(extractor),
+    'features_extractor_class': type(hgt_extractor),
     'features_extractor_kwargs': {
         'enable_auxiliary_losses': True,
         'hierarchical_hidden_dim': 128,
