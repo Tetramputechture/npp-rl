@@ -9,14 +9,13 @@ import logging
 from typing import Dict, Any, Optional, Callable
 import gymnasium as gym
 
-from .dynamic_graph_wrapper import DynamicGraphWrapper, UpdateBudget
+from .dynamic_graph_wrapper import DynamicGraphWrapper
 from .vectorization_wrapper import VectorizationWrapper
 
 
 def create_dynamic_graph_env(
     env_kwargs: Optional[Dict[str, Any]] = None,
     enable_dynamic_updates: bool = True,
-    update_budget: Optional[UpdateBudget] = None,
     performance_mode: str = "balanced",  # "fast", "balanced", "accurate"
 ) -> gym.Env:
     """
@@ -25,7 +24,6 @@ def create_dynamic_graph_env(
     Args:
         env_kwargs: Environment configuration parameters
         enable_dynamic_updates: Whether to enable dynamic graph updates
-        update_budget: Custom update budget, or None for defaults
         performance_mode: Performance/accuracy tradeoff mode
 
     Returns:
