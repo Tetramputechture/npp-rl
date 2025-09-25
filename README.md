@@ -21,7 +21,7 @@ The agent receives multi-modal observations:
     *   Temporal Stacking: 12 consecutive frames are stacked to provide temporal context.
         *   `TEMPORAL_FRAMES = 12` (defined in `nclone/nclone/gym_environment/constants.py`).
     *   Preprocessing: Grayscale conversion, centering on the player, cropping, and normalization.
-    *   Augmentation: Research-backed augmentation pipeline including random translation, color jitter, cutout, and Gaussian noise for improved generalization (implemented in `nclone/gym_environment/frame_augmentation.py`).
+    *   Augmentation: Game-optimized augmentation pipeline including random translation, horizontal flipping, cutout, and brightness/contrast variations for improved generalization (implemented in `nclone/gym_environment/frame_augmentation.py`).
 
 *   **Global View**:
     *   A downsampled 176x100 pixel grayscale view of the entire level.
