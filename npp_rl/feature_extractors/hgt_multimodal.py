@@ -19,13 +19,9 @@ import torch
 import torch.nn as nn
 from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-import gym
-
-from nclone.graph.edge_building import EdgeBuilder
-from nclone.graph.graph_processor import GraphProcessor
+import gymnasium as gym
 
 from ..models.hgt_config import HGT_CONFIG
-from ..models.node_extractor import NodeFeatureExtractor
 
 
 class HGTMultimodalExtractor(BaseFeaturesExtractor):
@@ -59,10 +55,8 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
         self.debug = debug
 
-        # Initialize simplified components
-        self.node_extractor = NodeFeatureExtractor(debug=debug)
-        self.edge_builder = EdgeBuilder(debug=debug)
-        self.graph_processor = GraphProcessor(debug=debug)
+        # Note: Graph processing is now handled by DynamicGraphWrapper
+        # which provides graph observations directly from nclone
 
         # Visual processing (simplified CNN)
         self.visual_cnn = self._build_visual_cnn()
@@ -223,15 +217,27 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         device: torch.device,
         batch_size: int,
     ) -> torch.Tensor:
-        """Process simplified graph features."""
-        # For now, create simplified mock graph features
-        # In full implementation, would extract from level data and build graph
-
-        if "level_data" in observations:
-            # Extract simplified graph features from level data
-            graph_features = self._extract_graph_features_from_level(
-                observations["level_data"], device, batch_size
-            )
+        """Process graph features from DynamicGraphWrapper observations."""
+        # Use graph observations provided by DynamicGraphWrapper
+        if "graph_node_feats" in observations:
+            # Use actual graph node features from nclone
+            node_feats = observations["graph_node_feats"].to(device)
+            # Average over nodes to get a single feature vector per batch
+            if node_feats.dim() == 3:  # [batch, nodes, features]
+                graph_features = node_feats.mean(dim=1)  # [batch, features]
+            else:  # [nodes, features] - single batch
+                graph_features = node_feats.mean(dim=0, keepdim=True)  # [1, features]
+            
+            # Pad or truncate to match expected dimension
+            if graph_features.shape[-1] < HGT_CONFIG.node_feat_dim:
+                padding = torch.zeros(
+                    *graph_features.shape[:-1], 
+                    HGT_CONFIG.node_feat_dim - graph_features.shape[-1], 
+                    device=device
+                )
+                graph_features = torch.cat([graph_features, padding], dim=-1)
+            elif graph_features.shape[-1] > HGT_CONFIG.node_feat_dim:
+                graph_features = graph_features[..., :HGT_CONFIG.node_feat_dim]
         else:
             # Fallback: create dummy graph features
             graph_features = torch.zeros(

@@ -17,8 +17,8 @@ patterns emergently rather than having them pre-computed.
 import time
 import numpy as np
 from typing import Dict, Any, Tuple, Set, Optional, List
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 
 # Use nclone physics constants
 TILE_PIXEL_SIZE = 24  # Standard N++ tile size
@@ -474,3 +474,26 @@ class ReachabilityWrapper(gym.Wrapper):
             "min_time_ms": np.min(times_ms),
             "std_time_ms": np.std(times_ms),
         }
+
+
+def create_reachability_aware_env(env_kwargs=None, debug=False):
+    """
+    Create a reachability-aware environment.
+    
+    Args:
+        env_kwargs: Keyword arguments for the base environment
+        debug: Enable debug output
+        
+    Returns:
+        ReachabilityWrapper: Environment with reachability analysis
+    """
+    from nclone.gym_environment.npp_environment import NPPEnvironment
+    
+    if env_kwargs is None:
+        env_kwargs = {}
+    
+    # Create base environment
+    base_env = NPPEnvironment(**env_kwargs)
+    
+    # Wrap with reachability analysis
+    return ReachabilityWrapper(base_env, debug=debug)
