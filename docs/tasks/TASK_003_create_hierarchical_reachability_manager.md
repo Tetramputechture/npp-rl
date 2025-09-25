@@ -97,7 +97,7 @@ Theoretical Foundation:
 
 nclone Integration:
 - Uses compact reachability features from nclone.graph.reachability for subgoal filtering
-- Integrates with TieredReachabilitySystem for performance-optimized planning queries
+- Integrates with ReachabilitySystem for performance-optimized planning queries
 - Maintains compatibility with existing NPP physics constants and level objective analysis
 """
 
@@ -117,7 +117,7 @@ import torch.nn as nn
 # nclone imports (top-level imports preferred)
 from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
 from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
-from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.reachability_system import ReachabilitySystem
 
 # npp_rl imports  
 from npp_rl.agents.base import BaseExplorationManager
@@ -157,7 +157,7 @@ class AdaptiveExplorationManager:
         
         # Hierarchical planning components (always enabled, no defensive programming)
         # Direct initialization - fail fast if dependencies are missing
-        self.reachability_extractor = ReachabilityFeatureExtractor(TieredReachabilitySystem())
+        self.reachability_extractor = ReachabilityFeatureExtractor(ReachabilitySystem())
         self.level_analyzer = LevelAnalyzer()
         
         # Subgoal management system for hierarchical planning
@@ -211,7 +211,7 @@ class AdaptiveExplorationManager:
             return cached_result['subgoals'][:max_subgoals]
         
         # Extract compact reachability features using nclone integration
-        # Uses TieredReachabilitySystem for performance-optimized analysis
+        # Uses ReachabilitySystem for performance-optimized analysis
         reachability_features = self.reachability_extractor.extract_features(
             ninja_pos, level_data, switch_states, performance_target="balanced"
         )

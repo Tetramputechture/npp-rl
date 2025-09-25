@@ -116,6 +116,11 @@ The system uses nclone's graph construction capabilities without over-engineerin
 - **spatial_attention.py**: Graph-guided spatial attention mechanisms
 - **physics_state_extractor.py**: Physics state extraction with momentum features
 
+**Intrinsic Curiosity Components (`npp_rl/intrinsic/`)**:
+- **icm.py**: Reachability-aware ICM with forward/inverse prediction models
+- **reachability_exploration.py**: Integration with nclone reachability systems for spatial modulation
+- **IntrinsicRewardWrapper**: Environment wrapper for seamless ICM integration with PPO
+
 **Configuration Management**:
 - **hgt_config.py**: Centralized configuration with sensible defaults
 - Modular design enables easy hyperparameter tuning
@@ -140,7 +145,15 @@ HGTMultimodalExtractor:
 ├── MLPs → State [128] + Reachability [128]
 └── Cross-Modal Fusion → Combined Features [512]
     ↓
-PPO Policy/Value Networks
+    ├── PPO Policy/Value Networks → Action Selection
+    └── ICM Network (Intrinsic Curiosity):
+        ├── Forward Model: (state_t, action) → predicted_state_{t+1}
+        ├── Inverse Model: (state_t, state_{t+1}) → predicted_action
+        └── Reachability Modulation → Scaled Intrinsic Rewards
+    ↓
+Reward Combination: Extrinsic + Intrinsic Rewards → Total Reward
+    ↓
+PPO Training Updates (Policy, Value, ICM parameters)
 ```
 
 ### Performance Characteristics
@@ -166,6 +179,13 @@ PPO Policy/Value Networks
 - Cross-modal attention enables optimal integration of temporal, spatial, graph, and state information
 - Layer normalization and residual connections ensure stable training
 - Designed for generalizability across diverse NPP level configurations
+
+**ICM Integration with PPO**:
+- **Feature Sharing**: ICM uses the same 512-dimensional features from HGTMultimodalExtractor
+- **Reward Combination**: IntrinsicRewardWrapper seamlessly combines extrinsic and intrinsic rewards
+- **Reachability Modulation**: ICM curiosity is spatially modulated using nclone's reachability analysis
+- **Training Synchronization**: ICM parameters update alongside PPO policy/value networks
+- **Performance Optimization**: <0.5ms ICM computation maintains real-time training requirements
 
 ### Network Architecture & Hyperparameters
 
@@ -214,7 +234,7 @@ The system includes an `AdaptiveExplorationManager` (from `npp_rl/agents/adaptiv
     *   Integrates with `EntityInteractionSubgoal` for unified subgoal representation
     *   Provides level completion planning through `LevelCompletionPlanner`
 *   **Reachability-Guided Exploration**:
-    *   Leverages nclone's `TieredReachabilitySystem` for performance-optimized planning
+    *   Leverages nclone's `ReachabilitySystem` for performance-optimized planning
     *   Uses compact reachability features for subgoal filtering
     *   Maintains compatibility with NPP physics constants and level objectives
 *   **Strategic Planning**:
@@ -267,7 +287,7 @@ The exploration system integrates with nclone's planning components:
 - **EntityInteractionSubgoal**: Unified subgoal representation for navigation and switch activation
 - **LevelCompletionPlanner**: Strategic level completion planning using reachability analysis
 - **SubgoalPrioritizer**: Intelligent subgoal ranking based on strategic value and feasibility
-- **TieredReachabilitySystem**: Performance-optimized spatial analysis for feasible paths
+- **ReachabilitySystem**: Performance-optimized spatial analysis for feasible paths
 
 ### Configuration
 
@@ -306,17 +326,35 @@ The extrinsic reward signal from the environment is designed to guide the agent 
 *   Large negative penalty for dying.
 *   Exploration rewards at multiple spatial scales.
 
-### 7. Intrinsic Curiosity Module (ICM)
+### 7. ICM Configuration and Usage
 
-The system includes a sophisticated **Reachability-Aware Intrinsic Curiosity Module** that enhances exploration by providing intrinsic rewards based on prediction errors and spatial accessibility analysis.
+The **Reachability-Aware Intrinsic Curiosity Module** is integrated into the main architecture pipeline (see System Architecture → Data Flow above). This section covers configuration and usage details.
 
-#### Architecture Overview
+#### Basic Usage
 
-The ICM consists of three main components:
+```python
+from npp_rl.agents.training import train_agent
 
-1. **Forward Model**: Predicts next state features given current state features and action
-2. **Inverse Model**: Predicts action given current and next state features  
-3. **Reachability Modulation Layer**: Scales curiosity rewards based on spatial accessibility
+# ICM is automatically integrated when using adaptive exploration
+config = {
+    "enable_adaptive_exploration": True,
+    "icm_config": {
+        "feature_dim": 512,        # Match HGTMultimodalExtractor output
+        "enable_reachability_awareness": True,
+        "alpha": 0.1,              # Intrinsic reward weight
+        "eta": 0.01,               # ICM learning rate
+        "lambda_inv": 0.1,         # Inverse model loss weight
+        "lambda_fwd": 0.9,         # Forward model loss weight
+    }
+}
+
+# Train with ICM-enhanced exploration
+model = train_agent(config)
+```
+
+#### Manual Integration
+
+For custom environments or advanced usage:
 
 ```python
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
@@ -339,78 +377,7 @@ env = IntrinsicRewardWrapper(
 )
 ```
 
-#### Key Features
-
-**Reachability-Aware Exploration**:
-- Modulates curiosity based on spatial accessibility from nclone physics
-- Prevents wasted exploration in unreachable areas
-- Boosts exploration of newly accessible areas (frontiers)
-- Strategic weighting near level objectives (doors, switches, exit)
-
-**Performance Optimized**:
-- <0.5ms computation time per step
-- <1MB memory overhead
-- Vectorized batch processing
-- Lazy initialization and caching
-
-**Integration with PPO**:
-- Seamlessly integrates with Stable Baselines3 PPO
-- Combines intrinsic and extrinsic rewards automatically
-- Maintains training stability through reward clipping
-- Updates ICM parameters during policy training
-
-#### Training Integration
-
-```python
-from npp_rl.agents.training import train_agent
-
-# ICM is automatically integrated when using adaptive exploration
-config = {
-    "enable_adaptive_exploration": True,
-    "icm_config": {
-        "feature_dim": 512,
-        "enable_reachability_awareness": True,
-        "alpha": 0.1,              # Intrinsic reward weight
-        "eta": 0.01,               # ICM learning rate
-        "lambda_inv": 0.1,         # Inverse model loss weight
-        "lambda_fwd": 0.9,         # Forward model loss weight
-    }
-}
-
-# Train with ICM-enhanced exploration
-model = train_agent(config)
-```
-
-#### Reachability Modulation Algorithm
-
-The ICM enhances standard curiosity with three modulation factors:
-
-1. **Reachability Scaling**:
-   - Reachable areas: 1.0x (full curiosity)
-   - Frontier areas: 0.5x (moderate curiosity)  
-   - Unreachable areas: 0.1x (minimal curiosity)
-
-2. **Frontier Boosting**:
-   - Detects newly accessible areas after state changes
-   - Applies temporary 3.0x boost for frontier exploration
-   - Decays over time to prevent permanent bias
-
-3. **Strategic Weighting**:
-   - Distance-based weighting to level objectives
-   - Door proximity: 2.0x weight
-   - Switch proximity: 1.5x weight
-   - Exit proximity: 3.0x weight
-
-#### Theoretical Foundation
-
-The ICM implementation is based on:
-- **Pathak et al. (2017)**: "Curiosity-driven Exploration by Self-supervised Prediction"
-- **Ecoffet et al. (2019)**: "Go-Explore: a New Approach for Hard-Exploration Problems"  
-- **Burda et al. (2018)**: "Exploration by Random Network Distillation"
-
-The reachability-aware enhancement addresses the key limitation of standard ICM in spatially constrained environments like N++, where naive curiosity can lead to exploration of unreachable areas.
-
-#### Configuration and Tuning
+#### Training Phase Configuration
 
 ```python
 # Early training: Conservative exploration
@@ -434,6 +401,15 @@ late_config = {
     "unreachable_penalty": 0.05,     # Stronger penalty
 }
 ```
+
+#### Key Configuration Parameters
+
+- **alpha**: Intrinsic reward weight (0.05-0.15 typical range)
+- **eta**: ICM learning rate (0.005-0.01 typical range)  
+- **lambda_inv/lambda_fwd**: Loss balancing for inverse/forward models
+- **reachability_scale_factor**: Modulation strength for spatial accessibility
+- **frontier_boost_factor**: Temporary boost for newly accessible areas
+- **strategic_weight_factor**: Goal-directed exploration weighting
 
 For detailed implementation and usage examples, see [`npp_rl/intrinsic/README.md`](npp_rl/intrinsic/README.md).
 
@@ -605,11 +581,6 @@ The hierarchical graph system processes N++ levels at three resolution levels:
     *   Creates multi-resolution representations through graph coarsening
     *   Maintains cross-scale connectivity for information flow
     *   Aggregates features from fine to coarse levels with statistical summaries
-
-*   **DiffPool GNN** (`npp_rl/models/diffpool_gnn.py`):
-    *   Implements differentiable graph pooling with soft cluster assignments
-    *   Enables end-to-end training of hierarchical representations
-    *   Includes auxiliary losses (link prediction, entropy, orthogonality) for stable training
 
 *   **Multi-Scale Fusion** (`npp_rl/models/multi_scale_fusion.py`):
     *   Context-aware attention mechanisms that adapt to ninja physics state

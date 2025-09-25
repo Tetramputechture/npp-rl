@@ -20,7 +20,7 @@ Theoretical Foundation:
 
 nclone Integration:
 - Uses compact reachability features from nclone.graph.reachability for subgoal filtering
-- Integrates with TieredReachabilitySystem for performance-optimized planning queries
+- Integrates with ReachabilitySystem for performance-optimized planning queries
 - Maintains compatibility with existing NPP physics constants and level objective analysis
 """
 
@@ -37,7 +37,7 @@ import torch.nn as nn
 
 # nclone imports (reachability and planning components)
 from nclone.graph.reachability.compact_features import CompactReachabilityFeatures
-from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.reachability_system import ReachabilitySystem
 from nclone.planning import (
     Subgoal,
     EntityInteractionSubgoal,
@@ -202,7 +202,7 @@ class AdaptiveExplorationManager:
 
         # Hierarchical planning components (always enabled, no defensive programming)
         # Direct initialization - fail fast if dependencies are missing
-        self.reachability_system = TieredReachabilitySystem()
+        self.reachability_system = ReachabilitySystem()
         self.reachability_features = CompactReachabilityFeatures()
 
         # Subgoal management system for hierarchical planning
@@ -347,7 +347,9 @@ class AdaptiveExplorationManager:
                     priority=step.priority,
                     estimated_time=3.0,
                     success_probability=0.95,
-                    entity_id=step.target_id if hasattr(step, 'target_id') else "exit_door",
+                    entity_id=step.target_id
+                    if hasattr(step, "target_id")
+                    else "exit_door",
                     entity_position=step.target_position,
                     entity_type="exit_door",
                     interaction_type="complete",

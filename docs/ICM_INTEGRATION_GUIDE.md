@@ -15,7 +15,7 @@ ICM Module (npp_rl.intrinsic.icm)
     ↓
 Reachability Exploration (npp_rl.intrinsic.reachability_exploration)
     ↓
-nclone Systems (TieredReachabilitySystem, CompactReachabilityFeatures, etc.)
+nclone Systems (ReachabilitySystem, CompactReachabilityFeatures, etc.)
 ```
 
 ## Key Components

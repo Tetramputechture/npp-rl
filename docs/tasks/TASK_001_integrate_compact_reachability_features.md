@@ -67,7 +67,7 @@ Theoretical Foundation:
 - Spatial reasoning: Hamilton et al. (2017) "Inductive Representation Learning on Large Graphs"
 
 nclone Integration:
-- Uses TieredReachabilitySystem for performance-tuned feature extraction
+- Uses ReachabilitySystem for performance-tuned feature extraction
 - Integrates with compact feature representations from nclone.graph.reachability
 - Maintains compatibility with existing NPP physics constants and game state
 """
@@ -86,7 +86,7 @@ import torch.nn.functional as F
 # nclone imports (top-level imports preferred)
 from nclone.constants import NINJA_RADIUS, GRAVITY_FALL, MAX_HOR_SPEED
 from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
-from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+from nclone.graph.reachability.reachability_system import ReachabilitySystem
 
 # npp_rl imports
 from npp_rl.feature_extractors.base import BaseFeatureExtractor
@@ -179,9 +179,9 @@ class HGTMultimodalExtractor(BaseFeatureExtractor):
         if self.reachability_extractor is None:
             try:
                 # Import at runtime to avoid hard dependency on nclone at module level
-                # Use TieredReachabilitySystem for performance-optimized feature extraction
-                tiered_system = TieredReachabilitySystem()
-                self.reachability_extractor = ReachabilityFeatureExtractor(tiered_system)
+                # Use ReachabilitySystem for performance-optimized feature extraction
+                reachability_system = ReachabilitySystem()
+                self.reachability_extractor = ReachabilityFeatureExtractor(reachability_system)
             except ImportError:
                 # Graceful degradation: use dummy extractor during development
                 # This ensures the model can still function for testing and development
@@ -458,7 +458,7 @@ class NPPEnv:
     is provided as part of the observation space to guide spatial reasoning.
     
     Integration Components:
-    - Reachability feature extraction using TieredReachabilitySystem
+    - Reachability feature extraction using ReachabilitySystem
     - Extended observation space including 64-dimensional reachability features
     - Performance-optimized caching for real-time extraction (<2ms target)
     - Graceful fallback when nclone components are unavailable
@@ -484,10 +484,10 @@ class NPPEnv:
         """Initialize reachability feature extractor."""
         try:
             from nclone.graph.reachability.compact_features import ReachabilityFeatureExtractor
-            from nclone.graph.reachability.tiered_system import TieredReachabilitySystem
+            from nclone.graph.reachability.reachability_system import ReachabilitySystem
             
-            tiered_system = TieredReachabilitySystem()
-            return ReachabilityFeatureExtractor(tiered_system)
+            reachability_system = ReachabilitySystem()
+            return ReachabilityFeatureExtractor(reachability_system)
         except ImportError:
             print("Warning: nclone reachability system not available, using dummy extractor")
             return DummyReachabilityExtractor()
