@@ -17,27 +17,27 @@ and let the transformer learn complex relationships through attention.
 
 import torch
 import torch.nn as nn
-import numpy as np
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gym
 
-from ..models.hgt_config import HGT_CONFIG, DEFAULT_CONFIG
-from ..models.simple_node_extractor import SimpleNodeFeatureExtractor, SimpleEntityInfo
-from ..models.simple_edge_builder import SimpleEdgeBuilder, get_traversable_positions_from_tiles
-from ..models.simple_graph_processor import SimpleGraphProcessor, create_simple_game_state
+from nclone.graph.edge_building import EdgeBuilder
+from nclone.graph.graph_processor import GraphProcessor
+
+from ..models.hgt_config import HGT_CONFIG
+from ..models.node_extractor import NodeFeatureExtractor
 
 
-class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
+class HGTMultimodalExtractor(BaseFeaturesExtractor):
     """
     Simplified HGT-based multimodal feature extractor.
-    
+
     Combines:
     1. Visual CNN features (unchanged)
     2. Simplified graph features (8 node + 4 edge dimensions)
     3. Simplified reachability features (8 dimensions)
     4. Game state features (unchanged)
-    
+
     Uses cross-modal attention to fuse information and let the HGT learn
     complex movement patterns emergently.
     """
@@ -58,27 +58,27 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
         """
         super().__init__(observation_space, features_dim)
         self.debug = debug
-        
+
         # Initialize simplified components
-        self.node_extractor = SimpleNodeFeatureExtractor(debug=debug)
-        self.edge_builder = SimpleEdgeBuilder(debug=debug)
-        self.graph_processor = SimpleGraphProcessor(debug=debug)
-        
+        self.node_extractor = NodeFeatureExtractor(debug=debug)
+        self.edge_builder = EdgeBuilder(debug=debug)
+        self.graph_processor = GraphProcessor(debug=debug)
+
         # Visual processing (simplified CNN)
         self.visual_cnn = self._build_visual_cnn()
-        
+
         # Graph processing (simplified HGT)
         self.graph_processor_net = self._build_graph_processor()
-        
+
         # Reachability processing (simplified)
         self.reachability_processor = self._build_reachability_processor()
-        
+
         # Game state processing (unchanged)
         self.state_processor = self._build_state_processor()
-        
+
         # Cross-modal fusion (simplified)
         self.fusion_network = self._build_fusion_network()
-        
+
         # Output projection
         self.output_projection = nn.Linear(
             self._calculate_fusion_output_dim(), features_dim
@@ -164,7 +164,9 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
         graph_features = self._process_graph_features(observations, device, batch_size)
 
         # 3. Process simplified reachability features
-        reachability_features = self._process_reachability_features(observations, device)
+        reachability_features = self._process_reachability_features(
+            observations, device
+        )
 
         # 4. Process game state features
         state_features = self._process_state_features(observations, device)
@@ -194,43 +196,48 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
     ) -> torch.Tensor:
         """Process visual observations through CNN."""
         # Try to get visual observation
-        visual_keys = ['image', 'visual', 'observation', 'rgb']
+        visual_keys = ["image", "visual", "observation", "rgb"]
         visual_obs = None
-        
+
         for key in visual_keys:
             if key in observations:
                 visual_obs = observations[key]
                 break
-        
+
         if visual_obs is None:
             # Fallback: create dummy visual features
             batch_size = self._get_batch_size(observations)
             return torch.zeros(batch_size, 256, device=device)
-        
+
         # Ensure correct shape for CNN
         if visual_obs.dim() == 3:
             visual_obs = visual_obs.unsqueeze(1)  # Add channel dimension
         elif visual_obs.dim() == 4 and visual_obs.shape[1] > 1:
             visual_obs = visual_obs.mean(dim=1, keepdim=True)  # Convert to grayscale
-        
+
         return self.visual_cnn(visual_obs.to(device))
 
     def _process_graph_features(
-        self, observations: Dict[str, torch.Tensor], device: torch.device, batch_size: int
+        self,
+        observations: Dict[str, torch.Tensor],
+        device: torch.device,
+        batch_size: int,
     ) -> torch.Tensor:
         """Process simplified graph features."""
         # For now, create simplified mock graph features
         # In full implementation, would extract from level data and build graph
-        
-        if 'level_data' in observations:
+
+        if "level_data" in observations:
             # Extract simplified graph features from level data
             graph_features = self._extract_graph_features_from_level(
-                observations['level_data'], device, batch_size
+                observations["level_data"], device, batch_size
             )
         else:
             # Fallback: create dummy graph features
-            graph_features = torch.zeros(batch_size, HGT_CONFIG.node_feat_dim, device=device)
-        
+            graph_features = torch.zeros(
+                batch_size, HGT_CONFIG.node_feat_dim, device=device
+            )
+
         return self.graph_processor_net(graph_features)
 
     def _extract_graph_features_from_level(
@@ -239,34 +246,34 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
         """Extract simplified graph features from level data."""
         # This is a simplified implementation
         # In practice, would use SimpleNodeFeatureExtractor and SimpleEdgeBuilder
-        
+
         # For now, create representative features based on level data
         if level_data.numel() > 0:
             # Use level data statistics as simple graph features
             features = torch.zeros(batch_size, HGT_CONFIG.node_feat_dim, device=device)
-            
+
             # Fill with simple statistics from level data
             if level_data.dim() >= 2:
                 level_mean = level_data.float().mean(dim=-1)
                 level_std = level_data.float().std(dim=-1)
-                
+
                 # Pad or truncate to match node feature dimension
                 if level_mean.shape[-1] >= HGT_CONFIG.node_feat_dim:
-                    features = level_mean[..., :HGT_CONFIG.node_feat_dim]
+                    features = level_mean[..., : HGT_CONFIG.node_feat_dim]
                 else:
-                    features[..., :level_mean.shape[-1]] = level_mean
-                    
+                    features[..., : level_mean.shape[-1]] = level_mean
+
         else:
             features = torch.zeros(batch_size, HGT_CONFIG.node_feat_dim, device=device)
-        
+
         return features
 
     def _process_reachability_features(
         self, observations: Dict[str, torch.Tensor], device: torch.device
     ) -> torch.Tensor:
         """Process simplified reachability features."""
-        if 'reachability_features' in observations:
-            reachability_obs = observations['reachability_features'].to(device)
+        if "reachability_features" in observations:
+            reachability_obs = observations["reachability_features"].to(device)
             return self.reachability_processor(reachability_obs)
         else:
             # Fallback: create dummy reachability features
@@ -281,14 +288,20 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
         # Extract game state information
         state_features = []
         batch_size = self._get_batch_size(observations)
-        
+
         # Try to extract various state features
         state_keys = [
-            'player_x', 'player_y', 'player_vx', 'player_vy',
-            'switch_states', 'door_states', 'exit_switch_activated',
-            'level_time', 'gold_collected'
+            "player_x",
+            "player_y",
+            "player_vx",
+            "player_vy",
+            "switch_states",
+            "door_states",
+            "exit_switch_activated",
+            "level_time",
+            "gold_collected",
         ]
-        
+
         for key in state_keys:
             if key in observations:
                 value = observations[key].to(device)
@@ -297,14 +310,14 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
                 elif value.dim() == 1 and value.shape[0] != batch_size:
                     value = value[:1].repeat(batch_size)
                 state_features.append(value.float())
-        
+
         # Pad to 16 features
         while len(state_features) < 16:
             state_features.append(torch.zeros(batch_size, device=device))
-        
+
         # Truncate to 16 features
         state_features = state_features[:16]
-        
+
         state_tensor = torch.stack(state_features, dim=1)
         return self.state_processor(state_tensor)
 
@@ -317,38 +330,14 @@ class SimpleHGTMultimodalExtractor(BaseFeaturesExtractor):
     ) -> torch.Tensor:
         """Fuse features from all modalities."""
         # Simple concatenation fusion
-        fused = torch.cat([
-            visual_features,
-            graph_features,
-            reachability_features,
-            state_features,
-        ], dim=1)
-        
+        fused = torch.cat(
+            [
+                visual_features,
+                graph_features,
+                reachability_features,
+                state_features,
+            ],
+            dim=1,
+        )
+
         return self.fusion_network(fused)
-
-
-def create_simple_hgt_multimodal_extractor(
-    observation_space: gym.Space,
-    features_dim: int = 512,
-    debug: bool = False,
-) -> SimpleHGTMultimodalExtractor:
-    """
-    Factory function to create simplified HGT multimodal extractor.
-
-    Args:
-        observation_space: Environment observation space
-        features_dim: Output feature dimension
-        debug: Enable debug output
-
-    Returns:
-        Configured SimpleHGTMultimodalExtractor
-    """
-    return SimpleHGTMultimodalExtractor(
-        observation_space=observation_space,
-        features_dim=features_dim,
-        debug=debug,
-    )
-
-
-# Backward compatibility alias
-SimpleHGTExtractor = SimpleHGTMultimodalExtractor

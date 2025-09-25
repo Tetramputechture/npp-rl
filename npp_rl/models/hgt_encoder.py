@@ -10,10 +10,9 @@ Based on "Heterogeneous Graph Transformer" by Wang et al. (2020).
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
-from .hgt_layer import HGTLayer, EdgeType
+from .hgt_layer import HGTLayer
 from .entity_type_system import (
     EntitySpecializedEmbedding,
     HazardAwareAttention,

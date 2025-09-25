@@ -11,19 +11,15 @@ and compatibility with modern graph learning frameworks.
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Any, Union, List
+from typing import Dict, Optional, Any
 import logging
 
 # Import HGT components
-from .hgt_layer import HGTLayer, EdgeType, create_hgt_layer
+from .hgt_layer import HGTLayer, create_hgt_layer
 from .hgt_encoder import HGTEncoder, create_hgt_encoder
 from .attention_mechanisms import (
-    TypeSpecificAttention,
-    CrossModalAttention,
-    create_type_specific_attention,
     create_cross_modal_attention
 )
-from .entity_type_system import HazardAwareAttention
 
 # Try to import PyTorch Geometric for enhanced functionality
 try:
