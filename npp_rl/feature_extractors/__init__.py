@@ -13,7 +13,7 @@ Key Components:
         * Cross-modal fusion with attention mechanisms
         * Designed for generalizability across diverse NPP levels
 
-    - RobustHGTMultimodalExtractor: Alternative HGT implementation:
+    - HGTMultimodalExtractor: Alternative HGT implementation:
         * Similar architecture with different implementation approach
         * Available for comparison and experimentation
 
@@ -28,8 +28,8 @@ Usage Examples:
     )
 
     # Alternative implementation
-    from npp_rl.feature_extractors import RobustHGTMultimodalExtractor
-    extractor = RobustHGTMultimodalExtractor(
+    from npp_rl.feature_extractors import HGTMultimodalExtractor
+    extractor = HGTMultimodalExtractor(
         observation_space,
         features_dim=512,
         debug=False
@@ -45,9 +45,8 @@ Architecture Features:
 
 __all__ = [
     "HGTMultimodalExtractor",
-    "RobustHGTMultimodalExtractor", 
+    "HGTMultimodalExtractor",
 ]
 
 # Import extractors
 from .hgt_multimodal import HGTMultimodalExtractor
-from .robust_hgt_multimodal import RobustHGTMultimodalExtractor
