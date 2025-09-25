@@ -34,72 +34,140 @@ The agent receives multi-modal observations:
 
 ### 2. Feature Extraction
 
-The agent uses a production-ready **RobustHGTMultimodalExtractor** designed for generalizability across diverse NPP levels:
+The agent uses an **HGTMultimodalExtractor** that combines multiple neural architectures for comprehensive multimodal processing:
 
-*   **Advanced Temporal Processing (3D CNN)**:
+*   **Temporal Processing (3D CNN)**:
     *   Processes 12-frame temporal stacks using 3D convolutional networks
     *   Captures movement patterns and temporal dynamics essential for NPP gameplay
-    *   Batch normalization and dropout for robust training
-    *   Adaptive pooling for standardized feature extraction
+    *   Uses batch normalization and dropout for stable training
+    *   Adaptive pooling ensures consistent output dimensions
 
 *   **Spatial Processing (2D CNN with Attention)**:
-    *   Processes global level view (176x100 pixels) through advanced 2D CNN
-    *   Integrated spatial attention mechanisms for enhanced spatial reasoning
-    *   Multi-scale feature extraction for comprehensive level understanding
+    *   Processes global level view (176x100 pixels) through 2D CNN
+    *   Integrates spatial attention mechanisms for enhanced spatial reasoning
+    *   Multi-scale feature extraction captures level structure at different resolutions
 
-*   **Full Heterogeneous Graph Transformer (HGT)**:
-    *   Complete HGT implementation with type-specific attention mechanisms
+*   **Graph Processing (Heterogeneous Graph Transformer)**:
+    *   Full HGT implementation with type-specific attention mechanisms
     *   **Type-aware processing**: Specialized handling for different node types (tiles, entities, hazards, switches)
-    *   **Edge-type specialization**: Distinct processing for movement edges (adjacent, logical, reachable)
-    *   **Multi-head attention**: Advanced attention mechanisms adapted for heterogeneous graph structures
+    *   **Edge-type specialization**: Distinct processing for movement edges (adjacent, reachable, functional)
+    *   **Multi-head attention**: Attention mechanisms adapted for heterogeneous graph structures
     *   **Entity-aware embeddings**: Specialized processing with hazard-aware attention
 
-*   **Advanced Cross-Modal Fusion**:
-    *   Sophisticated attention mechanisms for optimal multimodal integration
+*   **Cross-Modal Fusion**:
+    *   Attention mechanisms for multimodal integration
     *   Layer normalization and residual connections for stable training
     *   Cross-modal attention between temporal, spatial, graph, and state features
     *   Designed for robust performance across diverse level configurations
 
-*   **Production-Ready Architecture**:
+*   **Architecture Design**:
     *   Modular design with clear separation of concerns
     *   Comprehensive error handling and fallback mechanisms
     *   Optimized for both accuracy and computational efficiency
     *   Extensive logging and debugging capabilities
 
-The extractor combines all modalities through advanced fusion mechanisms, producing robust feature representations that enable generalization across the full spectrum of NPP level designs and difficulty configurations.
-
-#### Architecture Comparison
-
-| Feature | Legacy HGTMultimodalExtractor | RobustHGTMultimodalExtractor |
-|---------|------------------------------|------------------------------|
-| Temporal Processing | Basic 2D CNN | Advanced 3D CNN (12-frame stacks) |
-| Spatial Processing | Simple 2D CNN | 2D CNN with spatial attention |
-| Graph Processing | Basic MLP | Full HGT with type-specific attention |
-| Multimodal Fusion | Simple concatenation | Cross-modal attention mechanisms |
-| Generalizability | Limited | Designed for diverse NPP levels |
-| Production Ready | No | Yes |
+The extractor combines all modalities through fusion mechanisms, producing feature representations that enable generalization across different NPP level designs and difficulty configurations.
 
 #### Usage
 
 ```python
-# Production-ready robust extractor (recommended)
-from npp_rl.feature_extractors import RobustHGTMultimodalExtractor
+from npp_rl.feature_extractors import HGTMultimodalExtractor
 
-extractor = RobustHGTMultimodalExtractor(
+extractor = HGTMultimodalExtractor(
     observation_space=env.observation_space,
     features_dim=512,
     debug=False  # Set to True for detailed logging
 )
-
-# Or use factory function
-from npp_rl.feature_extractors import create_robust_hgt_extractor
-extractor = create_robust_hgt_extractor(
-    observation_space=env.observation_space,
-    features_dim=512
-)
 ```
 
-### 3. Network Architecture & Hyperparameters
+## System Architecture
+
+### Environment Integration
+
+The NPP-RL system integrates with the nclone N++ simulator through a layered architecture:
+
+#### Core Components
+
+**Base Environment (`nclone`)**:
+- Provides physics simulation and basic observations
+- Generates player-centric frames (84x84x12), global view (176x100x1), game state (16 features), and reachability features (64 features)
+- Handles N++ physics constants and movement mechanics
+
+**Environment Wrappers (`npp_rl/environments/`)**:
+- **DynamicGraphWrapper**: Adds graph observations from nclone's hierarchical graph builder
+- **ReachabilityWrapper**: Integrates nclone's tiered reachability analysis system  
+- **VectorizationWrapper**: Enables parallel environment processing
+
+#### Graph Processing Pipeline
+
+The system uses nclone's graph construction capabilities without over-engineering:
+
+1. **Graph Construction**: nclone's HierarchicalGraphBuilder creates multi-resolution spatial graphs
+2. **Dynamic Updates**: Simple state-based updates when switch/door states change
+3. **Graph Observations**: Fixed-size arrays compatible with Gym (N_MAX_NODES=18000, E_MAX_EDGES=144000)
+4. **HGT Processing**: Type-specific attention for heterogeneous node/edge types
+
+#### Model Architecture (`npp_rl/models/`)
+
+**Core Models**:
+- **hgt_gnn.py**: Complete Heterogeneous Graph Transformer implementation
+- **entity_type_system.py**: Entity-specialized embeddings and hazard-aware attention
+- **conditional_edges.py**: Conditional edge processing for dynamic graphs
+- **spatial_attention.py**: Graph-guided spatial attention mechanisms
+- **physics_state_extractor.py**: Physics state extraction with momentum features
+
+**Configuration Management**:
+- **hgt_config.py**: Centralized configuration with sensible defaults
+- Modular design enables easy hyperparameter tuning
+
+### Data Flow
+
+```
+nclone Environment
+    ↓
+Environment Wrappers (Graph, Reachability, Vectorization)
+    ↓
+Multimodal Observations:
+├── Temporal: player_frames [84,84,12]
+├── Spatial: global_view [176,100,1] 
+├── Vector: game_state [16], reachability_features [64]
+└── Graph: node_feats, edge_feats, connectivity, masks, types
+    ↓
+HGTMultimodalExtractor:
+├── 3D CNN → Temporal Features [512]
+├── 2D CNN + Attention → Spatial Features [256]
+├── Full HGT → Graph Features [256] 
+├── MLPs → State [128] + Reachability [128]
+└── Cross-Modal Fusion → Combined Features [512]
+    ↓
+PPO Policy/Value Networks
+```
+
+### Performance Characteristics
+
+- **Graph Updates**: Sub-millisecond performance suitable for real-time RL training
+- **Feature Extraction**: ~5.6ms average inference time (target: <10ms)
+- **Memory Usage**: Efficient with fixed-size arrays for Gym compatibility
+- **Batch Processing**: Supports vectorized environments for parallel training
+
+### Integration Points
+
+**nclone Integration**:
+- Clean abstraction layer using nclone for physics simulation and basic graph construction
+- Avoids over-engineering by letting HGT learn complex patterns through attention mechanisms
+- Uses simple reachability metrics rather than expensive physics calculations
+
+**Graph Processing**:
+- Seamless flow from nclone → DynamicGraphWrapper → HGT processing
+- Type-specific attention for different node types (tiles, entities, hazards, switches)
+- Edge-type specialization for movement relationships (adjacent, reachable, functional)
+
+**Multimodal Fusion**:
+- Cross-modal attention enables optimal integration of temporal, spatial, graph, and state information
+- Layer normalization and residual connections ensure stable training
+- Designed for generalizability across diverse NPP level configurations
+
+### Network Architecture & Hyperparameters
 
 #### Technical Specifications
 
@@ -116,16 +184,16 @@ extractor = create_robust_hgt_extractor(
     *   Spatial attention integration + Adaptive pooling + Feature projection to 256D
 
 *   **HGT Configuration**:
-    *   Node feature dimension: 8 (simplified for efficiency)
-    *   Edge feature dimension: 4 (adjacent, logical, reachable)
+    *   Node feature dimension: 8 (optimized for efficiency)
+    *   Edge feature dimension: 4 (adjacent, reachable, functional)
     *   Hidden dimension: 128, Layers: 3, Attention heads: 8
     *   Node types: 6 (tile, ninja, hazard, collectible, switch, exit)
-    *   Edge types: 3 (adjacent, logical, reachable)
+    *   Edge types: 3 (adjacent, reachable, functional)
 
 *   **Cross-Modal Fusion**:
-    *   Input dimensions: Temporal(512) + Spatial(256) + Graph(256) + State(128)
-    *   Fusion network: 1152→576→512→512 with ReLU, Dropout, Residual connections
-    *   Layer normalization for all input modalities
+    *   Input dimensions: Temporal(512) + Spatial(256) + Graph(256) + State(128) + Reachability(128)
+    *   Fusion network with layer normalization and residual connections
+    *   Progressive dimension reduction with attention mechanisms
 
 *   **Policy and Value Networks**:
     *   The PPO agent uses separate MLP heads for the policy (actor) and value (critic) functions, following the feature extraction stage.
