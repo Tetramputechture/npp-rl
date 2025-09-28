@@ -6,11 +6,11 @@ This tool converts raw human replay data (JSONL format) into structured datasets
 compatible with the N++ RL training pipeline. It processes replay files and
 produces NPZ or Parquet shards with observations, actions, and metadata.
 
-It can also generate videos of replays using the actual NppEnvironment rendering.
+For video generation from replay data, use the nclone video generator:
+    python -m nclone.replay.video_generator --input replay.jsonl --output video.mp4
 
 Usage:
     python tools/replay_ingest.py --input raw_replays/ --output processed/ --format npz
-    python tools/replay_ingest.py --input raw_replays/ --output-video replay.mp4 --generate-video
     python tools/replay_ingest.py --help
 """
 
@@ -18,9 +18,7 @@ import argparse
 import json
 import logging
 import numpy as np
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
@@ -35,7 +33,6 @@ sys.path.insert(0, str(nclone_path))
 # Import nclone modules after path setup
 try:
     from nclone.gym_environment.npp_environment import NppEnvironment
-    from nclone.replay import BinaryReplayParser
 except ImportError as e:
     print(f"Error importing nclone modules: {e}")
     print("Make sure nclone is in the correct location relative to npp-rl")
@@ -333,345 +330,6 @@ class ObservationProcessor:
         }
 
 
-class VideoGenerator:
-    """Generates videos from replay data using NppEnvironment rendering."""
-
-    def __init__(self, fps: int = 60, resolution: Tuple[int, int] = (1056, 600)):
-        """
-        Initialize video generator.
-
-        Args:
-            fps: Frames per second for output video
-            resolution: Video resolution (width, height)
-        """
-        self.fps = fps
-        self.resolution = resolution
-        self.env = None
-
-    def _get_env(self, custom_map_path: Optional[str] = None) -> NppEnvironment:
-        """Get or create environment instance for rendering."""
-        if self.env is None:
-            self.env = NppEnvironment(
-                render_mode="rgb_array",
-                enable_animation=True,
-                enable_debug_overlay=False,
-                custom_map_path=custom_map_path,
-            )
-        return self.env
-
-    def generate_video_from_jsonl(
-        self,
-        replay_file: Path,
-        output_video: Path,
-        custom_map_path: Optional[str] = None,
-    ) -> bool:
-        """
-        Generate video from JSONL replay file.
-
-        Args:
-            replay_file: Path to JSONL replay file
-            output_video: Output video file path
-            custom_map_path: Optional custom map to load
-
-        Returns:
-            True if video generation succeeded
-        """
-        try:
-            # Load replay frames
-            frames = self._load_jsonl_replay(replay_file)
-            if not frames:
-                logger.error("No valid frames found in replay file")
-                return False
-
-            # Initialize environment
-            env = self._get_env(custom_map_path)
-            env.reset()
-
-            # Create temporary directory for frames
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
-
-                logger.info(f"Generating {len(frames)} frames...")
-
-                # Generate frame images
-                for i, frame in enumerate(frames):
-                    try:
-                        # Map frame inputs to action
-                        action = ActionMapper.map_inputs_to_action(frame.player_inputs)
-
-                        # Step environment
-                        obs, reward, terminated, truncated, info = env.step(action)
-
-                        # Render frame
-                        frame_image = env.render()
-                        if frame_image is not None:
-                            # Save frame as PNG
-                            frame_file = temp_path / f"frame_{i:06d}.png"
-                            self._save_frame_as_png(frame_image, frame_file)
-
-                        if terminated or truncated:
-                            logger.info(f"Episode ended at frame {i}")
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error processing frame {i}: {e}")
-                        continue
-
-                # Generate video using ffmpeg
-                return self._create_video_from_frames(temp_path, output_video)
-
-        except Exception as e:
-            logger.error(f"Failed to generate video: {e}")
-            return False
-
-    def generate_video_from_binary_replay(
-        self, binary_replay_dir: Path, output_video: Path
-    ) -> bool:
-        """
-        Generate video from binary replay directory.
-
-        Args:
-            binary_replay_dir: Directory containing binary replay files
-            output_video: Output video file path
-
-        Returns:
-            True if video generation succeeded
-        """
-        try:
-            # Parse binary replay to JSONL first
-            parser = BinaryReplayParser()
-
-            if not parser.detect_trace_mode(binary_replay_dir):
-                logger.error("Directory does not contain trace mode files")
-                return False
-
-            # Load replay data
-            inputs_list, map_data = parser.load_inputs_and_map(binary_replay_dir)
-
-            if not inputs_list:
-                logger.error("No input data found in binary replay")
-                return False
-
-            # Use first input sequence
-            inputs = inputs_list[0]
-            level_id = binary_replay_dir.name
-            session_id = f"{level_id}_video"
-
-            # Simulate replay to get frames
-            frames_data = parser.simulate_replay(inputs, map_data, level_id, session_id)
-
-            # Convert to ReplayFrame objects
-            frames = []
-            for frame_data in frames_data:
-                frame = ReplayFrame(
-                    timestamp=frame_data["timestamp"],
-                    level_id=frame_data["level_id"],
-                    frame_number=frame_data["frame_number"],
-                    player_position=(
-                        frame_data["player_state"]["position"]["x"],
-                        frame_data["player_state"]["position"]["y"],
-                    ),
-                    player_velocity=(
-                        frame_data["player_state"]["velocity"]["x"],
-                        frame_data["player_state"]["velocity"]["y"],
-                    ),
-                    player_state=frame_data["player_state"],
-                    player_inputs=frame_data["player_inputs"],
-                    entities=frame_data["entities"],
-                    level_bounds=frame_data["level_bounds"],
-                    meta=frame_data["meta"],
-                )
-                frames.append(frame)
-
-            # Generate video from frames
-            return self._generate_video_from_frames(frames, output_video, map_data)
-
-        except Exception as e:
-            logger.error(f"Failed to generate video from binary replay: {e}")
-            return False
-
-    def _load_jsonl_replay(self, replay_file: Path) -> List[ReplayFrame]:
-        """Load replay frames from JSONL file."""
-        frames = []
-        validator = ReplayValidator()
-
-        try:
-            with open(replay_file, "r") as f:
-                for line_num, line in enumerate(f, 1):
-                    try:
-                        frame_data = json.loads(line.strip())
-
-                        # Validate frame
-                        is_valid, errors = validator.validate_frame(frame_data)
-                        if not is_valid:
-                            logger.warning(
-                                f"Frame {line_num} validation failed: {errors}"
-                            )
-                            continue
-
-                        # Convert to ReplayFrame
-                        frame = ReplayFrame(
-                            timestamp=frame_data["timestamp"],
-                            level_id=frame_data["level_id"],
-                            frame_number=frame_data["frame_number"],
-                            player_position=(
-                                frame_data["player_state"]["position"]["x"],
-                                frame_data["player_state"]["position"]["y"],
-                            ),
-                            player_velocity=(
-                                frame_data["player_state"]["velocity"]["x"],
-                                frame_data["player_state"]["velocity"]["y"],
-                            ),
-                            player_state=frame_data["player_state"],
-                            player_inputs=frame_data["player_inputs"],
-                            entities=frame_data["entities"],
-                            level_bounds=frame_data["level_bounds"],
-                            meta=frame_data["meta"],
-                        )
-                        frames.append(frame)
-
-                    except json.JSONDecodeError as e:
-                        logger.error(f"JSON decode error at line {line_num}: {e}")
-                    except Exception as e:
-                        logger.error(f"Error processing line {line_num}: {e}")
-
-        except Exception as e:
-            logger.error(f"Failed to load replay file {replay_file}: {e}")
-
-        return frames
-
-    def _generate_video_from_frames(
-        self,
-        frames: List[ReplayFrame],
-        output_video: Path,
-        map_data: Optional[List[int]] = None,
-    ) -> bool:
-        """Generate video from replay frames using environment rendering."""
-        try:
-            # Initialize environment
-            env = self._get_env()
-            env.reset()
-
-            # Create temporary directory for frames
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
-
-                logger.info(f"Generating {len(frames)} frames...")
-
-                # Generate frame images
-                for i, frame in enumerate(frames):
-                    try:
-                        # Map frame inputs to action
-                        action = ActionMapper.map_inputs_to_action(frame.player_inputs)
-
-                        # Step environment
-                        obs, reward, terminated, truncated, info = env.step(action)
-
-                        # Render frame
-                        frame_image = env.render()
-                        if frame_image is not None:
-                            # Save frame as PNG
-                            frame_file = temp_path / f"frame_{i:06d}.png"
-                            self._save_frame_as_png(frame_image, frame_file)
-
-                        if terminated or truncated:
-                            logger.info(f"Episode ended at frame {i}")
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error processing frame {i}: {e}")
-                        continue
-
-                # Generate video using ffmpeg
-                return self._create_video_from_frames(temp_path, output_video)
-
-        except Exception as e:
-            logger.error(f"Failed to generate video from frames: {e}")
-            return False
-
-    def _save_frame_as_png(self, frame_array: np.ndarray, output_path: Path):
-        """Save frame array as PNG image."""
-        try:
-            from PIL import Image
-
-            # Handle different frame formats
-            if len(frame_array.shape) == 3:
-                if frame_array.shape[2] == 1:
-                    # Single channel - squeeze to 2D
-                    frame_2d = np.squeeze(frame_array, axis=2)
-                    image = Image.fromarray(frame_2d.astype(np.uint8), mode="L")
-                elif frame_array.shape[2] == 3:
-                    # RGB format
-                    image = Image.fromarray(frame_array.astype(np.uint8), mode="RGB")
-                elif frame_array.shape[2] == 4:
-                    # RGBA format
-                    image = Image.fromarray(frame_array.astype(np.uint8), mode="RGBA")
-                else:
-                    logger.warning(
-                        f"Unsupported frame format with {frame_array.shape[2]} channels"
-                    )
-                    return
-            elif len(frame_array.shape) == 2:
-                # Already 2D grayscale
-                image = Image.fromarray(frame_array.astype(np.uint8), mode="L")
-            else:
-                logger.warning(f"Unsupported frame shape {frame_array.shape}")
-                return
-
-            image.save(output_path)
-
-        except Exception as e:
-            logger.error(f"Failed to save frame as PNG: {e}")
-
-    def _create_video_from_frames(self, frames_dir: Path, output_video: Path) -> bool:
-        """Create video from frame images using ffmpeg."""
-        try:
-            # Check if ffmpeg is available
-            result = subprocess.run(
-                ["ffmpeg", "-version"], capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                logger.error(
-                    "ffmpeg not found. Please install ffmpeg to generate videos."
-                )
-                return False
-
-            # Create output directory if it doesn't exist
-            output_video.parent.mkdir(parents=True, exist_ok=True)
-
-            # Build ffmpeg command
-            cmd = [
-                "ffmpeg",
-                "-y",  # Overwrite output file
-                "-framerate",
-                str(self.fps),
-                "-i",
-                str(frames_dir / "frame_%06d.png"),
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-crf",
-                "18",  # High quality
-                str(output_video),
-            ]
-
-            logger.info(f"Running ffmpeg: {' '.join(cmd)}")
-
-            # Run ffmpeg
-            result = subprocess.run(cmd, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                logger.info(f"Video generated successfully: {output_video}")
-                return True
-            else:
-                logger.error(f"ffmpeg failed: {result.stderr}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to create video: {e}")
-            return False
-
 
 class ReplayIngester:
     """Main class for ingesting and processing replay data."""
@@ -917,21 +575,18 @@ class ReplayIngester:
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Convert human replay data to training datasets and generate videos",
+        description="Convert human replay data to training datasets",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Process replay files with rich observations
   python tools/replay_ingest.py --input datasets/raw --output datasets/processed --profile rich
   
-  # Generate video from JSONL replay
-  python tools/replay_ingest.py --input datasets/raw/replay.jsonl --output-video replay.mp4 --generate-video
-  
-  # Generate video from binary replay directory
-  python tools/replay_ingest.py --input replays/level_001 --output-video level_001.mp4 --generate-video --binary-replay
-  
   # Dry run to validate data without processing
   python tools/replay_ingest.py --input datasets/raw --dry-run
+
+  # For video generation, use the nclone video generator:
+  python -m nclone.replay.video_generator --input replay.jsonl --output video.mp4
         """,
     )
 
@@ -955,21 +610,7 @@ Examples:
     parser.add_argument(
         "--max-samples", type=int, default=10000, help="Maximum samples per output file"
     )
-    parser.add_argument(
-        "--generate-video", action="store_true", help="Generate video from replay data"
-    )
-    parser.add_argument("--output-video", type=Path, help="Output video file path")
-    parser.add_argument(
-        "--binary-replay",
-        action="store_true",
-        help="Input is binary replay directory (trace mode)",
-    )
-    parser.add_argument(
-        "--fps", type=int, default=60, help="Video framerate (default: 60)"
-    )
-    parser.add_argument(
-        "--custom-map", type=str, help="Custom map file to use for video generation"
-    )
+
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate data without processing"
     )
@@ -985,37 +626,9 @@ Examples:
         level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    # Handle video generation
-    if args.generate_video:
-        if not args.input:
-            parser.error("--input is required for video generation")
-        if not args.output_video:
-            parser.error("--output-video is required for video generation")
-
-        video_generator = VideoGenerator(fps=args.fps)
-
-        if args.binary_replay:
-            # Generate video from binary replay directory
-            success = video_generator.generate_video_from_binary_replay(
-                args.input, args.output_video
-            )
-        else:
-            # Generate video from JSONL replay file
-            success = video_generator.generate_video_from_jsonl(
-                args.input, args.output_video, args.custom_map
-            )
-
-        if success:
-            logger.info(f"Video generation completed: {args.output_video}")
-        else:
-            logger.error("Video generation failed")
-            return 1
-
-        return 0
-
     # Validate arguments for data processing
     if not args.input:
-        parser.error("--input is required (unless using --generate-video)")
+        parser.error("--input is required")
 
     if not args.input.exists():
         parser.error(f"Input directory does not exist: {args.input}")
