@@ -1,4 +1,4 @@
-# NPP-RL Agent
+gg# NPP-RL Agent
 
 A Deep Reinforcement Learning Agent for the game N++, implementing PPO (Proximal Policy Optimization) using Stable Baselines3 with a custom N++ simulation environment.
 
@@ -90,12 +90,13 @@ The NPP-RL system integrates with the nclone N++ simulator through a layered arc
 
 **Base Environment (`nclone`)**:
 - Provides physics simulation and basic observations
-- Generates player-centric frames (84x84x12), global view (176x100x1), game state (16 features), and reachability features (64 features)
+- Generates player-centric frames (84x84x12), global view (176x100x1), game state (16 features), and simplified reachability features (8 features)
 - Handles N++ physics constants and movement mechanics
+- Uses ultra-fast OpenCV flood fill for <1ms reachability analysis
 
 **Environment Wrappers (`npp_rl/environments/`)**:
 - **DynamicGraphWrapper**: Adds graph observations from nclone's hierarchical graph builder
-- **ReachabilityWrapper**: Integrates nclone's tiered reachability analysis system  
+- **ReachabilityWrapper**: Integrates nclone's simplified reachability analysis system  
 - **VectorizationWrapper**: Enables parallel environment processing
 
 #### Graph Processing Pipeline
@@ -135,14 +136,14 @@ Environment Wrappers (Graph, Reachability, Vectorization)
 Multimodal Observations:
 ├── Temporal: player_frames [84,84,12]
 ├── Spatial: global_view [176,100,1] 
-├── Vector: game_state [16], reachability_features [64]
+├── Vector: game_state [16], reachability_features [8]
 └── Graph: node_feats, edge_feats, connectivity, masks, types
     ↓
 HGTMultimodalExtractor:
 ├── 3D CNN → Temporal Features [512]
 ├── 2D CNN + Attention → Spatial Features [256]
 ├── Full HGT → Graph Features [256] 
-├── MLPs → State [128] + Reachability [128]
+├── MLPs → State [128] + Reachability [64]
 └── Cross-Modal Fusion → Combined Features [512]
     ↓
     ├── PPO Policy/Value Networks → Action Selection
@@ -211,7 +212,7 @@ PPO Training Updates (Policy, Value, ICM parameters)
     *   Edge types: 3 (adjacent, reachable, functional)
 
 *   **Cross-Modal Fusion**:
-    *   Input dimensions: Temporal(512) + Spatial(256) + Graph(256) + State(128) + Reachability(128)
+    *   Input dimensions: Temporal(512) + Spatial(256) + Graph(256) + State(128) + Reachability(64)
     *   Fusion network with layer normalization and residual connections
     *   Progressive dimension reduction with attention mechanisms
 
@@ -365,7 +366,7 @@ icm = ICMNetwork(
     feature_dim=512,           # Match HGT feature extractor output
     action_dim=6,              # N++ action space size
     enable_reachability_awareness=True,
-    reachability_dim=64,       # nclone reachability features
+    reachability_dim=8,        # nclone simplified reachability features
 )
 
 # Wrap environment with intrinsic rewards
