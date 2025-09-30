@@ -32,7 +32,7 @@ The implementation enhances rather than replaces existing systems:
 
 - **nclone**: Uses existing `ExplorationRewardCalculator` for extrinsic exploration rewards
 - **npp-rl**: Enhances existing `ICMNetwork` with reachability awareness
-- **Reachability Features**: Leverages 64-dimensional features from TASK_001 consolidation
+- **Reachability Features**: Leverages 8-dimensional features from nclone feature extractor
 
 ## Usage
 
@@ -47,7 +47,7 @@ icm = ICMNetwork(
     feature_dim=512,
     action_dim=6,
     enable_reachability_awareness=True,
-    reachability_dim=64,
+    reachability_dim=8,
 )
 
 # Extract reachability info from environment observations
@@ -182,7 +182,7 @@ python examples/reachability_aware_icm_example.py
 
 ### Reachability Features
 
-The implementation uses 64-dimensional reachability features from nclone:
+The implementation uses 8-dimensional reachability features from nclone:
 
 - **Spatial Encoding**: Grid-based accessibility representation
 - **Dynamic Updates**: Features update with game state changes

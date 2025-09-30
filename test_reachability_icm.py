@@ -135,7 +135,7 @@ def test_exploration_calculator_integration():
         switch_states={}
     )
     
-    assert compact_features.shape == (64,), f"Expected 64-dim features, got {compact_features.shape}"
+    assert compact_features.shape == (8,), f"Expected 8-dim features, got {compact_features.shape}"
     
     print("✓ Exploration calculator integration works")
 

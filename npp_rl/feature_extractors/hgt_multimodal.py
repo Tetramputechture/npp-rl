@@ -228,7 +228,7 @@ class CrossModalFusion(nn.Module):
     """
     Advanced cross-modal fusion with attention mechanisms.
 
-    Fuses temporal, spatial, graph, and state features using
+    Fuses temporal, spatial, graph, state, and reachability features using
     sophisticated attention mechanisms for optimal integration.
     """
 
@@ -238,6 +238,7 @@ class CrossModalFusion(nn.Module):
         spatial_dim: int = 256,
         graph_dim: int = 256,
         state_dim: int = 128,
+        reachability_dim: int = 8,
         output_dim: int = 512,
         num_heads: int = 8,
     ):
@@ -247,6 +248,7 @@ class CrossModalFusion(nn.Module):
         self.spatial_dim = spatial_dim
         self.graph_dim = graph_dim
         self.state_dim = state_dim
+        self.reachability_dim = reachability_dim
 
         # Cross-modal attention mechanisms
         self.temporal_spatial_attention = create_cross_modal_attention(
@@ -263,14 +265,26 @@ class CrossModalFusion(nn.Module):
             dropout=0.1,
         )
 
+        # Reachability feature processing
+        self.reachability_processor = nn.Sequential(
+            nn.Linear(reachability_dim, reachability_dim * 4),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(reachability_dim * 4, reachability_dim * 2),
+            nn.ReLU(),
+        )
+
         # Feature normalization
         self.temporal_norm = nn.LayerNorm(temporal_dim)
         self.spatial_norm = nn.LayerNorm(spatial_dim)
         self.graph_norm = nn.LayerNorm(graph_dim)
         self.state_norm = nn.LayerNorm(state_dim)
+        self.reachability_norm = nn.LayerNorm(reachability_dim * 2)
 
         # Fusion network
-        fusion_input_dim = temporal_dim + spatial_dim + graph_dim + state_dim
+        fusion_input_dim = (
+            temporal_dim + spatial_dim + graph_dim + state_dim + (reachability_dim * 2)
+        )
         self.fusion_network = nn.Sequential(
             nn.Linear(fusion_input_dim, fusion_input_dim // 2),
             nn.ReLU(),
@@ -300,6 +314,7 @@ class CrossModalFusion(nn.Module):
         spatial_features: torch.Tensor,
         graph_features: torch.Tensor,
         state_features: torch.Tensor,
+        reachability_features: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass through cross-modal fusion.
@@ -309,6 +324,7 @@ class CrossModalFusion(nn.Module):
             spatial_features: Spatial features [batch_size, spatial_dim]
             graph_features: Graph features [batch_size, graph_dim]
             state_features: State features [batch_size, state_dim]
+            reachability_features: Reachability features [batch_size, reachability_dim]
 
         Returns:
             Fused features [batch_size, output_dim]
@@ -319,6 +335,16 @@ class CrossModalFusion(nn.Module):
         graph_norm = self.graph_norm(graph_features)
         state_norm = self.state_norm(state_features)
 
+        # Process reachability features - required, no fallback
+        if reachability_features is None:
+            raise ValueError(
+                "Reachability features are required but not provided. "
+                "Ensure the environment provides 'reachability_features' in observations."
+            )
+
+        processed_reachability = self.reachability_processor(reachability_features)
+        reachability_norm = self.reachability_norm(processed_reachability)
+
         # Apply cross-modal attention (simplified for batch processing)
         # In a full implementation, these would use proper attention mechanisms
         enhanced_temporal = temporal_norm
@@ -327,7 +353,14 @@ class CrossModalFusion(nn.Module):
 
         # Concatenate all features
         all_features = torch.cat(
-            [enhanced_temporal, enhanced_spatial, enhanced_graph, state_norm], dim=-1
+            [
+                enhanced_temporal,
+                enhanced_spatial,
+                enhanced_graph,
+                state_norm,
+                reachability_norm,
+            ],
+            dim=-1,
         )
 
         # Fusion network
@@ -413,6 +446,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
             spatial_dim=DEFAULT_CONFIG.global_hidden_dim,
             graph_dim=DEFAULT_CONFIG.output_dim,
             state_dim=DEFAULT_CONFIG.state_hidden_dim,
+            reachability_dim=8,  # 8-dimensional reachability features
             output_dim=features_dim,
             num_heads=DEFAULT_CONFIG.num_attention_heads,
         )
@@ -460,9 +494,18 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         # 4. Process state features
         state_features = self._process_state_features(observations, device, batch_size)
 
-        # 5. Cross-modal fusion
+        # 5. Process reachability features
+        reachability_features = self._process_reachability_features(
+            observations, device, batch_size
+        )
+
+        # 6. Cross-modal fusion
         fused_features = self.fusion_module(
-            temporal_features, spatial_features, graph_features, state_features
+            temporal_features,
+            spatial_features,
+            graph_features,
+            state_features,
+            reachability_features,
         )
 
         if self.debug and torch.rand(1).item() < 0.01:  # Debug 1% of calls
@@ -608,3 +651,46 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
             state_obs = state_obs[..., :16]
 
         return self.state_processor(state_obs)
+
+    def _process_reachability_features(
+        self,
+        observations: Dict[str, torch.Tensor],
+        device: torch.device,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Process reachability observations - required, no fallback."""
+        # Look for reachability feature observations
+        reachability_keys = [
+            "reachability_features",
+            "reachability",
+            "compact_features",
+        ]
+        reachability_obs = None
+
+        for key in reachability_keys:
+            if key in observations:
+                reachability_obs = observations[key]
+                break
+
+        if reachability_obs is None:
+            available_keys = list(observations.keys())
+            raise ValueError(
+                f"Reachability features are required but not found in observations. "
+                f"Expected one of {reachability_keys}, but got keys: {available_keys}. "
+                f"Ensure the environment wrapper provides reachability features."
+            )
+
+        # Ensure correct shape and dimension
+        reachability_obs = reachability_obs.to(device)
+        if reachability_obs.dim() == 1:
+            reachability_obs = reachability_obs.unsqueeze(0)  # Add batch dimension
+
+        # Validate dimension - must be exactly 8
+        if reachability_obs.shape[-1] != 8:
+            raise ValueError(
+                f"Reachability features must be exactly 8-dimensional, "
+                f"but got {reachability_obs.shape[-1]} dimensions. "
+                f"Check the reachability feature extractor configuration."
+            )
+
+        return reachability_obs

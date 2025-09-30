@@ -19,7 +19,7 @@ Theoretical Foundation:
 - Strategic planning: Custom integration with nclone physics and level completion heuristics
 
 nclone Integration:
-- Uses compact reachability features from nclone.graph.reachability for subgoal filtering
+- Uses 8-dimensional reachability features from nclone.graph.reachability for subgoal filtering
 - Integrates with ReachabilitySystem for performance-optimized planning queries
 - Maintains compatibility with existing NPP physics constants and level objective analysis
 """
@@ -36,7 +36,7 @@ import torch
 import torch.nn as nn
 
 # nclone imports (reachability and planning components)
-from nclone.graph.reachability.compact_features import CompactReachabilityFeatures
+from nclone.graph.reachability.feature_extractor import ReachabilityFeatureExtractor
 from nclone.graph.reachability.reachability_system import ReachabilitySystem
 from nclone.planning import (
     Subgoal,
@@ -203,7 +203,7 @@ class AdaptiveExplorationManager:
         # Hierarchical planning components (always enabled, no defensive programming)
         # Direct initialization - fail fast if dependencies are missing
         self.reachability_system = ReachabilitySystem()
-        self.reachability_features = CompactReachabilityFeatures()
+        self.reachability_extractor = ReachabilityFeatureExtractor()
 
         # Subgoal management system for hierarchical planning
         # Based on Options framework from Sutton et al. (1999)
@@ -307,9 +307,12 @@ class AdaptiveExplorationManager:
             level_data, ninja_pos, switch_states, performance_target="balanced"
         )
 
-        # Encode reachability into compact features for neural processing
-        reachability_features_array = self.reachability_features.encode_reachability(
-            reachability_result, level_data, [], ninja_pos, switch_states
+        # Encode reachability into 8-dimensional features for neural processing
+        reachability_features_array = self.reachability_extractor.extract_features(
+            ninja_position=ninja_pos,
+            level_data=level_data,
+            entities=[],
+            switch_states=switch_states,
         )
         reachability_features = torch.tensor(
             reachability_features_array, dtype=torch.float32

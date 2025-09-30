@@ -179,7 +179,7 @@ def train_agent(
         "hgt_output_dim": 256,
         "use_cross_modal_attention": True,
         "use_spatial_attention": True,
-        "reachability_dim": 64,  # Standard compact feature dimension
+        "reachability_dim": 8,  # 8-dimensional reachability features
     }
 
     policy_kwargs = {

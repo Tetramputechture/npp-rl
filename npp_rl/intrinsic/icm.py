@@ -13,7 +13,7 @@ Key Design Principles:
 
 Integration with nclone:
 - ReachabilitySystem for multi-tier reachability analysis
-- CompactReachabilityFeatures for 64-dimensional feature encoding
+- ReachabilityFeatureExtractor for 8-dimensional feature encoding
 - FrontierDetector for boundary detection and classification
 - ExplorationRewardCalculator for multi-scale exploration tracking
 """
@@ -103,7 +103,6 @@ class ICMNetwork(nn.Module):
         actions: torch.Tensor,
     ):
         """Forward pass through ICM models."""
-        batch_size = features_current.shape[0]
 
         # Inverse model: predict action from state transition
         inverse_input = torch.cat([features_current, features_next], dim=1)
@@ -147,13 +146,20 @@ class ICMNetwork(nn.Module):
             )
             base_curiosity = prediction_error.mean(dim=1) * self.eta
 
-        # Skip if no level data to avoid expensive failed computations
-        if observations is not None and observations.get("level_data") is not None:
-            modulated_curiosity = self._apply_reachability_modulation(
-                base_curiosity, observations
+        # Apply reachability modulation - required for proper operation
+        if observations is None:
+            raise ValueError(
+                "Observations are required for reachability-aware ICM but not provided."
             )
-        else:
-            modulated_curiosity = base_curiosity
+
+        if observations.get("level_data") is None:
+            raise ValueError(
+                "Level data is required in observations for reachability analysis."
+            )
+
+        modulated_curiosity = self._apply_reachability_modulation(
+            base_curiosity, observations
+        )
 
         # Track performance
         computation_time = (time.time() - start_time) * 1000
@@ -232,16 +238,23 @@ class ICMNetwork(nn.Module):
     def get_reachability_info(self, observations: Dict[str, Any]) -> Dict[str, Any]:
         """Get reachability information using nclone systems."""
         if self.reachability_calculator is None:
-            return {"available": False}
+            raise ValueError(
+                "Reachability calculator is not initialized. "
+                "This should never happen in production code."
+            )
+
+        if not observations:
+            raise ValueError("Observations are required but not provided.")
 
         # Extract first observation
         obs = self._extract_single_observation(observations, 0)
 
-        # Get compact features
+        # Get compact features (8-dimensional)
         compact_features = self.reachability_calculator.extract_compact_features(
             level_data=obs.get("level_data"),
             player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
             switch_states=obs.get("switch_states", {}),
+            entities=obs.get("entities", []),
         )
 
         # Get frontier information

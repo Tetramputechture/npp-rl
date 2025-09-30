@@ -135,7 +135,7 @@ Environment Wrappers (Graph, Reachability, Vectorization)
 Multimodal Observations:
 ├── Temporal: player_frames [84,84,12]
 ├── Spatial: global_view [176,100,1] 
-├── Vector: game_state [16], reachability_features [64]
+├── Vector: game_state [16], reachability_features [8]
 └── Graph: node_feats, edge_feats, connectivity, masks, types
     ↓
 HGTMultimodalExtractor:
@@ -365,7 +365,7 @@ icm = ICMNetwork(
     feature_dim=512,           # Match HGT feature extractor output
     action_dim=6,              # N++ action space size
     enable_reachability_awareness=True,
-    reachability_dim=64,       # nclone reachability features
+    reachability_dim=8,        # nclone reachability features
 )
 
 # Wrap environment with intrinsic rewards

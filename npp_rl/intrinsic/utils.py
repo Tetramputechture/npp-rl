@@ -244,7 +244,7 @@ def create_reachability_aware_icm_config(
     alpha: float = 0.1,
     r_int_clip: float = 1.0,
     enable_reachability_awareness: bool = True,
-    reachability_dim: int = 64,
+    reachability_dim: int = 8,
     reachability_scale_factor: float = 2.0,
     frontier_boost_factor: float = 3.0,
     strategic_weight_factor: float = 1.5,

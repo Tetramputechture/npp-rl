@@ -11,10 +11,7 @@ import numpy as np
 
 # Import nclone reachability systems
 from nclone.graph.reachability.reachability_system import ReachabilitySystem
-from nclone.graph.reachability.compact_features import (
-    CompactReachabilityFeatures,
-    FeatureConfig,
-)
+from nclone.graph.reachability.feature_extractor import ReachabilityFeatureExtractor
 from nclone.graph.reachability.frontier_detector import (
     FrontierDetector,
 )
@@ -45,15 +42,8 @@ class ReachabilityAwareExplorationCalculator:
         # Core nclone systems
         self.base_calculator = ExplorationRewardCalculator()
         self.reachability_system = ReachabilitySystem(debug=debug)
-        self.feature_extractor = CompactReachabilityFeatures(
-            config=FeatureConfig(
-                objective_slots=8,
-                switch_slots=16,
-                hazard_slots=16,
-                area_slots=8,
-                movement_slots=8,
-                meta_slots=8,
-            )
+        self.feature_extractor = ReachabilityFeatureExtractor(
+            reachability_system=self.reachability_system, debug=debug
         )
         self.frontier_detector = FrontierDetector(debug=debug)
         self.rl_api = RLIntegrationAPI(self.reachability_system, debug=debug)
@@ -95,12 +85,10 @@ class ReachabilityAwareExplorationCalculator:
         )
 
         if level_data is None:
-            return {
-                "base_exploration": base_reward,
-                "reachability_modulation": 1.0,
-                "total_reward": base_reward,
-                "reachability_available": False,
-            }
+            raise ValueError(
+                "Level data is required for reachability-aware exploration but not provided. "
+                "Ensure the environment provides level_data in observations."
+            )
 
         # Get reachability analysis
         reachability_info = self._get_reachability_analysis(
@@ -108,12 +96,10 @@ class ReachabilityAwareExplorationCalculator:
         )
 
         if reachability_info is None:
-            return {
-                "base_exploration": base_reward,
-                "reachability_modulation": 1.0,
-                "total_reward": base_reward,
-                "reachability_available": False,
-            }
+            raise ValueError(
+                "Reachability analysis failed. This indicates a problem with the "
+                "reachability system or level data format."
+            )
 
         # Calculate reachability modulation
         modulation = self._calculate_reachability_modulation(
@@ -238,37 +224,37 @@ class ReachabilityAwareExplorationCalculator:
         level_data: Any,
         player_position: Tuple[float, float],
         switch_states: Optional[Dict[int, bool]] = None,
+        entities: Optional[List[Any]] = None,
     ) -> np.ndarray:
         """
-        Extract 64-dimensional compact reachability features.
+        Extract 8-dimensional compact reachability features.
 
         Args:
             level_data: Level data for analysis
             player_position: Current player position (x, y)
             switch_states: Current switch states
+            entities: List of game entities
 
         Returns:
-            64-dimensional feature vector
+            8-dimensional feature vector
         """
-        # Get reachability analysis
-        reachability_info = self._get_reachability_analysis(
-            player_position[0], player_position[1], level_data, switch_states
-        )
+        if entities is None:
+            entities = []
 
-        if reachability_info is None:
-            return np.zeros(64, dtype=np.float32)
-
-        # Extract compact features using nclone's system
-        # Note: This would need a proper ReachabilityResult object in practice
-        # For now, return zeros as we need the full nclone environment integration
-        features = np.zeros(64, dtype=np.float32)
-
-        if self.debug:
-            print(
-                "Warning: Using placeholder features - need full nclone environment integration"
+        try:
+            # Use nclone's ReachabilityFeatureExtractor for 8-dimensional features
+            features = self.feature_extractor.extract_features(
+                ninja_position=player_position,
+                level_data=level_data,
+                entities=entities,
+                switch_states=switch_states,
             )
-
-        return features
+            return features
+        except Exception as e:
+            raise ValueError(
+                f"Reachability feature extraction failed: {e}. "
+                f"Check that level_data, entities, and switch_states are properly formatted."
+            )
 
     def get_frontier_information(
         self,
@@ -292,7 +278,10 @@ class ReachabilityAwareExplorationCalculator:
         )
 
         if reachability_info is None:
-            return []
+            raise ValueError(
+                "Reachability analysis failed for frontier information. "
+                "Check level_data format and reachability system configuration."
+            )
 
         frontiers = reachability_info.get("frontiers", [])
         frontier_info = []
@@ -337,7 +326,7 @@ def extract_reachability_info_from_observations(
     """
     Extract reachability information from environment observations using real nclone systems.
 
-    This replaces the placeholder implementation with proper integration to nclone's
+    This uses nclone's ReachabilityFeatureExtractor for proper 8-dimensional
     compact feature extraction and reachability analysis.
 
     Args:
@@ -351,9 +340,13 @@ def extract_reachability_info_from_observations(
     player_y = observations.get("player_y")
     level_data = observations.get("level_data")
     switch_states = observations.get("switch_states", {})
+    entities = observations.get("entities", [])
 
     if player_x is None or player_y is None:
-        return None
+        raise ValueError(
+            "Player position (player_x, player_y) is required in observations "
+            "but not found. Ensure the environment provides player position."
+        )
 
     # Handle batch dimensions
     if isinstance(player_x, (list, np.ndarray)) and len(player_x) > 0:
@@ -364,11 +357,12 @@ def extract_reachability_info_from_observations(
     # Create temporary calculator for feature extraction
     calculator = ReachabilityAwareExplorationCalculator()
 
-    # Extract compact features (64-dimensional)
+    # Extract compact features (8-dimensional)
     compact_features = calculator.extract_compact_features(
         level_data=level_data,
         player_position=(float(player_x), float(player_y)),
         switch_states=switch_states,
+        entities=entities,
     )
 
     # Get frontier information
