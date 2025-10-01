@@ -46,7 +46,7 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
 )
 from npp_rl.feature_extractors import HGTMultimodalExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
-from npp_rl.environments import create_reachability_aware_env, create_hierarchical_env
+from nclone.gym_environment import create_reachability_aware_env, create_hierarchical_env
 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
 from npp_rl.hrl.completion_controller import CompletionController
 
