@@ -20,40 +20,21 @@ class NodeType(IntEnum):
 
 
 class EntityType(IntEnum):
-    """Specific entity types from N++ game."""
+    """Simplified entity types for completion-focused NPP-RL."""
 
-    # Interactive elements
+    # Core entities for completion-focused gameplay
     TOGGLE_MINE = 1
-    GOLD = 2
-    EXIT = 3
+    EXIT_DOOR = 3
     EXIT_SWITCH = 4
-    DOOR_REGULAR = 5
-    DOOR_LOCKED = 6
-    DOOR_TRAP = 8
-    LAUNCH_PAD = 10
-    ONE_WAY_PLATFORM = 11
-
-    # Enemies/Hazards
-    DRONE_ZAP = 14
-    DRONE_CHASER = 15
-    BOUNCE_BLOCK = 17
-    THWUMP = 20
-    ACTIVE_MINE = 21
-    LASER = 23
-    BOOST_PAD = 24
-    DEATH_BALL = 25
-    MINI_DRONE = 26
-    SHOVE_THWUMP = 28
+    LOCKED_DOOR = 6
 
 
 class EntityCategory(IntEnum):
-    """Entity categories for specialized processing."""
+    """Simplified entity categories for completion-focused processing."""
 
-    MOVEMENT = 1  # Platforms, launch pads, boost pads, traversable entities
-    HAZARD = 2  # Enemies, mines, dangerous elements
-    INTERACTIVE = 3  # Doors, switches, exits
-    GRID_TILE = 4  # Regular grid cells
-    CONDITIONAL = 5  # Conditionally hazardous/traversable entities
+    HAZARD = 1  # Mines and dangerous elements
+    INTERACTIVE = 2  # Doors, switches, exits
+    GRID_TILE = 3  # Regular grid cells
 
 
 class EntityTypeSystem:
@@ -70,47 +51,19 @@ class EntityTypeSystem:
         self._category_properties = self._build_category_properties()
 
     def _build_entity_category_mapping(self) -> Dict[int, EntityCategory]:
-        """Build mapping from entity types to categories."""
+        """Build mapping from simplified entity types to categories."""
         mapping = {}
 
-        # Movement aids (always safe to traverse)
-        movement_aids = {
-            EntityType.LAUNCH_PAD,
-            EntityType.ONE_WAY_PLATFORM,
-            EntityType.BOUNCE_BLOCK,
-            EntityType.BOOST_PAD,
-        }
-        for entity_type in movement_aids:
-            mapping[entity_type] = EntityCategory.MOVEMENT
-
-        # Conditional entities (directionally hazardous/traversable)
-        conditional = {EntityType.THWUMP, EntityType.SHOVE_THWUMP}
-        for entity_type in conditional:
-            mapping[entity_type] = EntityCategory.CONDITIONAL
-
-        # Hazards (fully dangerous entities)
-        hazards = {
-            EntityType.DRONE_ZAP,
-            EntityType.DRONE_CHASER,
-            EntityType.DEATH_BALL,
-            EntityType.MINI_DRONE,
-            EntityType.TOGGLE_MINE,
-            EntityType.ACTIVE_MINE,
-            EntityType.LASER,
-        }
+        # Hazards (mines only)
+        hazards = {EntityType.TOGGLE_MINE}
         for entity_type in hazards:
             mapping[entity_type] = EntityCategory.HAZARD
 
-        # Note: THWUMP and SHOVE_THWUMP are now in MOVEMENT category due to
-        # their conditional traversability (safe from sides/back)
-
-        # Interactive elements
+        # Interactive elements (doors, switches, exits)
         interactive = {
-            EntityType.EXIT,
+            EntityType.EXIT_DOOR,
             EntityType.EXIT_SWITCH,
-            EntityType.DOOR_REGULAR,
-            EntityType.DOOR_LOCKED,
-            EntityType.DOOR_TRAP,
+            EntityType.LOCKED_DOOR,
         }
         for entity_type in interactive:
             mapping[entity_type] = EntityCategory.INTERACTIVE
@@ -118,16 +71,8 @@ class EntityTypeSystem:
         return mapping
 
     def _build_category_properties(self) -> Dict[EntityCategory, Dict]:
-        """Build properties for each entity category."""
+        """Build properties for simplified entity categories."""
         return {
-            EntityCategory.MOVEMENT: {
-                "attention_weight": 1.1,
-                "hazard_level": 0.0,
-                "interaction_range": 2.0,  # Larger interaction range
-                "movement_impact": True,
-                "traversable": True,
-                "platform_capable": True,  # Movement entities can be platforms
-            },
             EntityCategory.HAZARD: {
                 "attention_weight": 1.5,  # Highest attention for dangers
                 "hazard_level": 1.0,
@@ -136,7 +81,7 @@ class EntityTypeSystem:
                 "traversable": False,
             },
             EntityCategory.INTERACTIVE: {
-                "attention_weight": 1.0,
+                "attention_weight": 1.2,  # High attention for objectives
                 "hazard_level": 0.0,
                 "interaction_range": 1.0,
                 "movement_impact": False,
@@ -148,15 +93,6 @@ class EntityTypeSystem:
                 "interaction_range": 0.5,
                 "movement_impact": False,
                 "traversable": True,
-            },
-            EntityCategory.CONDITIONAL: {
-                "attention_weight": 1.3,  # High attention for complex entities
-                "hazard_level": 0.5,  # Partially hazardous
-                "interaction_range": 2.0,  # Large range due to directional effects
-                "movement_impact": True,
-                "traversable": True,  # Conditionally traversable
-                "directional_hazard": True,  # Special property for directional entities
-                "platform_capable": True,  # Can be used as platforms
             },
         }
 
@@ -188,15 +124,7 @@ class EntityTypeSystem:
         category = self.get_entity_category(entity_type)
         return self._category_properties[category]["traversable"]
 
-    def is_directional_hazard(self, entity_type: int) -> bool:
-        """Check if an entity type has directional hazard properties."""
-        category = self.get_entity_category(entity_type)
-        return self._category_properties[category].get("directional_hazard", False)
 
-    def is_platform_capable(self, entity_type: int) -> bool:
-        """Check if an entity type can be used as a platform."""
-        category = self.get_entity_category(entity_type)
-        return self._category_properties[category].get("platform_capable", False)
 
     def get_interaction_range(self, entity_type: int) -> float:
         """Get the interaction range for an entity type."""

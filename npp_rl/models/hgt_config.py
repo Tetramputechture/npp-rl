@@ -121,8 +121,8 @@ class HGTConfig:
     num_layers: int = 3
     dropout: float = 0.1
 
-    # SIMPLIFIED: Node and edge type counts
-    num_node_types: int = 6  # From entity_type_system.py (unchanged)
+    # SIMPLIFIED: Node and edge type counts for completion-focused system
+    num_node_types: int = 6  # tile, ninja, mine, exit_switch, exit_door, locked_door
     num_edge_types: int = 3  # Simplified: ADJACENT, LOGICAL, REACHABLE
 
 
