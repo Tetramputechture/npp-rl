@@ -118,11 +118,15 @@ Each phase document contains:
 - **Completion planner integration**: Use existing heuristic for strategic guidance
 
 ### Technical Stack
-- **Environment**: nclone with switch-aware reachability analysis
+- **Environment**: nclone with switch-aware reachability analysis and hierarchical RL integration
 - **RL Framework**: PPO with hierarchical extensions
 - **Feature Extraction**: Multimodal fusion (CNN + GNN + MLP)
 - **Exploration**: ICM with reachability modulation
 - **Hardware**: Optimized for H100 GPUs
+
+### Repository Architecture (Updated)
+- **nclone**: Environment implementation, completion planner, hierarchical mixins
+- **npp-rl**: RL algorithms, training scripts, hierarchical controllers, feature extractors
 
 ## Getting Started
 
