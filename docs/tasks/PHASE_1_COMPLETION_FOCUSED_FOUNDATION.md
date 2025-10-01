@@ -102,14 +102,6 @@ This phase establishes the foundation for completion-focused NPP-RL training by 
 - [ ] HGT model handles simplified entity types
 - [ ] Graph construction uses simplified node/edge types
 - [ ] Entity observations contain only relevant entities
-- [ ] Performance improvement in feature extraction time
-
-**Testing requirements**:
-- Entity extraction tests with simplified types
-- HGT model tests with 4 node types
-- Graph construction tests with simplified entities
-- Performance benchmarks showing improved inference time
-
 ---
 
 ### Task 1.3: Implement Simplified Reward System (1-2 days)
