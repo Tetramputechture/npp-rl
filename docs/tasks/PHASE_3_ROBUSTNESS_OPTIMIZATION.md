@@ -45,7 +45,7 @@ This phase focuses on optimizing the hierarchical system for robustness and perf
 - Complex message passing with type embeddings
 
 **Target simplified architecture**:
-- 4 node types: tile, ninja, mine, objective (switch/exit)
+- 6 node types: tile, ninja, mine, exit_switch, exit_door, locked_door
 - 2 edge types: adjacent, reachable
 - Simplified attention mechanism (GAT or basic HGT)
 - Reduced embedding dimensions

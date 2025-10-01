@@ -77,12 +77,14 @@ This phase establishes the foundation for completion-focused NPP-RL training by 
 - `nclone/gym_environment/observation_processor.py`
 
 **Specific changes needed**:
-1. Reduce entity types to 4: tile, ninja, mine, objective (switch/exit)
+1. Reduce entity types to 6: tile, ninja, mine, exit_switch, exit_door, locked_door
 2. Remove thwump and drone processing from entity extractor
-3. Simplify HGT configuration to handle 4 node types
+3. Update HGT configuration to handle 6 simplified node types
 4. Update entity type embeddings and attention mechanisms
 5. Remove complex entity state tracking (thwump states, drone modes)
-6. Simplify graph edge types to 2: adjacent, reachable
+6. Properly extract locked door switch coordinates (sw_xcoord, sw_ycoord)
+7. Track activation states for both exit switches and locked door switches
+8. Maintain one-to-one switch-door relationships in observations
 
 **Current entity types (to remove)**:
 - Thwumps (Type 20) - complex movement states and deadly face logic
@@ -94,11 +96,16 @@ This phase establishes the foundation for completion-focused NPP-RL training by 
 - Tiles (collision geometry)
 - Ninja (player character)
 - Mines (toggle mines and regular mines only)
-- Objectives (switches and exit doors)
+- Exit Switch (Type 4) - main exit switch, one per level
+- Exit Door (Type 3) - main exit door, one per level
+- Locked Doors (Type 6) - contains both door and switch coordinates, multiple per level
 
 **Acceptance criteria**:
-- [ ] Entity type system reduced to 4 types
+- [ ] Entity type system reduced to 6 types (tile, ninja, mine, exit_switch, exit_door, locked_door)
 - [ ] No thwump or drone processing in entity extraction
+- [ ] Exit switch/door pair properly tracked (one per level)
+- [ ] Locked door entities track both door and switch coordinates
+- [ ] Switch activation states properly maintained for all switch types
 - [ ] HGT model handles simplified entity types
 - [ ] Graph construction uses simplified node/edge types
 - [ ] Entity observations contain only relevant entities
@@ -215,13 +222,13 @@ PBRS_EXIT_DISTANCE = 0.05    # Distance-based shaping to exit
    - Add subtask transition logging and metrics
 
 **Subtasks to implement**:
-1. `navigate_to_exit_switch` - Move to and activate exit switch
-2. `navigate_to_locked_switch` - Move to and activate locked door switch
+1. `navigate_to_exit_switch` - Move to and activate main exit switch (Type 4)
+2. `navigate_to_locked_door_switch` - Move to and activate locked door switch coordinates
 3. `navigate_to_exit_door` - Move to exit door after switch activation
 4. `avoid_mine` - Navigate around mine hazards
 
 **Architecture design**:
-- **High-level policy input**: 8D reachability features, switch states
+- **High-level policy input**: 8D reachability features, exit switch state, locked door states
 - **High-level policy output**: Subtask selection (4 discrete actions)
 - **Low-level policy input**: Full multimodal observations + current subtask
 - **Low-level policy output**: Movement actions (6 discrete actions)

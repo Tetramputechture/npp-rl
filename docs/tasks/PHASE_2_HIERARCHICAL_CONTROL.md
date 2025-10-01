@@ -44,13 +44,13 @@ This phase implements a sophisticated two-level hierarchical reinforcement learn
   - Exit accessibility [3]: Can exit door be reached?
   - Objective distance [1]: Distance to current objective
   - Connectivity score [5]: Overall level connectivity
-- Switch state vector (exit switch, all locked door switches)
+- Switch state vector (exit switch activated, locked door states)
 - Current ninja position (normalized)
 - Time remaining in episode
 
 **Output**: Subtask selection (4 discrete actions)
 1. `navigate_to_exit_switch` - Priority when exit switch unreachable
-2. `navigate_to_locked_switch` - When exit switch unreachable, find nearest locked switch
+2. `navigate_to_locked_door_switch` - When exit switch unreachable, find nearest locked door switch
 3. `navigate_to_exit_door` - When exit switch activated and exit reachable
 4. `explore_for_switches` - When no clear path exists
 
@@ -65,12 +65,12 @@ def select_subtask(self, reachability_features, switch_states):
         if exit_switch_reachable:
             return 'navigate_to_exit_switch'
         else:
-            return 'navigate_to_locked_switch'
+            return 'navigate_to_locked_door_switch'
     else:  # exit switch activated
         if exit_door_reachable:
             return 'navigate_to_exit_door'
         else:
-            return 'navigate_to_locked_switch'
+            return 'navigate_to_locked_door_switch'
 ```
 
 #### Low-Level Policy
@@ -182,11 +182,11 @@ class HierarchicalPolicy(nn.Module):
    - Activation bonus: +0.1 (base reward) when switch activated
    - Timeout penalty: -0.1 if subtask exceeds 300 steps
 
-2. **navigate_to_locked_switch**:
-   - Progress reward: +0.02 per unit distance reduction to target locked switch
-   - Switch selection bonus: +0.01 for approaching nearest reachable locked switch
-   - Activation bonus: +0.05 when locked switch activated
-   - Exploration bonus: +0.01 for discovering new locked switches
+2. **navigate_to_locked_door_switch**:
+   - Progress reward: +0.02 per unit distance reduction to target locked door switch
+   - Switch selection bonus: +0.01 for approaching nearest reachable locked door switch
+   - Activation bonus: +0.05 when locked door switch activated
+   - Door opening bonus: +0.03 when locked door opens (enabling new paths)
 
 3. **navigate_to_exit_door**:
    - Progress reward: +0.03 per unit distance reduction to exit door
@@ -196,7 +196,7 @@ class HierarchicalPolicy(nn.Module):
 
 4. **explore_for_switches**:
    - Exploration reward: +0.01 for visiting new areas
-   - Discovery bonus: +0.05 for finding previously unknown switches
+   - Discovery bonus: +0.05 for finding previously unknown locked doors
    - Connectivity bonus: +0.02 for improving reachability score
    - Timeout transition: Automatic switch to specific subtask after 200 steps
 
