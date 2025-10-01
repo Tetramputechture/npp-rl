@@ -90,7 +90,6 @@ This phase establishes the foundation for completion-focused NPP-RL training by 
 - Thwumps (Type 20) - complex movement states and deadly face logic
 - Drones (Types 14, 26) - patrol patterns and movement modes
 - Death balls (Type 25) - seeking behavior
-- Complex collectibles beyond basic switches
 
 **Target entity types (to keep)**:
 - Tiles (collision geometry)
@@ -132,9 +131,9 @@ This phase establishes the foundation for completion-focused NPP-RL training by 
    - Exit door reached: +1.0 terminal reward
    - Time penalty: -0.01 per step
    - Death penalty: -0.5
-2. Remove gold-related PBRS potentials
+2. Remove any gold-related PBRS potentials
 3. Focus PBRS on switch/exit distance only
-4. Remove gold-seeking navigation rewards
+4. Remove any gold-seeking navigation rewards
 5. Simplify exploration rewards to focus on switch/exit discovery
 
 **Target reward structure**:
@@ -160,8 +159,7 @@ PBRS_EXIT_DISTANCE = 0.05    # Distance-based shaping to exit
 
 **Testing requirements**:
 - Unit tests for each reward component
-- Integration tests showing correct reward calculation
-- Validation that rewards align with completion objectives
+
 
 ---
 
@@ -235,9 +233,6 @@ PBRS_EXIT_DISTANCE = 0.05    # Distance-based shaping to exit
 
 **Testing requirements**:
 - Unit tests for completion controller logic
-- Integration tests for hierarchical PPO training
-- End-to-end tests on simple levels
-- Performance tests showing stable training
 
 ---
 
@@ -328,18 +323,9 @@ PBRS_EXIT_DISTANCE = 0.05    # Distance-based shaping to exit
 - [ ] Entity processing simplified to 4 types
 - [ ] Completion-focused reward system implemented
 - [ ] Hierarchical controller integrated with training
-- [ ] Single-switch levels completed with >80% success rate
-
-**Performance targets**:
-- [ ] Feature extraction time < 10ms
-- [ ] Training runs stable for >1000 episodes
-- [ ] Memory usage remains constant over long runs
-- [ ] No system crashes during training
 
 **Quality gates**:
-- [ ] All tests pass
 - [ ] Code review completed
-- [ ] Performance benchmarks met
 - [ ] Documentation updated
 
 This phase establishes the foundation for all subsequent development by creating a stable, completion-focused system that can be enhanced with additional capabilities in later phases.
