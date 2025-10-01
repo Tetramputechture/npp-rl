@@ -49,7 +49,7 @@ This phase implements a sophisticated two-level hierarchical reinforcement learn
 - Time remaining in episode
 
 **Output**: Subtask selection (4 discrete actions)
-1. `navigate_to_exit_switch` - Priority when exit switch unreachable
+1. `navigate_to_exit_switch` - Priority when exit switch reachable
 2. `navigate_to_locked_door_switch` - When exit switch unreachable, find nearest locked door switch
 3. `navigate_to_exit_door` - When exit switch activated and exit reachable
 4. `explore_for_switches` - When no clear path exists

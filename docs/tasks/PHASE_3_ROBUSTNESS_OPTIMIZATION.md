@@ -20,7 +20,7 @@ This phase focuses on optimizing the hierarchical system for robustness and perf
 
 ### Task 3.1: Model Architecture Optimization (1-2 weeks)
 
-**What we want to do**: Optimize the neural network architecture to balance complexity with performance, focusing on the simplified 4-node-type entity system and efficient attention mechanisms.
+**What we want to do**: Optimize the neural network architecture to balance complexity with performance, focusing on the simplified 6-node-type entity system and efficient attention mechanisms.
 
 **Current state**:
 - HGT implementation with 6 node types from original design
