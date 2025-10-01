@@ -46,13 +46,51 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
 )
 from npp_rl.feature_extractors import HGTMultimodalExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
-from npp_rl.environments import create_reachability_aware_env
+from npp_rl.environments import create_reachability_aware_env, create_hierarchical_env
+from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
+from npp_rl.hrl.completion_controller import CompletionController
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class HierarchicalLoggingCallback(BaseCallback):
-    """Callback for logging hierarchical training metrics."""
+    """
+    Custom callback for logging hierarchical RL metrics.
+    
+    This callback logs subtask transitions, completion controller metrics,
+    and hierarchical performance statistics during training.
+    """
+    
+    def __init__(self, completion_controller: CompletionController, log_freq: int = 10, verbose: int = 0):
+        super().__init__(verbose)
+        self.completion_controller = completion_controller
+        self.log_freq = log_freq
+        self.step_count = 0
+        
+    def _on_step(self) -> bool:
+        self.step_count += 1
+        
+        if self.step_count % self.log_freq == 0:
+            # Log hierarchical metrics
+            metrics = self.completion_controller.get_subtask_metrics()
+            
+            # Log to tensorboard/logger
+            self.logger.record("hierarchical/current_subtask", metrics.get('current_subtask', 'unknown'))
+            self.logger.record("hierarchical/subtask_step_count", metrics.get('subtask_step_count', 0))
+            self.logger.record("hierarchical/subtask_duration", metrics.get('subtask_duration', 0.0))
+            self.logger.record("hierarchical/total_transitions", metrics.get('total_transitions', 0))
+            
+            # Log recent transitions
+            recent_transitions = metrics.get('recent_transitions', [])
+            if recent_transitions:
+                avg_transition_steps = sum(t.get('step_count', 0) for t in recent_transitions) / len(recent_transitions)
+                self.logger.record("hierarchical/avg_transition_steps", avg_transition_steps)
+        
+        return True
+
+
+class ExplorationLoggingCallback(BaseCallback):
+    """Callback for logging exploration training metrics."""
 
     def __init__(
         self, exploration_manager: AdaptiveExplorationManager, log_freq: int = 1000
@@ -106,6 +144,199 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
     return _init
 
 
+def train_hierarchical_agent(
+    num_envs: int = 64,
+    total_timesteps: int = 10_000_000,
+    load_model: str = None,
+    render_mode: str = "rgb_array",
+    disable_exploration: bool = False,
+    save_freq: int = 100_000,
+    eval_freq: int = 50_000,
+    log_interval: int = 10,
+    enable_subtask_rewards: bool = True,
+    subtask_reward_scale: float = 0.1,
+):
+    """
+    Train the hierarchical agent with completion planner integration.
+    
+    This function implements hierarchical RL training using the completion planner
+    for strategic subtask selection and HGT-based multimodal feature extraction.
+    
+    Args:
+        num_envs: Number of parallel environments
+        total_timesteps: Total training timesteps
+        load_model: Path to existing model to resume training
+        render_mode: Rendering mode ('rgb_array' for headless, 'human' for visual)
+        disable_exploration: Whether to disable adaptive exploration
+        save_freq: Frequency of model saves
+        eval_freq: Frequency of evaluation
+        log_interval: Logging interval
+        enable_subtask_rewards: Whether to enable subtask-specific reward shaping
+        subtask_reward_scale: Scaling factor for subtask rewards
+    """
+    
+    # Force single environment for human rendering
+    if render_mode == "human":
+        num_envs = 1
+        print("Human rendering mode detected. Setting num_envs=1.")
+
+    print(f"Training hierarchical agent with {num_envs} environments")
+    print(f"Device: {device}")
+    print(f"Total timesteps: {total_timesteps:,}")
+    print(f"Subtask rewards: {'enabled' if enable_subtask_rewards else 'disabled'}")
+
+    # Create timestamped log directory
+    timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    log_dir = Path(f"./training_logs/hierarchical_ppo/session-{timestamp}")
+    log_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create completion controller
+    completion_controller = CompletionController()
+
+    # Create environment factory for hierarchical training
+    def make_hierarchical_env():
+        return create_hierarchical_env(
+            render_mode=render_mode,
+            level_set="intro",
+            max_episode_steps=2000,
+            completion_controller=completion_controller,
+            enable_subtask_rewards=enable_subtask_rewards,
+            subtask_reward_scale=subtask_reward_scale,
+        )
+
+    # Create vectorized environment
+    if num_envs == 1:
+        env = DummyVecEnv([make_hierarchical_env])
+    else:
+        env = SubprocVecEnv([make_hierarchical_env for _ in range(num_envs)])
+
+    # Add monitoring and NaN checking
+    env = VecMonitor(env, str(log_dir / "monitor"))
+    env = VecCheckNan(env, raise_exception=True)
+
+    # Initialize adaptive exploration manager
+    exploration_manager = None
+    if not disable_exploration:
+        exploration_manager = AdaptiveExplorationManager(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            device=device,
+        )
+        print("Adaptive exploration enabled (ICM + Novelty)")
+    else:
+        print("Adaptive exploration disabled")
+
+    print("Using hierarchical PPO with HGT-based multimodal extractor")
+    
+    # Configure hierarchical policy
+    extractor_kwargs = {
+        "features_dim": 512,
+        "hgt_hidden_dim": 256,
+        "hgt_num_layers": 3,
+        "hgt_output_dim": 256,
+        "use_cross_modal_attention": True,
+        "use_spatial_attention": True,
+        "reachability_dim": 8,  # 8-dimensional reachability features
+    }
+
+    policy_kwargs = {
+        "features_extractor_class": HGTMultimodalExtractor,
+        "features_extractor_kwargs": extractor_kwargs,
+        "net_arch": [dict(pi=[256, 256], vf=[256, 256])],
+        "activation_fn": torch.nn.ReLU,
+        "normalize_images": False,
+        "completion_controller": completion_controller,
+    }
+
+    # Create hierarchical PPO model
+    hierarchical_ppo = HierarchicalPPO(
+        policy_class=HierarchicalActorCriticPolicy,
+        completion_controller=completion_controller,
+        policy_kwargs=policy_kwargs,
+        **HYPERPARAMETERS
+    )
+
+    # Create or load model
+    if load_model:
+        print(f"Loading hierarchical model from: {load_model}")
+        model = hierarchical_ppo.load(load_model, env=env, device=device)
+    else:
+        model = hierarchical_ppo.create_model(env=env, device=device)
+
+    # Configure logger
+    logger = configure(str(log_dir), ["stdout", "csv", "tensorboard"])
+    model.set_logger(logger)
+
+    # Create callbacks
+    callbacks = []
+    
+    # Evaluation callback
+    eval_env = DummyVecEnv([make_hierarchical_env])
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(log_dir / "best_model"),
+        log_path=str(log_dir / "eval"),
+        eval_freq=eval_freq // num_envs,
+        deterministic=True,
+        render=False,
+    )
+    callbacks.append(eval_callback)
+
+    # Early stopping callback
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=10, min_evals=5, verbose=1
+    )
+    callbacks.append(stop_callback)
+
+    # Custom hierarchical logging callback
+    hierarchical_callback = HierarchicalLoggingCallback(
+        completion_controller=completion_controller,
+        log_freq=log_interval,
+    )
+    callbacks.append(hierarchical_callback)
+
+    # Save hyperparameters
+    hyperparams_path = log_dir / "hyperparameters.json"
+    with open(hyperparams_path, "w") as f:
+        hyperparams = {
+            **HYPERPARAMETERS,
+            "num_envs": num_envs,
+            "total_timesteps": total_timesteps,
+            "extractor_kwargs": extractor_kwargs,
+            "enable_subtask_rewards": enable_subtask_rewards,
+            "subtask_reward_scale": subtask_reward_scale,
+            "hierarchical": True,
+        }
+        json.dump(hyperparams, f, indent=2)
+
+    print(f"Starting hierarchical training...")
+    print(f"Logs will be saved to: {log_dir}")
+
+    # Train the model
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callbacks,
+        log_interval=log_interval,
+        progress_bar=True,
+    )
+
+    # Save final model
+    final_model_path = log_dir / "final_model"
+    model.save(str(final_model_path))
+    print(f"Final hierarchical model saved to: {final_model_path}")
+
+    # Save completion controller metrics
+    metrics_path = log_dir / "hierarchical_metrics.json"
+    with open(metrics_path, "w") as f:
+        metrics = completion_controller.get_subtask_metrics()
+        json.dump(metrics, f, indent=2)
+
+    env.close()
+    eval_env.close()
+
+    return model
+
+
 def train_agent(
     num_envs: int = 64,
     total_timesteps: int = 10_000_000,
@@ -117,7 +348,7 @@ def train_agent(
     log_interval: int = 10,
 ):
     """
-    Train the multimodal agent with HGT or hierarchical architecture and reachability features.
+    Train the multimodal agent with HGT architecture and reachability features (non-hierarchical).
 
     Args:
         num_envs: Number of parallel environments
