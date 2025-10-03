@@ -12,19 +12,15 @@ policy architecture and coordinated training.
 
 import torch
 import torch.nn as nn
-import numpy as np
 from typing import Dict, Any, Tuple, Optional
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.distributions import CategoricalDistribution
 from gymnasium import spaces
 
 from npp_rl.models.hierarchical_policy import (
     HierarchicalPolicyNetwork,
     HierarchicalExperienceBuffer,
 )
-from npp_rl.hrl.high_level_policy import HighLevelPolicy, Subtask, SubtaskTransitionManager
-from npp_rl.hrl.subtask_policies import LowLevelPolicy, ICMIntegration
 
 
 class HierarchicalActorCriticPolicy(ActorCriticPolicy):

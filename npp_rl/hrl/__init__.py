@@ -6,6 +6,7 @@ This module implements hierarchical RL components including:
 - Hierarchical policy architectures
 - Subtask management and transitions
 - Two-level policy architecture (Phase 2 Task 2.1)
+- Subtask-specific reward functions (Phase 2 Task 2.2)
 """
 
 from .completion_controller import CompletionController
@@ -21,6 +22,11 @@ from .subtask_policies import (
     ICMIntegration,
     SubtaskSpecificFeatures,
 )
+from .subtask_rewards import (
+    SubtaskRewardCalculator,
+    ProgressTracker,
+    ExplorationTracker,
+)
 
 __all__ = [
     "CompletionController",
@@ -32,4 +38,7 @@ __all__ = [
     "SubtaskContextEncoder",
     "ICMIntegration",
     "SubtaskSpecificFeatures",
+    "SubtaskRewardCalculator",
+    "ProgressTracker",
+    "ExplorationTracker",
 ]

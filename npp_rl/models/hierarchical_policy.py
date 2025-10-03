@@ -13,8 +13,6 @@ Architecture:
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 from typing import Dict, Any, Optional, Tuple, List
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
@@ -26,7 +24,6 @@ from npp_rl.hrl.high_level_policy import (
 from npp_rl.hrl.subtask_policies import (
     LowLevelPolicy,
     ICMIntegration,
-    SubtaskSpecificFeatures,
 )
 
 
