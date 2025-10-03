@@ -79,6 +79,7 @@ class EntityTypeSystem:
                 "interaction_range": 1.5,
                 "movement_impact": True,
                 "traversable": False,
+                "requires_state_tracking": True,  # Mines have state-dependent danger
             },
             EntityCategory.INTERACTIVE: {
                 "attention_weight": 1.2,  # High attention for objectives
@@ -86,6 +87,7 @@ class EntityTypeSystem:
                 "interaction_range": 1.0,
                 "movement_impact": False,
                 "traversable": True,
+                "requires_state_tracking": False,
             },
             EntityCategory.GRID_TILE: {
                 "attention_weight": 0.8,  # Lower attention for basic tiles
@@ -93,6 +95,7 @@ class EntityTypeSystem:
                 "interaction_range": 0.5,
                 "movement_impact": False,
                 "traversable": True,
+                "requires_state_tracking": False,
             },
         }
 
@@ -130,6 +133,15 @@ class EntityTypeSystem:
         """Get the interaction range for an entity type."""
         category = self.get_entity_category(entity_type)
         return self._category_properties[category]["interaction_range"]
+    
+    def requires_state_tracking(self, entity_type: int) -> bool:
+        """Check if an entity type requires state tracking (e.g., mines)."""
+        category = self.get_entity_category(entity_type)
+        return self._category_properties[category].get("requires_state_tracking", False)
+    
+    def is_mine_entity(self, entity_type: int) -> bool:
+        """Check if entity type is a toggle mine."""
+        return entity_type == EntityType.TOGGLE_MINE
 
 
 class EntitySpecializedEmbedding(nn.Module):
