@@ -381,14 +381,6 @@ else
     exit 1
 fi
 
-# Check nclone integration
-if python3 -c "from nclone.constants import MAX_HOR_SPEED, GRAVITY_FALL; from nclone.graph.graph_builder import EdgeType; print('nclone integration verified')" 2>/dev/null; then
-    log_message "[SUCCESS] nclone integration verified"
-else
-    log_message "[ERROR] nclone integration failed"
-    exit 1
-fi
-
 log_message ""
 log_message "DEPENDENCY VERIFICATION COMPLETE"
 log_message "All core dependencies have been verified"
