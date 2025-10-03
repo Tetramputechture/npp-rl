@@ -102,19 +102,19 @@ This document summarizes the implementation of Phase 2, Task 2.1: Two-Level Poli
         └────────────────────────┘
 ```
 
-### 4. Enhanced Hierarchical PPO Agent (`npp_rl/agents/hierarchical_ppo.py`)
+### 4. Hierarchical PPO Agent (`npp_rl/agents/hierarchical_ppo.py`)
 
 **Purpose**: Integration with Stable-Baselines3 PPO for training.
 
 **Key Classes**:
-- `EnhancedHierarchicalActorCriticPolicy`: Actor-Critic policy using hierarchical network
-- `EnhancedHierarchicalPPO`: Wrapper for easy instantiation and training
+- `HierarchicalActorCriticPolicy`: Actor-Critic policy using two-level hierarchical network
+- `HierarchicalPPO`: Wrapper for easy instantiation and training
 
 **Features**:
 - Observation dictionary support with automatic fallback
 - Episode reset handling
 - Subtask metrics collection
-- Backward compatible (legacy classes renamed)
+- In-place enhancement of existing classes (no legacy versions)
 
 ### 5. Unit Tests (`tests/test_hierarchical_policy_task2_1.py`)
 
@@ -214,21 +214,21 @@ From Task 2.1 specification:
 4. `tests/test_hierarchical_policy_task2_1.py` (591 lines)
 
 ### Modified Files
-1. `npp_rl/agents/hierarchical_ppo.py` (added Enhanced classes, renamed legacy)
+1. `npp_rl/agents/hierarchical_ppo.py` (updated in-place with new architecture)
 2. `npp_rl/hrl/__init__.py` (updated exports)
 
 ## Usage Example
 
 ```python
-from npp_rl.agents.hierarchical_ppo import EnhancedHierarchicalPPO
+from npp_rl.agents.hierarchical_ppo import HierarchicalPPO
 from npp_rl.feature_extractors import HGTMultimodalExtractor
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 # Create environment
 env = DummyVecEnv([lambda: create_hierarchical_env()])
 
-# Create enhanced hierarchical PPO
-model = EnhancedHierarchicalPPO(
+# Create hierarchical PPO with two-level architecture
+model = HierarchicalPPO(
     high_level_update_frequency=50,  # High-level updates every 50 steps
     max_steps_per_subtask=500,       # Max 500 steps per subtask
     use_icm=True,                    # Enable ICM integration
