@@ -17,7 +17,12 @@ Research foundations:
 - ICM: Pathak et al. (2017) "Curiosity-driven Exploration"
 """
 
-from stable_baselines3.common.utils import get_linear_fn
+import warnings
+
+# Suppress deprecation warning for get_linear_fn (still functional in SB3 2.1+)
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*get_linear_fn.*")
+    from stable_baselines3.common.utils import get_linear_fn
 
 
 # High-Level Policy Hyperparameters

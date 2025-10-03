@@ -40,7 +40,6 @@ import warnings
 from pathlib import Path
 from typing import Dict, Any
 
-from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.callbacks import (
     CallbackList,
     CheckpointCallback,
@@ -57,7 +56,6 @@ from nclone.gym_environment import create_hierarchical_env
 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
 from npp_rl.feature_extractors import HGTMultimodalExtractor
 from npp_rl.agents.hyperparameters.hierarchical_hyperparameters import (
-    HIERARCHICAL_CONFIG,
     HIGH_LEVEL_HYPERPARAMETERS,
     LOW_LEVEL_HYPERPARAMETERS,
     ICM_HYPERPARAMETERS,
@@ -66,8 +64,6 @@ from npp_rl.agents.hyperparameters.hierarchical_hyperparameters import (
 )
 from npp_rl.callbacks.hierarchical_callbacks import (
     create_hierarchical_callbacks,
-    HierarchicalStabilityCallback,
-    CurriculumProgressionCallback,
 )
 
 
@@ -428,7 +424,7 @@ def train_hierarchical_agent(
             if hasattr(model, 'high_level_lr'):
                 model.high_level_lr = original_hl_lr
             
-            print(f"\n✓ Warmup phase complete\n")
+            print("\n✓ Warmup phase complete\n")
         
         # Phase 2: Full hierarchical training
         remaining_steps = total_timesteps - warmup_steps
@@ -453,7 +449,7 @@ def train_hierarchical_agent(
         print(f"✓ Final model saved to {final_model_path}")
         
         # Print training summary
-        print(f"\nTraining Summary:")
+        print("\nTraining Summary:")
         print(f"  - Total timesteps: {total_timesteps:,}")
         print(f"  - Log directory: {log_dir}")
         print(f"  - Checkpoints: {log_dir / 'checkpoints'}")
@@ -478,8 +474,8 @@ def train_hierarchical_agent(
         try:
             model.save(error_path)
             print(f"✓ Model saved to {error_path}")
-        except:
-            print("✗ Could not save model")
+        except Exception as e:
+            print(f"✗ Could not save model: {e}")
     
     finally:
         # Cleanup

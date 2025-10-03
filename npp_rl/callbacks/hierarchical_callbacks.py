@@ -23,9 +23,8 @@ Task 2.4 Requirements:
 import numpy as np
 import torch
 from collections import deque, defaultdict
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.logger import Logger
 import warnings
 
 
