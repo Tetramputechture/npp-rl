@@ -97,13 +97,38 @@ class HighLevelPolicy(nn.Module):
         # Output layer for subtask selection
         self.subtask_head = nn.Linear(hidden_dim, 4)
         
-        # Optional: Add attention mechanism for reachability features
+        # Attention mechanism for reachability features
         self.reachability_attention = nn.Sequential(
             nn.Linear(reachability_dim, reachability_dim),
             nn.Tanh(),
             nn.Linear(reachability_dim, reachability_dim),
             nn.Softmax(dim=-1),
         )
+    
+    def _normalize_switch_states(self, switch_states: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize switch states tensor to expected dimension.
+        
+        Args:
+            switch_states: Variable-length switch states tensor
+            
+        Returns:
+            Switch states tensor with shape [..., max_switches]
+        """
+        batch_size = switch_states.shape[0]
+        
+        if switch_states.shape[-1] < self.max_switches:
+            # Pad with zeros if fewer switches
+            padding = torch.zeros(
+                batch_size, 
+                self.max_switches - switch_states.shape[-1],
+                device=switch_states.device
+            )
+            return torch.cat([switch_states, padding], dim=-1)
+        elif switch_states.shape[-1] > self.max_switches:
+            # Truncate if more switches
+            return switch_states[:, :self.max_switches]
+        return switch_states
         
     def forward(
         self,
@@ -124,24 +149,12 @@ class HighLevelPolicy(nn.Module):
         Returns:
             Subtask logits [batch_size, 4]
         """
-        batch_size = reachability_features.shape[0]
-        
         # Apply attention to reachability features to focus on important aspects
         attention_weights = self.reachability_attention(reachability_features)
         attended_features = reachability_features * attention_weights
         
-        # Ensure switch states has correct dimension
-        if switch_states.shape[-1] < self.max_switches:
-            # Pad with zeros if fewer switches
-            padding = torch.zeros(
-                batch_size, 
-                self.max_switches - switch_states.shape[-1],
-                device=switch_states.device
-            )
-            switch_states = torch.cat([switch_states, padding], dim=-1)
-        elif switch_states.shape[-1] > self.max_switches:
-            # Truncate if more switches
-            switch_states = switch_states[:, :self.max_switches]
+        # Normalize switch states dimension
+        switch_states = self._normalize_switch_states(switch_states)
         
         # Concatenate all input features
         combined_features = torch.cat([
@@ -236,42 +249,6 @@ class HighLevelPolicy(nn.Module):
                 return Subtask.NAVIGATE_TO_EXIT_DOOR
             else:
                 return Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH
-    
-    def get_value_estimate(
-        self,
-        reachability_features: torch.Tensor,
-        switch_states: torch.Tensor,
-        ninja_position: torch.Tensor,
-        time_remaining: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute value estimate for high-level policy (optional).
-        
-        This can be used if we want a separate value function for the high-level
-        policy, though the main implementation uses a shared value function.
-        """
-        # Forward to get features
-        batch_size = reachability_features.shape[0]
-        
-        # Ensure switch states has correct dimension
-        if switch_states.shape[-1] < self.max_switches:
-            padding = torch.zeros(
-                batch_size, 
-                self.max_switches - switch_states.shape[-1],
-                device=switch_states.device
-            )
-            switch_states = torch.cat([switch_states, padding], dim=-1)
-        elif switch_states.shape[-1] > self.max_switches:
-            switch_states = switch_states[:, :self.max_switches]
-        
-        combined_features = torch.cat([
-            reachability_features,
-            switch_states,
-            ninja_position,
-            time_remaining,
-        ], dim=-1)
-        
-        return self.feature_net(combined_features)
 
 
 class SubtaskTransitionManager:

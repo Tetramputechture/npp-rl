@@ -19,12 +19,11 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.distributions import CategoricalDistribution
 from gymnasium import spaces
 
-from npp_rl.hrl.completion_controller import CompletionController, Subtask
 from npp_rl.models.hierarchical_policy import (
     HierarchicalPolicyNetwork,
     HierarchicalExperienceBuffer,
 )
-from npp_rl.hrl.high_level_policy import HighLevelPolicy, SubtaskTransitionManager
+from npp_rl.hrl.high_level_policy import HighLevelPolicy, Subtask, SubtaskTransitionManager
 from npp_rl.hrl.subtask_policies import LowLevelPolicy, ICMIntegration
 
 
@@ -108,6 +107,8 @@ class HierarchicalActorCriticPolicy(ActorCriticPolicy):
         )
         
         # Override action and value networks (handled by hierarchical network)
+        # We set these to Identity because the HierarchicalPolicyNetwork
+        # handles action and value computation internally
         self.action_net = nn.Identity()
         self.value_net = nn.Identity()
         
@@ -118,8 +119,40 @@ class HierarchicalActorCriticPolicy(ActorCriticPolicy):
         )
     
     def _build_mlp_extractor(self) -> None:
-        """Override to prevent building default MLP extractor."""
+        """
+        Override to prevent building default MLP extractor.
+        
+        The HierarchicalPolicyNetwork is used instead of the standard
+        MLP extractor, so we skip the base class implementation.
+        """
         pass
+    
+    def _ensure_obs_dict(self, obs: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Ensure observation is in dictionary format.
+        
+        Args:
+            obs: Observation tensor or dictionary
+            
+        Returns:
+            Observation dictionary with all required keys
+            
+        Note:
+            When obs is not a dict, this creates a minimal observation dict
+            with placeholder values. In practice, the environment should provide
+            properly structured dictionary observations.
+        """
+        if isinstance(obs, dict):
+            return obs
+        
+        batch_size = obs.shape[0] if len(obs.shape) > 1 else 1
+        return {
+            'observation': obs,
+            'reachability_features': torch.zeros(batch_size, 8, device=obs.device),
+            'switch_states': torch.zeros(batch_size, 5, device=obs.device),
+            'ninja_position': torch.zeros(batch_size, 2, device=obs.device),
+            'time_remaining': torch.ones(batch_size, 1, device=obs.device),
+        }
     
     def forward(
         self, 
@@ -136,20 +169,7 @@ class HierarchicalActorCriticPolicy(ActorCriticPolicy):
         Returns:
             Tuple of (actions, values, log_probs)
         """
-        # Convert obs to dictionary format if needed
-        if not isinstance(obs, dict):
-            # Create minimal observation dict
-            # In practice, this should be properly structured from the environment
-            batch_size = obs.shape[0] if len(obs.shape) > 1 else 1
-            obs_dict = {
-                'observation': obs,
-                'reachability_features': torch.zeros(batch_size, 8, device=obs.device),
-                'switch_states': torch.zeros(batch_size, 5, device=obs.device),
-                'ninja_position': torch.zeros(batch_size, 2, device=obs.device),
-                'time_remaining': torch.ones(batch_size, 1, device=obs.device),
-            }
-        else:
-            obs_dict = obs
+        obs_dict = self._ensure_obs_dict(obs)
         
         # Forward through hierarchical network
         actions, values, log_probs, info = self.mlp_extractor(
@@ -175,35 +195,12 @@ class HierarchicalActorCriticPolicy(ActorCriticPolicy):
         Returns:
             Tuple of (values, log_probs, entropy)
         """
-        # Convert obs to dict if needed
-        if not isinstance(obs, dict):
-            batch_size = obs.shape[0] if len(obs.shape) > 1 else 1
-            obs_dict = {
-                'observation': obs,
-                'reachability_features': torch.zeros(batch_size, 8, device=obs.device),
-                'switch_states': torch.zeros(batch_size, 5, device=obs.device),
-                'ninja_position': torch.zeros(batch_size, 2, device=obs.device),
-                'time_remaining': torch.ones(batch_size, 1, device=obs.device),
-            }
-        else:
-            obs_dict = obs
-        
+        obs_dict = self._ensure_obs_dict(obs)
         return self.mlp_extractor.evaluate_actions(obs_dict, actions)
     
     def predict_values(self, obs: torch.Tensor) -> torch.Tensor:
         """Predict values for given observations."""
-        if not isinstance(obs, dict):
-            batch_size = obs.shape[0] if len(obs.shape) > 1 else 1
-            obs_dict = {
-                'observation': obs,
-                'reachability_features': torch.zeros(batch_size, 8, device=obs.device),
-                'switch_states': torch.zeros(batch_size, 5, device=obs.device),
-                'ninja_position': torch.zeros(batch_size, 2, device=obs.device),
-                'time_remaining': torch.ones(batch_size, 1, device=obs.device),
-            }
-        else:
-            obs_dict = obs
-        
+        obs_dict = self._ensure_obs_dict(obs)
         return self.mlp_extractor.get_value(obs_dict)
     
     def reset_episode(self):

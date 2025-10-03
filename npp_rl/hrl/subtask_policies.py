@@ -393,14 +393,14 @@ class ICMIntegration(nn.Module):
         Returns:
             Modulated curiosity rewards [batch_size]
         """
-        batch_size = base_curiosity.shape[0]
         modulated = base_curiosity.clone()
         
-        # Apply subtask-specific modulation
-        for i in range(batch_size):
-            subtask = Subtask(subtask_indices[i].item())
-            modulation_factor = self.subtask_modulation.get(subtask, 1.0)
-            modulated[i] *= modulation_factor
+        # Apply subtask-specific modulation (vectorized)
+        modulation_factors = torch.ones_like(base_curiosity)
+        for subtask, factor in self.subtask_modulation.items():
+            mask = subtask_indices == subtask.value
+            modulation_factors[mask] = factor
+        modulated = modulated * modulation_factors
         
         # Reduce curiosity near dangerous mines (safety)
         mine_danger_threshold = 2.0
@@ -436,6 +436,10 @@ class SubtaskSpecificFeatures:
     
     This provides utility methods for computing target positions, distances,
     and other context features needed by the low-level policy.
+    
+    Note: The methods in this class provide placeholder implementations.
+    Users should extend this class and override methods to extract actual
+    features from their environment's observation space.
     """
     
     @staticmethod
@@ -452,20 +456,20 @@ class SubtaskSpecificFeatures:
             
         Returns:
             Target position [2] (normalized)
+            
+        Note:
+            This is a placeholder implementation returning dummy values.
+            Override this method to extract actual positions from your
+            environment's observation structure.
         """
-        # This would extract from observation based on subtask
-        # Placeholder implementation
+        # Placeholder implementation - override in subclass
         if subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
-            # Extract exit switch position from obs
             return np.array([0.5, 0.5], dtype=np.float32)
         elif subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
-            # Extract nearest locked door switch position
             return np.array([0.3, 0.7], dtype=np.float32)
         elif subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
-            # Extract exit door position
             return np.array([0.8, 0.2], dtype=np.float32)
         else:  # EXPLORE_FOR_SWITCHES
-            # No specific target
             return np.array([0.5, 0.5], dtype=np.float32)
     
     @staticmethod
@@ -486,7 +490,11 @@ class SubtaskSpecificFeatures:
             
         Returns:
             Distance to nearest dangerous mine (normalized)
+            
+        Note:
+            This is a placeholder implementation returning a safe distance.
+            Override this method to compute actual mine proximity from your
+            environment's observation structure.
         """
-        # This would extract mine positions and states from obs
-        # Placeholder implementation
+        # Placeholder implementation - override in subclass
         return 5.0  # Safe distance

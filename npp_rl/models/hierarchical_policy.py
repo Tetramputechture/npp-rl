@@ -116,7 +116,8 @@ class HierarchicalPolicyNetwork(nn.Module):
         
         # Step tracking
         self.step_count = 0
-        self.current_subtask = torch.tensor([0])  # Start with NAVIGATE_TO_EXIT_SWITCH
+        # Register current_subtask as a buffer so it moves with the model
+        self.register_buffer('current_subtask', torch.tensor([0], dtype=torch.long))
         
     def forward(
         self,
@@ -221,18 +222,24 @@ class HierarchicalPolicyNetwork(nn.Module):
             
         Returns:
             Context dictionary with target info, mine proximity, etc.
+            
+        Note:
+            This is a placeholder implementation. In a full implementation,
+            these values should be extracted from the observation dictionary
+            using environment-specific logic (see SubtaskSpecificFeatures class
+            for helper methods).
         """
         batch_size = obs['reachability_features'].shape[0]
         device = obs['reachability_features'].device
         
-        # For now, use placeholder values
-        # In full implementation, these would be extracted from observations
+        # Placeholder implementation - override or extend for actual use
         context = {
             'target_position': torch.zeros(batch_size, 2, device=device),
             'distance_to_target': torch.ones(batch_size, 1, device=device),
-            'mine_proximity': torch.ones(batch_size, 1, device=device) * 5.0,
-            'time_in_subtask': torch.tensor(
-                [[self.transition_manager.subtask_step_count / 500.0]] * batch_size,
+            'mine_proximity': torch.full((batch_size, 1), 5.0, device=device),
+            'time_in_subtask': torch.full(
+                (batch_size, 1),
+                self.transition_manager.subtask_step_count / 500.0,
                 device=device
             ),
         }
@@ -316,13 +323,19 @@ class HierarchicalPolicyNetwork(nn.Module):
     def reset_episode(self):
         """Reset policy state for new episode."""
         self.step_count = 0
-        self.current_subtask = torch.tensor([0])  # Reset to NAVIGATE_TO_EXIT_SWITCH
+        # Reset to NAVIGATE_TO_EXIT_SWITCH, maintaining device
+        self.current_subtask = torch.tensor([0], dtype=torch.long, device=self.current_subtask.device)
         self.transition_manager.reset()
     
     def get_subtask_metrics(self) -> Dict[str, Any]:
-        """Get metrics about subtask performance."""
+        """
+        Get metrics about subtask performance.
+        
+        Note: This method assumes single-environment (non-batched) execution.
+        For batched environments, metrics would need to be computed per environment.
+        """
         return {
-            'current_subtask': Subtask(self.current_subtask.item()).name,
+            'current_subtask': Subtask(self.current_subtask[0].item()).name,
             'subtask_step_count': self.transition_manager.subtask_step_count,
             'total_steps': self.step_count,
             'high_level_updates': self.step_count // self.high_level_update_frequency,
@@ -337,6 +350,11 @@ class HierarchicalExperienceBuffer:
     - Low-level experiences (every step)
     - High-level experiences (every N steps)
     - Subtask context for proper credit assignment
+    
+    Note:
+        This implementation uses Python lists for simplicity. For production use
+        with large buffers, consider using numpy arrays or circular buffers for
+        better memory efficiency and performance.
     """
     
     def __init__(
