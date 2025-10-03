@@ -27,6 +27,7 @@ from typing import Dict, Any, Optional
 from collections import deque
 
 from .reachability_exploration import ReachabilityAwareExplorationCalculator
+from .mine_aware_curiosity import MineAwareCuriosityModulator
 
 
 class ICMNetwork(nn.Module):
@@ -48,6 +49,7 @@ class ICMNetwork(nn.Module):
         eta: float = 0.01,
         lambda_inv: float = 0.1,
         lambda_fwd: float = 0.9,
+        enable_mine_awareness: bool = True,
         debug: bool = False,
     ):
         """
@@ -60,6 +62,7 @@ class ICMNetwork(nn.Module):
             eta: Intrinsic reward scaling factor
             lambda_inv: Weight for inverse model loss
             lambda_fwd: Weight for forward model loss
+            enable_mine_awareness: Enable mine-aware curiosity modulation
             debug: Enable debug output
         """
         super().__init__()
@@ -70,6 +73,7 @@ class ICMNetwork(nn.Module):
         self.eta = eta
         self.lambda_inv = lambda_inv
         self.lambda_fwd = lambda_fwd
+        self.enable_mine_awareness = enable_mine_awareness
         self.debug = debug
 
         # Standard ICM components
@@ -92,6 +96,9 @@ class ICMNetwork(nn.Module):
         self.reachability_calculator = ReachabilityAwareExplorationCalculator(
             debug=debug
         )
+        
+        # Mine-aware curiosity modulator
+        self.mine_modulator = MineAwareCuriosityModulator(debug=debug) if enable_mine_awareness else None
 
         # Performance tracking
         self.computation_times = deque(maxlen=100)
@@ -160,6 +167,12 @@ class ICMNetwork(nn.Module):
         modulated_curiosity = self._apply_reachability_modulation(
             base_curiosity, observations
         )
+        
+        # Apply mine-aware modulation if enabled
+        if self.enable_mine_awareness and self.mine_modulator is not None:
+            modulated_curiosity = self._apply_mine_aware_modulation(
+                modulated_curiosity, observations
+            )
 
         # Track performance
         computation_time = (time.time() - start_time) * 1000
@@ -194,6 +207,42 @@ class ICMNetwork(nn.Module):
 
         return modulated_curiosity
 
+    def _apply_mine_aware_modulation(
+        self, base_curiosity: torch.Tensor, observations: Dict[str, Any]
+    ) -> torch.Tensor:
+        """
+        Apply mine-aware curiosity modulation.
+        
+        Reduces curiosity near dangerous mines to discourage risky exploration.
+        """
+        batch_size = base_curiosity.shape[0]
+        modulated_curiosity = base_curiosity.clone()
+        
+        for i in range(batch_size):
+            # Extract single observation
+            obs_i = self._extract_single_observation(observations, i)
+            
+            # Get mine proximity from observation
+            mine_proximity = obs_i.get("mine_proximity", float('inf'))
+            path_safety = obs_i.get("path_safety", True)
+            
+            # Convert torch tensors to python scalars if needed
+            if isinstance(mine_proximity, torch.Tensor):
+                mine_proximity = mine_proximity.item()
+            if isinstance(path_safety, torch.Tensor):
+                path_safety = bool(path_safety.item())
+            
+            # Apply mine-aware modulation
+            curiosity_value = modulated_curiosity[i].item()
+            modulated_value = self.mine_modulator.modulate_curiosity(
+                curiosity_value,
+                mine_proximity,
+                path_safety
+            )
+            modulated_curiosity[i] = modulated_value
+        
+        return modulated_curiosity
+    
     def _extract_single_observation(
         self, observations: Dict[str, Any], index: int
     ) -> Dict[str, Any]:

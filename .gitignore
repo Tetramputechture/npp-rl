@@ -25,6 +25,7 @@ env/
 .venv/
 .ENV/
 .env/
+.env
 
 # Data directory
 data/

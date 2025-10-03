@@ -398,7 +398,6 @@ def modulate_curiosity_for_mines(self, curiosity_reward, mine_proximity):
 **Testing requirements**:
 - Unit tests for mine state processing
 
-
 ---
 
 ### Task 2.4: Training Stability and Optimization
