@@ -12,7 +12,6 @@ import unittest
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from typing import Dict, Any, Tuple
 
 from npp_rl.wrappers.hierarchical_reward_wrapper import (
     HierarchicalRewardWrapper,

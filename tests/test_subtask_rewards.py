@@ -248,9 +248,6 @@ class TestNavigateToExitDoorReward(unittest.TestCase):
         switch_calculator = SubtaskRewardCalculator()
         switch_subtask = Subtask.NAVIGATE_TO_EXIT_SWITCH
         
-        # Same distance improvement for both
-        distance_improvement = 10.0
-        
         # Exit door progress
         exit_prev = self.create_obs(150.0, 150.0)
         exit_curr = self.create_obs(160.0, 160.0)
