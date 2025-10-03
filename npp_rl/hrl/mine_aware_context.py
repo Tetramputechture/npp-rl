@@ -5,7 +5,6 @@ This module provides utilities for mine-aware subtask execution,
 including danger scoring, path safety evaluation, and priority modulation.
 """
 
-import numpy as np
 from typing import Tuple
 
 
