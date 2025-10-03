@@ -560,23 +560,10 @@ class AdaptiveHierarchicalTrainer:
 
 ## Success Criteria for Phase 2
 
-**Primary objectives**:
-- [ ] Two-level hierarchical architecture trains stably
-- [ ] Subtask-specific rewards improve learning efficiency
-- [ ] Mine avoidance integrated successfully
-- [ ] Multi-switch levels completed with >60% success rate
-- [ ] Training stability maintained over long runs
-
-**Performance targets**:
-- [ ] Multi-switch level completion: >60% success rate
-- [ ] Training stability: 5000+ episodes without collapse
-- [ ] Mine safety: <5% deaths due to mine contact
-- [ ] Efficiency: Competitive steps-to-completion vs baseline
 
 **Quality gates**:
 - [ ] All hierarchical components tested and validated
 - [ ] Training procedures documented and reproducible
-- [ ] Performance benchmarks established
 - [ ] Code review and documentation completed
 
 This phase establishes sophisticated hierarchical control that can handle complex multi-switch levels while maintaining training stability and safety around mine hazards.
