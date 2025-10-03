@@ -253,8 +253,6 @@ class HierarchicalRewardCalculator:
 
 **Testing requirements**:
 - Unit tests for each subtask reward function
-- Integration tests showing reward calculation correctness
-- Training tests demonstrating improved learning efficiency
 - Balance tests ensuring no reward component dominates
 
 ---
@@ -399,13 +397,11 @@ def modulate_curiosity_for_mines(self, curiosity_reward, mine_proximity):
 
 **Testing requirements**:
 - Unit tests for mine state processing
-- Integration tests for mine-aware reachability analysis
-- Behavioral tests showing mine avoidance in navigation
-- Safety tests ensuring ninja doesn't die to mines unnecessarily
+
 
 ---
 
-### Task 2.4: Training Stability and Optimization (3-5 days)
+### Task 2.4: Training Stability and Optimization
 
 **What we want to do**: Ensure stable training across both hierarchical policy levels with proper hyperparameter tuning and learning coordination.
 
@@ -532,19 +528,6 @@ class AdaptiveHierarchicalTrainer:
 - Gradient clipping to prevent instability
 - Experience replay balancing between policy levels
 
-**Acceptance criteria**:
-- [ ] Training remains stable over 5000+ episodes
-- [ ] Both policy levels show consistent improvement
-- [ ] No catastrophic forgetting or policy collapse
-- [ ] Hyperparameters optimized for hierarchical structure
-- [ ] Adaptive procedures maintain training stability
-- [ ] Multi-switch levels show >60% completion rate
-
-**Testing requirements**:
-- Long-term training stability tests (10k+ episodes)
-- Hyperparameter sensitivity analysis
-- Performance regression tests
-- Stability monitoring validation
 
 ## Dependencies and Prerequisites
 
