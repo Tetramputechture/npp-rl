@@ -15,7 +15,7 @@ The wrapper:
 
 import gymnasium as gym
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 from collections import deque
 
 from npp_rl.hrl.subtask_rewards import SubtaskRewardCalculator

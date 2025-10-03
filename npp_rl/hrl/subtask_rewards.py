@@ -18,9 +18,8 @@ The rewards are designed to:
 - Balance with base rewards to maintain training stability
 """
 
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 import numpy as np
-from enum import Enum
 
 from npp_rl.hrl.high_level_policy import Subtask
 

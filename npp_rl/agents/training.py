@@ -309,7 +309,7 @@ def train_hierarchical_agent(
         }
         json.dump(hyperparams, f, indent=2)
 
-    print(f"Starting hierarchical training...")
+    print("Starting hierarchical training...")
     print(f"Logs will be saved to: {log_dir}")
 
     # Train the model
