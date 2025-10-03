@@ -60,19 +60,19 @@ class TestMineState:
     
     def test_mine_danger_status(self):
         """Test mine danger status based on state."""
-        # Safe state
-        mine_safe = MineState(1, (0, 0), MineState.UNTOGGLED)
-        assert mine_safe.is_safe
-        assert not mine_safe.is_dangerous
+        # Safe states
+        mine_untoggled = MineState(1, (0, 0), MineState.UNTOGGLED)
+        assert mine_untoggled.is_safe
+        assert not mine_untoggled.is_dangerous
         
-        # Dangerous states
-        mine_toggled = MineState(2, (0, 0), MineState.TOGGLED)
+        mine_toggling = MineState(2, (0, 0), MineState.TOGGLING)
+        assert mine_toggling.is_safe  # Safe because player is overlapping
+        assert not mine_toggling.is_dangerous
+        
+        # Dangerous state
+        mine_toggled = MineState(3, (0, 0), MineState.TOGGLED)
         assert not mine_toggled.is_safe
         assert mine_toggled.is_dangerous
-        
-        mine_toggling = MineState(3, (0, 0), MineState.TOGGLING)
-        assert not mine_toggling.is_safe
-        assert mine_toggling.is_dangerous
     
     def test_mine_distance_calculation(self):
         """Test distance calculation to mine."""
@@ -177,9 +177,9 @@ class TestMineStateProcessor:
         
         ninja_pos = (100.0, 100.0)
         
-        # Get all dangerous mines
+        # Get all dangerous mines - only mine1 (TOGGLED)
         dangerous = processor.get_dangerous_mines(ninja_pos)
-        assert len(dangerous) == 2  # mine1 and mine3
+        assert len(dangerous) == 1  # Only mine1, mine3 is safe (toggling)
         
         # Get within distance
         dangerous_close = processor.get_dangerous_mines(ninja_pos, max_distance=50.0)
@@ -270,8 +270,8 @@ class TestMineStateProcessor:
         stats = processor.get_summary_stats()
         
         assert stats['total_mines'] == 3
-        assert stats['dangerous_mines'] == 2
-        assert stats['safe_mines'] == 1
+        assert stats['dangerous_mines'] == 1  # Only TOGGLED is dangerous
+        assert stats['safe_mines'] == 2  # UNTOGGLED and TOGGLING are safe
     
     def test_processor_reset(self):
         """Test processor reset."""

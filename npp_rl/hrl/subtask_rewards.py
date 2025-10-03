@@ -475,8 +475,9 @@ class SubtaskRewardCalculator:
     
     def _get_nearest_dangerous_mine_distance(self, obs: Dict[str, Any]) -> Optional[float]:
         """
-        Get distance to nearest dangerous (toggled/toggling) mine.
+        Get distance to nearest dangerous (toggled) mine.
         
+        Only TOGGLED mines are dangerous. UNTOGGLED and TOGGLING are safe.
         Placeholder implementation - should extract from mine state in obs.
         """
         # Placeholder: would extract from mine entity information
