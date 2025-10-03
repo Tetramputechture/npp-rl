@@ -1,7 +1,5 @@
 # Phase 4: Advanced Features (Optional)
 
-**Timeline**: 2-4 weeks  
-**Priority**: Medium (Optional Enhancement)  
 **Dependencies**: Phase 3 completed  
 
 ## Overview
@@ -18,7 +16,7 @@ This phase implements advanced features that enhance the agent's capabilities be
 
 ## Task Breakdown
 
-### Task 4.1: Human Replay Integration (2-3 weeks)
+### Task 4.1: Human Replay Integration
 
 **What we want to do**: Process human replay data to extract completion-focused behavioral patterns and integrate them into the training pipeline through behavioral cloning pre-training.
 
@@ -223,7 +221,7 @@ class HybridTrainer:
 
 ---
 
-### Task 4.2: Advanced Model Architecture Evaluation (1-2 weeks)
+### Task 4.2: Advanced Model Architecture Evaluation
 
 **What we want to do**: Evaluate whether upgrading to more sophisticated model architectures (full HGT, advanced attention mechanisms) provides performance benefits that justify the increased complexity.
 
@@ -370,7 +368,7 @@ class ArchitectureComparison:
 
 ---
 
-### Task 4.3: Curriculum Learning Implementation (1-2 weeks)
+### Task 4.3: Curriculum Learning Implementation
 
 **What we want to do**: Implement progressive difficulty training that starts with simple levels and gradually increases complexity to improve generalization and training efficiency.
 
@@ -596,7 +594,7 @@ class CurriculumTrainer:
 
 ---
 
-### Task 4.4: Advanced Exploration Strategies (Optional - 1 week)
+### Task 4.4: Advanced Exploration Strategies
 
 **What we want to do**: Implement advanced exploration techniques beyond ICM to further improve exploration efficiency in complex levels.
 

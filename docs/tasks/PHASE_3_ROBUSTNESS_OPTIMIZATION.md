@@ -1,7 +1,5 @@
 # Phase 3: Robustness & Optimization
 
-**Timeline**: 2-3 weeks  
-**Priority**: High  
 **Dependencies**: Phase 2 completed  
 
 ## Overview
@@ -18,7 +16,7 @@ This phase focuses on optimizing the hierarchical system for robustness and perf
 
 ## Task Breakdown
 
-### Task 3.1: Model Architecture Optimization (1-2 weeks)
+### Task 3.1: Model Architecture Optimization
 
 **What we want to do**: Optimize the neural network architecture to balance complexity with performance, focusing on the simplified 6-node-type entity system and efficient attention mechanisms.
 
@@ -171,7 +169,7 @@ class ArchitectureBenchmark:
 
 ---
 
-### Task 3.2: Advanced ICM Integration (1 week)
+### Task 3.2: Advanced ICM Integration
 
 **What we want to do**: Optimize ICM for completion-focused exploration in physics-uncertain environments, with reachability-modulated curiosity and subtask-aware exploration.
 

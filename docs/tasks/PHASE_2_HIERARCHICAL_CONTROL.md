@@ -1,7 +1,5 @@
 # Phase 2: Hierarchical Control
 
-**Timeline**: 3-4 weeks  
-**Priority**: Critical  
 **Dependencies**: Phase 1 completed  
 
 ## Overview
@@ -18,7 +16,7 @@ This phase implements a sophisticated two-level hierarchical reinforcement learn
 
 ## Task Breakdown
 
-### Task 2.1: Two-Level Policy Architecture (2-3 weeks)
+### Task 2.1: Two-Level Policy Architecture
 
 **What we want to do**: Implement a sophisticated hierarchical architecture where a high-level policy selects subtasks based on reachability analysis, and a low-level policy executes movement actions with ICM-enhanced exploration.
 
@@ -133,7 +131,7 @@ class HierarchicalPolicy(nn.Module):
 - Automatic transitions based on completion planner output
 - Timeout-based transitions (max 500 steps per subtask)
 - Success-based transitions (switch activated, exit reached)
-- Failure-based transitions (stuck detection)
+- Failure-based transitions (stuck detection, when the exit door or exit switch is not reachable and no locked door switch is reachable)
 
 **Acceptance criteria**:
 - [ ] High-level policy successfully selects appropriate subtasks
@@ -145,13 +143,11 @@ class HierarchicalPolicy(nn.Module):
 
 **Testing requirements**:
 - Unit tests for policy architecture components
-- Integration tests for hierarchical training loop
-- Performance tests showing stable learning curves
-- Functional tests on multi-switch levels
+
 
 ---
 
-### Task 2.2: Subtask-Specific Reward Functions (1 week)
+### Task 2.2: Subtask-Specific Reward Functions
 
 **What we want to do**: Implement dense reward functions that provide clear feedback for each subtask, enabling efficient learning of hierarchical behaviors.
 
@@ -263,7 +259,7 @@ class HierarchicalRewardCalculator:
 
 ---
 
-### Task 2.3: Mine Avoidance Integration (1 week)
+### Task 2.3: Mine Avoidance Integration
 
 **What we want to do**: Integrate mine state awareness and avoidance behavior into the hierarchical navigation system, using reachability analysis to plan safe paths.
 
