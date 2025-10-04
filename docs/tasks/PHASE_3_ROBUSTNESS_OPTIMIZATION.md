@@ -353,7 +353,7 @@ class AdaptiveExplorationScheduler:
 
 ---
 
-### Task 3.3: Comprehensive Evaluation Framework (3-5 days)
+### Task 3.3: Comprehensive Evaluation Framework
 
 **What we want to do**: Establish a comprehensive evaluation framework that measures performance across diverse level types and provides detailed analysis of agent capabilities.
 
@@ -537,7 +537,7 @@ class PerformanceAnalyzer:
 
 ---
 
-### Task 3.4: Hardware Optimization (3-5 days)
+### Task 3.4: Hardware Optimization
 
 **What we want to do**: Optimize training for H100 GPU hardware with mixed-precision training, efficient memory usage, and distributed training capabilities.
 
