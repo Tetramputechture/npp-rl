@@ -155,17 +155,286 @@ class ArchitectureBenchmark:
 
 **Acceptance criteria**:
 - [ ] Architecture comparison framework implemented
-- [ ] All architecture variants tested systematically
-- [ ] Optimal architecture selected based on objective criteria
-- [ ] Selected architecture achieves <10ms inference time
-- [ ] Performance maintained or improved vs Phase 2 baseline
-- [ ] Memory usage optimized for long training runs
 
-**Testing requirements**:
-- Performance benchmarks for all architecture variants
-- Inference time measurements under realistic conditions
-- Memory profiling during extended training
-- Generalization testing across level types
+---
+
+#### Vision-Free Architecture Analysis
+
+**Research Question**: Can the NPP-RL agent learn effectively without visual input by relying solely on graph, game state, and reachability features?
+
+**Motivation**: Visual processing (3D CNN for temporal frames + 2D CNN for global view) represents significant computational overhead (~60% of inference time). Understanding whether visual input is necessary or redundant could enable dramatic performance improvements.
+
+##### Available Non-Visual Information
+
+The agent currently receives rich non-visual features that encode comprehensive game state:
+
+**1. Game State Vector (30 features)**:
+- **Core Movement State (8)**: Velocity magnitude/direction, movement state categories (ground/air/wall/special), airborne status
+- **Input & Buffer State (5)**: Current horizontal/jump inputs, jump/floor/wall buffer states (critical for frame-perfect timing)
+- **Surface Contact (6)**: Floor/wall/ceiling contact strength, floor normal strength, wall direction, surface slope
+- **Momentum & Physics (4)**: Recent acceleration (x/y), momentum preservation, impact risk assessment
+- **Entity Proximity (4)**: Nearest hazard distance, nearest collectible distance, hazard threat level, interaction cooldown
+- **Level Progress (3)**: Switch activation status, exit accessibility, completion progress
+
+**2. Graph Representation (up to 18,000 nodes, 144,000 edges)**:
+- **Node Features**: Position (x, y), node type (6 types: tile, ninja, hazard, collectible, switch, exit)
+- **Edge Features**: Connectivity type (adjacent, reachable), weights
+- **Spatial Structure**: Encodes tile types, entity positions, level topology
+- **Type-Specific Processing**: HGT processes different node/edge types with specialized attention
+
+**3. Reachability Features (8 features)**:
+- Reachable area ratio, current objective distance
+- Switch accessibility, exit accessibility
+- Hazard proximity, connectivity score
+- Analysis confidence, computation time
+
+##### Information Coverage Analysis
+
+**What visual input provides**:
+1. **Fine-grained spatial awareness**: Pixel-level detail of nearby tiles and slopes
+2. **Temporal motion patterns**: 12-frame stack captures movement dynamics
+3. **Global level layout**: 176x100 downsampled view of entire level
+4. **Immediate surroundings**: Visual context around ninja position
+5. **Slope angles and geometry**: Precise visual representation of terrain
+
+**What non-visual features already encode**:
+1. ✅ **Tile types and positions**: Graph nodes encode exact tile positions and types
+2. ✅ **Entity locations**: Graph explicitly represents all entity positions
+3. ✅ **Movement state**: Game state captures velocity, direction, airborne status, surface contact
+4. ✅ **Physics state**: Acceleration, momentum, impact risk, surface normals/slopes
+5. ✅ **Connectivity**: Graph edges encode adjacency and reachability
+6. ✅ **Spatial relationships**: Graph topology + reachability features
+7. ✅ **Objectives**: Switch/exit positions and accessibility explicitly provided
+8. ✅ **Timing information**: Input buffers (5-frame windows) encode critical timing state
+
+**Critical capabilities requiring visual input**:
+1. ❓ **Precise slope angle perception**: Surface slopes are in game state (feature 19), but visual may help with complex curved geometry
+2. ❓ **Immediate hazard patterns**: Visual patterns might help recognize dangerous configurations
+3. ❓ **Movement pattern recognition**: Temporal stack captures recent movement, but game state has velocity/acceleration
+4. ❓ **Spatial reasoning shortcuts**: Visual CNN may learn spatial shortcuts that graph processing doesn't capture efficiently
+
+##### Comparative Analysis: Graph-Based vs Vision-Based RL
+
+**Research Evidence**:
+
+1. **Structured Representations in RL** (Pathak et al., 2019; Zambaldi et al., 2019):
+   - Graph-based representations can match or exceed vision-based performance when structural information is relevant
+   - Relational reasoning through GNNs provides strong inductive bias for structured environments
+   - Particularly effective in environments with discrete entities and clear spatial relationships (✅ matches N++)
+
+2. **Cross-Modality Transfer** (Lesort et al., 2019):
+   - Policies can be trained with one modality and transferred to another
+   - Latent representations can be learned that are modality-agnostic
+   - Suggests vision may not be strictly necessary if other modalities capture essential information
+
+3. **Tactile/Non-Visual RL** (Van Hoof et al., 2016):
+   - Agents can achieve robust performance using non-visual sensory data
+   - Key requirement: information richness and task-relevance of available features
+   - Success demonstrated in manipulation tasks with tactile feedback only
+
+4. **Attention Mechanisms for Perception** (Mnih et al., 2014):
+   - Hard attention can enable effective learning with partial observations
+   - Graph attention mechanisms can selectively focus on relevant spatial regions
+   - Suggests graph-based attention may substitute for visual attention
+
+**N++ Specific Considerations**:
+
+**Arguments FOR vision-free learning**:
+1. **Discrete tile structure**: N++ uses 24x24 pixel tiles with discrete types - perfectly captured by graph nodes
+2. **Entity-centric gameplay**: Core challenges involve entity interactions (switches, mines, doors) - all explicitly in graph
+3. **Physics state completeness**: Game state vector includes all physics parameters needed for movement decisions
+4. **Timing criticality**: Frame-perfect timing depends on buffer states, which are explicitly provided, not visual cues
+5. **Reachability information**: Strategic navigation already encoded in reachability features
+6. **Deterministic physics**: Unlike real-world robotics, N++ physics is deterministic and fully observable through state features
+
+**Arguments AGAINST vision-free learning**:
+1. **Complex slope geometry**: Curved tiles (quarter moons, quarter pipes) have subtle geometry that may be clearer visually
+2. **Spatial pattern recognition**: Visual CNNs excel at recognizing spatial patterns that may be harder for GNNs
+3. **Immediate danger detection**: Visual processing might enable faster recognition of dangerous configurations
+4. **Emergent visual features**: CNNs may learn useful intermediate representations not explicitly in graph/state
+5. **Partial observability handling**: Visual frames might help handle any information gaps in explicit features
+
+##### Feasibility Assessment
+
+**HIGH FEASIBILITY scenarios (Recommended for testing)**:
+
+**Scenario 1: Remove Global View Only**
+- **Rationale**: Global view (176x100) provides strategic overview, but graph + reachability features encode same information more efficiently
+- **Keep**: Local temporal frames (84x84x12) for immediate spatial awareness
+- **Expected impact**: 30-40% inference speedup with minimal performance loss
+- **Risk**: Low - local frames retain immediate spatial information
+
+**Scenario 2: Keep Local Frames Only, No Global View**
+- **Rationale**: Same as Scenario 1, already the architecture we should test
+- **Implementation**: Disable global view CNN branch in HGTMultimodalExtractor
+- **Expected impact**: Same as Scenario 1
+
+**MEDIUM FEASIBILITY scenarios**:
+
+**Scenario 3: Complete Vision-Free Architecture**
+- **Rationale**: All spatial/structural information is in graph, all physics in game state
+- **Architecture**: Graph + Game State + Reachability features only
+- **Expected impact**: 60-70% inference speedup, uncertain performance impact
+- **Risk**: Medium - requires thorough testing to validate information sufficiency
+
+**Scenario 4: Vision-Free with Enhanced Graph Features**
+- **Rationale**: Augment graph with additional spatial features to compensate for vision removal
+- **Enhancements**: 
+  - Add slope angle/curvature as node features
+  - Include local tile neighborhood patterns in node embeddings
+  - Augment with temporal velocity history in graph
+- **Expected impact**: Better than Scenario 3, may approach vision-based performance
+- **Risk**: Medium - requires graph feature engineering
+
+**LOW FEASIBILITY scenarios**:
+
+**Scenario 5: Hybrid Attention-Based Vision**
+- **Rationale**: Use visual input only when graph-based features are uncertain
+- **Implementation**: Learn to attend to vision vs graph based on context
+- **Risk**: High complexity, unclear benefit over simpler approaches
+
+##### Recommended Experimental Protocol
+
+**Phase 1: Baseline Validation**
+1. Establish baseline performance with full visual input (current architecture)
+2. Measure inference time breakdown: Visual (3D CNN + 2D CNN) vs Graph vs State processing
+3. Analyze feature importance through ablation studies
+
+**Phase 2: Progressive Vision Reduction**
+1. **Experiment 2.1**: Remove global view (Scenario 1)
+   - Train for 5M timesteps
+   - Evaluate success rate, efficiency, inference time
+   - Analyze failure modes vs baseline
+
+2. **Experiment 2.2**: Complete vision removal (Scenario 3)
+   - Train for 5M timesteps with graph + state + reachability only
+   - Compare convergence speed and final performance
+   - Detailed analysis of spatial reasoning capabilities
+
+3. **Experiment 2.3**: Enhanced graph features (Scenario 4)
+   - If Experiment 2.2 shows deficits, augment graph features
+   - Focus on areas where visual input seemed necessary
+   - Retest and compare
+
+**Phase 3: Comparative Analysis**
+1. Compare all architectures on standardized test suite (Task 3.3)
+2. Analyze per-category performance (simple, medium, complex, mine-heavy, exploration)
+3. Identify specific scenarios where vision helps/hurts
+4. Generate architecture recommendations
+
+##### Implementation Considerations
+
+**Modified HGTMultimodalExtractor**:
+```python
+class ConfigurableMultimodalExtractor(nn.Module):
+    def __init__(
+        self,
+        observation_space,
+        features_dim=512,
+        use_temporal_frames=True,  # 84x84x12 local frames
+        use_global_view=True,      # 176x100 global view
+        use_graph=True,
+        use_state=True,
+        use_reachability=True,
+        enhanced_graph_features=False
+    ):
+        self.modality_config = {
+            'temporal': use_temporal_frames,
+            'global': use_global_view,
+            'graph': use_graph,
+            'state': use_state,
+            'reachability': use_reachability
+        }
+        
+        # Initialize only enabled modalities
+        if use_temporal_frames:
+            self.temporal_cnn = TemporalCNN3D(...)
+        if use_global_view:
+            self.spatial_cnn = SpatialCNN2D(...)
+        if use_graph:
+            if enhanced_graph_features:
+                self.graph_processor = EnhancedHGT(...)
+            else:
+                self.graph_processor = HGTEncoder(...)
+        # ... etc
+        
+        # Adaptive fusion based on enabled modalities
+        self.fusion = AdaptiveFusion(enabled_modalities=self.modality_config)
+```
+
+**Testing Framework**:
+```python
+class VisionAblationStudy:
+    def __init__(self):
+        self.configurations = {
+            'full_vision': {'temporal': True, 'global': True, 'graph': True},
+            'local_only': {'temporal': True, 'global': False, 'graph': True},
+            'vision_free': {'temporal': False, 'global': False, 'graph': True},
+            'enhanced_graph': {'temporal': False, 'global': False, 'graph': True, 
+                              'enhanced_graph_features': True}
+        }
+    
+    def run_study(self, timesteps=5_000_000):
+        results = {}
+        for name, config in self.configurations.items():
+            model = self.train_model(config, timesteps)
+            results[name] = self.evaluate_model(model)
+        return self.compare_results(results)
+```
+
+##### Expected Outcomes & Recommendations
+
+**Optimistic Scenario** (60% probability):
+- Vision-free or local-frames-only achieves >90% of full-vision performance
+- Inference time reduces by 40-60%
+- Training becomes more sample-efficient due to simpler architecture
+- **Recommendation**: Adopt vision-free or local-only architecture
+
+**Moderate Scenario** (30% probability):
+- Vision-free achieves 70-85% of full-vision performance
+- Specific failure modes in complex geometric scenarios
+- Enhanced graph features bridge most of the gap
+- **Recommendation**: Use local frames only, or enhanced graph features
+
+**Pessimistic Scenario** (10% probability):
+- Vision-free performs <70% of full-vision baseline
+- Critical spatial reasoning depends on visual processing
+- Graph features insufficient for complex geometries
+- **Recommendation**: Keep full visual processing, optimize CNN architectures instead
+
+**Key Decision Factors**:
+1. **Performance threshold**: If vision-free achieves >85% of full-vision success rate, the 60% inference speedup is likely worth the trade-off
+2. **Generalization**: Test across all level categories - if vision-free generalizes better, it may be preferred even with slightly lower average performance
+3. **Training efficiency**: Simpler architectures may train faster and require less data
+4. **Real-time constraints**: If deployment requires <5ms inference, vision-free may be necessary regardless of performance impact
+
+##### Integration with Task 3.1
+
+**Add to architecture comparison framework**:
+```python
+class ArchitectureComparison:
+    def __init__(self):
+        self.architectures = {
+            'full_hgt': FullHGTModel(node_types=6, edge_types=3),
+            'simplified_hgt': SimplifiedHGTModel(node_types=4, edge_types=2),
+            'gat': GATModel(node_types=4),
+            'gcn': GCNModel(node_types=4),
+            'mlp_baseline': MLPModel(),  # No graph processing
+            
+            # Vision ablation variants
+            'full_vision': FullMultimodalExtractor(temporal=True, global=True),
+            'local_vision_only': MultimodalExtractor(temporal=True, global=False),
+            'vision_free': VisionFreeExtractor(temporal=False, global=False),
+            'enhanced_graph': EnhancedGraphExtractor(enhanced_features=True)
+        }
+```
+
+**Acceptance Criteria Updates**:
+- [ ] Vision ablation study completed with all scenarios tested
+- [ ] Performance comparison across vision configurations documented
+- [ ] Inference time improvements measured and validated
+- [ ] Optimal vision configuration selected based on performance/efficiency trade-off
+- [ ] If vision-free selected, validate across all level categories (Task 3.3 test suite)
 
 ---
 
