@@ -6,6 +6,15 @@ Network) as simpler alternatives to the full HGT architecture.
 
 These serve as baselines to evaluate whether the complexity of HGT is necessary
 for the N++ completion task.
+
+IMPORTANT PERFORMANCE NOTES:
+- These implementations prioritize simplicity and readability for research comparison
+- GCNLayer uses iterative aggregation which is not optimized for large graphs
+- GATLayer uses dense attention for simplicity (not sparse edge-based attention)
+- For production use with large graphs, consider using PyTorch Geometric or
+  torch_scatter for optimized sparse graph operations
+- Current implementations are suitable for benchmarking and small-to-medium graphs
+  typical in N++ levels (100-1000 nodes)
 """
 
 import torch
@@ -22,6 +31,9 @@ class GCNLayer(nn.Module):
     using normalized adjacency matrix. No attention mechanism.
     
     Based on Kipf & Welling (2017) "Semi-Supervised Classification with GCNs"
+    
+    Note: This implementation uses iterative aggregation for simplicity.
+    For large-scale graphs, use PyTorch Geometric's GCNConv for better performance.
     """
     
     def __init__(self, in_dim: int, out_dim: int, dropout: float = 0.1):
@@ -91,6 +103,9 @@ class GATLayer(nn.Module):
     the heterogeneous type-specific processing of HGT.
     
     Based on Veličković et al. (2018) "Graph Attention Networks"
+    
+    Note: This simplified implementation uses dense attention over all nodes.
+    For sparse edge-based attention, use PyTorch Geometric's GATConv.
     """
     
     def __init__(

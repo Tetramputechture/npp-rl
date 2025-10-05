@@ -8,8 +8,8 @@ which modalities to use and how to process them.
 Based on Task 3.1 requirements from PHASE_3_ROBUSTNESS_OPTIMIZATION.md
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Literal
+from dataclasses import dataclass
+from typing import Dict, Any, List
 from enum import Enum
 
 
@@ -40,7 +40,7 @@ class ModalityConfig:
     use_game_state: bool = True  # Game state vector (30 features)
     use_reachability: bool = True  # Reachability features (8 features)
     
-    def get_enabled_modalities(self) -> list[str]:
+    def get_enabled_modalities(self) -> List[str]:
         """Return list of enabled modality names."""
         modalities = []
         if self.use_temporal_frames:
@@ -388,7 +388,7 @@ def get_architecture_config(name: str) -> ArchitectureConfig:
     return ARCHITECTURE_REGISTRY[name]
 
 
-def list_available_architectures() -> list[str]:
+def list_available_architectures() -> List[str]:
     """Return list of available architecture names."""
     return list(ARCHITECTURE_REGISTRY.keys())
 

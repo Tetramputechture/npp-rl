@@ -10,10 +10,9 @@ Based on Task 3.1 vision-free architecture analysis requirements.
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional
+from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
-from gymnasium.spaces import Dict as SpacesDict
 
 from .architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
 from ..models.simplified_gnn import GCNEncoder, GATEncoder, SimplifiedHGTEncoder
