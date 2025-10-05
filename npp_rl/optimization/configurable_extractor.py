@@ -15,7 +15,9 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
 
 from .architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
-from ..models.simplified_gnn import GCNEncoder, GATEncoder, SimplifiedHGTEncoder
+from ..models.gcn import GCNEncoder
+from ..models.gat import GATEncoder
+from ..models.simplified_hgt import SimplifiedHGTEncoder
 from ..models.hgt_factory import create_production_hgt_encoder
 
 
