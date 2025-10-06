@@ -4,11 +4,14 @@ Test Suite Loader for NPP-RL Evaluation (Task 3.3).
 This module provides utilities for loading and managing the comprehensive test suite
 of 250 deterministic N++ levels across 5 complexity categories.
 
+The test suite dataset is located in the nclone repository at:
+    nclone/datasets/test_suite/
+
 Usage:
     from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
     
-    # Load test suite
-    loader = TestSuiteLoader('/path/to/test_suite')
+    # Load test suite (point to nclone dataset)
+    loader = TestSuiteLoader('/path/to/nclone/datasets/test_suite')
     
     # Get all simple levels
     simple_levels = loader.get_category('simple')
