@@ -63,4 +63,4 @@ tune_logs/
 .openhands/.setup.log
 
 # Mermaid diagrams
-*.mmd
+*.mmddatasets/test_suite/**/*.pkl
