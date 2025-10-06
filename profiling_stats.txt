@@ -1,0 +1,514 @@
+         96691985 function calls (96068200 primitive calls) in 103.412 seconds
+
+   Ordered by: cumulative time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     2990    0.055    0.000   98.164    0.033 /home/tetra/projects/nclone/nclone/gym_environment/npp_environment.py:156(step)
+     3098    0.028    0.000   80.465    0.026 /home/tetra/projects/nclone/nclone/gym_environment/npp_environment.py:268(_process_observation)
+     3098    0.325    0.000   80.437    0.026 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:364(_process_observation)
+     3098    2.515    0.001   80.112    0.026 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:331(process_observation)
+     3098    0.189    0.000   47.821    0.015 /home/tetra/projects/nclone/nclone/gym_environment/frame_augmentation.py:146(apply_consistent_augmentation)
+    34078    0.078    0.000   45.565    0.001 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1329(replay)
+170390/34078    0.747    0.000   37.075    0.001 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1344(_restore_for_replay)
+    34078    0.109    0.000   28.324    0.001 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1368(<listcomp>)
+272624/136312    0.985    0.000   27.218    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/validation.py:102(custom_init)
+     9294   13.200    0.001   24.329    0.003 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:64(stabilize_frame)
+     6088    0.071    0.000   19.713    0.003 /home/tetra/projects/nclone/nclone/gym_environment/npp_environment.py:247(_get_observation)
+     6088    0.636    0.000   19.622    0.003 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:295(_get_observation)
+     6088    0.014    0.000   12.875    0.002 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:291(render)
+     6088    0.036    0.000   12.859    0.002 /home/tetra/projects/nclone/nclone/nplay_headless.py:183(render)
+     3098    0.075    0.000   12.823    0.004 /home/tetra/projects/nclone/nclone/nsim_renderer.py:35(draw)
+   272624    5.138    0.000   11.957    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:155(set_random_seed)
+     3098    0.012    0.000   10.722    0.003 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/pygame/surfarray.py:178(array3d)
+     3098   10.699    0.003   10.699    0.003 {built-in method pygame.pixelcopy.surface_to_array}
+   136312    0.283    0.000   10.673    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:92(__init__)
+    37176    0.180    0.000   10.356    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1309(__call__)
+   272624    1.093    0.000    9.486    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/validation.py:32(_process_init_parameters)
+   570032    0.253    0.000    9.262    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:3128(signature)
+   570032    0.182    0.000    9.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2876(from_callable)
+   570032    1.287    0.000    8.827    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2244(_signature_from_callable)
+    34078    0.069    0.000    8.513    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1294(__init__)
+    34078    0.207    0.000    8.305    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:452(__init__)
+    34078    0.094    0.000    7.423    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:110(__init__)
+    34078    0.697    0.000    6.816    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:163(set_random_seed)
+   272624    2.290    0.000    6.458    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2150(_signature_from_function)
+    12176    3.087    0.000    5.893    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:535(get_entity_states)
+   272624    0.786    0.000    5.565    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/validation.py:56(_validate_parameters)
+    34078    0.066    0.000    5.349    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/coarse_dropout.py:121(__init__)
+    37176    0.090    0.000    5.076    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:752(get_dict_with_id)
+     3098    0.021    0.000    5.070    0.002 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:305(process_rendered_global_view)
+     3098    5.040    0.002    5.040    0.002 {resize}
+     3098    5.017    0.002    5.021    0.002 /home/tetra/projects/nclone/nclone/debug_overlay_renderer.py:256(draw_debug_overlay)
+    37176    0.061    0.000    4.962    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:297(get_dict_with_id)
+      108    0.002    0.000    4.797    0.044 /home/tetra/projects/nclone/nclone/gym_environment/npp_environment.py:230(reset)
+      108    0.002    0.000    4.795    0.044 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:260(reset)
+    37176    0.291    0.000    4.763    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:576(__call__)
+    37176    0.064    0.000    4.739    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:308(<listcomp>)
+   148704    0.117    0.000    4.675    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:166(get_dict_with_id)
+   148704    0.230    0.000    4.522    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:528(to_dict_private)
+    34078    0.144    0.000    4.462    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:723(__init__)
+   148704    0.153    0.000    3.988    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:229(__call__)
+   148704    0.538    0.000    3.888    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:503(get_transform_init_args)
+    34078    0.055    0.000    3.873    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/transforms.py:119(__init__)
+   272624    0.162    0.000    3.630    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/pydantic/main.py:243(__init__)
+   136312    0.360    0.000    3.515    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:433(_set_keys)
+   306702    0.141    0.000    3.503    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:117(__init__)
+     9294    3.495    0.000    3.495    0.000 {method 'blit' of 'pygame.surface.Surface' objects}
+   272624    1.511    0.000    3.468    0.000 {method 'validate_python' of 'pydantic_core._pydantic_core.SchemaValidator' objects}
+   315930    3.010    0.000    3.377    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_ufunc_config.py:434(inner)
+    39168    0.160    0.000    3.364    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:299(apply_with_params)
+   306702    0.466    0.000    3.362    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:126(seed)
+    34078    0.084    0.000    3.257    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/pixel/transforms.py:2403(__init__)
+   148704    1.497    0.000    2.992    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:177(get_transform_init_args_names)
+   306702    2.772    0.000    2.772    0.000 {function Random.seed at 0x7f3e01925b80}
+  1397198    1.363    0.000    2.561    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2515(__init__)
+    22284    0.085    0.000    2.286    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/decorators.py:39(wrapped_function)
+    14988    0.025    0.000    2.180    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:781(apply)
+     3098    0.290    0.000    2.136    0.001 /home/tetra/projects/nclone/nclone/entity_renderer.py:24(draw_entities)
+   136312    0.670    0.000    2.011    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:443(<dictcomp>)
+    14988    0.073    0.000    1.955    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:592(warp_affine)
+  7484266    1.035    0.000    1.801    0.000 {built-in method builtins.isinstance}
+  2146914    1.467    0.000    1.467    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:641(targets)
+      108    0.001    0.000    1.431    0.013 /home/tetra/projects/nclone/nclone/gym_environment/env_map_loader.py:74(load_map)
+      108    0.002    0.000    1.427    0.013 /home/tetra/projects/nclone/nclone/gym_environment/env_map_loader.py:135(load_random_categorized_map)
+      108    0.001    0.000    1.416    0.013 /home/tetra/projects/nclone/nclone/nplay_headless.py:118(load_map)
+      108    0.000    0.000    1.386    0.013 /home/tetra/projects/nclone/nclone/nplay_headless.py:111(load_map_from_map_data)
+      108    0.001    0.000    1.385    0.013 /home/tetra/projects/nclone/nclone/nsim.py:28(load)
+     3098    1.286    0.000    1.286    0.000 {built-in method pygame.display.flip}
+   306702    0.271    0.000    1.272    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/utils.py:544(to_tuple)
+   272624    0.771    0.000    1.236    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2798(__init__)
+    14988    0.042    0.000    1.099    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:541(is_identity_matrix)
+      108    0.018    0.000    1.068    0.010 /home/tetra/projects/nclone/nclone/map_loader.py:16(load_map_tiles)
+   432440    0.597    0.000    1.056    0.000 /home/tetra/projects/nclone/nclone/entities.py:185(get_state)
+      108    0.000    0.000    1.049    0.010 /home/tetra/projects/nclone/nclone/map_loader.py:41(_populate_segment_dictionaries)
+      108    0.019    0.000    1.049    0.010 /home/tetra/projects/nclone/nclone/utils/tile_segment_factory.py:321(create_segments_for_simulator)
+   102234    0.139    0.000    0.999    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:701(_handle_dict_arg)
+  1679050    0.270    0.000    0.995    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/abc.py:117(__instancecheck__)
+     2990    0.014    0.000    0.970    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:171(tick)
+    14988    0.045    0.000    0.961    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:2225(allclose)
+  1397198    0.756    0.000    0.947    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/enum.py:358(__call__)
+     3315    0.945    0.000    0.945    0.000 {method 'paint' of 'cairo.Context' objects}
+   272624    0.138    0.000    0.899    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/pydantic/main.py:421(model_dump)
+   570032    0.448    0.000    0.791    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:494(unwrap)
+    68156    0.067    0.000    0.785    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:659(_process_shear)
+    14988    0.413    0.000    0.778    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:2315(isclose)
+   306702    0.330    0.000    0.776    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:791(getrandbits)
+   272624    0.761    0.000    0.761    0.000 {method 'to_python' of 'pydantic_core._pydantic_core.SchemaSerializer' objects}
+    84012    0.416    0.000    0.751    0.000 /home/tetra/projects/nclone/nclone/utils/tile_segment_factory.py:275(_process_tile_with_grid_edges)
+   136312    0.359    0.000    0.730    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:438(<setcomp>)
+  1679050    0.498    0.000    0.725    0.000 {built-in method _abc._abc_instancecheck}
+     2990    0.076    0.000    0.703    0.000 /home/tetra/projects/nclone/nclone/nsim.py:85(tick)
+   241092    0.104    0.000    0.697    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_toggle_mine.py:116(get_state)
+   534674    0.294    0.000    0.688    0.000 {built-in method builtins.all}
+   119642    0.072    0.000    0.667    0.000 /home/tetra/projects/nclone/nclone/entity_renderer.py:176(_draw_physical_entity)
+    68156    0.287    0.000    0.577    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:333(_set_keys)
+     3098    0.564    0.000    0.564    0.000 {method 'fill' of 'pygame.surface.Surface' objects}
+  7969806    0.544    0.000    0.544    0.000 {method 'extend' of 'list' objects}
+   122753    0.541    0.000    0.541    0.000 {method 'fill' of 'cairo.Context' objects}
+     5980    0.536    0.000    0.536    0.000 {method 'tick' of 'pygame.time.Clock' objects}
+  2310717    0.533    0.000    0.533    0.000 {built-in method builtins.min}
+    14040    0.030    0.000    0.518    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:76(__process_fn)
+    47930    0.503    0.000    0.503    0.000 {method 'astype' of 'numpy.ndarray' objects}
+    14040    0.020    0.000    0.481    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:554(warp_affine_with_value_extension)
+  1669822    0.348    0.000    0.465    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2847(<genexpr>)
+    14040    0.448    0.000    0.448    0.000 {warpAffine}
+  9547848    0.440    0.000    0.440    0.000 {built-in method builtins.len}
+     7656    0.010    0.000    0.438    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/pixel/transforms.py:2417(apply)
+  2966138    0.408    0.000    0.432    0.000 {built-in method builtins.hasattr}
+     7656    0.014    0.000    0.429    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:112(wrapped_function)
+     7656    0.016    0.000    0.415    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/functions.py:466(multiply_add)
+    37176    0.177    0.000    0.407    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:616(preprocess)
+    34078    0.058    0.000    0.399    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:676(_handle_translate)
+     7656    0.062    0.000    0.382    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/functions.py:446(multiply_add_lut)
+     9228    0.157    0.000    0.378    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/transforms.py:129(apply)
+   306810    0.371    0.000    0.371    0.000 {built-in method posix.urandom}
+   185880    0.133    0.000    0.367    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/serialization.py:315(get_shortest_class_fullname)
+    68156    0.029    0.000    0.350    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/pydantic.py:96(create_symmetric_range)
+    84012    0.331    0.000    0.335    0.000 /home/tetra/projects/nclone/nclone/utils/tile_segment_factory.py:171(_process_single_tile)
+   306702    0.136    0.000    0.319    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/utils.py:440(process_sequence)
+  3027080    0.319    0.000    0.319    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:603(<genexpr>)
+  3448258    0.301    0.000    0.301    0.000 {method 'get' of 'dict' objects}
+  4540461    0.296    0.000    0.296    0.000 {method 'append' of 'list' objects}
+   345906    0.293    0.000    0.293    0.000 {method 'set' of 'ContextVar' objects}
+   681560    0.206    0.000    0.288    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/types.py:171(__get__)
+    34078    0.016    0.000    0.285    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:311(add_targets)
+   148704    0.045    0.000    0.281    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:479(get_class_fullname)
+      108    0.072    0.001    0.279    0.003 /home/tetra/projects/nclone/nclone/utils/tile_segment_factory.py:228(_process_orthogonal_segments)
+    11960    0.040    0.000    0.275    0.000 /home/tetra/projects/nclone/nclone/ninja.py:225(collide_vs_tiles)
+  1876196    0.270    0.000    0.270    0.000 {built-in method builtins.max}
+      108    0.248    0.002    0.248    0.002 /home/tetra/projects/nclone/nclone/nsim.py:59(reset_map_tile_data)
+   749716    0.241    0.000    0.241    0.000 {method 'update' of 'set' objects}
+   185880    0.146    0.000    0.235    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/serialization.py:39(shorten_class_name)
+306704/306703    0.047    0.000    0.227    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/abc.py:121(__subclasscheck__)
+     7656    0.019    0.000    0.217    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/decorators.py:22(wrapped_function)
+     3098    0.137    0.000    0.212    0.000 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:219(process_game_state)
+    38834    0.051    0.000    0.206    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:51(_wrapfunc)
+    50772    0.089    0.000    0.204    0.000 /home/tetra/projects/nclone/nclone/entities.py:11(__init__)
+   570032    0.116    0.000    0.203    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:514(_is_wrapper)
+   102234    0.073    0.000    0.195    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/pydantic.py:193(validator)
+185880/37176    0.151    0.000    0.195    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1381(fill_with_params)
+   170390    0.192    0.000    0.192    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1365(<dictcomp>)
+     3098    0.018    0.000    0.192    0.000 /home/tetra/projects/nclone/nclone/tile_renderer.py:18(draw_tiles)
+  1397198    0.191    0.000    0.191    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/enum.py:670(__new__)
+    21336    0.079    0.000    0.190    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/lib/_shape_base_impl.py:508(expand_dims)
+   272624    0.189    0.000    0.189    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/validation.py:65(<dictcomp>)
+     3098    0.048    0.000    0.187    0.000 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:156(frame_around_player)
+    34078    0.064    0.000    0.185    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:550(_set_processors_for_transforms)
+    34078    0.035    0.000    0.183    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:558(_set_check_args_for_transforms)
+306704/306703    0.145    0.000    0.180    0.000 {built-in method _abc._abc_subclasscheck}
+     2990    0.009    0.000    0.178    0.000 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:360(_calculate_reward)
+     2990    0.032    0.000    0.169    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/main_reward_calculator.py:51(calculate_reward)
+  1397198    0.168    0.000    0.168    0.000 {method 'isidentifier' of 'str' objects}
+      216    0.003    0.000    0.167    0.001 /home/tetra/projects/nclone/nclone/nsim.py:40(reset)
+     3098    0.038    0.000    0.162    0.000 /home/tetra/projects/nclone/nclone/entity_renderer.py:194(_draw_ninja)
+     1249    0.018    0.000    0.161    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:989(get_params_dependent_on_data)
+    28080    0.016    0.000    0.157    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:3360(round)
+    37176    0.020    0.000    0.152    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:264(get_class_fullname)
+    34078    0.020    0.000    0.152    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:178(set_mask_interpolation)
+  1478658    0.148    0.000    0.148    0.000 {built-in method builtins.getattr}
+    13494    0.036    0.000    0.145    0.000 /home/tetra/projects/nclone/nclone/physics.py:109(get_single_closest_point)
+     2990    0.145    0.000    0.145    0.000 {built-in method pygame.event.get}
+    14988    0.017    0.000    0.143    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_ufunc_config.py:410(__enter__)
+   148704    0.143    0.000    0.143    0.000 {built-in method builtins.sorted}
+     7296    0.005    0.000    0.143    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/flip.py:247(apply)
+   545248    0.110    0.000    0.142    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:159(isfunction)
+    15312    0.109    0.000    0.142    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_asarray.py:27(require)
+   272624    0.142    0.000    0.142    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/validation.py:113(<listcomp>)
+185880/37176    0.081    0.000    0.141    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1395(fill_applied)
+      769    0.044    0.000    0.138    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/coarse_dropout.py:161(get_params_dependent_on_data)
+     7296    0.006    0.000    0.138    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/functions.py:728(hflip)
+    34078    0.014    0.000    0.137    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:668(_process_rotate)
+    34078    0.046    0.000    0.135    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:352(set_deterministic)
+     6088    0.104    0.000    0.134    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:378(get_ninja_state)
+    14988    0.020    0.000    0.133    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2513(all)
+    28444    0.097    0.000    0.133    0.000 /home/tetra/projects/nclone/nclone/physics.py:39(gather_segments_from_region)
+    34078    0.041    0.000    0.132    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:189(_set_mask_interpolation_recursive)
+    14950    0.094    0.000    0.129    0.000 /home/tetra/projects/nclone/nclone/physics.py:72(gather_entities_from_neighbourhood)
+   330918    0.128    0.000    0.128    0.000 {built-in method numpy._core._multiarray_umath._make_extobj}
+55766/3264    0.050    0.000    0.125    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:128(deepcopy)
+   306702    0.123    0.000    0.123    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:761(targets)
+   503582    0.122    0.000    0.122    0.000 {method 'update' of 'dict' objects}
+    11960    0.010    0.000    0.121    0.000 /home/tetra/projects/nclone/nclone/ninja.py:180(collide_vs_objects)
+    16526    0.032    0.000    0.120    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:89(_wrapreduction_any_all)
+  1524216    0.119    0.000    0.119    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2577(kind)
+  1592372    0.119    0.000    0.119    0.000 {method 'add' of 'set' objects}
+  1397198    0.117    0.000    0.117    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2565(name)
+   306702    0.089    0.000    0.113    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/utils.py:491(ensure_int_output)
+     2498    0.088    0.000    0.111    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:2625(create_affine_transformation_matrix)
+4513/3264    0.014    0.000    0.108    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:226(_deepcopy_dict)
+   835781    0.104    0.000    0.104    0.000 {built-in method builtins.id}
+    14040    0.031    0.000    0.103    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:57(maybe_process_in_chunks)
+     3098    0.101    0.000    0.101    0.000 {method 'stroke' of 'cairo.Context' objects}
+      216    0.019    0.000    0.100    0.000 /home/tetra/projects/nclone/nclone/map_loader.py:54(load_map_entities)
+    28080    0.052    0.000    0.099    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:41(_wrapit)
+   345906    0.099    0.000    0.099    0.000 {method 'reset' of 'ContextVar' objects}
+     3098    0.099    0.000    0.099    0.000 {copyMakeBorder}
+      108    0.001    0.000    0.098    0.001 /home/tetra/projects/nclone/nclone/nplay_headless.py:160(reset)
+     2989    0.026    0.000    0.098    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/navigation_reward_calculator.py:105(calculate_navigation_reward)
+   570032    0.097    0.000    0.097    0.000 {method 'items' of 'mappingproxy' objects}
+    37176    0.042    0.000    0.096    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:1406(<listcomp>)
+   842656    0.094    0.000    0.094    0.000 {method 'pop' of 'dict' objects}
+     3206    0.019    0.000    0.093    0.000 /home/tetra/projects/nclone/nclone/ninja.py:667(update_graphics)
+     9228    0.018    0.000    0.093    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/functional.py:268(cutout)
+     1151    0.025    0.000    0.092    0.000 /home/tetra/projects/nclone/nclone/shared_tile_renderer.py:26(render_tile_group_to_cairo)
+    14988    0.071    0.000    0.092    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/lib/_twodim_base_impl.py:159(eye)
+    19602    0.090    0.000    0.090    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+   136312    0.079    0.000    0.088    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:316(set_deterministic)
+   170390    0.070    0.000    0.088    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/serialization.py:140(instantiate_nonserializable)
+    11960    0.014    0.000    0.087    0.000 /home/tetra/projects/nclone/nclone/physics.py:92(sweep_circle_vs_tiles)
+     7656    0.016    0.000    0.084    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:104(clip)
+   681560    0.083    0.000    0.083    0.000 {method 'lower' of 'str' objects}
+   681560    0.082    0.000    0.082    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/enum.py:792(value)
+   119654    0.076    0.000    0.076    0.000 {method 'arc' of 'cairo.Context' objects}
+   306810    0.075    0.000    0.075    0.000 {built-in method from_bytes}
+   306702    0.055    0.000    0.075    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/pydantic.py:201(<genexpr>)
+     3207    0.058    0.000    0.069    0.000 /home/tetra/projects/nclone/nclone/ninja.py:761(calc_ninja_position)
+    74352    0.035    0.000    0.068    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:892(_get_data_shape)
+   570032    0.068    0.000    0.068    0.000 {built-in method sys.getrecursionlimit}
+   570032    0.068    0.000    0.068    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/inspect.py:2882(parameters)
+     2990    0.020    0.000    0.067    0.000 /home/tetra/projects/nclone/nclone/ninja.py:282(post_collision)
+      216    0.063    0.000    0.064    0.000 /home/tetra/projects/nclone/nclone/nsim.py:49(reset_map_entity_data)
+    37176    0.027    0.000    0.062    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:934(_check_shape_consistency)
+    42626    0.062    0.000    0.062    0.000 {built-in method numpy.array}
+    78336    0.045    0.000    0.061    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/utils.py:511(ensure_contiguous_output)
+    34078    0.026    0.000    0.061    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/pydantic/main.py:993(__setattr__)
+   570032    0.060    0.000    0.060    0.000 {built-in method builtins.callable}
+    14040    0.033    0.000    0.060    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/functools.py:35(update_wrapper)
+     9661    0.009    0.000    0.059    0.000 /home/tetra/projects/nclone/nclone/utils/entity_factory.py:140(create_entity_instance)
+   272624    0.059    0.000    0.059    0.000 {method 'keys' of 'mappingproxy' objects}
+    21336    0.037    0.000    0.058    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:1373(normalize_axis_tuple)
+   549827    0.057    0.000    0.057    0.000 {method 'items' of 'dict' objects}
+     7656    0.008    0.000    0.056    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2178(clip)
+     7656    0.022    0.000    0.056    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/functions.py:76(sz_lut)
+     8967    0.056    0.000    0.056    0.000 /home/tetra/projects/nclone/nclone/gym_environment/util/util.py:4(calculate_distance)
+   185880    0.053    0.000    0.053    0.000 {method 'rfind' of 'str' objects}
+      769    0.027    0.000    0.052    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/coarse_dropout.py:135(calculate_hole_dimensions)
+    33977    0.039    0.000    0.052    0.000 /home/tetra/projects/nclone/nclone/entities.py:42(get_closest_point)
+   684824    0.050    0.000    0.050    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:472(targets_as_params)
+    72648    0.013    0.000    0.049    0.000 {built-in method builtins.next}
+     3098    0.036    0.000    0.049    0.000 /home/tetra/projects/nclone/nclone/nsim_renderer.py:66(_update_screen_size_and_offsets)
+     7296    0.009    0.000    0.048    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/functions.py:720(hflip_cv2)
+    14988    0.014    0.000    0.048    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/contextlib.py:242(helper)
+   328983    0.046    0.000    0.046    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/multiarray.py:161(concatenate)
+     9228    0.045    0.000    0.045    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/dropout/functional.py:146(fill_holes_with_value)
+    68641    0.028    0.000    0.044    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_toggle_mine.py:84(think)
+    14988    0.013    0.000    0.042    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/contextlib.py:112(__enter__)
+     7296    0.040    0.000    0.040    0.000 {flip}
+    37176    0.033    0.000    0.040    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:666(_preprocess_processors)
+    14988    0.022    0.000    0.038    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/contextlib.py:121(__exit__)
+     7656    0.007    0.000    0.038    0.000 {method 'clip' of 'numpy.ndarray' objects}
+     2989    0.021    0.000    0.038    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/exploration_reward_calculator.py:73(calculate_exploration_reward)
+   219742    0.037    0.000    0.037    0.000 {method 'keys' of 'dict' objects}
+     4513    0.019    0.000    0.037    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:209(_deepcopy_tuple)
+    21076    0.037    0.000    0.037    0.000 {built-in method numpy.zeros}
+    37176    0.022    0.000    0.036    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:676(_preprocess_arrays)
+    29976    0.012    0.000    0.036    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_ufunc_config.py:458(_no_nep50_warning)
+   306702    0.036    0.000    0.036    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/_collections_abc.py:315(__subclasshook__)
+    37176    0.026    0.000    0.036    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:845(_check_shapes)
+   185880    0.035    0.000    0.035    0.000 {method 'startswith' of 'str' objects}
+     3098    0.030    0.000    0.035    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mine_state_processor.py:202(update_mine_states)
+   272624    0.035    0.000    0.035    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:445(available_keys)
+    16884    0.035    0.000    0.035    0.000 {method 'copy' of 'numpy.ndarray' objects}
+    74940    0.022    0.000    0.035    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:2399(<genexpr>)
+    14988    0.031    0.000    0.034    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/contextlib.py:86(__init__)
+   306702    0.034    0.000    0.034    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/utils.py:422(validate_args)
+    37176    0.030    0.000    0.033    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:912(_get_single_data_shape)
+   410185    0.033    0.000    0.033    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/typing.py:1340(cast)
+     2990    0.017    0.000    0.032    0.000 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:329(_check_termination)
+     3076    0.005    0.000    0.032    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:3068(prod)
+      217    0.023    0.000    0.031    0.000 /home/tetra/projects/nclone/nclone/shared_tile_renderer.py:15(group_tiles_by_type)
+     7656    0.031    0.000    0.031    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_methods.py:99(_clip)
+    34078    0.026    0.000    0.030    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/pydantic/main.py:97(_model_field_setattr_handler)
+    54508    0.029    0.000    0.029    0.000 {built-in method builtins.abs}
+   148704    0.029    0.000    0.029    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:499(get_base_init_args)
+   138369    0.029    0.000    0.029    0.000 {method 'set_source_rgb' of 'cairo.Context' objects}
+    37176    0.024    0.000    0.028    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:709(postprocess)
+    12392    0.026    0.000    0.028    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:283(should_apply)
+   166012    0.028    0.000    0.028    0.000 {method 'rectangle' of 'cairo.Context' objects}
+     9445    0.020    0.000    0.027    0.000 /home/tetra/projects/nclone/nclone/entities.py:159(__init__)
+     3076    0.010    0.000    0.027    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:69(_wrapreduction)
+    28080    0.027    0.000    0.027    0.000 {method 'round' of 'numpy.ndarray' objects}
+    15312    0.023    0.000    0.026    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_asarray.py:108(<setcomp>)
+     6142    0.004    0.000    0.026    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_toggle_mine.py:78(__init__)
+   148704    0.024    0.000    0.024    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:363(check_data_post_transform)
+   136312    0.024    0.000    0.024    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:207(set_processors)
+     3098    0.006    0.000    0.022    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:602(transpose)
+     3315    0.022    0.000    0.022    0.000 {built-in method pygame.image.frombuffer}
+    21336    0.022    0.000    0.022    0.000 {method 'reshape' of 'numpy.ndarray' objects}
+   192184    0.022    0.000    0.022    0.000 {method 'values' of 'dict' objects}
+     2990    0.021    0.000    0.021    0.000 {built-in method pygame.key.get_pressed}
+   263670    0.020    0.000    0.020    0.000 {built-in method math.floor}
+   102234    0.020    0.000    0.020    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/pydantic.py:20(nondecreasing)
+     2989    0.016    0.000    0.020    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/navigation_reward_calculator.py:66(calculate_potential)
+   204468    0.019    0.000    0.019    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/pydantic.py:197(<lambda>)
+    21336    0.016    0.000    0.019    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/lib/_shape_base_impl.py:597(<listcomp>)
+      216    0.005    0.000    0.019    0.000 /home/tetra/projects/nclone/nclone/ninja.py:77(__init__)
+     6088    0.008    0.000    0.018    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:272(exit_switch_activated)
+    30440    0.015    0.000    0.018    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:263(_sim_exit_switch)
+    21336    0.011    0.000    0.018    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:1424(<listcomp>)
+     7656    0.018    0.000    0.018    0.000 {built-in method stringzilla.translate}
+     9078    0.011    0.000    0.018    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:248(ninja_has_died)
+     1249    0.009    0.000    0.017    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:1054(_get_translate_params)
+     4513    0.004    0.000    0.017    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:210(<listcomp>)
+    43392    0.017    0.000    0.017    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:125(get_num_channels)
+   148704    0.017    0.000    0.017    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:138(_track_transform_params)
+     2989    0.011    0.000    0.017    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/exploration_reward_calculator.py:64(_get_cell_coords)
+    12176    0.008    0.000    0.017    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:291(exit_door_position)
+     7656    0.016    0.000    0.016    0.000 {built-in method numpy.arange}
+   162566    0.016    0.000    0.016    0.000 /home/tetra/projects/nclone/nclone/physics.py:6(clamp)
+    24395    0.010    0.000    0.016    0.000 /home/tetra/projects/nclone/nclone/physics.py:11(clamp_cell)
+     2990    0.014    0.000    0.014    0.000 /home/tetra/projects/nclone/nclone/ninja.py:471(think)
+      108    0.014    0.000    0.014    0.000 {method 'read' of '_io.BufferedReader' objects}
+      769    0.009    0.000    0.013    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:371(stack)
+    14988    0.013    0.000    0.013    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_ufunc_config.py:400(__init__)
+     6630    0.013    0.000    0.013    0.000 {method 'set_operator' of 'cairo.Context' objects}
+     9078    0.010    0.000    0.013    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:245(ninja_has_won)
+     3315    0.013    0.000    0.013    0.000 {method 'get_data' of 'cairo.ImageSurface' objects}
+    15312    0.010    0.000    0.012    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albucore/utils.py:148(convert_value)
+     9294    0.012    0.000    0.012    0.000 {method 'get_size' of 'pygame.surface.Surface' objects}
+     2990    0.011    0.000    0.012    0.000 /home/tetra/projects/nclone/nclone/gym_environment/truncation_checker.py:29(update)
+    14040    0.012    0.000    0.012    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/functools.py:65(wraps)
+     3098    0.012    0.000    0.012    0.000 /home/tetra/projects/nclone/nclone/entity_renderer.py:202(<listcomp>)
+    12176    0.007    0.000    0.012    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:278(exit_switch_position)
+     9661    0.011    0.000    0.011    0.000 /home/tetra/projects/nclone/nclone/utils/entity_factory.py:28(get_entity_class_for_type)
+   134550    0.011    0.000    0.011    0.000 /home/tetra/projects/nclone/nclone/physics.py:87(<listcomp>)
+    69376    0.011    0.000    0.011    0.000 {built-in method numpy.asanyarray}
+     2834    0.004    0.000    0.011    0.000 /home/tetra/projects/nclone/nclone/shared_tile_renderer.py:48(draw_complex_tile_to_cairo)
+    12312    0.008    0.000    0.010    0.000 /home/tetra/projects/nclone/nclone/physics.py:152(overlap_circle_vs_circle)
+      108    0.010    0.000    0.010    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:123(<listcomp>)
+     3098    0.005    0.000    0.010    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mine_state_processor.py:287(get_nearest_dangerous_mine)
+    14988    0.006    0.000    0.010    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/_ufunc_config.py:426(__exit__)
+     3264    0.007    0.000    0.010    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:381(update_transform_params)
+     2871    0.002    0.000    0.010    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_gold.py:54(__init__)
+    78336    0.010    0.000    0.010    0.000 {built-in method numpy.ascontiguousarray}
+     1538    0.002    0.000    0.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2400(any)
+    14040    0.007    0.000    0.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:1434(extend_value)
+    16526    0.009    0.000    0.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:91(<dictcomp>)
+     8549    0.007    0.000    0.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:242(_keep_alive)
+    37176    0.009    0.000    0.009    0.000 {built-in method builtins.any}
+    34078    0.009    0.000    0.009    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:525(strict)
+    12176    0.005    0.000    0.009    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:284(_sim_exit_door)
+    70768    0.008    0.000    0.008    0.000 /home/tetra/projects/nclone/nclone/ninja.py:815(is_valid_target)
+    37176    0.008    0.000    0.008    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:681(_preprocess_images)
+     3098    0.008    0.000    0.008    0.000 {built-in method numpy.empty}
+    70200    0.008    0.000    0.008    0.000 {built-in method builtins.setattr}
+     1240    0.002    0.000    0.008    0.000 /home/tetra/projects/nclone/nclone/entities.py:64(intersect_with_ray)
+    22105    0.008    0.000    0.008    0.000 {built-in method numpy.lib.array_utils.normalize_axis_index}
+    28080    0.008    0.000    0.008    0.000 {method 'as_arrays' of 'numpy._core._multiarray_umath._array_converter' objects}
+     2990    0.008    0.000    0.008    0.000 /home/tetra/projects/nclone/nclone/ninja.py:167(pre_collision)
+     1249    0.005    0.000    0.007    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:1062(<dictcomp>)
+      769    0.001    0.000    0.007    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:334(randint)
+    37176    0.007    0.000    0.007    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:515(strict)
+     1249    0.005    0.000    0.007    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:948(_get_scale)
+    37176    0.007    0.000    0.007    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:225(additional_targets)
+     3098    0.007    0.000    0.007    0.000 {method 'transpose' of 'numpy.ndarray' objects}
+    28080    0.007    0.000    0.007    0.000 {method 'wrap' of 'numpy._core._multiarray_umath._array_converter' objects}
+    40468    0.006    0.000    0.006    0.000 {method 'line_to' of 'cairo.Context' objects}
+     6630    0.006    0.000    0.006    0.000 {method 'get_width' of 'cairo.ImageSurface' objects}
+     2990    0.006    0.000    0.006    0.000 /home/tetra/projects/nclone/nclone/ninja.py:157(integrate)
+     9078    0.006    0.000    0.006    0.000 /home/tetra/projects/nclone/nclone/ninja.py:831(has_died)
+    12392    0.006    0.000    0.006    0.000 /home/tetra/projects/nclone/nclone/nsim_renderer.py:40(<genexpr>)
+    25509    0.006    0.000    0.006    0.000 {method 'random' of '_random.Random' objects}
+    30361    0.006    0.000    0.006    0.000 {built-in method math.sqrt}
+      769    0.002    0.000    0.006    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:290(randrange)
+    36912    0.006    0.000    0.006    0.000 {method 'move_to' of 'cairo.Context' objects}
+    37176    0.006    0.000    0.006    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:695(_preprocess_masks)
+    15166    0.005    0.000    0.005    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:251(ninja_position)
+      638    0.004    0.000    0.005    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/pixel/transforms.py:2480(get_params_dependent_on_data)
+    10019    0.005    0.000    0.005    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:511(uniform)
+     4286    0.005    0.000    0.005    0.000 {method 'append' of 'collections.deque' objects}
+    41691    0.005    0.000    0.005    0.000 {built-in method math.sin}
+     9077    0.005    0.000    0.005    0.000 {method 'get_width' of 'pygame.surface.Surface' objects}
+     3098    0.004    0.000    0.005    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mine_state_processor.py:257(get_dangerous_mines)
+    37284    0.005    0.000    0.005    0.000 {method 'count' of 'list' objects}
+    41691    0.005    0.000    0.005    0.000 {built-in method math.cos}
+      540    0.001    0.000    0.005    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:672(_parse_args)
+      216    0.001    0.000    0.005    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/genericpath.py:27(isfile)
+     5980    0.005    0.000    0.005    0.000 {method 'copy' of 'dict' objects}
+     6088    0.004    0.000    0.004    0.000 /home/tetra/projects/nclone/nclone/nplay_headless.py:370(get_doors_opened)
+      108    0.004    0.000    0.004    0.000 {built-in method io.open}
+      108    0.001    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:1069(__new__)
+     1249    0.003    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/transforms.py:1069(_get_shear_params)
+     3098    0.004    0.000    0.004    0.000 /home/tetra/projects/nclone/nclone/entity_renderer.py:19(update_dimensions)
+     2127    0.002    0.000    0.004    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_toggle_mine.py:100(logical_collision)
+    21336    0.004    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/lib/_shape_base_impl.py:504(_expand_dims_dispatcher)
+    34078    0.004    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/composition.py:504(<genexpr>)
+     3098    0.004    0.000    0.004    0.000 /home/tetra/projects/nclone/nclone/debug_overlay_renderer.py:41(update_params)
+      985    0.003    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:237(_randbelow_with_getrandbits)
+     6167    0.003    0.000    0.004    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_toggle_mine.py:109(set_state)
+    28080    0.004    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:3356(_round_dispatcher)
+      216    0.004    0.000    0.004    0.000 {built-in method posix.stat}
+     3098    0.004    0.000    0.004    0.000 {built-in method time.time}
+    29976    0.004    0.000    0.004    0.000 {built-in method _operator.index}
+     3267    0.004    0.000    0.004    0.000 {method '__deepcopy__' of 'numpy.ndarray' objects}
+    15312    0.004    0.000    0.004    0.000 {method 'upper' of 'str' objects}
+      108    0.000    0.000    0.004    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:692(_from_parts)
+    14988    0.003    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:2221(_allclose_dispatcher)
+     1240    0.003    0.000    0.003    0.000 /home/tetra/projects/nclone/nclone/physics.py:202(get_time_of_intersection_circle_vs_lineseg)
+      540    0.002    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:64(parse_parts)
+      432    0.000    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:964(__truediv__)
+     1636    0.003    0.000    0.003    0.000 {built-in method math.atan2}
+    14988    0.003    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2508(_all_dispatcher)
+    42704    0.003    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/copy.py:182(_deepcopy_atomic)
+      432    0.001    0.000    0.003    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:726(_make_child)
+     9078    0.003    0.000    0.003    0.000 /home/tetra/projects/nclone/nclone/ninja.py:828(has_won)
+     9294    0.003    0.000    0.003    0.000 {method 'set_line_width' of 'cairo.Context' objects}
+    21336    0.002    0.000    0.002    0.000 {built-in method builtins.iter}
+     2624    0.002    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/physics.py:185(get_time_of_intersection_circle_vs_circle)
+     2990    0.002    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:185(_actions_to_execute)
+      769    0.001    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:361(_stack_dispatcher)
+     2990    0.002    0.000    0.002    0.000 {built-in method time.perf_counter}
+      108    0.001    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/main_reward_calculator.py:121(reset)
+     1030    0.001    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_gold.py:58(logical_collision)
+    14988    0.002    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/numeric.py:2311(_isclose_dispatcher)
+    14988    0.002    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/multiarray.py:678(result_type)
+      769    0.002    0.000    0.002    0.000 {method '__deepcopy__' of 'numpy.generic' objects}
+     3098    0.002    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:598(_transpose_dispatcher)
+    15312    0.002    0.000    0.002    0.000 {method 'remove' of 'set' objects}
+     6088    0.002    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/gym_environment/base_environment.py:372(_debug_info)
+     1249    0.002    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:2765(center)
+      108    0.000    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/uuid.py:713(uuid4)
+      108    0.001    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/gym_environment/observation_processor.py:451(reset)
+     3098    0.002    0.000    0.002    0.000 {method 'set_line_cap' of 'cairo.Context' objects}
+      216    0.001    0.000    0.002    0.000 /home/tetra/projects/nclone/nclone/ninja.py:841(__init__)
+     3076    0.002    0.000    0.002    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:70(<dictcomp>)
+     7656    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2174(_clip_dispatcher)
+      769    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:454(<listcomp>)
+      216    0.000    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_exit.py:56(__init__)
+      769    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:446(<setcomp>)
+      769    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:207(_arrays_for_stack_dispatcher)
+     6208    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/entities.py:214(log_collision)
+     9445    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/entities.py:221(log_position)
+      216    0.000    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_exit_switch.py:57(__init__)
+      769    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/shape_base.py:442(<listcomp>)
+      112    0.000    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/exploration_reward_calculator.py:106(reset)
+      216    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/ninja.py:819(log)
+     6630    0.001    0.000    0.001    0.000 {method 'get_height' of 'cairo.ImageSurface' objects}
+      108    0.001    0.000    0.001    0.000 {method '__exit__' of '_io._IOBase' objects}
+      108    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/uuid.py:138(__init__)
+     4036    0.001    0.000    0.001    0.000 {built-in method builtins.issubclass}
+     1188    0.001    0.000    0.001    0.000 {built-in method sys.intern}
+      216    0.000    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/random.py:343(choice)
+     9077    0.001    0.000    0.001    0.000 {method 'get_height' of 'pygame.surface.Surface' objects}
+      108    0.001    0.000    0.001    0.000 {method 'clear' of 'collections.deque' objects}
+      108    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/uuid.py:279(__str__)
+      216    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/nsim.py:55(<dictcomp>)
+     3264    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:377(get_params)
+      108    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/gym_environment/reward_calculation/navigation_reward_calculator.py:166(reset)
+      448    0.001    0.000    0.001    0.000 {method 'fill' of 'numpy.ndarray' objects}
+      108    0.000    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:732(__str__)
+      648    0.000    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:705(_from_parsed_parts)
+      216    0.000    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:976(parent)
+     3076    0.001    0.000    0.001    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:3063(_prod_dispatcher)
+      108    0.001    0.000    0.001    0.000 /home/tetra/projects/nclone/nclone/gym_environment/truncation_checker.py:53(reset)
+     1967    0.001    0.000    0.001    0.000 {method 'getrandbits' of '_random.Random' objects}
+      985    0.000    0.000    0.000    0.000 {method 'bit_length' of 'int' objects}
+       72    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/entities.py:142(intersect_with_ray)
+      864    0.000    0.000    0.000    0.000 {built-in method builtins.round}
+     3076    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/multiarray.py:556(can_cast)
+      540    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:293(splitroot)
+     2834    0.000    0.000    0.000    0.000 {method 'close_path' of 'cairo.Context' objects}
+     1538    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/numpy/_core/fromnumeric.py:2395(_any_dispatcher)
+     1249    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/augmentations/geometric/functional.py:2779(center_bbox)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:56(get_ninja_animation)
+      108    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mine_state_processor.py:440(reset)
+      108    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:715(_format_parsed_parts)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:112(<listcomp>)
+      756    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:1079(_init)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:844(<listcomp>)
+       72    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/physics.py:224(get_time_of_intersection_circle_vs_arc)
+      756    0.000    0.000    0.000    0.000 {built-in method __new__ of type object at 0x7f3e04d859a0}
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:845(<listcomp>)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:766(<listcomp>)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:846(<listcomp>)
+      216    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:847(<listcomp>)
+      108    0.000    0.000    0.000    0.000 {method 'split' of 'str' objects}
+      432    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/pathlib.py:102(join_parsed_parts)
+       94    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/entities.py:106(get_closest_point)
+      608    0.000    0.000    0.000    0.000 /home/tetra/.asdf/installs/python/3.9.6/lib/python3.9/site-packages/albumentations/core/transforms_interface.py:415(get_params_dependent_on_data)
+      108    0.000    0.000    0.000    0.000 {method 'capitalize' of 'str' objects}
+       47    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_exit_switch.py:62(logical_collision)
+      216    0.000    0.000    0.000    0.000 {built-in method _stat.S_ISREG}
+      108    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mixins/reachability_mixin.py:65(_reset_reachability_state)
+      108    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/gym_environment/mixins/graph_mixin.py:75(_reset_graph_state)
+       27    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/entity_classes/entity_exit.py:61(logical_collision)
+      108    0.000    0.000    0.000    0.000 {method 'lstrip' of 'str' objects}
+      540    0.000    0.000    0.000    0.000 {built-in method posix.fspath}
+      540    0.000    0.000    0.000    0.000 {method 'reverse' of 'list' objects}
+      108    0.000    0.000    0.000    0.000 {method 'join' of 'str' objects}
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:644(think_awaiting_death)
+        9    0.000    0.000    0.000    0.000 <frozen importlib._bootstrap>:398(parent)
+        8    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:430(wall_jump)
+      108    0.000    0.000    0.000    0.000 {method 'clear' of 'dict' objects}
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:862(activate)
+        6    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/entities.py:81(__init__)
+       10    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:394(floor_jump)
+        9    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/physics.py:390(clear_caches)
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:647(<listcomp>)
+        9    0.000    0.000    0.000    0.000 {method 'rpartition' of 'str' objects}
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:875(<listcomp>)
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:878(<listcomp>)
+        1    0.000    0.000    0.000    0.000 /home/tetra/projects/nclone/nclone/ninja.py:804(kill)
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+
+

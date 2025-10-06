@@ -644,10 +644,10 @@ class AdaptiveExplorationScheduler:
 #### Test Suite Design
 **Level complexity categories**:
 1. **Simple levels** (baseline): Single switch, direct path to exit
-2. **Medium levels**: 2-3 switches with simple dependencies
-3. **Complex levels**: 4+ switches with complex dependency chains
-4. **Mine-heavy levels**: Significant mine obstacles requiring strategic navigation
-5. **Exploration levels**: Hidden switches requiring extensive exploration
+2. **Medium levels**: 1-3 switches with simple dependencies. Jumps may be required.
+3. **Complex levels**: 4+ switches with complex dependency chains. Jumps may be required.
+4. **Mine-heavy levels**: Significant mine obstacles requiring strategic navigation. Jumps may be required.
+5. **Exploration levels**: Hidden switches requiring extensive exploration. Jumps and wall jumps may be required.
 
 **Test suite composition**:
 - 50 simple levels for baseline performance
@@ -655,6 +655,14 @@ class AdaptiveExplorationScheduler:
 - 50 complex levels for advanced capability testing
 - 30 mine-heavy levels for safety evaluation
 - 20 exploration levels for discovery capability testing
+
+**Building the Test Suite Maps**:
+
+We can use the tools in `nclone/map_generation/map.py` and `nclone/map_generation/map_generator.py` to generate maps as well as the related files in the map_generation/ folder.
+Please place the logic for each map you generate in a new file in `nclone/map_generation/generate_test_suite_maps.py`. This file should contain logic to create
+the entire test suite. Our simple levels should have a navigable space of empty tiles of at least 1 tile high, and at least 3 empty tiles wide. The most simple level is a one tile high and 3 tile wide map where the ninja is at one side, the exit switch is in the middle, and the exit door is on the other side. Some of this logic is located in `nclone/map_generation/map_single_chamber.py`, but we want to make deterministic maps for our test suite. Going from most simple to a little less simple, we can introduce vertical deviations in our tiles or exit switches and exit doors. You can also see the logic in our map single chamber for this with our GLOBAL_MAX_UP_DEVIATION and GLOBAL_MAX_DOWN_DEVIATION variables. Less simple, but still 'simple' levels can include levels that require a jump such as our JUMP_REQUIRED type. Medium levels can have mines, or may require exploration and navigation across a small space. Our MAZE type is a good example of a medium level.
+We want to make a script that makes a deterministic set of seed maps to satisfy our test suite composition. We want to ensure that we have a wide variety of maps to test our agent on. If you have any questions while building this suite using the tools provided, please ask before continuing.
+
 
 **Level selection criteria**:
 ```python
