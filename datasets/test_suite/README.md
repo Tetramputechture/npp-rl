@@ -19,20 +19,29 @@ The test suite provides a well-formed baseline dataset for training and evaluati
 ### Simple (50 levels)
 **Purpose**: Test basic navigation and switch activation
 
-- **Levels 0-19**: Minimal chambers (1-3 tiles high, 3-12 tiles wide)
+- **Levels 0-14**: Minimal chambers with exit switch only (1-3 tiles high, 3-12 tiles wide)
   - Ninja on one side, switch in middle, door on other side
   - Flat surfaces, no jumps required
+  - **No locked doors** - only exit door activation (type 3 + 4)
   - Difficulty Tier 1
 
-- **Levels 20-34**: Single chamber with vertical deviations
+- **Levels 15-24**: Single chamber with vertical deviations
   - Small vertical obstacles to navigate
-  - Single switch controlling door
-  - Difficulty Tiers 2-3
+  - Single exit switch controlling door
+  - Difficulty Tier 2
 
-- **Levels 35-49**: Simple jump required
+- **Levels 25-39**: Locked door corridor - **INTRODUCES TYPE 6 DOORS**
+  - **First appearance of locked doors (type 6)**
+  - Layout: Ninja -> Switch -> Locked Door -> Exit Switch -> Exit
+  - 16-24 tiles wide, 3-4 tiles high
+  - Teaches switch dependency: must collect switch to open locked door
+  - **Critical for learning switch-dependent progression**
+  - Difficulty Tier 3
+
+- **Levels 40-49**: Simple jump required
   - Small pits (2-3 tiles wide)
   - Minimal mines (0-2 per platform)
-  - Difficulty Tier 3
+  - Difficulty Tier 4
 
 ### Medium (100 levels)
 **Purpose**: Test navigation with multiple objectives and basic planning
@@ -230,6 +239,18 @@ For each level, track:
 - **Variety**: Within each category, levels vary in layout, size, and obstacle placement
 - **Baseline Quality**: Maps are generated to be challenging but solvable
 - **Format Compatibility**: Map data format is compatible with nclone's `load_map_from_map_data()`
+
+### Locked Door Implementation
+
+This test suite includes proper locked door (type 6) entities for switch-dependent progression:
+
+- **Entity Format**: Locked doors use 9 bytes: `[type(6), door_x, door_y, orientation, mode, switch_x, switch_y, 0, 0]`
+- **Purpose**: Block passage until the player collects the associated switch
+- **First Appearance**: Simple levels 25-39 introduce locked doors
+- **vs Exit Doors**: Exit doors (type 3 + 4) only block the level exit, while locked doors (type 6) can block internal passages
+- **Learning Objective**: Agents must learn that switches can open doors mid-level, not just at the exit
+
+This distinction is critical for agents to understand switch dependencies and plan optimal routes through levels with multiple objectives.
 
 ## Future Enhancements
 
