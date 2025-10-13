@@ -6,14 +6,19 @@ setup, training loop, evaluation, and checkpointing.
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from torch.utils.tensorboard import SummaryWriter
 
+from nclone.gym_environment.graph_observation import create_graph_enhanced_env
+from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
 from npp_rl.optimization.architecture_configs import ArchitectureConfig
+from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.training.curriculum_manager import create_curriculum_manager
+from npp_rl.wrappers.curriculum_env import CurriculumEnv, CurriculumVecEnvWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +97,8 @@ class ArchitectureTrainer:
         """
         logger.info("Setting up model...")
         
-        # Import necessary modules
-        from nclone.gym_environment.graph_observation import create_graph_enhanced_env
-        from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
-        
         # Create a temporary environment to get spaces
         temp_env = create_graph_enhanced_env()
-        observation_space = temp_env.observation_space
-        action_space = temp_env.action_space
         temp_env.close()
         
         # Set up policy kwargs with architecture config
@@ -143,17 +142,14 @@ class ArchitectureTrainer:
         # Choose PPO class based on configuration
         if self.use_hierarchical_ppo:
             logger.info("Using Hierarchical PPO")
-            # Import HierarchicalPPO (wrapper around PPO with custom policy)
-            # For now, use standard PPO with hierarchical policy
+            # Use standard PPO with hierarchical policy
             # Full HierarchicalPPO implementation may need custom training loop
-            from stable_baselines3 import PPO as PPOClass
             policy_class = "MultiInputPolicy"  # Will use hierarchical policy internally
         else:
-            from stable_baselines3 import PPO as PPOClass
             policy_class = "MultiInputPolicy"
         
         # Create model (will create environments later)
-        self.model = PPOClass(
+        self.model = PPO(
             policy=policy_class,
             env=None,  # Set up environments separately
             policy_kwargs=policy_kwargs,
@@ -185,12 +181,8 @@ class ArchitectureTrainer:
         """
         logger.info(f"Setting up {num_envs} training environments...")
         
-        from nclone.gym_environment.graph_observation import create_graph_enhanced_env
-        
         # Set up curriculum manager if enabled
         if self.use_curriculum:
-            from npp_rl.training.curriculum_manager import create_curriculum_manager
-            
             self.curriculum_manager = create_curriculum_manager(
                 dataset_path=str(self.train_dataset_path),
                 **self.curriculum_kwargs
@@ -206,7 +198,6 @@ class ArchitectureTrainer:
                 
                 # Wrap with curriculum if enabled
                 if self.use_curriculum and self.curriculum_manager:
-                    from npp_rl.wrappers.curriculum_env import CurriculumEnv
                     env = CurriculumEnv(
                         env,
                         self.curriculum_manager,
@@ -225,7 +216,6 @@ class ArchitectureTrainer:
         
         # Wrap vectorized env with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
-            from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
             self.env = CurriculumVecEnvWrapper(
                 self.env,
                 self.curriculum_manager,
@@ -320,8 +310,6 @@ class ArchitectureTrainer:
         logger.info(f"Evaluating model on test suite ({num_episodes} episodes)...")
         
         try:
-            from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
-            
             evaluator = ComprehensiveEvaluator(
                 test_dataset_path=str(self.test_dataset_path),
                 device=f'cuda:{self.device_id}' if torch.cuda.is_available() else 'cpu'

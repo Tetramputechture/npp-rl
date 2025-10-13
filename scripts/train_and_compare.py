@@ -12,7 +12,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import torch
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -361,7 +360,7 @@ def main():
     )
     
     logger.info("=" * 70)
-    logger.info(f"NPP-RL Training and Comparison Experiment")
+    logger.info("NPP-RL Training and Comparison Experiment")
     logger.info(f"Experiment: {args.experiment_name}")
     logger.info(f"Output directory: {exp_dir}")
     logger.info("=" * 70)

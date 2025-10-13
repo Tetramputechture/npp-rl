@@ -5,13 +5,16 @@ Evaluates trained models across standardized test levels with detailed metrics.
 
 import json
 import logging
-from pathlib import Path
-from typing import Dict, List, Optional, Any
 from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
 from tqdm import tqdm
+
+from nclone.gym_environment.npp_environment import NppEnvironment
+from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +33,6 @@ class ComprehensiveEvaluator:
             test_dataset_path: Path to test dataset
             device: Device for model inference
         """
-        from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
-        
         self.test_dataset_path = Path(test_dataset_path)
         self.device = device
         
@@ -144,8 +145,6 @@ class ComprehensiveEvaluator:
         Returns:
             Category results dictionary
         """
-        from nclone.gym_environment.npp_environment import NppEnvironment
-        
         successes = []
         episode_steps = []
         rewards = []

@@ -14,7 +14,6 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from gymnasium.spaces import Discrete, Dict as SpacesDict
-from stable_baselines3 import PPO
 
 from npp_rl.training.training_utils import create_training_policy, setup_device
 from nclone.gym_environment.graph_observation import (
@@ -320,20 +319,6 @@ class BCTrainer:
         dummy_env = create_graph_enhanced_env()
 
         try:
-            # Create PPO model with matching architecture for compatibility
-            ppo_model = PPO(
-                policy="MultiInputPolicy",
-                env=dummy_env,
-                policy_kwargs={
-                    "features_extractor_class": type(self.policy[0])
-                    if hasattr(self.policy, "__getitem__")
-                    else None,
-                    "features_extractor_kwargs": {
-                        "features_dim": 512,
-                    },
-                },
-            )
-
             # Save policy state dict with metadata for loading
             torch.save(
                 {

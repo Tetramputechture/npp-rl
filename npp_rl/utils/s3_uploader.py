@@ -77,7 +77,7 @@ class S3Uploader:
                     raise
         else:
             self.s3 = None
-            logger.info(f"S3 uploader in dry-run mode (no actual uploads)")
+            logger.info("S3 uploader in dry-run mode (no actual uploads)")
     
     def upload_file(
         self,

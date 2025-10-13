@@ -6,6 +6,7 @@ mixed precision training, and environment distribution across GPUs.
 
 import logging
 import os
+from contextlib import nullcontext
 from typing import Optional
 
 import torch
@@ -191,8 +192,6 @@ class AMPHelper:
         if self.enabled:
             return torch.cuda.amp.autocast()
         else:
-            # Return dummy context manager
-            from contextlib import nullcontext
             return nullcontext()
     
     def scale_loss(self, loss: torch.Tensor) -> torch.Tensor:

@@ -5,7 +5,7 @@ based on current difficulty stage.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 import gymnasium as gym
 import numpy as np
@@ -44,7 +44,7 @@ class CurriculumEnv(gym.Wrapper):
         self.current_level_stage = None
         self.current_level_data = None
         
-        logger.info(f"Curriculum environment initialized")
+        logger.info("Curriculum environment initialized")
         logger.info(f"Starting stage: {curriculum_manager.get_current_stage()}")
     
     def reset(self, **kwargs):

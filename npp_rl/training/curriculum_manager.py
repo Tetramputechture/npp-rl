@@ -4,12 +4,15 @@ Manages progression through test suite categories from simple to complex,
 enabling the agent to learn incrementally on progressively harder levels.
 """
 
+import json
 import logging
 from collections import deque
-from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+
+from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,7 @@ class CurriculumManager:
         # Load level data
         self.levels_by_stage = self._load_levels()
         
-        logger.info(f"Curriculum Manager initialized")
+        logger.info("Curriculum Manager initialized")
         logger.info(f"Starting stage: {self.current_stage}")
         logger.info(f"Advancement threshold: {self.advancement_threshold:.1%}")
         logger.info(f"Min episodes per stage: {self.min_episodes_per_stage}")
@@ -98,8 +101,6 @@ class CurriculumManager:
         Returns:
             Dictionary mapping stage name to list of level data
         """
-        from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
-        
         loader = TestSuiteLoader(str(self.dataset_path))
         all_levels = loader.load_all_levels()
         
@@ -221,7 +222,7 @@ class CurriculumManager:
             self.current_stage = self.CURRICULUM_ORDER[self.current_stage_idx]
             
             logger.info("=" * 60)
-            logger.info(f"CURRICULUM ADVANCEMENT!")
+            logger.info("CURRICULUM ADVANCEMENT!")
             logger.info(f"Advanced to stage: {self.current_stage}")
             logger.info(f"Previous stage performance: {perf['success_rate']:.1%} "
                        f"over {perf['episodes']} episodes")
@@ -276,8 +277,6 @@ class CurriculumManager:
         Args:
             path: Path to save state JSON
         """
-        import json
-        
         state = {
             'current_stage': self.current_stage,
             'current_stage_idx': self.current_stage_idx,
@@ -298,8 +297,6 @@ class CurriculumManager:
         Args:
             path: Path to state JSON
         """
-        import json
-        
         with open(path, 'r') as f:
             state = json.load(f)
         

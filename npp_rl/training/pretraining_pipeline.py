@@ -6,11 +6,12 @@ for architecture comparison experiments.
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+from nclone.gym_environment.graph_observation import create_graph_enhanced_env
 from npp_rl.optimization.architecture_configs import ArchitectureConfig
 
 logger = logging.getLogger(__name__)
@@ -130,13 +131,8 @@ class PretrainingPipeline:
         logger.info("=" * 60)
         
         try:
-            from npp_rl.training.bc_trainer import BCTrainer
-            from nclone.gym_environment.graph_observation import create_graph_enhanced_env
-            
             # Create environment to get observation/action spaces
             env = create_graph_enhanced_env()
-            obs_space = env.observation_space
-            action_space = env.action_space
             env.close()
             
             # Create BC trainer

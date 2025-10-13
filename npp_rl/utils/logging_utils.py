@@ -277,10 +277,10 @@ def create_experiment_summary(
         Markdown-formatted summary string
     """
     lines = [
-        f"# Experiment Summary\n",
+        "# Experiment Summary\n",
         f"**Directory**: `{experiment_dir}`\n",
         f"**Completed**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
-        f"\n## Architecture Results\n"
+        "\n## Architecture Results\n"
     ]
     
     for arch_name, results in architecture_results.items():
