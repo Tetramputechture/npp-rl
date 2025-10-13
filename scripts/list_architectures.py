@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from npp_rl.optimization.architecture_configs import (
     ARCHITECTURE_REGISTRY,
-    get_architecture_config
+    get_architecture_config,
 )
 
 
@@ -19,35 +19,35 @@ def main():
     print("Available NPP-RL Architectures")
     print("=" * 70)
     print()
-    
+
     for i, arch_name in enumerate(sorted(ARCHITECTURE_REGISTRY.keys()), 1):
         try:
             config = get_architecture_config(arch_name)
             print(f"{i}. {arch_name}")
             print(f"   Description: {config.name}")
             print(f"   Features dim: {config.features_dim}")
-            
+
             # Show which modalities are enabled
             modalities = []
-            if config.use_temporal_cnn:
+            if config.modalities.use_temporal_frames:
                 modalities.append("temporal frames")
-            if config.use_global_cnn:
+            if config.modalities.use_global_view:
                 modalities.append("global view")
-            if config.use_graph:
-                modalities.append(f"graph ({config.graph_type})")
-            if config.use_game_state:
+            if config.modalities.use_graph:
+                modalities.append(f"graph ({config.graph.architecture.value})")
+            if config.modalities.use_game_state:
                 modalities.append("game state")
-            if config.use_reachability:
+            if config.modalities.use_reachability:
                 modalities.append("reachability")
-            
+
             print(f"   Modalities: {', '.join(modalities)}")
             print()
-            
+
         except Exception as e:
             print(f"{i}. {arch_name}")
             print(f"   Error loading config: {e}")
             print()
-    
+
     print("=" * 70)
     print(f"Total architectures: {len(ARCHITECTURE_REGISTRY)}")
     print("=" * 70)
@@ -57,5 +57,5 @@ def main():
     print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
