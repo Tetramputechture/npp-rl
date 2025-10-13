@@ -1,6 +1,6 @@
 # NPP-RL: Deep RL Agent for N++
 
-Production-ready Deep Reinforcement Learning system for training agents to play N++, a physics-based platformer game.
+Deep Reinforcement Learning system for training agents to play N++, a physics-based platformer game.
 
 ## System Overview
 
@@ -148,12 +148,6 @@ python scripts/train_and_compare.py \
     --num-envs 64 \
     --output-dir experiments/
 ```
-
-**Pretraining benefits:**
-- 30-50% faster initial learning
-- Better sample efficiency
-- More stable early training
-- Improved final performance
 
 ### Architecture Comparison
 
