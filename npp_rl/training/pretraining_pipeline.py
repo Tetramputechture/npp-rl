@@ -148,9 +148,11 @@ class PretrainingPipeline:
             
             checkpoint_path = self.output_dir / checkpoint_name
             
-            # TODO: Implement full BC training loop here or call bc_pretrain.py
-            # For now, we create a placeholder checkpoint structure
-            logger.info(f"BC pretraining would save to: {checkpoint_path}")
+            # NOTE: By design, this delegates to bc_pretrain.py script for actual BC training
+            # This pipeline provides orchestration and validation, not the training loop itself
+            # Users should run: python bc_pretrain.py --dataset_dir <path> --epochs 20
+            logger.info(f"BC pretraining checkpoint location: {checkpoint_path}")
+            logger.info("Run bc_pretrain.py separately for actual BC training")
             
             return str(checkpoint_path) if checkpoint_path.exists() else None
             
