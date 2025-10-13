@@ -13,7 +13,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from torch.utils.tensorboard import SummaryWriter
 
-from nclone.gym_environment.graph_observation import create_graph_enhanced_env
+# Note: graph_observation module not available in nclone
+# from nclone.gym_environment.graph_observation import create_graph_enhanced_env
 from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
 from npp_rl.optimization.architecture_configs import ArchitectureConfig
 from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor

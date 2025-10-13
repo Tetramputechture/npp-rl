@@ -16,9 +16,8 @@ from tqdm import tqdm
 from gymnasium.spaces import Discrete, Dict as SpacesDict
 
 from npp_rl.training.training_utils import create_training_policy, setup_device
-from nclone.gym_environment.graph_observation import (
-    create_graph_enhanced_env,
-)
+# Note: graph_observation module not available in nclone
+# from nclone.gym_environment.graph_observation import create_graph_enhanced_env
 
 
 class BCTrainer:

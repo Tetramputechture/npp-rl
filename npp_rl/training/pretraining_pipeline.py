@@ -11,7 +11,8 @@ from typing import Optional
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from nclone.gym_environment.graph_observation import create_graph_enhanced_env
+# Note: graph_observation module not available in nclone
+# from nclone.gym_environment.graph_observation import create_graph_enhanced_env
 from npp_rl.optimization.architecture_configs import ArchitectureConfig
 
 logger = logging.getLogger(__name__)

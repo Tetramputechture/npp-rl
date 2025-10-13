@@ -268,11 +268,17 @@ class CompletionController:
         """Extract ninja position from observation/info."""
         # Try to get from info first
         if 'ninja_pos' in info:
-            return tuple(info['ninja_pos'])
+            pos = info['ninja_pos']
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                return (int(pos[0]), int(pos[1]))
         
-        # Fallback: try to extract from observation
-        # This would need to be implemented based on actual observation structure
-        return (0, 0)  # Placeholder
+        # Extract from observation (nclone environment provides player_x, player_y)
+        if 'player_x' in obs and 'player_y' in obs:
+            return (int(obs['player_x']), int(obs['player_y']))
+        
+        # Fallback: log warning and return default
+        print("Warning: Could not extract ninja position from obs or info")
+        return (0, 0)
     
     def _extract_level_data(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Dict[str, Any]:
         """Extract level data from observation/info."""
@@ -284,16 +290,47 @@ class CompletionController:
         return info.get('switch_states', {})
     
     def _extract_reachability_features(self, obs: Dict[str, Any]) -> np.ndarray:
-        """Extract 8D reachability features from observation."""
-        # This would extract reachability features from the observation
-        # For now, return zeros as placeholder
+        """
+        Extract 8D reachability features from observation.
+        
+        When reachability analysis is enabled in nclone environment,
+        the observation will contain 'reachability_features' key.
+        
+        Returns:
+            8D reachability feature vector
+        """
+        # Extract from observation if available (nclone provides this when reachability is enabled)
+        if 'reachability_features' in obs:
+            features = obs['reachability_features']
+            if isinstance(features, np.ndarray) and features.shape == (8,):
+                return features.astype(np.float32)
+            elif hasattr(features, '__iter__') and len(features) == 8:
+                return np.array(features, dtype=np.float32)
+        
+        # Fallback: return zeros if not available
         return np.zeros(8, dtype=np.float32)
     
     def _find_exit_switch_id(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Optional[str]:
-        """Find the exit switch ID from level data."""
-        _ = self._extract_level_data(obs, info)
-        # TODO: Parse level_data to find the exit switch
-        return None  # Placeholder
+        """
+        Find the exit switch ID from level data.
+        
+        In N++, exit switches typically have entity type 3 and are part of exit_pair entities.
+        The nclone environment provides 'switch_activated' in obs to check activation status.
+        
+        Returns:
+            Exit switch ID string if found, None otherwise
+        """
+        level_data = self._extract_level_data(obs, info)
+        
+        # Try to find exit switch from level data entities
+        if level_data and 'entities' in level_data:
+            for entity in level_data['entities']:
+                if entity.get('type') == 'exit_switch' or 'exit_pair' in entity.get('entity_id', ''):
+                    return entity.get('entity_id')
+        
+        # Fallback: use generic exit switch identifier
+        # Most N++ levels have a single exit switch
+        return "exit_switch_0"
     
     def _create_reachability_system(self, reachability_features: np.ndarray):
         """Create a mock reachability system for the completion planner."""

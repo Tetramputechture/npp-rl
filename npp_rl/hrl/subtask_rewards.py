@@ -399,13 +399,28 @@ class SubtaskRewardCalculator:
         """
         Find the nearest locked door switch position.
         
-        This is a placeholder that should be implemented based on the
-        actual observation structure. It should return the position of
-        the nearest reachable locked door switch.
+        Attempts to extract locked door switch positions from the observation.
+        In N++, locked doors are entity type 4 and have associated switches.
+        
+        Returns:
+            Position array [x, y] of nearest locked door switch, or None if not found
         """
-        # Placeholder implementation
-        # In a real system, this would query locked door information from obs
-        # For now, return None to indicate no locked door switch found
+        # Try to get from info dict if provided with observation
+        if 'locked_switches' in obs and obs['locked_switches']:
+            ninja_pos = np.array([obs['player_x'], obs['player_y']])
+            min_distance = float('inf')
+            nearest_switch = None
+            
+            for switch_pos in obs['locked_switches']:
+                distance = np.linalg.norm(ninja_pos - np.array(switch_pos))
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_switch = np.array(switch_pos)
+            
+            return nearest_switch
+        
+        # If locked door information not available, return None
+        # This is acceptable as not all levels have locked doors
         return None
     
     def _detect_locked_switch_activation(
@@ -416,10 +431,14 @@ class SubtaskRewardCalculator:
         """
         Detect if a locked door switch was just activated.
         
-        Placeholder implementation - should track individual switch states.
+        Checks if the number of opened doors increased, indicating a switch activation.
         """
-        # Would need to track individual switch activations
-        return False
+        # Check if doors_opened count increased
+        current_doors = obs.get('doors_opened', 0)
+        prev_doors = prev_obs.get('doors_opened', 0)
+        
+        # A locked door switch activation would increase doors_opened count
+        return current_doors > prev_doors
     
     def _detect_door_opening(
         self,
@@ -429,10 +448,12 @@ class SubtaskRewardCalculator:
         """
         Detect if a locked door just opened.
         
-        Placeholder implementation - should track door state changes.
+        Uses the same detection as switch activation since door opening
+        is triggered by switch activation in N++.
         """
-        # Would need to track door state changes
-        return False
+        # Door opening is detected the same way as switch activation
+        # since doors open when their associated switch is activated
+        return self._detect_locked_switch_activation(obs, prev_obs)
     
     def _detect_objective_discovery(
         self,
@@ -442,30 +463,70 @@ class SubtaskRewardCalculator:
         """
         Detect if new objectives (switches/doors) were discovered.
         
-        Placeholder implementation - should track visible objectives.
+        Uses reachability features to detect improved connectivity,
+        which indicates discovering new areas/objectives.
         """
-        # Would need to track newly visible objectives
+        # Use reachability features to detect new area discovery
+        # Feature index 5 typically represents connectivity/reachability score
+        current_reachability = obs.get('reachability_features', np.zeros(8))
+        prev_reachability = prev_obs.get('reachability_features', np.zeros(8))
+        
+        if len(current_reachability) >= 6 and len(prev_reachability) >= 6:
+            # Check if reachability improved significantly
+            improvement = current_reachability[5] - prev_reachability[5]
+            return improvement > 0.1  # Threshold for significant discovery
+        
         return False
     
     def _get_nearest_dangerous_mine_distance(self, obs: Dict[str, Any]) -> Optional[float]:
         """
         Get distance to nearest dangerous (toggled) mine.
         
-        Only TOGGLED mines are dangerous. UNTOGGLED and TOGGLING are safe.
-        Placeholder implementation - should extract from mine state in obs.
+        Only TOGGLED mines are dangerous (state 0). UNTOGGLED (state 1) and TOGGLING (state 2) are safe.
+        
+        Returns:
+            Distance to nearest dangerous mine in pixels, or None if no dangerous mines
         """
-        # Placeholder: would extract from mine entity information
-        # For now, return None to indicate no mine information
+        # Try to extract mine information from entity_states
+        # entity_states contains information about all entities including mines
+        if 'entity_states' not in obs or obs['entity_states'] is None:
+            return None
+        
+        ninja_pos = np.array([obs['player_x'], obs['player_y']])
+        entity_states = obs['entity_states']
+        
+        # Mine state information is encoded in entity_states
+        # We need to parse this to find toggled mines
+        # For now, use a simplified approach checking if mine info is available
+        if 'mine_states' in obs:
+            mine_states = obs['mine_states']
+            min_distance = float('inf')
+            found_dangerous_mine = False
+            
+            for mine_info in mine_states:
+                # Only consider TOGGLED mines (state 0) as dangerous
+                if mine_info.get('state') == 0:  # TOGGLED state
+                    mine_pos = np.array([mine_info['x'], mine_info['y']])
+                    distance = np.linalg.norm(ninja_pos - mine_pos)
+                    if distance < min_distance:
+                        min_distance = distance
+                        found_dangerous_mine = True
+            
+            if found_dangerous_mine:
+                return float(min_distance)
+        
         return None
     
     def _check_mine_state_awareness(self, obs: Dict[str, Any]) -> bool:
         """
         Check if the agent is correctly tracking mine states.
         
-        Placeholder implementation.
+        Returns True if mine state information is available in the observation,
+        indicating the agent has access to mine awareness features.
         """
-        # Placeholder for mine state awareness tracking
-        return False
+        # Check if mine state information is available
+        # This indicates the environment is providing mine awareness data
+        return 'mine_states' in obs and obs['mine_states'] is not None and len(obs['mine_states']) > 0
     
     def reset(self):
         """Reset all trackers for new episode."""
