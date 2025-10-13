@@ -241,15 +241,20 @@ class HierarchicalPolicyNetwork(nn.Module):
         # Determine target based on current subtask using ACTUAL positions
         current_subtask = self.transition_manager.current_subtask
         
-        if current_subtask == Subtask.REACH_SWITCH:
-            # Target is the switch - use real position
+        if current_subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
+            # Target is the exit switch - use real position
             target_position = switch_pos
             distance_to_target = torch.norm(ninja_pos - switch_pos, dim=1, keepdim=True)
-        elif current_subtask == Subtask.REACH_EXIT:
-            # Target is the exit - use real position
+        elif current_subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
+            # Target is locked door switch - for now use same as exit switch
+            # (locked doors not fully implemented yet)
+            target_position = switch_pos
+            distance_to_target = torch.norm(ninja_pos - switch_pos, dim=1, keepdim=True)
+        elif current_subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
+            # Target is the exit door - use real position
             target_position = exit_pos
             distance_to_target = torch.norm(ninja_pos - exit_pos, dim=1, keepdim=True)
-        else:  # EXPLORE or other
+        else:  # EXPLORE_FOR_SWITCHES or other
             # Use centroid of switch and exit as exploration target
             target_position = (switch_pos + exit_pos) / 2.0
             distance_to_target = torch.norm(ninja_pos - target_position, dim=1, keepdim=True)
