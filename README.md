@@ -8,6 +8,80 @@ This project trains an agent to play the game [N++](https://en.wikipedia.org/wik
 
 The agent architecture incorporates several features informed by recent deep reinforcement learning research to enhance performance, generalization, and sample efficiency.
 
+## 🚀 NEW: Comprehensive Training System
+
+**A complete training and architecture comparison framework is now available!**
+
+The system provides end-to-end functionality for:
+- ✅ **Multi-Architecture Training**: Compare multiple RL architectures (HGT, GAT, GCN, vision-free, etc.)
+- ✅ **Curriculum Learning**: Progressive difficulty training from simple to complex levels
+- ✅ **Hierarchical PPO**: Two-level policy architecture with high/low-level policies
+- ✅ **Standardized Evaluation**: Test on comprehensive standardized test suites
+- ✅ **Cloud Integration**: Automatic AWS S3 artifact storage
+- ✅ **Multi-GPU Support**: Distributed training with mixed precision
+- ✅ **Comprehensive Monitoring**: TensorBoard logging and metrics
+
+### Quick Start
+
+```bash
+# Train with curriculum learning and hierarchical PPO
+python scripts/train_and_compare.py \
+    --experiment-name "curriculum_hierarchical" \
+    --architectures full_hgt \
+    --use-curriculum \
+    --use-hierarchical-ppo \
+    --train-dataset ../nclone/datasets/train \
+    --test-dataset ../nclone/datasets/test \
+    --total-timesteps 20000000 \
+    --num-envs 64 \
+    --output-dir experiments/
+
+# Or compare multiple architectures
+python scripts/train_and_compare.py \
+    --experiment-name "arch_comparison" \
+    --architectures full_hgt vision_free gat \
+    --train-dataset ../nclone/datasets/train \
+    --test-dataset ../nclone/datasets/test \
+    --total-timesteps 10000000 \
+    --num-envs 64 \
+    --output-dir experiments/
+```
+
+### Documentation
+
+- **📖 Quick Start Guide**: [`docs/QUICK_START_TRAINING.md`](docs/QUICK_START_TRAINING.md)
+- **🎓 Curriculum Learning**: [`docs/CURRICULUM_LEARNING.md`](docs/CURRICULUM_LEARNING.md) - Progressive difficulty training
+- **📚 Complete System Docs**: [`docs/TRAINING_SYSTEM.md`](docs/TRAINING_SYSTEM.md)
+- **✅ Installation Checklist**: [`INSTALLATION_CHECKLIST.md`](INSTALLATION_CHECKLIST.md)
+- **📦 Delivery Summary**: [`TRAINING_SYSTEM_DELIVERY.md`](TRAINING_SYSTEM_DELIVERY.md)
+
+### Available Architectures
+
+```bash
+# List all available architectures
+python scripts/list_architectures.py
+```
+
+**Supported architectures**: `full_hgt`, `vision_free`, `local_only`, `gat`, `gcn`, `simplified_hgt`, `mlp_baseline`
+
+### Example Scripts
+
+```bash
+# Single architecture quick test
+./scripts/example_single_arch.sh
+
+# Multi-architecture comparison  
+./scripts/example_multi_arch.sh
+
+# Curriculum learning with hierarchical PPO
+./scripts/example_curriculum.sh
+
+# Production run with S3 upload
+./scripts/example_with_s3.sh
+```
+
+---
+
 ## Core Agent Features & Architecture
 
 The PPO agent leverages a multi-input policy capable of processing visual and vector-based game state information. Key architectural components include:

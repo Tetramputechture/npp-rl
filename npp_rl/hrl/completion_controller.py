@@ -291,8 +291,8 @@ class CompletionController:
     
     def _find_exit_switch_id(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Optional[str]:
         """Find the exit switch ID from level data."""
-        level_data = self._extract_level_data(obs, info)
-        # This would find the exit switch in the level data
+        _ = self._extract_level_data(obs, info)
+        # TODO: Parse level_data to find the exit switch
         return None  # Placeholder
     
     def _create_reachability_system(self, reachability_features: np.ndarray):
