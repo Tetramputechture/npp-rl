@@ -231,39 +231,32 @@ class HierarchicalPolicyNetwork(nn.Module):
         # Feature indices: 0=area_ratio, 1=dist_to_switch, 2=dist_to_exit, 3=reachable_switches,
         #                  4=reachable_hazards, 5=connectivity, 6=exit_reachable, 7=path_exists
         
-        # Determine target based on current subtask
+        # Get actual entity positions from observation (added in observation processor)
+        # entity_positions: [ninja_x, ninja_y, switch_x, switch_y, exit_x, exit_y]
+        entity_positions = obs.get('entity_positions', torch.zeros(batch_size, 6, device=device))
+        ninja_pos = entity_positions[:, :2]  # [batch, 2]
+        switch_pos = entity_positions[:, 2:4]  # [batch, 2]
+        exit_pos = entity_positions[:, 4:6]  # [batch, 2]
+        
+        # Determine target based on current subtask using ACTUAL positions
         current_subtask = self.transition_manager.current_subtask
         
         if current_subtask == Subtask.REACH_SWITCH:
-            # Target is the switch
-            distance_to_target = 1.0 - reachability[:, 1:2]  # Convert proximity to distance
+            # Target is the switch - use real position
+            target_position = switch_pos
+            distance_to_target = torch.norm(ninja_pos - switch_pos, dim=1, keepdim=True)
         elif current_subtask == Subtask.REACH_EXIT:
-            # Target is the exit
-            distance_to_target = 1.0 - reachability[:, 2:3]  # Convert proximity to distance
+            # Target is the exit - use real position
+            target_position = exit_pos
+            distance_to_target = torch.norm(ninja_pos - exit_pos, dim=1, keepdim=True)
         else:  # EXPLORE or other
-            # Use average of switch and exit distances
-            distance_to_target = 1.0 - (reachability[:, 1:2] + reachability[:, 2:3]) / 2.0
+            # Use centroid of switch and exit as exploration target
+            target_position = (switch_pos + exit_pos) / 2.0
+            distance_to_target = torch.norm(ninja_pos - target_position, dim=1, keepdim=True)
         
         # Extract mine proximity from reachability features
         # Feature 4 is reachable_hazards count (normalized, higher = more hazards nearby)
         mine_proximity = reachability[:, 4:5]  # [batch, 1] - already normalized [0, 1]
-        
-        # Compute target position estimate from game_state
-        # game_state contains normalized ninja position in first 2 dims
-        game_state = obs.get('game_state', torch.zeros(batch_size, 26, device=device))
-        ninja_pos = game_state[:, :2]  # [batch, 2] - normalized position
-        
-        # Estimate target position based on current subtask
-        # This is a rough estimate since we don't have explicit target coordinates in obs
-        if current_subtask == Subtask.REACH_SWITCH:
-            # Use reachability distance to estimate direction
-            target_position = ninja_pos.clone()
-            target_position[:, 0] += (1.0 - reachability[:, 1]) * 0.1  # Move toward switch
-        elif current_subtask == Subtask.REACH_EXIT:
-            target_position = ninja_pos.clone()
-            target_position[:, 0] += (1.0 - reachability[:, 2]) * 0.1  # Move toward exit
-        else:
-            target_position = torch.zeros(batch_size, 2, device=device)
         
         # Time in subtask (normalized by expected duration)
         time_in_subtask = torch.full(
