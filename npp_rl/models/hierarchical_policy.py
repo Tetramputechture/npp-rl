@@ -215,30 +215,68 @@ class HierarchicalPolicyNetwork(nn.Module):
         Extract subtask-specific context from observations.
         
         Args:
-            obs: Observation dictionary
+            obs: Observation dictionary containing:
+                - reachability_features: [batch, 8] - distances to switches/exits, reachability info
+                - game_state: [batch, 26] - ninja physics state including position
+                - entity_states: [batch, ...] - entity information including mines
             
         Returns:
             Context dictionary with target info, mine proximity, etc.
-            
-        Note:
-            This is a placeholder implementation. In a full implementation,
-            these values should be extracted from the observation dictionary
-            using environment-specific logic (see SubtaskSpecificFeatures class
-            for helper methods).
         """
         batch_size = obs['reachability_features'].shape[0]
         device = obs['reachability_features'].device
         
-        # Placeholder implementation - override or extend for actual use
+        # Extract reachability features
+        reachability = obs['reachability_features']  # [batch, 8]
+        # Feature indices: 0=area_ratio, 1=dist_to_switch, 2=dist_to_exit, 3=reachable_switches,
+        #                  4=reachable_hazards, 5=connectivity, 6=exit_reachable, 7=path_exists
+        
+        # Determine target based on current subtask
+        current_subtask = self.transition_manager.current_subtask
+        
+        if current_subtask == Subtask.REACH_SWITCH:
+            # Target is the switch
+            distance_to_target = 1.0 - reachability[:, 1:2]  # Convert proximity to distance
+        elif current_subtask == Subtask.REACH_EXIT:
+            # Target is the exit
+            distance_to_target = 1.0 - reachability[:, 2:3]  # Convert proximity to distance
+        else:  # EXPLORE or other
+            # Use average of switch and exit distances
+            distance_to_target = 1.0 - (reachability[:, 1:2] + reachability[:, 2:3]) / 2.0
+        
+        # Extract mine proximity from reachability features
+        # Feature 4 is reachable_hazards count (normalized, higher = more hazards nearby)
+        mine_proximity = reachability[:, 4:5]  # [batch, 1] - already normalized [0, 1]
+        
+        # Compute target position estimate from game_state
+        # game_state contains normalized ninja position in first 2 dims
+        game_state = obs.get('game_state', torch.zeros(batch_size, 26, device=device))
+        ninja_pos = game_state[:, :2]  # [batch, 2] - normalized position
+        
+        # Estimate target position based on current subtask
+        # This is a rough estimate since we don't have explicit target coordinates in obs
+        if current_subtask == Subtask.REACH_SWITCH:
+            # Use reachability distance to estimate direction
+            target_position = ninja_pos.clone()
+            target_position[:, 0] += (1.0 - reachability[:, 1]) * 0.1  # Move toward switch
+        elif current_subtask == Subtask.REACH_EXIT:
+            target_position = ninja_pos.clone()
+            target_position[:, 0] += (1.0 - reachability[:, 2]) * 0.1  # Move toward exit
+        else:
+            target_position = torch.zeros(batch_size, 2, device=device)
+        
+        # Time in subtask (normalized by expected duration)
+        time_in_subtask = torch.full(
+            (batch_size, 1),
+            min(self.transition_manager.subtask_step_count / 500.0, 1.0),
+            device=device
+        )
+        
         context = {
-            'target_position': torch.zeros(batch_size, 2, device=device),
-            'distance_to_target': torch.ones(batch_size, 1, device=device),
-            'mine_proximity': torch.full((batch_size, 1), 5.0, device=device),
-            'time_in_subtask': torch.full(
-                (batch_size, 1),
-                self.transition_manager.subtask_step_count / 500.0,
-                device=device
-            ),
+            'target_position': target_position,
+            'distance_to_target': distance_to_target,
+            'mine_proximity': mine_proximity,
+            'time_in_subtask': time_in_subtask,
         }
         
         return context

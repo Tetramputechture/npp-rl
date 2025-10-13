@@ -12,7 +12,16 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 
-from npp_rl.optimization.architecture_configs import ArchitectureConfig
+from npp_rl.optimization.architecture_configs import (
+    ArchitectureConfig,
+    ModalityConfig,
+    GraphConfig,
+    VisualConfig,
+    StateConfig,
+    FusionConfig,
+    GraphArchitectureType,
+    FusionType,
+)
 from npp_rl.training.pretraining_pipeline import PretrainingPipeline
 
 
@@ -40,17 +49,33 @@ class TestPretrainingPipeline(unittest.TestCase):
                 dones=np.zeros(100)
             )
         
-        # Create mock architecture config
+        # Create mock architecture config with proper nested structure
         self.arch_config = ArchitectureConfig(
             name="test_bc_arch",
-            cnn_architecture="3d",
-            hidden_dim=256,
-            num_layers=2,
-            use_graph_encoder=False,
-            graph_hidden_dim=0,
-            use_attention=False,
-            attention_heads=0,
-            dropout_rate=0.1
+            description="Test behavioral cloning architecture",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=True,
+                use_graph=False,  # Simplified for BC testing
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.NONE,  # No graph for BC testing
+                hidden_dim=256,
+                num_layers=2,
+            ),
+            visual=VisualConfig(
+                temporal_output_dim=512,
+                global_output_dim=256,
+                cnn_dropout=0.1,
+            ),
+            state=StateConfig(
+                hidden_dim=128,
+                output_dim=128,
+            ),
+            fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+            features_dim=512,
         )
     
     def test_initialization(self):
@@ -191,10 +216,18 @@ class TestPretrainingPipeline(unittest.TestCase):
             output_dir=self.output_dir
         )
         
-        checkpoint_path = pipeline.get_checkpoint_path("bc_pretrained")
+        # Method returns None if no checkpoint exists
+        checkpoint_path = pipeline.get_checkpoint_path()
+        self.assertIsNone(checkpoint_path)
         
-        self.assertTrue(checkpoint_path.parent == self.output_dir)
-        self.assertTrue(checkpoint_path.name == "bc_pretrained.zip")
+        # Create a checkpoint file to test the method
+        test_checkpoint = self.output_dir / 'bc_checkpoint.pth'
+        test_checkpoint.touch()
+        
+        checkpoint_path = pipeline.get_checkpoint_path()
+        self.assertIsNotNone(checkpoint_path)
+        self.assertEqual(checkpoint_path.parent, self.output_dir)
+        self.assertEqual(checkpoint_path.name, "bc_checkpoint.pth")
     
     def test_architecture_config_accessible(self):
         """Test that architecture config is accessible."""
@@ -205,8 +238,8 @@ class TestPretrainingPipeline(unittest.TestCase):
         )
         
         self.assertEqual(pipeline.architecture_config.name, "test_bc_arch")
-        self.assertEqual(pipeline.architecture_config.hidden_dim, 256)
-        self.assertFalse(pipeline.architecture_config.use_graph_encoder)
+        self.assertEqual(pipeline.architecture_config.features_dim, 512)
+        self.assertFalse(pipeline.architecture_config.modalities.use_graph)
     
     def test_tensorboard_writer_optional(self):
         """Test that TensorBoard writer is optional."""
@@ -244,14 +277,30 @@ class TestPretrainingPipelineEdgeCases(unittest.TestCase):
         
         self.arch_config = ArchitectureConfig(
             name="edge_case_arch",
-            cnn_architecture="2d",
-            hidden_dim=128,
-            num_layers=2,
-            use_graph_encoder=False,
-            graph_hidden_dim=0,
-            use_attention=False,
-            attention_heads=0,
-            dropout_rate=0.0
+            description="Edge case test architecture",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=True,
+                use_graph=False,
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.NONE,
+                hidden_dim=128,
+                num_layers=2,
+            ),
+            visual=VisualConfig(
+                temporal_output_dim=256,
+                global_output_dim=128,
+                cnn_dropout=0.0,
+            ),
+            state=StateConfig(
+                hidden_dim=128,
+                output_dim=128,
+            ),
+            fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+            features_dim=384,
         )
     
     def test_handles_nested_output_directory(self):
@@ -343,14 +392,31 @@ class TestPretrainingPipelineIntegration(unittest.TestCase):
         
         self.arch_config = ArchitectureConfig(
             name="integration_test_arch",
-            cnn_architecture="3d",
-            hidden_dim=256,
-            num_layers=3,
-            use_graph_encoder=True,
-            graph_hidden_dim=128,
-            use_attention=False,
-            attention_heads=0,
-            dropout_rate=0.1
+            description="Integration test architecture with full features",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=True,
+                use_graph=True,
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.FULL_HGT,
+                hidden_dim=128,
+                num_layers=3,
+                output_dim=128,
+            ),
+            visual=VisualConfig(
+                temporal_output_dim=512,
+                global_output_dim=256,
+                cnn_dropout=0.1,
+            ),
+            state=StateConfig(
+                hidden_dim=256,
+                output_dim=128,
+            ),
+            fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+            features_dim=512,
         )
     
     def test_full_pipeline_workflow(self):
