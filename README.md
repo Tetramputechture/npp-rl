@@ -594,6 +594,53 @@ python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --extr
 
 The original training utilities in `npp_rl/agents/npp_agent_ppo.py` remain for compatibility; prefer `training.py` going forward.
 
+### Behavioral Cloning Pretraining
+
+The system supports pretraining policies using behavioral cloning (BC) on human replay data before starting RL training. This can significantly improve initial performance and sample efficiency.
+
+**Using the PretrainingPipeline (Recommended):**
+
+```python
+from npp_rl.training.pretraining_pipeline import PretrainingPipeline, run_bc_pretraining_if_available
+from npp_rl.optimization.architecture_configs import ArchitectureConfig
+from pathlib import Path
+
+# Configure architecture
+config = ArchitectureConfig(
+    name="hgt_with_bc",
+    features_dim=512,
+    modalities=ModalityConfig(
+        use_graph=True,
+        use_visual=True,
+        use_state=True
+    )
+)
+
+# Run BC pretraining if replay data available
+checkpoint_path = run_bc_pretraining_if_available(
+    replay_data_dir="bc_replays",  # Directory with replay .npz files
+    architecture_config=config,
+    output_dir=Path("pretrained_models"),
+    epochs=20,
+    batch_size=64
+)
+
+# Use pretrained model for RL training
+if checkpoint_path:
+    print(f"Pretrained model saved to: {checkpoint_path}")
+    # Load this checkpoint when starting PPO training
+```
+
+**Replay Data Format:**
+
+Replay files should be in `.npz` format with the following structure:
+- `observations`: Dict with keys matching environment observation space
+- `actions`: Integer actions (0-5 for N++)
+- `success_rate`: (optional) Quality metric for filtering
+- `completion_time`: (optional) Time metric for filtering
+
+**Note:** The standalone `bc_pretrain.py` script uses deprecated imports and should not be used. Use `PretrainingPipeline` or `BCTrainer` directly instead.
+
 ### Hyperparameter Tuning
 
 Automated hyperparameter optimization is available via Optuna. Scripts `ppo_tune.py` (for standard PPO features) and `recurrent_ppo_tune.py` (if a recurrent version is being tested) can be used. These scripts typically optimize:
