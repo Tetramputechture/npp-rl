@@ -106,6 +106,12 @@ The agent receives multi-modal observations:
     *   Normalized vectors from the ninja to key objectives (e.g., active switch, exit).
     *   Time remaining in the episode.
 
+*   **Entity Positions**: A 6-element array containing normalized positions:
+    *   Ninja position (x, y)
+    *   Exit switch position (x, y) 
+    *   Exit door position (x, y)
+    *   Used for hierarchical planning and target-based navigation
+
 ### 2. Feature Extraction
 
 The agent uses an **HGTMultimodalExtractor** that combines multiple neural architectures for comprehensive multimodal processing:
