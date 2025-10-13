@@ -164,9 +164,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     
     def _create_graph_encoder(self, graph_config) -> nn.Module:
         """Create graph encoder based on architecture type."""
-        # Note: Actual node feature dimension should come from observation space
-        # Using placeholder value here
-        node_feature_dim = 67  # N++ graph node features
+        # N++ graph observations from nclone have 67-dimensional node features
+        # This is the standard dimension from HierarchicalGraphBuilder in nclone
+        node_feature_dim = 67  # N++ graph node features from nclone
         
         arch_type = graph_config.architecture
         
