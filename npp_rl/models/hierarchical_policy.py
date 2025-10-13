@@ -26,6 +26,15 @@ from npp_rl.hrl.subtask_policies import (
     ICMIntegration,
 )
 
+# Entity position indices in the entity_positions array
+# Array format: [ninja_x, ninja_y, switch_x, switch_y, exit_x, exit_y]
+NINJA_POS_START = 0
+NINJA_POS_END = 2
+SWITCH_POS_START = 2
+SWITCH_POS_END = 4
+EXIT_POS_START = 4
+EXIT_POS_END = 6
+
 
 class HierarchicalPolicyNetwork(nn.Module):
     """
@@ -234,9 +243,9 @@ class HierarchicalPolicyNetwork(nn.Module):
         # Get actual entity positions from observation (added in observation processor)
         # entity_positions: [ninja_x, ninja_y, switch_x, switch_y, exit_x, exit_y]
         entity_positions = obs.get('entity_positions', torch.zeros(batch_size, 6, device=device))
-        ninja_pos = entity_positions[:, :2]  # [batch, 2]
-        switch_pos = entity_positions[:, 2:4]  # [batch, 2]
-        exit_pos = entity_positions[:, 4:6]  # [batch, 2]
+        ninja_pos = entity_positions[:, NINJA_POS_START:NINJA_POS_END]
+        switch_pos = entity_positions[:, SWITCH_POS_START:SWITCH_POS_END]
+        exit_pos = entity_positions[:, EXIT_POS_START:EXIT_POS_END]
         
         # Determine target based on current subtask using ACTUAL positions
         current_subtask = self.transition_manager.current_subtask

@@ -2,16 +2,13 @@
 Heterogeneous Graph Transformer (HGT) Main Module for NPP-RL.
 
 This module provides the main interface for HGT functionality in the NPP-RL
-system. It imports and re-exports components from the split HGT modules
-for backward compatibility and ease of use.
+system. It imports and re-exports components from the split HGT modules.
 
-The HGT implementation is now split into focused modules:
+The HGT implementation is split into focused modules:
 - hgt_layer.py: Core HGT layer implementation
 - hgt_encoder.py: Multi-layer HGT encoder
 - attention_mechanisms.py: Specialized attention mechanisms
 - hgt_factory.py: Factory functions and production utilities
-
-This maintains the original API while providing better maintainability.
 """
 
 # Import core HGT components
@@ -46,7 +43,7 @@ from .hgt_factory import (
     default_hgt_factory
 )
 
-# Re-export for backward compatibility
+# Public API exports
 __all__ = [
     # Core components
     "HGTLayer",
@@ -78,24 +75,6 @@ __all__ = [
     "validate_hgt_installation",
     "default_hgt_factory"
 ]
-
-
-# Backward compatibility aliases
-def create_hgt_encoder_legacy(
-    node_feature_dim: int, 
-    edge_feature_dim: int, 
-    **kwargs
-) -> HGTEncoder:
-    """
-    Legacy factory function for backward compatibility.
-    
-    This maintains the original API from the monolithic hgt_gnn.py file.
-    """
-    return create_hgt_encoder(
-        node_feature_dim=node_feature_dim,
-        edge_feature_dim=edge_feature_dim,
-        **kwargs
-    )
 
 
 # Production-ready defaults for NPP-RL
