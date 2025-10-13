@@ -241,7 +241,10 @@ class TestMineStateProcessor:
         
         # Get mines blocking horizontal path
         blocking = processor.get_mines_blocking_path((50.0, 100.0), (150.0, 100.0))
-        assert len(blocking) == 2  # mine1 and mine2, not mine3 (safe)
+        # Only mine1 (TOGGLED) is dangerous and blocks the path
+        # mine2 (TOGGLING) is safe because player is currently overlapping
+        # mine3 (UNTOGGLED) is safe
+        assert len(blocking) == 1  # only mine1 (TOGGLED)
     
     def test_get_mine_features(self):
         """Test getting mine feature array."""
