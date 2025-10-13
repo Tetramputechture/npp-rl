@@ -281,15 +281,59 @@ class ObservationProcessor:
 
     def _create_mock_observation(self, frame: ReplayFrame) -> Dict[str, np.ndarray]:
         """
-        Create mock observation for testing purposes.
+        Create observation from replay frame data.
 
-        In a real implementation, this would:
-        1. Set up the game state based on frame data
-        2. Render player and global views
-        3. Compute game state vector
-
-        For now, we create placeholder data with correct shapes.
+        TODO: Implement proper observation extraction using replay infrastructure.
+        
+        Production Implementation Plan:
+        ----------------------------
+        The N++ simulation is fully deterministic, so we can reconstruct
+        complete observations by replaying the recorded inputs. This provides:
+        - Exact visual observations matching training data format
+        - Correct entity states and game state vectors
+        - 100-1000x storage efficiency vs storing raw observations
+        
+        Implementation Steps:
+        1. Load level map from replay frame.level_id
+        2. Initialize nclone simulation with that map
+        3. Step simulation using recorded inputs up to frame_number
+        4. Use UnifiedObservationExtractor to extract proper observations
+        5. Return observations in NppEnvironment format
+        
+        Required Components:
+        - nclone.replay.map_loader.MapLoader (already exists)
+        - nclone.replay.replay_executor.ReplayExecutor (already exists)
+        - nclone.replay.unified_observation_extractor.UnifiedObservationExtractor (already exists)
+        
+        Example Code:
+        ```python
+        from nclone.replay.map_loader import MapLoader
+        from nclone.replay.replay_executor import ReplayExecutor
+        from nclone.replay.unified_observation_extractor import UnifiedObservationExtractor
+        
+        # Load map
+        map_loader = MapLoader()
+        level_map = map_loader.load_level(frame.level_id)
+        
+        # Execute replay up to current frame
+        executor = ReplayExecutor(level_map)
+        executor.replay_to_frame(inputs=recorded_inputs, target_frame=frame.frame_number)
+        
+        # Extract observations
+        obs_extractor = UnifiedObservationExtractor(enable_visual_observations=True)
+        observation = obs_extractor.extract_observation(executor.sim)
+        ```
+        
+        See: docs/tasks/REPLAY_PRETRAINING_PIPELINE.md for full architecture
+        
+        Current Placeholder Implementation:
+        -----------------------------------
+        For now, we create mock data with correct shapes for testing the pipeline.
+        This should be replaced with the production implementation above.
         """
+        # PLACEHOLDER: Mock observations for testing purposes only
+        # Replace with actual replay-based observation extraction
+        
         # Mock player frame (64x64x3)
         player_frame = np.random.randint(0, 256, (64, 64, 3), dtype=np.uint8)
 
@@ -299,7 +343,7 @@ class ObservationProcessor:
         # Mock game state vector
         game_state_dim = 31
 
-        # Create realistic game state based on frame data
+        # Create realistic game state based on available frame data
         game_state = np.zeros(game_state_dim, dtype=np.float32)
 
         # Fill in known values from frame data
@@ -320,8 +364,8 @@ class ObservationProcessor:
         game_state[5] = float(frame.player_state.get("wall_sliding", False))
         game_state[6] = frame.player_state.get("jump_time_remaining", 0.0)
 
-        # Fill remaining with mock data
-        game_state[7:] = np.random.random(game_state_dim - 7) * 0.1
+        # Fill remaining with zeros (not random) for deterministic testing
+        game_state[7:] = 0.0
 
         return {
             "player_frame": player_frame,
