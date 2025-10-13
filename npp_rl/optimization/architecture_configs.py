@@ -37,7 +37,7 @@ class ModalityConfig:
     use_temporal_frames: bool = True  # 3D CNN on 84x84x12 temporal frames
     use_global_view: bool = True  # 2D CNN on 176x100 global view
     use_graph: bool = True  # Graph neural network
-    use_game_state: bool = True  # Game state vector (30 features)
+    use_game_state: bool = True  # Game state vector (26 features after redundancy removal)
     use_reachability: bool = True  # Reachability features (8 features)
     
     def get_enabled_modalities(self) -> List[str]:
@@ -103,7 +103,7 @@ class VisualConfig:
 @dataclass(frozen=True)
 class StateConfig:
     """Configuration for state vector processing."""
-    game_state_dim: int = 30  # Input dimension
+    game_state_dim: int = 26  # Input dimension (after redundancy removal)
     reachability_dim: int = 8  # Input dimension
     hidden_dim: int = 128
     output_dim: int = 128
