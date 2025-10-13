@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from gymnasium.spaces import Discrete, Dict as SpacesDict
 
-from npp_rl.feature_extractors import create_hgt_multimodal_extractor
+from npp_rl.feature_extractors import HGTMultimodalExtractor
 
 
 def create_training_policy(
@@ -36,7 +36,7 @@ def create_training_policy(
     """
     if policy_class == "npp":
         # Create custom policy with multimodal feature extractor
-        features_extractor = create_hgt_multimodal_extractor(
+        features_extractor = HGTMultimodalExtractor(
             observation_space=observation_space,
             features_dim=features_dim,
         )
