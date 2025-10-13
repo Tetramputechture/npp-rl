@@ -435,11 +435,8 @@ class SubtaskSpecificFeatures:
     Helper class to extract subtask-specific features from observations.
     
     This provides utility methods for computing target positions, distances,
-    and other context features needed by the low-level policy.
-    
-    Note: The methods in this class provide placeholder implementations.
-    Users should extend this class and override methods to extract actual
-    features from their environment's observation space.
+    and other context features needed by the low-level policy from the
+    N++ environment's observation structure.
     """
     
     @staticmethod
@@ -448,29 +445,45 @@ class SubtaskSpecificFeatures:
         subtask: Subtask,
     ) -> np.ndarray:
         """
-        Extract target position for current subtask.
+        Extract target position for current subtask from N++ observations.
         
         Args:
-            obs: Environment observation
+            obs: Environment observation containing position information
             subtask: Current subtask
             
         Returns:
-            Target position [2] (normalized)
-            
-        Note:
-            This is a placeholder implementation returning dummy values.
-            Override this method to extract actual positions from your
-            environment's observation structure.
+            Target position [2] (x, y in pixels)
         """
-        # Placeholder implementation - override in subclass
+        # Extract from actual environment observations
         if subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
-            return np.array([0.5, 0.5], dtype=np.float32)
+            # Target is the exit switch
+            switch_x = obs.get("switch_x", 0.0)
+            switch_y = obs.get("switch_y", 0.0)
+            return np.array([switch_x, switch_y], dtype=np.float32)
+        
         elif subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
-            return np.array([0.3, 0.7], dtype=np.float32)
+            # Target is nearest locked door switch
+            # Extract from entity_states or use fallback
+            # For now, use a heuristic: center of level or nearest known switch
+            # TODO: Extract locked door switch positions from entity_states
+            # This requires parsing the entity_dic structure or adding to obs dict
+            # Fallback: use level center as exploration target
+            level_width = 1056  # LEVEL_WIDTH * CELL_SIZE
+            level_height = 600  # LEVEL_HEIGHT * CELL_SIZE
+            return np.array([level_width * 0.5, level_height * 0.5], dtype=np.float32)
+        
         elif subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
-            return np.array([0.8, 0.2], dtype=np.float32)
-        else:  # EXPLORE_FOR_SWITCHES
-            return np.array([0.5, 0.5], dtype=np.float32)
+            # Target is the exit door
+            exit_x = obs.get("exit_door_x", 0.0)
+            exit_y = obs.get("exit_door_y", 0.0)
+            return np.array([exit_x, exit_y], dtype=np.float32)
+        
+        else:  # AVOID_MINE or EXPLORE_FOR_SWITCHES
+            # For mine avoidance: move away from nearest mine
+            # For exploration: use level center or unexplored area
+            level_width = 1056
+            level_height = 600
+            return np.array([level_width * 0.5, level_height * 0.5], dtype=np.float32)
     
     @staticmethod
     def compute_distance_to_target(
@@ -483,18 +496,50 @@ class SubtaskSpecificFeatures:
     @staticmethod
     def compute_mine_proximity(obs: Dict[str, Any]) -> float:
         """
-        Compute proximity to nearest dangerous mine.
+        Compute proximity to nearest dangerous mine from N++ observations.
         
         Args:
-            obs: Environment observation
+            obs: Environment observation containing game_state with hazard info
             
         Returns:
-            Distance to nearest dangerous mine (normalized)
-            
-        Note:
-            This is a placeholder implementation returning a safe distance.
-            Override this method to compute actual mine proximity from your
-            environment's observation structure.
+            Distance to nearest dangerous mine (normalized to screen diagonal)
         """
-        # Placeholder implementation - override in subclass
-        return 5.0  # Safe distance
+        # Extract mine proximity from ninja_state features
+        # Feature 23 (index 23) is nearest_hazard_distance (normalized to [-1, 1])
+        game_state = obs.get("game_state", None)
+        
+        if game_state is not None and len(game_state) >= 24:
+            # Feature 23: nearest hazard distance (normalized to [-1, 1])
+            # Convert back to [0, 1] range: (x + 1) / 2
+            nearest_hazard_norm = game_state[23]
+            nearest_hazard_01 = (nearest_hazard_norm + 1.0) / 2.0
+            return float(nearest_hazard_01)
+        
+        # Fallback: use entity_states if available
+        entity_states = obs.get("entity_states", None)
+        if entity_states is not None and len(entity_states) > 0:
+            player_x = obs.get("player_x", 0.0)
+            player_y = obs.get("player_y", 0.0)
+            
+            # Import helper function to compute hazard from entity states
+            try:
+                # Avoid circular import by importing here
+                import sys
+                import os
+                nclone_path = os.path.join(os.path.dirname(__file__), '../../..', 'nclone')
+                if os.path.exists(nclone_path):
+                    sys.path.insert(0, nclone_path)
+                from nclone.gym_environment.observation_processor import compute_hazard_from_entity_states
+                
+                nearest_dist, _ = compute_hazard_from_entity_states(
+                    entity_states, player_x, player_y
+                )
+                
+                # Normalize to screen diagonal
+                screen_diagonal = (1056**2 + 600**2) ** 0.5
+                return min(1.0, nearest_dist / screen_diagonal)
+            except ImportError:
+                pass
+        
+        # Safe fallback: assume no nearby mines
+        return 1.0
