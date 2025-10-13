@@ -255,9 +255,9 @@ class TestArchitectureTrainer(unittest.TestCase):
         )
         
         self.assertEqual(trainer.architecture_config.name, "test_architecture")
-        self.assertEqual(trainer.architecture_config.hidden_dim, 256)
-        self.assertEqual(trainer.architecture_config.num_layers, 3)
-        self.assertTrue(trainer.architecture_config.use_graph_encoder)
+        self.assertEqual(trainer.architecture_config.graph.hidden_dim, 256)
+        self.assertEqual(trainer.architecture_config.graph.num_layers, 3)
+        self.assertTrue(trainer.architecture_config.modalities.use_graph)
     
     def test_model_initially_none(self):
         """Test that model is initially None before setup."""
