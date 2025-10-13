@@ -463,11 +463,25 @@ class SubtaskSpecificFeatures:
         
         elif subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
             # Target is nearest locked door switch
-            # Extract from entity_states or use fallback
-            # For now, use a heuristic: center of level or nearest known switch
-            # TODO: Extract locked door switch positions from entity_states
-            # This requires parsing the entity_dic structure or adding to obs dict
-            # Fallback: use level center as exploration target
+            # Extract from observation dict (added in base_environment)
+            locked_door_switches = obs.get("locked_door_switches", [])
+            
+            if locked_door_switches:
+                # Find nearest locked door switch
+                ninja_pos = np.array([obs["player_x"], obs["player_y"]], dtype=np.float32)
+                min_dist = float('inf')
+                nearest_switch = None
+                
+                for switch in locked_door_switches:
+                    switch_pos = np.array([switch.xpos, switch.ypos], dtype=np.float32)
+                    dist = np.linalg.norm(ninja_pos - switch_pos)
+                    if dist < min_dist:
+                        min_dist = dist
+                        nearest_switch = switch_pos
+                
+                return nearest_switch
+            
+            # Fallback if no locked door switches in level
             level_width = 1056  # LEVEL_WIDTH * CELL_SIZE
             level_height = 600  # LEVEL_HEIGHT * CELL_SIZE
             return np.array([level_width * 0.5, level_height * 0.5], dtype=np.float32)
