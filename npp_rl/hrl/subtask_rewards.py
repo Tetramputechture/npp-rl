@@ -1,27 +1,16 @@
 """
-Subtask-Specific Reward Functions for Hierarchical RL
+Subtask-specific reward functions for hierarchical RL.
 
-This module implements dense reward functions that provide clear feedback for
-each subtask in the hierarchical control system. These rewards enable efficient
-learning of hierarchical behaviors by providing subtask-aligned incentives.
-
-Reward Structure:
-1. navigate_to_exit_switch: Progress toward and activation of exit switch
-2. navigate_to_locked_door_switch: Finding and activating locked door switches
-3. navigate_to_exit_door: Efficient navigation to exit after switch activation
-4. explore_for_switches: Discovery and exploration when no clear path exists
-
-The rewards are designed to:
-- Provide dense feedback for each subtask
-- Integrate with PBRS for theoretically grounded shaping
-- Include mine avoidance incentives
-- Balance with base rewards to maintain training stability
+Implements dense rewards for navigate_to_exit_switch, navigate_to_locked_door_switch,
+navigate_to_exit_door, and explore_for_switches subtasks. Integrates with PBRS for
+theoretically grounded shaping and includes mine avoidance incentives.
 """
 
 from typing import Dict, Any, Optional
 import numpy as np
 
 from npp_rl.hrl.high_level_policy import Subtask
+from npp_rl.hrl.progress_trackers import ProgressTracker, ExplorationTracker
 
 
 class SubtaskRewardCalculator:
@@ -149,14 +138,7 @@ class SubtaskRewardCalculator:
         obs: Dict[str, Any],
         prev_obs: Dict[str, Any],
     ) -> float:
-        """
-        Calculate reward for navigating to exit switch.
-        
-        Rewards:
-        - Progress toward exit switch
-        - Proximity bonus when close
-        - Timeout penalty if taking too long
-        """
+        """Calculate reward for navigating to exit switch (progress, proximity, timeout)."""
         reward = 0.0
         tracker = self.progress_trackers[Subtask.NAVIGATE_TO_EXIT_SWITCH]
         
@@ -191,15 +173,7 @@ class SubtaskRewardCalculator:
         obs: Dict[str, Any],
         prev_obs: Dict[str, Any],
     ) -> float:
-        """
-        Calculate reward for navigating to locked door switches.
-        
-        Rewards:
-        - Progress toward nearest locked door switch
-        - Switch selection bonus for approaching correct switch
-        - Activation bonus when switch is activated
-        - Door opening bonus when locked door opens
-        """
+        """Calculate reward for navigating to locked door switches."""
         reward = 0.0
         tracker = self.progress_trackers[Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH]
         
@@ -522,85 +496,3 @@ class SubtaskRewardCalculator:
         
         return components
 
-
-class ProgressTracker:
-    """
-    Track progress toward a specific objective.
-    
-    Maintains best distance achieved and step count for a subtask.
-    """
-    
-    def __init__(self):
-        self.best_distance = None
-        self.steps = 0
-    
-    def update_distance(self, distance: float):
-        """Update best distance if this is an improvement."""
-        if self.best_distance is None or distance < self.best_distance:
-            self.best_distance = distance
-    
-    def get_best_distance(self) -> float:
-        """Get best distance achieved."""
-        return self.best_distance if self.best_distance is not None else float('inf')
-    
-    def has_previous_distance(self) -> bool:
-        """Check if we have a previous distance measurement."""
-        return self.best_distance is not None
-    
-    def increment_steps(self):
-        """Increment step counter."""
-        self.steps += 1
-    
-    def get_steps(self) -> int:
-        """Get number of steps in current subtask."""
-        return self.steps
-    
-    def reset(self):
-        """Reset tracker for new episode or subtask."""
-        self.best_distance = None
-        self.steps = 0
-
-
-class ExplorationTracker(ProgressTracker):
-    """
-    Track exploration progress.
-    
-    Extends ProgressTracker to also track visited locations for exploration
-    reward calculation.
-    """
-    
-    def __init__(self, grid_size: float = 10.0):
-        """
-        Initialize exploration tracker.
-        
-        Args:
-            grid_size: Size of grid cells for discretizing visited locations
-        """
-        super().__init__()
-        self.grid_size = grid_size
-        self.visited_locations = set()
-    
-    def visit_new_location(self, position: np.ndarray) -> bool:
-        """
-        Record visit to a location and return whether it's new.
-        
-        Args:
-            position: [x, y] position
-            
-        Returns:
-            True if this is a new location, False otherwise
-        """
-        # Discretize position to grid cell
-        grid_x = int(position[0] / self.grid_size)
-        grid_y = int(position[1] / self.grid_size)
-        grid_cell = (grid_x, grid_y)
-        
-        if grid_cell not in self.visited_locations:
-            self.visited_locations.add(grid_cell)
-            return True
-        return False
-    
-    def reset(self):
-        """Reset tracker including visited locations."""
-        super().reset()
-        self.visited_locations.clear()
