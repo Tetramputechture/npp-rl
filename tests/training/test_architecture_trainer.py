@@ -13,7 +13,16 @@ from unittest.mock import MagicMock, Mock, patch
 import torch
 from stable_baselines3 import PPO
 
-from npp_rl.optimization.architecture_configs import ArchitectureConfig
+from npp_rl.optimization.architecture_configs import (
+    ArchitectureConfig,
+    ModalityConfig,
+    GraphConfig,
+    VisualConfig,
+    StateConfig,
+    FusionConfig,
+    GraphArchitectureType,
+    FusionType,
+)
 from npp_rl.training.architecture_trainer import ArchitectureTrainer
 
 
@@ -32,17 +41,28 @@ class TestArchitectureTrainer(unittest.TestCase):
         self.train_dataset.mkdir(parents=True)
         self.test_dataset.mkdir(parents=True)
         
-        # Create mock architecture config
+        # Create mock architecture config with proper nested structure
         self.arch_config = ArchitectureConfig(
             name="test_architecture",
-            cnn_architecture="3d",
-            hidden_dim=256,
-            num_layers=3,
-            use_graph_encoder=True,
-            graph_hidden_dim=128,
-            use_attention=False,
-            attention_heads=0,
-            dropout_rate=0.1
+            description="Test architecture configuration",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=True,
+                use_graph=True,
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.FULL_HGT,
+                hidden_dim=256,
+                num_layers=3,
+                output_dim=256,
+                num_heads=8,
+            ),
+            visual=VisualConfig(),
+            state=StateConfig(),
+            fusion=FusionConfig(fusion_type=FusionType.MULTI_HEAD_ATTENTION),
+            features_dim=512,
         )
     
     def test_initialization_defaults(self):
@@ -268,14 +288,24 @@ class TestArchitectureTrainerWithMockedEnvironment(unittest.TestCase):
         
         self.arch_config = ArchitectureConfig(
             name="mock_architecture",
-            cnn_architecture="2d",
-            hidden_dim=128,
-            num_layers=2,
-            use_graph_encoder=False,
-            graph_hidden_dim=0,
-            use_attention=False,
-            attention_heads=0,
-            dropout_rate=0.0
+            description="Mock architecture for testing",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=False,
+                use_graph=False,
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.NONE,
+                hidden_dim=128,
+                num_layers=2,
+                output_dim=128,
+            ),
+            visual=VisualConfig(),
+            state=StateConfig(),
+            fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+            features_dim=256,
         )
     
     @patch('npp_rl.training.architecture_trainer.create_graph_enhanced_env')
@@ -311,14 +341,30 @@ class TestArchitectureTrainerEdgeCases(unittest.TestCase):
         
         self.arch_config = ArchitectureConfig(
             name="edge_case_arch",
-            cnn_architecture="3d",
-            hidden_dim=256,
-            num_layers=3,
-            use_graph_encoder=True,
-            graph_hidden_dim=128,
-            use_attention=True,
-            attention_heads=4,
-            dropout_rate=0.2
+            description="Edge case test architecture",
+            modalities=ModalityConfig(
+                use_temporal_frames=True,
+                use_global_view=True,
+                use_graph=True,
+                use_game_state=True,
+                use_reachability=True,
+            ),
+            graph=GraphConfig(
+                architecture=GraphArchitectureType.FULL_HGT,
+                hidden_dim=256,
+                num_layers=3,
+                output_dim=256,
+                num_heads=4,
+                dropout=0.2,
+            ),
+            visual=VisualConfig(),
+            state=StateConfig(),
+            fusion=FusionConfig(
+                fusion_type=FusionType.MULTI_HEAD_ATTENTION,
+                num_attention_heads=4,
+                dropout=0.2,
+            ),
+            features_dim=512,
         )
     
     def test_handles_nonexistent_dataset_paths(self):

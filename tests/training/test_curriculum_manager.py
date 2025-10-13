@@ -21,6 +21,8 @@ class TestCurriculumManager(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures with temporary dataset."""
+        import pickle
+        
         # Create temporary directory for test data
         self.temp_dir = tempfile.mkdtemp()
         self.dataset_path = Path(self.temp_dir)
@@ -49,11 +51,16 @@ class TestCurriculumManager(unittest.TestCase):
             ],
         }
         
-        # Write mock level data to files
+        # Write mock level data to files in TestSuiteLoader expected format
+        # TestSuiteLoader expects subdirectories with *.pkl files
         for stage, levels in self.mock_levels.items():
-            stage_file = self.dataset_path / f"{stage}.json"
-            with open(stage_file, 'w') as f:
-                json.dump(levels, f)
+            stage_dir = self.dataset_path / stage
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            
+            for i, level in enumerate(levels):
+                level_file = stage_dir / f"level_{i:03d}.pkl"
+                with open(level_file, 'wb') as f:
+                    pickle.dump(level, f)
     
     def test_initialization_defaults(self):
         """Test curriculum manager initializes with default parameters."""

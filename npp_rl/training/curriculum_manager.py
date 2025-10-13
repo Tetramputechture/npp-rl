@@ -157,6 +157,14 @@ class CurriculumManager:
         # Sample random level from stage
         return np.random.choice(levels)
     
+    def get_current_level(self) -> Optional[Dict[str, Any]]:
+        """Alias for sample_level() for backwards compatibility.
+        
+        Returns:
+            Level data dictionary from current stage
+        """
+        return self.sample_level()
+    
     def record_episode(self, stage: str, success: bool) -> None:
         """Record episode result for a stage.
         
@@ -170,6 +178,15 @@ class CurriculumManager:
         
         self.stage_performance[stage].append(1 if success else 0)
         self.stage_episode_counts[stage] += 1
+    
+    def record_episode_result(self, stage: str, success: bool) -> None:
+        """Alias for record_episode() for backwards compatibility.
+        
+        Args:
+            stage: Stage name
+            success: Whether episode was successful
+        """
+        self.record_episode(stage, success)
     
     def get_stage_performance(self, stage: str) -> Dict[str, float]:
         """Get performance metrics for a stage.
@@ -203,6 +220,20 @@ class CurriculumManager:
             'can_advance': can_advance
         }
     
+    def get_stage_success_rate(self, stage: str) -> float:
+        """Get success rate for a stage.
+        
+        Args:
+            stage: Stage name
+            
+        Returns:
+            Success rate (0.0 to 1.0)
+        """
+        results = self.stage_performance.get(stage, deque())
+        if not results:
+            return 0.0
+        return float(np.mean(results))
+    
     def check_advancement(self) -> bool:
         """Check if agent should advance to next curriculum stage.
         
@@ -231,6 +262,14 @@ class CurriculumManager:
             return True
         
         return False
+    
+    def check_and_advance(self) -> bool:
+        """Alias for check_advancement() for backwards compatibility.
+        
+        Returns:
+            True if advanced to next stage, False otherwise
+        """
+        return self.check_advancement()
     
     def get_progress_summary(self) -> str:
         """Get human-readable curriculum progress summary.
