@@ -115,18 +115,22 @@ class CompletionController:
         if self.current_subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
             # Check if exit switch was activated
             exit_switch_id = self._find_exit_switch_id(obs, info)
-            if exit_switch_id and switch_states.get(exit_switch_id, False):
+            if exit_switch_id in switch_states and switch_states[exit_switch_id]:
                 return True
                 
         elif self.current_subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
             # Check if any locked door switch was activated
+            # Compare with previous switch states to detect new activations
             for switch_id, activated in switch_states.items():
-                if activated and not self.last_switch_states.get(switch_id, False):
+                # Use .get() for last_switch_states since it may not have all current keys
+                was_activated = self.last_switch_states.get(switch_id, False)
+                if activated and not was_activated:
                     return True
                     
         elif self.current_subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
             # Check if ninja reached exit (level completion)
-            if info.get('level_complete', False):
+            # Use obs['player_won'] which is guaranteed in nclone observations
+            if obs['player_won']:
                 return True
                 
         # Check for significant position change (potential mine avoidance completion)
@@ -265,79 +269,194 @@ class CompletionController:
     
     # Helper methods for extracting information from observations
     def _extract_ninja_position(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Tuple[int, int]:
-        """Extract ninja position from observation/info."""
-        # Try to get from info first
-        if 'ninja_pos' in info:
-            pos = info['ninja_pos']
-            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                return (int(pos[0]), int(pos[1]))
+        """Extract ninja position from observation.
         
-        # Extract from observation (nclone environment provides player_x, player_y)
-        if 'player_x' in obs and 'player_y' in obs:
-            return (int(obs['player_x']), int(obs['player_y']))
+        The nclone environment guarantees player_x and player_y in observations.
+        These are pixel coordinates updated every step in base_environment.py.
         
-        # Fallback: log warning and return default
-        print("Warning: Could not extract ninja position from obs or info")
-        return (0, 0)
+        Args:
+            obs: Environment observation dictionary from nclone
+            info: Environment info dictionary (unused for position)
+            
+        Returns:
+            Tuple of (x, y) pixel coordinates
+        """
+        return (int(obs['player_x']), int(obs['player_y']))
     
     def _extract_level_data(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract level data from observation/info."""
-        # This would extract level layout information
-        return info.get('level_data', {})
+        """
+        Extract level data from observation.
+        
+        In npp-rl, level_data is not directly available in obs/info. Instead, we reconstruct
+        essential level information from observation keys that are always present:
+        - Switch and exit door positions from obs['switch_x/y'] and obs['exit_door_x/y']
+        - Entity states from obs['entity_states'] if available
+        
+        This lightweight representation is sufficient for completion planning which relies
+        primarily on reachability features rather than full level geometry.
+        
+        Args:
+            obs: Environment observation dictionary from nclone
+            info: Environment info dictionary (may contain level_data in some configurations)
+            
+        Returns:
+            Dictionary with essential level information for completion planning
+        """
+        # Check if full level_data is available in info (e.g., from environment property access)
+        if 'level_data' in info and info['level_data']:
+            return info['level_data']
+        
+        # Reconstruct essential level information from observation
+        level_data = {
+            'entities': [],
+            'switches': {},
+            'exit_door': {
+                'position': (obs['exit_door_x'], obs['exit_door_y']),
+                'type': 'exit_door'
+            }
+        }
+        
+        # Add main exit switch
+        level_data['switches']['exit_switch_0'] = {
+            'position': (obs['switch_x'], obs['switch_y']),
+            'activated': obs['switch_activated'],
+            'type': 'exit',
+            'is_exit': True
+        }
+        
+        # Note: entity_states is available in obs but contains flat array format
+        # For completion planning, the primary switch/exit from obs keys is sufficient
+        # Advanced implementations could parse entity_states for additional switches
+        
+        return level_data
     
     def _extract_switch_states(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Dict[str, bool]:
-        """Extract switch states from observation/info."""
-        return info.get('switch_states', {})
+        """
+        Extract switch states from observation.
+        
+        The nclone environment provides switch activation status in obs['switch_activated'].
+        For completion planning, we track the main exit switch (which is guaranteed present).
+        Additional switches can be inferred from obs['doors_opened'] count.
+        
+        Args:
+            obs: Environment observation dictionary from nclone
+            info: Environment info dictionary (may contain switch_states in some configurations)
+            
+        Returns:
+            Dictionary mapping switch IDs to activation status (bool)
+        """
+        # Use info if available (e.g., from hierarchical mixin)
+        if 'switch_states' in info and info['switch_states']:
+            return info['switch_states']
+        
+        # Reconstruct from observation
+        switch_states = {
+            'exit_switch_0': bool(obs['switch_activated'])
+        }
+        
+        # doors_opened gives us information about locked door switches
+        # Each opened door implies an activated locked door switch
+        doors_opened = obs['doors_opened']
+        for i in range(doors_opened):
+            switch_states[f'locked_door_switch_{i}'] = True
+        
+        return switch_states
     
     def _extract_reachability_features(self, obs: Dict[str, Any]) -> np.ndarray:
         """
         Extract 8D reachability features from observation.
         
-        When reachability analysis is enabled in nclone environment,
-        the observation will contain 'reachability_features' key.
+        The nclone environment provides reachability features when reachability is enabled.
+        These features are computed via flood-fill analysis in reachability_mixin.py:
         
+        Features (all normalized 0-1):
+        1. Reachable area ratio - fraction of level accessible
+        2. Distance to nearest switch - normalized by level size
+        3. Distance to exit - normalized by level size
+        4. Reachable switches count - normalized
+        5. Reachable hazards count - normalized
+        6. Connectivity score - measure of path diversity
+        7. Exit reachable flag - binary 0/1
+        8. Switch-to-exit path exists - binary 0/1
+        
+        Args:
+            obs: Environment observation dictionary from nclone
+            
         Returns:
-            8D reachability feature vector
+            8D numpy array of float32 reachability features
         """
-        # Extract from observation if available (nclone provides this when reachability is enabled)
-        if 'reachability_features' in obs:
-            features = obs['reachability_features']
-            if isinstance(features, np.ndarray) and features.shape == (8,):
-                return features.astype(np.float32)
-            elif hasattr(features, '__iter__') and len(features) == 8:
-                return np.array(features, dtype=np.float32)
-        
-        # Fallback: return zeros if not available
-        return np.zeros(8, dtype=np.float32)
+        return obs['reachability_features'].astype(np.float32)
     
-    def _find_exit_switch_id(self, obs: Dict[str, Any], info: Dict[str, Any]) -> Optional[str]:
+    def _find_exit_switch_id(self, obs: Dict[str, Any], info: Dict[str, Any]) -> str:
         """
-        Find the exit switch ID from level data.
+        Find the exit switch ID.
         
-        In N++, exit switches typically have entity type 3 and are part of exit_pair entities.
-        The nclone environment provides 'switch_activated' in obs to check activation status.
+        In N++ levels, there is always at least one exit switch (the main switch that opens
+        the exit door). The nclone environment exposes this via obs['switch_x/y'] and 
+        obs['switch_activated'].
         
+        For standard levels, we use the canonical ID 'exit_switch_0'. Levels with multiple
+        switches would need more complex logic, but the completion planner primarily cares
+        about the main exit switch.
+        
+        Args:
+            obs: Environment observation dictionary from nclone
+            info: Environment info dictionary
+            
         Returns:
-            Exit switch ID string if found, None otherwise
+            Exit switch ID string (always 'exit_switch_0' for standard levels)
         """
-        level_data = self._extract_level_data(obs, info)
-        
-        # Try to find exit switch from level data entities
-        if level_data and 'entities' in level_data:
-            for entity in level_data['entities']:
-                if entity.get('type') == 'exit_switch' or 'exit_pair' in entity.get('entity_id', ''):
-                    return entity.get('entity_id')
-        
-        # Fallback: use generic exit switch identifier
-        # Most N++ levels have a single exit switch
         return "exit_switch_0"
     
     def _create_reachability_system(self, reachability_features: np.ndarray):
-        """Create a mock reachability system for the completion planner."""
-        # This would create a reachability system compatible with the planner
-        # For now, return a simple mock
-        class MockReachabilitySystem:
-            def analyze_reachability(self, level_data, ninja_pos, switch_states):
-                return {'reachable_positions': set(), 'features': reachability_features}
+        """
+        Create a reachability system adapter for the completion planner.
         
-        return MockReachabilitySystem()
+        The completion planner expects a reachability_system object with an
+        analyze_reachability() method. Since we're working from pre-computed
+        reachability features rather than doing analysis on-demand, we create
+        an adapter that returns the features in the expected format.
+        
+        The reachability features (8D vector) contain:
+        1. Reachable area ratio
+        2. Distance to nearest switch (normalized)
+        3. Distance to exit (normalized)
+        4. Reachable switches count (normalized)
+        5. Reachable hazards count (normalized)
+        6. Connectivity score
+        7. Exit reachable flag (0/1)
+        8. Switch-to-exit path exists (0/1)
+        
+        Args:
+            reachability_features: 8D numpy array from observation
+            
+        Returns:
+            ReachabilitySystemAdapter with analyze_reachability method
+        """
+        class ReachabilitySystemAdapter:
+            """Adapter that wraps pre-computed reachability features."""
+            
+            def __init__(self, features):
+                self.features = features
+            
+            def analyze_reachability(self, level_data, ninja_pos, switch_states):
+                """
+                Return reachability analysis results based on pre-computed features.
+                
+                The features array provides all necessary information:
+                - features[6] = exit reachable (0/1)
+                - features[3] = reachable switches count
+                - features[7] = switch-to-exit path exists
+                
+                Returns:
+                    Dictionary with reachability results compatible with completion planner
+                """
+                return {
+                    'reachable_positions': set(),  # Not used by feature-based planner
+                    'features': self.features,
+                    'exit_reachable': bool(self.features[6] > 0.5),
+                    'switch_reachable': bool(self.features[3] > 0),
+                    'path_exists': bool(self.features[7] > 0.5)
+                }
+        
+        return ReachabilitySystemAdapter(reachability_features)
