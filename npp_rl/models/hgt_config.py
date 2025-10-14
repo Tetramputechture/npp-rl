@@ -107,12 +107,21 @@ class MultiplierConfig:
 
 @dataclass(frozen=True)
 class HGTConfig:
-    """Configuration for Heterogeneous Graph Transformer (SIMPLIFIED)."""
+    """Configuration for Heterogeneous Graph Transformer (SIMPLIFIED).
+    
+    NOTE: Full feature dimensions are now available in nclone:
+    - NODE_FEATURE_DIM = 56 (comprehensive features from nclone.graph.common)
+    - EDGE_FEATURE_DIM = 6 (comprehensive features from nclone.graph.common)
+    
+    To use full features, update node_feat_dim=56 and edge_feat_dim=6.
+    Current config uses simplified 8/4 dimensions for testing.
+    """
 
-    # SIMPLIFIED: Node feature dimensions reduced from 31 to 8
+    # SIMPLIFIED: Node feature dimensions (full features available: 56 dims)
     node_feat_dim: int = (
         8  # Simplified node features (position, tile, entity, distances)
     )
+    # SIMPLIFIED: Edge feature dimensions (full features available: 6 dims)
     edge_feat_dim: int = 4  # Simplified edge features (type + weight)
 
     # HGT architecture
