@@ -8,7 +8,6 @@ This package contains training-related functionality including:
 - Distributed training support
 """
 
-from npp_rl.training.bc_trainer import BCTrainer
 from npp_rl.training.training_utils import create_training_policy
 from npp_rl.training.distributed_utils import (
     setup_distributed,
@@ -20,28 +19,27 @@ from npp_rl.training.distributed_utils import (
     AMPHelper,
     distribute_environments,
     configure_cuda_for_training,
-    DistributedTrainingContext
+    DistributedTrainingContext,
 )
 from npp_rl.training.curriculum_manager import (
     CurriculumManager,
-    create_curriculum_manager
+    create_curriculum_manager,
 )
 from npp_rl.training.architecture_trainer import ArchitectureTrainer
 
 __all__ = [
-    'BCTrainer',
-    'create_training_policy',
-    'setup_distributed',
-    'cleanup_distributed',
-    'get_rank',
-    'get_world_size',
-    'is_main_process',
-    'wrap_model_ddp',
-    'AMPHelper',
-    'distribute_environments',
-    'configure_cuda_for_training',
-    'DistributedTrainingContext',
-    'CurriculumManager',
-    'create_curriculum_manager',
-    'ArchitectureTrainer'
+    "create_training_policy",
+    "setup_distributed",
+    "cleanup_distributed",
+    "get_rank",
+    "get_world_size",
+    "is_main_process",
+    "wrap_model_ddp",
+    "AMPHelper",
+    "distribute_environments",
+    "configure_cuda_for_training",
+    "DistributedTrainingContext",
+    "CurriculumManager",
+    "create_curriculum_manager",
+    "ArchitectureTrainer",
 ]
