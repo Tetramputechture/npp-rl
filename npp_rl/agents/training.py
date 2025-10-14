@@ -44,7 +44,7 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
     HYPERPARAMETERS,
     NET_ARCH_SIZE,
 )
-from npp_rl.feature_extractors import HGTMultimodalExtractor
+from npp_rl.feature_extractors import HGTMultimodalExtractor, VisionFreeExtractor, MinimalStateExtractor
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 from nclone.gym_environment import create_reachability_aware_env, create_hierarchical_env
 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
@@ -267,6 +267,11 @@ def train_hierarchical_agent(
     # Create callbacks
     callbacks = []
     
+    # Early stopping callback (must be passed to EvalCallback)
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=10, min_evals=5, verbose=1
+    )
+    
     # Evaluation callback
     eval_env = DummyVecEnv([make_hierarchical_env])
     eval_callback = EvalCallback(
@@ -276,14 +281,9 @@ def train_hierarchical_agent(
         eval_freq=eval_freq // num_envs,
         deterministic=True,
         render=False,
+        callback_after_eval=stop_callback,  # Attach stop callback to eval
     )
     callbacks.append(eval_callback)
-
-    # Early stopping callback
-    stop_callback = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=10, min_evals=5, verbose=1
-    )
-    callbacks.append(stop_callback)
 
     # Custom hierarchical logging callback
     hierarchical_callback = HierarchicalLoggingCallback(
@@ -400,21 +400,37 @@ def train_agent(
     else:
         print("Adaptive exploration disabled")
 
-    print("Using HGT-based multimodal extractor with reachability")
-    extractor_kwargs = {
-        "features_dim": 512,
-        "hgt_hidden_dim": 256,
-        "hgt_num_layers": 3,
-        "hgt_output_dim": 256,
-        "use_cross_modal_attention": True,
-        "use_spatial_attention": True,
-        "reachability_dim": 8,  # 8-dimensional reachability features
-    }
+    # Select feature extractor based on extractor_type
+    if extractor_type == "vision_free":
+        print("Using vision-free state-based extractor (no visual processing)")
+        extractor_class = VisionFreeExtractor
+        extractor_kwargs = {
+            "features_dim": 256,
+            "hidden_dim": 256,
+        }
+    elif extractor_type == "minimal":
+        print("Using minimal state-only extractor (fastest)")
+        extractor_class = MinimalStateExtractor
+        extractor_kwargs = {
+            "features_dim": 128,
+        }
+    else:  # Default to HGT
+        print("Using HGT-based multimodal extractor with reachability")
+        extractor_class = HGTMultimodalExtractor
+        extractor_kwargs = {
+            "features_dim": 512,
+            "hgt_hidden_dim": 256,
+            "hgt_num_layers": 3,
+            "hgt_output_dim": 256,
+            "use_cross_modal_attention": True,
+            "use_spatial_attention": True,
+            "reachability_dim": 8,  # 8-dimensional reachability features
+        }
 
     policy_kwargs = {
-        "features_extractor_class": HGTMultimodalExtractor,
+        "features_extractor_class": extractor_class,
         "features_extractor_kwargs": extractor_kwargs,
-        "net_arch": [dict(pi=NET_ARCH_SIZE, vf=NET_ARCH_SIZE)],
+        "net_arch": dict(pi=NET_ARCH_SIZE, vf=NET_ARCH_SIZE),
         "activation_fn": torch.nn.ReLU,
         "normalize_images": False,  # We handle normalization in the extractor
     }
@@ -463,9 +479,14 @@ def train_agent(
     # Setup callbacks
     callbacks = []
 
-    # Evaluation callback
+    # Evaluation callback with stop on no improvement
     eval_env = DummyVecEnv([make_env])
     eval_env = VecMonitor(eval_env)
+
+    # Stop training callback (must be passed as callback to EvalCallback)
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=10, min_evals=5, verbose=1
+    )
 
     eval_callback = EvalCallback(
         eval_env,
@@ -475,14 +496,9 @@ def train_agent(
         deterministic=True,
         render=False,
         n_eval_episodes=10,
+        callback_after_eval=stop_callback,  # Attach stop callback to eval
     )
     callbacks.append(eval_callback)
-
-    # Stop training callback
-    stop_callback = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=10, min_evals=5, verbose=1
-    )
-    callbacks.append(stop_callback)
 
     # Logging callback
     if exploration_manager:
@@ -575,8 +591,8 @@ def main():
         "--extractor_type",
         type=str,
         default="hgt",
-        choices=["hgt", "hierarchical"],
-        help="Feature extractor type: 'hgt' (recommended) or 'hierarchical' (default: hgt)",
+        choices=["hgt", "hierarchical", "vision_free", "minimal"],
+        help="Feature extractor type: 'hgt' (full multimodal), 'hierarchical', 'vision_free' (state-based), or 'minimal' (fastest) (default: hgt)",
     )
     parser.add_argument(
         "--disable_reachability",

@@ -45,8 +45,10 @@ Architecture Features:
 
 __all__ = [
     "HGTMultimodalExtractor",
-    "HGTMultimodalExtractor",
+    "VisionFreeExtractor",
+    "MinimalStateExtractor",
 ]
 
 # Import extractors
 from .hgt_multimodal import HGTMultimodalExtractor
+from .vision_free_extractor import VisionFreeExtractor, MinimalStateExtractor

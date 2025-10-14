@@ -176,10 +176,18 @@ class AdaptiveExplorationManager:
 
     def __init__(
         self,
+        observation_space=None,
+        action_space=None,
+        device=None,
         curiosity_weight: float = 0.1,
         novelty_weight: float = 0.05,
         progress_window: int = 100,
     ):
+        # Store environment information if provided
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.device = device if device is not None else torch.device('cpu')
+        
         # Initialize base exploration components (existing functionality preserved)
         self.curiosity_weight = curiosity_weight
         self.novelty_weight = novelty_weight
