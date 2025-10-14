@@ -26,6 +26,15 @@ from npp_rl.hrl.subtask_policies import (
     ICMIntegration,
 )
 
+# Entity position indices in the entity_positions array
+# Array format: [ninja_x, ninja_y, switch_x, switch_y, exit_x, exit_y]
+NINJA_POS_START = 0
+NINJA_POS_END = 2
+SWITCH_POS_START = 2
+SWITCH_POS_END = 4
+EXIT_POS_START = 4
+EXIT_POS_END = 6
+
 
 class HierarchicalPolicyNetwork(nn.Module):
     """
@@ -215,30 +224,66 @@ class HierarchicalPolicyNetwork(nn.Module):
         Extract subtask-specific context from observations.
         
         Args:
-            obs: Observation dictionary
+            obs: Observation dictionary containing:
+                - reachability_features: [batch, 8] - distances to switches/exits, reachability info
+                - game_state: [batch, 26] - ninja physics state including position
+                - entity_states: [batch, ...] - entity information including mines
             
         Returns:
             Context dictionary with target info, mine proximity, etc.
-            
-        Note:
-            This is a placeholder implementation. In a full implementation,
-            these values should be extracted from the observation dictionary
-            using environment-specific logic (see SubtaskSpecificFeatures class
-            for helper methods).
         """
         batch_size = obs['reachability_features'].shape[0]
         device = obs['reachability_features'].device
         
-        # Placeholder implementation - override or extend for actual use
+        # Extract reachability features
+        reachability = obs['reachability_features']  # [batch, 8]
+        # Feature indices: 0=area_ratio, 1=dist_to_switch, 2=dist_to_exit, 3=reachable_switches,
+        #                  4=reachable_hazards, 5=connectivity, 6=exit_reachable, 7=path_exists
+        
+        # Get actual entity positions from observation (added in observation processor)
+        # entity_positions: [ninja_x, ninja_y, switch_x, switch_y, exit_x, exit_y]
+        entity_positions = obs.get('entity_positions', torch.zeros(batch_size, 6, device=device))
+        ninja_pos = entity_positions[:, NINJA_POS_START:NINJA_POS_END]
+        switch_pos = entity_positions[:, SWITCH_POS_START:SWITCH_POS_END]
+        exit_pos = entity_positions[:, EXIT_POS_START:EXIT_POS_END]
+        
+        # Determine target based on current subtask using ACTUAL positions
+        current_subtask = self.transition_manager.current_subtask
+        
+        if current_subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
+            # Target is the exit switch - use real position
+            target_position = switch_pos
+            distance_to_target = torch.norm(ninja_pos - switch_pos, dim=1, keepdim=True)
+        elif current_subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
+            # Target is locked door switch - for now use same as exit switch
+            # (locked doors not fully implemented yet)
+            target_position = switch_pos
+            distance_to_target = torch.norm(ninja_pos - switch_pos, dim=1, keepdim=True)
+        elif current_subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
+            # Target is the exit door - use real position
+            target_position = exit_pos
+            distance_to_target = torch.norm(ninja_pos - exit_pos, dim=1, keepdim=True)
+        else:  # EXPLORE_FOR_SWITCHES or other
+            # Use centroid of switch and exit as exploration target
+            target_position = (switch_pos + exit_pos) / 2.0
+            distance_to_target = torch.norm(ninja_pos - target_position, dim=1, keepdim=True)
+        
+        # Extract mine proximity from reachability features
+        # Feature 4 is reachable_hazards count (normalized, higher = more hazards nearby)
+        mine_proximity = reachability[:, 4:5]  # [batch, 1] - already normalized [0, 1]
+        
+        # Time in subtask (normalized by expected duration)
+        time_in_subtask = torch.full(
+            (batch_size, 1),
+            min(self.transition_manager.subtask_step_count / 500.0, 1.0),
+            device=device
+        )
+        
         context = {
-            'target_position': torch.zeros(batch_size, 2, device=device),
-            'distance_to_target': torch.ones(batch_size, 1, device=device),
-            'mine_proximity': torch.full((batch_size, 1), 5.0, device=device),
-            'time_in_subtask': torch.full(
-                (batch_size, 1),
-                self.transition_manager.subtask_step_count / 500.0,
-                device=device
-            ),
+            'target_position': target_position,
+            'distance_to_target': distance_to_target,
+            'mine_proximity': mine_proximity,
+            'time_in_subtask': time_in_subtask,
         }
         
         return context

@@ -104,21 +104,21 @@ class TestCurriculumManager(unittest.TestCase):
                 len(self.mock_levels[stage])
             )
     
-    def test_get_current_level_returns_from_current_stage(self):
-        """Test that get_current_level returns levels from current stage."""
+    def test_sample_level_returns_from_current_stage(self):
+        """Test that sample_level returns levels from current stage."""
         manager = CurriculumManager(self.dataset_path)
         
-        level = manager.get_current_level()
+        level = manager.sample_level()
         
         self.assertIsNotNone(level)
         self.assertTrue(level['level_id'].startswith('simple_'))
     
-    def test_record_episode_result_updates_performance(self):
+    def test_record_episode_updates_performance(self):
         """Test recording episode results updates performance tracking."""
         manager = CurriculumManager(self.dataset_path)
         
         # Record successful episode
-        manager.record_episode_result('simple', success=True)
+        manager.record_episode('simple', success=True)
         
         # Check performance was recorded
         self.assertEqual(len(manager.stage_performance['simple']), 1)
@@ -131,7 +131,7 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record mix of successes and failures
         for i in range(10):
-            manager.record_episode_result('simple', success=(i % 2 == 0))
+            manager.record_episode('simple', success=(i % 2 == 0))
         
         # Check all results recorded
         self.assertEqual(len(manager.stage_performance['simple']), 10)
@@ -150,7 +150,7 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record more episodes than window size
         for i in range(10):
-            manager.record_episode_result('simple', success=True)
+            manager.record_episode('simple', success=True)
         
         # Only last 5 should be kept
         self.assertEqual(len(manager.stage_performance['simple']), 5)
@@ -165,10 +165,10 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record enough successful episodes to meet threshold
         for _ in range(15):
-            manager.record_episode_result('simple', success=True)
+            manager.record_episode('simple', success=True)
         
         # Check for advancement
-        advanced = manager.check_and_advance()
+        advanced = manager.check_advancement()
         
         self.assertTrue(advanced)
         self.assertEqual(manager.current_stage, 'medium')
@@ -184,10 +184,10 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record episodes with 50% success rate
         for i in range(20):
-            manager.record_episode_result('simple', success=(i % 2 == 0))
+            manager.record_episode('simple', success=(i % 2 == 0))
         
         # Should not advance
-        advanced = manager.check_and_advance()
+        advanced = manager.check_advancement()
         
         self.assertFalse(advanced)
         self.assertEqual(manager.current_stage, 'simple')
@@ -202,10 +202,10 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record few episodes even with high success
         for _ in range(10):
-            manager.record_episode_result('simple', success=True)
+            manager.record_episode('simple', success=True)
         
         # Should not advance (not enough episodes)
-        advanced = manager.check_and_advance()
+        advanced = manager.check_advancement()
         
         self.assertFalse(advanced)
         self.assertEqual(manager.current_stage, 'simple')
@@ -220,10 +220,10 @@ class TestCurriculumManager(unittest.TestCase):
         
         # Record many successful episodes
         for _ in range(20):
-            manager.record_episode_result('mine_heavy', success=True)
+            manager.record_episode('mine_heavy', success=True)
         
         # Should not advance (already at final stage)
-        advanced = manager.check_and_advance()
+        advanced = manager.check_advancement()
         
         self.assertFalse(advanced)
         self.assertEqual(manager.current_stage, 'mine_heavy')

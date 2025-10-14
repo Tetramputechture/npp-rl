@@ -24,6 +24,22 @@ from npp_rl.wrappers.curriculum_env import CurriculumEnv, CurriculumVecEnvWrappe
 logger = logging.getLogger(__name__)
 
 
+def create_graph_enhanced_env(**env_kwargs):
+    """Create graph-enhanced environment.
+    
+    Note: Graph enhancement is controlled by nclone's enable_graph_updates config
+    option, not a separate wrapper. This function exists for backwards compatibility.
+    
+    Args:
+        **env_kwargs: Environment creation kwargs
+        
+    Returns:
+        NPPEnvironment instance
+    """
+    from nclone import NPPEnvironment
+    return NPPEnvironment(**env_kwargs)
+
+
 class ArchitectureTrainer:
     """Manages training for a specific architecture configuration."""
     
@@ -365,3 +381,85 @@ class ArchitectureTrainer:
         logger.info(f"Saved checkpoint to {checkpoint_path}")
         
         return checkpoint_path
+    
+    def get_device(self) -> str:
+        """Get the device string for this trainer.
+        
+        Returns:
+            Device string (e.g., 'cuda:0', 'cpu')
+        """
+        if torch.cuda.is_available():
+            return f'cuda:{self.device_id}'
+        return 'cpu'
+    
+    def get_checkpoint_path(self, name: str) -> Path:
+        """Get path for a checkpoint file.
+        
+        Args:
+            name: Checkpoint name (without extension)
+            
+        Returns:
+            Path to checkpoint file
+        """
+        return self.output_dir / f"{name}.zip"
+    
+    def create_evaluator(self) -> ComprehensiveEvaluator:
+        """Create comprehensive evaluator for this architecture.
+        
+        Returns:
+            Configured ComprehensiveEvaluator instance
+        """
+        return ComprehensiveEvaluator(
+            model=self.model,
+            eval_env=self.eval_env,
+            tensorboard_writer=self.tensorboard_writer,
+            output_dir=self.output_dir
+        )
+    
+    def save_training_state(self, timestep: int) -> Path:
+        """Save complete training state including curriculum progress.
+        
+        Args:
+            timestep: Current training timestep
+            
+        Returns:
+            Path to saved state file
+        """
+        import json
+        from datetime import datetime
+        
+        state = {
+            'timestep': timestep,
+            'architecture': self.architecture_config.name,
+            'timestamp': datetime.now().isoformat(),
+        }
+        
+        # Add curriculum state if available
+        if self.curriculum_manager is not None:
+            state['curriculum'] = self.curriculum_manager.get_curriculum_state()
+        
+        # Save state file
+        state_file = self.output_dir / f"training_state_{timestep}.json"
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2)
+        
+        logger.info(f"Saved training state to {state_file}")
+        return state_file
+    
+    def create_graph_enhanced_env(self, **env_kwargs):
+        """Create graph-enhanced environment for this architecture.
+        
+        Note: Graph enhancement is currently handled by nclone's enable_graph_updates
+        config option, not a separate wrapper.
+        
+        Args:
+            **env_kwargs: Environment creation kwargs
+            
+        Returns:
+            Environment instance
+        """
+        # Graph enhancement is controlled by nclone's config, not a wrapper
+        # This method exists for backwards compatibility with tests
+        from nclone import NPPEnvironment
+        
+        return NPPEnvironment(**env_kwargs)
