@@ -120,28 +120,25 @@ class ExplorationLoggingCallback(BaseCallback):
 
 def create_environment(render_mode: str = "rgb_array", **kwargs):
     """Create environment with hierarchical graph observations and reachability features."""
+    from nclone.gym_environment.config import EnvironmentConfig, RenderConfig
 
-    def _init():
-        # Create base environment
-        base_env = NppEnvironment(
-            render_mode=render_mode,
-            enable_animation=False,
-            enable_logging=False,
-            enable_debug_overlay=False,
-            **kwargs,
-        )
+    # Create environment with proper config
+    render_config = RenderConfig(
+        render_mode=render_mode,
+        enable_animation=False,
+        enable_debug_overlay=False,
+    )
+    config = EnvironmentConfig(
+        eval_mode=False,
+        render=render_config,
+        enable_logging=False,
+        **kwargs,
+    )
+    
+    # Use the reachability-aware environment factory
+    env = create_reachability_aware_env(config=config)
 
-        env = create_reachability_aware_env(
-            base_env=base_env,
-            cache_ttl_ms=100.0,  # 100ms cache for real-time performance
-            performance_target="fast",  # Use Tier-1 algorithms
-            enable_monitoring=True,
-            debug=False,
-        )
-
-        return env
-
-    return _init
+    return env
 
 
 def train_hierarchical_agent(
@@ -346,6 +343,7 @@ def train_agent(
     save_freq: int = 100_000,
     eval_freq: int = 50_000,
     log_interval: int = 10,
+    extractor_type: str = "3d",
 ):
     """
     Train the multimodal agent with HGT architecture and reachability features (non-hierarchical).
