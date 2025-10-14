@@ -64,3 +64,6 @@ tune_logs/
 
 # Mermaid diagrams
 *.mmd
+
+# experiments
+experiments/

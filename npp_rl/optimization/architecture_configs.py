@@ -15,6 +15,7 @@ from enum import Enum
 
 class GraphArchitectureType(Enum):
     """Types of graph neural network architectures."""
+
     FULL_HGT = "full_hgt"  # Full Heterogeneous Graph Transformer
     SIMPLIFIED_HGT = "simplified_hgt"  # Simplified HGT with reduced complexity
     GAT = "gat"  # Graph Attention Network
@@ -24,6 +25,7 @@ class GraphArchitectureType(Enum):
 
 class FusionType(Enum):
     """Types of multimodal fusion mechanisms."""
+
     CONCAT = "concat"  # Simple concatenation
     SINGLE_HEAD_ATTENTION = "single_head"  # Single-head cross-modal attention
     MULTI_HEAD_ATTENTION = "multi_head"  # Multi-head cross-modal attention
@@ -34,12 +36,15 @@ class FusionType(Enum):
 @dataclass(frozen=True)
 class ModalityConfig:
     """Configuration for which input modalities to use."""
+
     use_temporal_frames: bool = True  # 3D CNN on 84x84x12 temporal frames
     use_global_view: bool = True  # 2D CNN on 176x100 global view
     use_graph: bool = True  # Graph neural network
-    use_game_state: bool = True  # Game state vector (26 features after redundancy removal)
+    use_game_state: bool = (
+        True  # Game state vector (26 features after redundancy removal)
+    )
     use_reachability: bool = True  # Reachability features (8 features)
-    
+
     def get_enabled_modalities(self) -> List[str]:
         """Return list of enabled modality names."""
         modalities = []
@@ -54,32 +59,35 @@ class ModalityConfig:
         if self.use_reachability:
             modalities.append("reachability")
         return modalities
-    
+
     def count_modalities(self) -> int:
         """Return count of enabled modalities."""
-        return sum([
-            self.use_temporal_frames,
-            self.use_global_view,
-            self.use_graph,
-            self.use_game_state,
-            self.use_reachability
-        ])
+        return sum(
+            [
+                self.use_temporal_frames,
+                self.use_global_view,
+                self.use_graph,
+                self.use_game_state,
+                self.use_reachability,
+            ]
+        )
 
 
 @dataclass(frozen=True)
 class GraphConfig:
     """Configuration for graph neural network architecture."""
+
     architecture: GraphArchitectureType = GraphArchitectureType.FULL_HGT
     hidden_dim: int = 256
     num_layers: int = 3
     output_dim: int = 256
     num_heads: int = 8  # For attention-based architectures
     dropout: float = 0.1
-    
+
     # HGT-specific: node and edge types
     num_node_types: int = 6  # tile, ninja, mine, exit_switch, exit_door, locked_door
     num_edge_types: int = 2  # adjacent, reachable (simplified from 3)
-    
+
     # Simplification options
     use_type_embeddings: bool = True  # Whether to use separate embeddings per type
     use_edge_features: bool = True  # Whether to use edge features
@@ -88,14 +96,15 @@ class GraphConfig:
 @dataclass(frozen=True)
 class VisualConfig:
     """Configuration for visual processing (CNNs)."""
+
     # 3D CNN (temporal frames)
     temporal_output_dim: int = 512
     temporal_channels: tuple[int, int, int] = (32, 64, 128)
-    
+
     # 2D CNN (global view)
     global_output_dim: int = 256
     global_channels: tuple[int, int, int] = (32, 64, 128)
-    
+
     # Dropout rates
     cnn_dropout: float = 0.1
 
@@ -103,7 +112,8 @@ class VisualConfig:
 @dataclass(frozen=True)
 class StateConfig:
     """Configuration for state vector processing."""
-    game_state_dim: int = 26  # Input dimension (after redundancy removal)
+
+    game_state_dim: int = 30  # Input dimension from N++ environment
     reachability_dim: int = 8  # Input dimension
     hidden_dim: int = 128
     output_dim: int = 128
@@ -112,6 +122,7 @@ class StateConfig:
 @dataclass(frozen=True)
 class FusionConfig:
     """Configuration for multimodal fusion."""
+
     fusion_type: FusionType = FusionType.MULTI_HEAD_ATTENTION
     num_attention_heads: int = 8
     dropout: float = 0.1
@@ -122,10 +133,11 @@ class FusionConfig:
 class ArchitectureConfig:
     """
     Complete architecture configuration for model variants.
-    
+
     This dataclass encapsulates all parameters needed to construct
     a specific architecture variant for comparison.
     """
+
     name: str
     description: str
     modalities: ModalityConfig
@@ -134,7 +146,7 @@ class ArchitectureConfig:
     state: StateConfig
     fusion: FusionConfig
     features_dim: int = 512  # Final output dimension
-    
+
     def get_config_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary for logging."""
         return {
@@ -150,6 +162,7 @@ class ArchitectureConfig:
 
 
 # ===== Predefined Architecture Variants =====
+
 
 def create_full_hgt_config() -> ArchitectureConfig:
     """Full HGT architecture with all modalities (current baseline)."""
@@ -370,21 +383,19 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
 def get_architecture_config(name: str) -> ArchitectureConfig:
     """
     Get architecture configuration by name.
-    
+
     Args:
         name: Architecture name (e.g., 'full_hgt', 'vision_free')
-        
+
     Returns:
         ArchitectureConfig object
-        
+
     Raises:
         ValueError if architecture name not found
     """
     if name not in ARCHITECTURE_REGISTRY:
         available = ", ".join(ARCHITECTURE_REGISTRY.keys())
-        raise ValueError(
-            f"Unknown architecture '{name}'. Available: {available}"
-        )
+        raise ValueError(f"Unknown architecture '{name}'. Available: {available}")
     return ARCHITECTURE_REGISTRY[name]
 
 
@@ -395,9 +406,9 @@ def list_available_architectures() -> List[str]:
 
 def print_architecture_summary(config: ArchitectureConfig) -> None:
     """Print human-readable summary of architecture configuration."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Architecture: {config.name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Description: {config.description}")
     print(f"\nModalities ({config.modalities.count_modalities()} enabled):")
     for modality in config.modalities.get_enabled_modalities():
@@ -409,4 +420,4 @@ def print_architecture_summary(config: ArchitectureConfig) -> None:
         print(f"  - Num heads: {config.graph.num_heads}")
     print(f"\nFusion Type: {config.fusion.fusion_type.value}")
     print(f"Final Feature Dimension: {config.features_dim}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
