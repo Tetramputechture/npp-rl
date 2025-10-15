@@ -320,8 +320,13 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Process global view
         if self.global_cnn is not None and "global_view" in observations:
             global_obs = observations["global_view"]
-            # Add channel dimension if needed
-            if global_obs.dim() == 3:
+            # Ensure correct format: [batch, channels, height, width]
+            if global_obs.dim() == 4:
+                # If [batch, H, W, C], permute to [batch, C, H, W]
+                if global_obs.shape[-1] <= 3:  # channels is last dimension
+                    global_obs = global_obs.permute(0, 3, 1, 2)
+            elif global_obs.dim() == 3:
+                # [batch, H, W] -> [batch, 1, H, W]
                 global_obs = global_obs.unsqueeze(1)
             global_features = self.global_cnn(global_obs.float() / 255.0)
             features.append(global_features)
@@ -329,20 +334,47 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Process graph
         if self.graph_encoder is not None and "graph_obs" in observations:
             graph_obs = observations["graph_obs"]
-            # Extract graph components
-            node_features = graph_obs["node_features"]
-            edge_index = graph_obs["edge_index"]
-            node_mask = graph_obs.get("node_mask", None)
 
-            # Handle different encoder types
-            if isinstance(self.graph_encoder, SimplifiedHGTEncoder):
+            # Handle different encoder types - some take dict, some take separate args
+            from ..models.hgt_encoder import HGTEncoder
+            
+            if isinstance(self.graph_encoder, HGTEncoder):
+                # HGTEncoder expects a dict with specific keys (graph_* prefix)
+                # Convert from standard keys to HGTEncoder format
+                hgt_graph_obs = {
+                    "graph_node_feats": graph_obs.get("node_features", graph_obs.get("graph_node_feats")),
+                    "graph_edge_index": graph_obs.get("edge_index", graph_obs.get("graph_edge_index")),
+                    "graph_edge_feats": graph_obs.get("edge_features", graph_obs.get("graph_edge_feats")),
+                    "graph_node_mask": graph_obs.get("node_mask", graph_obs.get("graph_node_mask")),
+                    "graph_edge_mask": graph_obs.get("edge_mask", graph_obs.get("graph_edge_mask")),
+                }
+                # Add optional type info
+                if "node_types" in graph_obs:
+                    hgt_graph_obs["graph_node_types"] = graph_obs["node_types"]
+                if "graph_node_types" in graph_obs:
+                    hgt_graph_obs["graph_node_types"] = graph_obs["graph_node_types"]
+                if "edge_types" in graph_obs:
+                    hgt_graph_obs["graph_edge_types"] = graph_obs["edge_types"]
+                if "graph_edge_types" in graph_obs:
+                    hgt_graph_obs["graph_edge_types"] = graph_obs["graph_edge_types"]
+                
+                graph_features = self.graph_encoder(hgt_graph_obs)
+            elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
+                # SimplifiedHGTEncoder takes separate arguments
+                node_features = graph_obs["node_features"]
+                edge_index = graph_obs["edge_index"]
+                node_mask = graph_obs.get("node_mask", None)
                 node_types = graph_obs.get(
-                    "node_types", torch.zeros(node_features.shape[:2], dtype=torch.long)
+                    "node_types", torch.zeros(node_features.shape[:2], dtype=torch.long, device=node_features.device)
                 )
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_types, node_mask
                 )
             else:
+                # GAT and GCN take separate arguments
+                node_features = graph_obs["node_features"]
+                edge_index = graph_obs["edge_index"]
+                node_mask = graph_obs.get("node_mask", None)
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_mask
                 )
