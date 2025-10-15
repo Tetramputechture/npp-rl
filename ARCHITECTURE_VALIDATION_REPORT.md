@@ -303,23 +303,48 @@ Architectures support N++ environments with:
 
 ### Immediate Actions (Required)
 1. ✅ **DONE:** Install `torch_geometric` dependency
-2. **TODO:** Add `torch_geometric` to `requirements.txt`
-3. **TODO:** Push validated code to `audit/architecture-integration-complete` branch
+2. ✅ **DONE:** Add `torch_geometric` to `requirements.txt`
+3. ✅ **DONE:** Push validated code to `audit/architecture-integration-complete` branch
 
-### Optional Cleanup (Recommended)
-1. Update 3 files still using legacy extractors:
-   - `train_hierarchical_stable.py`
-   - `npp_rl/agents/training.py`
-   - `npp_rl/training/training_utils.py`
+### Code Cleanup (Completed)
 
-2. Remove redundant feature extractors:
-   - `npp_rl/feature_extractors/hgt_multimodal.py`
-   - `npp_rl/feature_extractors/vision_free_extractor.py`
+#### ✅ Documentation Updates
+1. **`npp_rl/feature_extractors/__init__.py`**
+   - Updated with clear distinction between recommended and legacy extractors
+   - Added usage examples for ConfigurableMultimodalExtractor
+   - Documented special-purpose extractors
 
-3. Add documentation comment in `architecture_configs.py` noting that all 8 architectures are production-ready
+2. **`ARCHITECTURE_CLEANUP_NOTES.md`** (NEW)
+   - Complete migration guide for legacy scripts
+   - Architectural selection guide
+   - Phase-by-phase migration plan for future work
+
+#### 📋 Legacy Extractor Status
+
+**Decision: Retained for backward compatibility and special purposes**
+
+1. **HGTMultimodalExtractor** - Marked as LEGACY
+   - Superseded by ConfigurableMultimodalExtractor with "full_hgt" config
+   - Still used by 3 active training scripts
+   - Migration path documented in ARCHITECTURE_CLEANUP_NOTES.md
+
+2. **VisionFreeExtractor** - Marked as SPECIAL PURPOSE
+   - For environments without graph observations (uses entity_positions)
+   - Different from "vision_free" architecture config
+   - Kept for CPU training and rapid prototyping
+
+3. **MinimalStateExtractor** - Marked as SPECIAL PURPOSE
+   - Minimal state-only processing for debugging
+   - Kept for fastest iteration without GPU
+
+#### 📝 Future Work (Optional)
+
+See `ARCHITECTURE_CLEANUP_NOTES.md` for detailed migration guide.
 
 ### No Action Required
-- ✓ No new architectures to add
+- ✓ All 8 architectures validated and production-ready
+- ✓ Comprehensive test coverage in place
+- ✓ Documentation complete
 - ✓ No modifications to existing architecture definitions
 - ✓ No new features needed
 - ✓ All workspace coding standards followed (500-line limit, nclone constants)

@@ -2,50 +2,62 @@
 Feature Extractors Package for N++ RL Agent
 
 This package provides feature extractors for the N++ RL environment,
-using Heterogeneous Graph Transformers (HGT) for multimodal processing.
+using various architectures for multimodal processing.
 
-Key Components:
+## Recommended Extractors (Architecture System)
 
-    - HGTMultimodalExtractor: Enhanced HGT extractor with:
-        * 3D CNN for temporal processing (12-frame stacks)
-        * 2D CNN with spatial attention for global view
-        * Full Heterogeneous Graph Transformers with type-specific attention
-        * Cross-modal fusion with attention mechanisms
-        * Designed for generalizability across diverse NPP levels
+For systematic architecture comparison and production training, use:
 
-    - HGTMultimodalExtractor: Alternative HGT implementation:
-        * Similar architecture with different implementation approach
-        * Available for comparison and experimentation
+    **ConfigurableMultimodalExtractor** (npp_rl.optimization.configurable_extractor)
+    - Unified system supporting 8 validated architectures
+    - Use with ArchitectureTrainer for best results
+    - Supports: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, etc.
+    
+    from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+    from npp_rl.optimization.architecture_configs import get_architecture_config
+    
+    config = get_architecture_config("full_hgt")
+    extractor = ConfigurableMultimodalExtractor(observation_space, config)
+
+## Legacy Extractors (Maintained for Compatibility)
+
+These extractors are maintained for backward compatibility and specific use cases:
+
+    **HGTMultimodalExtractor** [LEGACY - Use ConfigurableMultimodalExtractor instead]
+    - Original HGT implementation
+    - Replaced by ConfigurableMultimodalExtractor with "full_hgt" config
+    - Still used by: train_hierarchical_stable.py, npp_rl/agents/training.py
+    
+    **VisionFreeExtractor** [SPECIAL PURPOSE]
+    - For environments WITHOUT graph observations
+    - Uses only: game_state, reachability_features, entity_positions
+    - Suitable for CPU training and rapid prototyping
+    - Different from "vision_free" architecture config (which uses graphs)
+    
+    **MinimalStateExtractor** [SPECIAL PURPOSE]
+    - Minimal state-only processing (game_state + reachability)
+    - Fastest option for CPU training and debugging
+    - No visual or graph processing
 
 Usage Examples:
 
-    # Main HGT extractor (recommended)
-    from npp_rl.feature_extractors import HGTMultimodalExtractor
-    extractor = HGTMultimodalExtractor(
-        observation_space,
-        features_dim=512,
-        debug=False
-    )
+    # RECOMMENDED: Configurable system with validated architectures
+    from npp_rl.training.architecture_trainer import ArchitectureTrainer
+    trainer = ArchitectureTrainer(config_name="full_hgt", env_id="NPP-v0")
+    trainer.train()
 
-    # Alternative implementation
+    # Legacy HGT extractor (use ConfigurableMultimodalExtractor instead)
     from npp_rl.feature_extractors import HGTMultimodalExtractor
-    extractor = HGTMultimodalExtractor(
-        observation_space,
-        features_dim=512,
-        debug=False
-    )
-
-Architecture Features:
-- 3D CNN: Temporal processing of 12-frame stacks for movement pattern recognition
-- 2D CNN: Spatial processing with attention mechanisms for global level understanding
-- HGT: Full heterogeneous graph processing for entity relationships and reachability
-- Cross-modal Fusion: Attention mechanisms for optimal feature integration
-- Generalizability: Architecture designed for diverse NPP level completion
+    extractor = HGTMultimodalExtractor(observation_space, features_dim=512)
+    
+    # Special purpose: CPU training without graph obs
+    from npp_rl.feature_extractors import VisionFreeExtractor
+    extractor = VisionFreeExtractor(observation_space, features_dim=256)
 """
 
 __all__ = [
     "HGTMultimodalExtractor",
-    "VisionFreeExtractor",
+    "VisionFreeExtractor", 
     "MinimalStateExtractor",
 ]
 
