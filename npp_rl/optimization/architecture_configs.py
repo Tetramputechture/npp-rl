@@ -75,7 +75,14 @@ class ModalityConfig:
 
 @dataclass(frozen=True)
 class GraphConfig:
-    """Configuration for graph neural network architecture."""
+    """
+    Configuration for graph neural network architecture.
+    
+    Note: Input dimensions come from nclone:
+    - node_feature_dim = 55 (NODE_FEATURE_DIM from nclone.graph.common)
+    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common)
+    These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
+    """
 
     architecture: GraphArchitectureType = GraphArchitectureType.FULL_HGT
     hidden_dim: int = 256
@@ -113,8 +120,9 @@ class VisualConfig:
 class StateConfig:
     """Configuration for state vector processing."""
 
-    game_state_dim: int = 30  # Input dimension from N++ environment
-    reachability_dim: int = 8  # Input dimension
+    # Dimensions from nclone environment observations
+    game_state_dim: int = 30  # GAME_STATE_CHANNELS from nclone
+    reachability_dim: int = 8  # Reachability features from nclone
     hidden_dim: int = 128
     output_dim: int = 128
 
