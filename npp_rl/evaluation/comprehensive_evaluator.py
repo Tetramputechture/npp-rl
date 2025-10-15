@@ -5,6 +5,7 @@ Evaluates trained models across standardized test levels with detailed metrics.
 
 import json
 import logging
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -51,6 +52,7 @@ class ComprehensiveEvaluator:
         num_episodes_per_category: Optional[Dict[str, int]] = None,
         max_steps_per_episode: int = 10000,
         deterministic: bool = True,
+        timeout_per_episode: float = 30.0,
     ) -> Dict[str, Any]:
         """Run comprehensive evaluation on model.
 
@@ -59,6 +61,7 @@ class ComprehensiveEvaluator:
             num_episodes_per_category: Episodes per category (None = all)
             max_steps_per_episode: Maximum steps per episode
             deterministic: Use deterministic policy
+            timeout_per_episode: Timeout in seconds per episode (default: 30.0)
 
         Returns:
             Comprehensive results dictionary
@@ -100,6 +103,7 @@ class ComprehensiveEvaluator:
                 levels=levels[:n_episodes],
                 max_steps=max_steps_per_episode,
                 deterministic=deterministic,
+                timeout=timeout_per_episode,
             )
 
             results["by_category"][category] = category_results
@@ -134,6 +138,7 @@ class ComprehensiveEvaluator:
         levels: List[Dict],
         max_steps: int,
         deterministic: bool,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         """Evaluate model on a specific category.
 
@@ -143,6 +148,7 @@ class ComprehensiveEvaluator:
             levels: List of level data
             max_steps: Max steps per episode
             deterministic: Use deterministic policy
+            timeout: Timeout in seconds per episode
 
         Returns:
             Category results dictionary
@@ -151,47 +157,83 @@ class ComprehensiveEvaluator:
         episode_steps = []
         rewards = []
 
-        for level_data in tqdm(levels, desc=f"Eval {category}", leave=False):
+        for level_idx, level_data in enumerate(
+            tqdm(levels, desc=f"Eval {category}", leave=False)
+        ):
+            level_id = level_data.get("level_id", f"{category}_{level_idx:03d}")
+            logger.debug(f"Starting evaluation of level: {level_id}")
+
             try:
                 # Create environment factory function to avoid closure issues
                 def make_env(lvl_data=level_data):
+                    logger.debug(f"Creating environment for level: {level_id}")
                     config = EnvironmentConfig.for_training()
                     env = NppEnvironment(config=config)
                     # Load the specific map from level_data
                     if "map_data" in lvl_data:
+                        logger.debug(f"Loading map data for level: {level_id}")
                         env.nplay_headless.load_map_from_map_data(lvl_data["map_data"])
                     return env
 
                 # Wrap in DummyVecEnv to match the format expected by the model
                 # Models trained with vectorized environments expect vectorized observations
+                logger.debug(
+                    f"Wrapping environment in DummyVecEnv for level: {level_id}"
+                )
                 env = DummyVecEnv([make_env])
 
+                logger.debug(f"Resetting environment for level: {level_id}")
                 obs = env.reset()
+                logger.debug(
+                    f"Environment reset complete for level: {level_id}, obs keys: {obs.keys() if isinstance(obs, dict) else type(obs)}"
+                )
+
                 done = False
                 steps = 0
                 episode_reward = 0
+                start_time = time.time()
 
+                logger.debug(f"Starting episode loop for level: {level_id}")
                 while not done and steps < max_steps:
+                    # Check timeout
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > timeout:
+                        logger.warning(
+                            f"Level {level_id} timed out after {elapsed_time:.1f}s (timeout={timeout}s, steps={steps})"
+                        )
+                        break
                     # Get action from model
+                    if steps % 100 == 0:  # Log every 100 steps to avoid spam
+                        logger.debug(f"Level {level_id}: step {steps}/{max_steps}")
+
                     action, _ = model.predict(obs, deterministic=deterministic)
 
                     # Step environment
-                    obs, reward, terminated, truncated, info = env.step(action)
+                    # Note: DummyVecEnv returns 4 values (old gym API) even though
+                    # the underlying environment uses the new Gymnasium API (5 values)
+                    obs, reward, done, info = env.step(action)
                     # DummyVecEnv returns arrays, so extract the first element
-                    done = terminated[0] or truncated[0]
+                    done = done[0]
                     reward = reward[0]
                     info = info[0]
 
                     episode_reward += reward
                     steps += 1
 
+                elapsed_time = time.time() - start_time
+                logger.debug(
+                    f"Episode complete for level {level_id}: steps={steps}, reward={episode_reward:.2f}, time={elapsed_time:.1f}s"
+                )
+
                 # Record results
-                success = info.get("success", False) if done else False
+                success = info.get("is_success", False) if done else False
                 successes.append(1 if success else 0)
                 episode_steps.append(steps)
                 rewards.append(episode_reward)
 
+                logger.debug(f"Closing environment for level: {level_id}")
                 env.close()
+                logger.debug(f"Finished evaluation of level: {level_id}")
 
             except Exception as e:
                 logger.error(

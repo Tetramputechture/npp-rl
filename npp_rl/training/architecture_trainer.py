@@ -336,7 +336,7 @@ class ArchitectureTrainer:
         """Evaluate model on test dataset.
 
         Args:
-            num_episodes: Number of episodes to evaluate
+            num_episodes: Number of episodes to evaluate (per category)
 
         Returns:
             Evaluation metrics dictionary
@@ -344,7 +344,7 @@ class ArchitectureTrainer:
         if self.model is None:
             raise RuntimeError("Model not initialized")
 
-        logger.info(f"Evaluating model on test suite ({num_episodes} episodes)...")
+        logger.info(f"Evaluating model on test suite ({num_episodes} episodes per category)...")
 
         try:
             evaluator = ComprehensiveEvaluator(
@@ -352,9 +352,15 @@ class ArchitectureTrainer:
                 device=f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
             )
 
+            # Create episodes per category dict - distribute episodes across all categories
+            num_episodes_per_category = {
+                category: num_episodes 
+                for category in evaluator.test_levels.keys()
+            }
+
             results = evaluator.evaluate_model(
                 model=self.model,
-                num_episodes_per_category=None,  # Evaluate all
+                num_episodes_per_category=num_episodes_per_category,
                 max_steps_per_episode=10000,
                 deterministic=True,
             )
