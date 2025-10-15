@@ -30,12 +30,12 @@ cd /path/to/npp-rl
 
 python scripts/train_and_compare.py \
     --experiment-name "quick_test" \
-    --architectures vision_free \
+    --architectures mlp_baseline \
     --no-pretraining \
     --train-dataset ../nclone/datasets/train \
     --test-dataset ../nclone/datasets/test \
-    --total-timesteps 100000 \
-    --num-envs 16 \
+    --total-timesteps 100 \
+    --num-envs 4 \
     --num-gpus 1 \
     --output-dir experiments/
 

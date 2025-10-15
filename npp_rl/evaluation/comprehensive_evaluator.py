@@ -5,6 +5,7 @@ Evaluates trained models across standardized test levels with detailed metrics.
 
 import json
 import logging
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
+from npp_rl.utils.video_recorder import create_video_recorder
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,11 @@ class ComprehensiveEvaluator:
         num_episodes_per_category: Optional[Dict[str, int]] = None,
         max_steps_per_episode: int = 10000,
         deterministic: bool = True,
+        timeout_per_episode: float = 30.0,
+        record_videos: bool = False,
+        video_output_dir: Optional[str] = None,
+        max_videos_per_category: int = 10,
+        video_fps: int = 30,
     ) -> Dict[str, Any]:
         """Run comprehensive evaluation on model.
 
@@ -59,6 +66,11 @@ class ComprehensiveEvaluator:
             num_episodes_per_category: Episodes per category (None = all)
             max_steps_per_episode: Maximum steps per episode
             deterministic: Use deterministic policy
+            timeout_per_episode: Timeout in seconds per episode (default: 30.0)
+            record_videos: Whether to record videos of episodes
+            video_output_dir: Directory to save videos (required if record_videos=True)
+            max_videos_per_category: Maximum number of videos to record per category
+            video_fps: Video framerate
 
         Returns:
             Comprehensive results dictionary
@@ -66,6 +78,19 @@ class ComprehensiveEvaluator:
         logger.info("=" * 60)
         logger.info("Starting comprehensive evaluation")
         logger.info("=" * 60)
+
+        # Validate video recording parameters
+        if record_videos and video_output_dir is None:
+            raise ValueError(
+                "video_output_dir must be provided when record_videos=True"
+            )
+
+        if record_videos:
+            video_output_path = Path(video_output_dir)
+            video_output_path.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                f"Video recording enabled: {video_output_path} (max {max_videos_per_category} per category)"
+            )
 
         results = {
             "overall": {},
@@ -100,6 +125,11 @@ class ComprehensiveEvaluator:
                 levels=levels[:n_episodes],
                 max_steps=max_steps_per_episode,
                 deterministic=deterministic,
+                timeout=timeout_per_episode,
+                record_videos=record_videos,
+                video_output_dir=video_output_dir,
+                max_videos_per_category=max_videos_per_category,
+                video_fps=video_fps,
             )
 
             results["by_category"][category] = category_results
@@ -134,6 +164,11 @@ class ComprehensiveEvaluator:
         levels: List[Dict],
         max_steps: int,
         deterministic: bool,
+        timeout: float = 30.0,
+        record_videos: bool = False,
+        video_output_dir: Optional[str] = None,
+        max_videos_per_category: int = 10,
+        video_fps: int = 30,
     ) -> Dict[str, Any]:
         """Evaluate model on a specific category.
 
@@ -143,6 +178,11 @@ class ComprehensiveEvaluator:
             levels: List of level data
             max_steps: Max steps per episode
             deterministic: Use deterministic policy
+            timeout: Timeout in seconds per episode
+            record_videos: Whether to record videos
+            video_output_dir: Directory to save videos
+            max_videos_per_category: Max videos to record
+            video_fps: Video framerate
 
         Returns:
             Category results dictionary
@@ -150,48 +190,142 @@ class ComprehensiveEvaluator:
         successes = []
         episode_steps = []
         rewards = []
+        videos_recorded = 0
 
-        for level_data in tqdm(levels, desc=f"Eval {category}", leave=False):
+        for level_idx, level_data in enumerate(
+            tqdm(levels, desc=f"Eval {category}", leave=False)
+        ):
+            level_id = level_data.get("level_id", f"{category}_{level_idx:03d}")
+            logger.debug(f"Starting evaluation of level: {level_id}")
+
+            # Determine if we should record this episode
+            should_record = (
+                record_videos
+                and video_output_dir is not None
+                and videos_recorded < max_videos_per_category
+            )
+
             try:
                 # Create environment factory function to avoid closure issues
                 def make_env(lvl_data=level_data):
+                    logger.debug(f"Creating environment for level: {level_id}")
                     config = EnvironmentConfig.for_training()
                     env = NppEnvironment(config=config)
                     # Load the specific map from level_data
                     if "map_data" in lvl_data:
+                        logger.debug(f"Loading map data for level: {level_id}")
                         env.nplay_headless.load_map_from_map_data(lvl_data["map_data"])
                     return env
 
                 # Wrap in DummyVecEnv to match the format expected by the model
                 # Models trained with vectorized environments expect vectorized observations
+                logger.debug(
+                    f"Wrapping environment in DummyVecEnv for level: {level_id}"
+                )
                 env = DummyVecEnv([make_env])
 
+                logger.debug(f"Resetting environment for level: {level_id}")
                 obs = env.reset()
+                logger.debug(
+                    f"Environment reset complete for level: {level_id}, obs keys: {obs.keys() if isinstance(obs, dict) else type(obs)}"
+                )
+
                 done = False
                 steps = 0
                 episode_reward = 0
+                start_time = time.time()
 
+                # Initialize video recorder if needed
+                video_recorder = None
+                if should_record:
+                    # We'll determine success/failure after episode, so use placeholder
+                    video_filename = f"{category}_{level_idx:03d}_temp.mp4"
+                    video_path = Path(video_output_dir) / category / video_filename
+                    video_recorder = create_video_recorder(
+                        output_path=str(video_path),
+                        fps=video_fps,
+                    )
+                    if video_recorder:
+                        video_recorder.start_recording()
+                        # Record initial frame
+                        frame = env.render()
+                        if frame is not None:
+                            video_recorder.record_frame(
+                                frame[0] if isinstance(frame, tuple) else frame
+                            )
+
+                logger.debug(f"Starting episode loop for level: {level_id}")
                 while not done and steps < max_steps:
+                    # Check timeout
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > timeout:
+                        logger.warning(
+                            f"Level {level_id} timed out after {elapsed_time:.1f}s (timeout={timeout}s, steps={steps})"
+                        )
+                        break
                     # Get action from model
+                    if steps % 100 == 0:  # Log every 100 steps to avoid spam
+                        logger.debug(f"Level {level_id}: step {steps}/{max_steps}")
+
                     action, _ = model.predict(obs, deterministic=deterministic)
 
                     # Step environment
-                    obs, reward, terminated, truncated, info = env.step(action)
+                    # Note: DummyVecEnv returns 4 values (old gym API) even though
+                    # the underlying environment uses the new Gymnasium API (5 values)
+                    obs, reward, done, info = env.step(action)
                     # DummyVecEnv returns arrays, so extract the first element
-                    done = terminated[0] or truncated[0]
+                    done = done[0]
                     reward = reward[0]
                     info = info[0]
+
+                    # Record frame if video recording is enabled
+                    if video_recorder and video_recorder.is_recording:
+                        frame = env.render()
+                        if frame is not None:
+                            video_recorder.record_frame(
+                                frame[0] if isinstance(frame, tuple) else frame
+                            )
 
                     episode_reward += reward
                     steps += 1
 
+                elapsed_time = time.time() - start_time
+                logger.debug(
+                    f"Episode complete for level {level_id}: steps={steps}, reward={episode_reward:.2f}, time={elapsed_time:.1f}s"
+                )
+
                 # Record results
-                success = info.get("success", False) if done else False
+                success = info.get("is_success", False) if done else False
                 successes.append(1 if success else 0)
                 episode_steps.append(steps)
                 rewards.append(episode_reward)
 
+                # Save and rename video if recording
+                if video_recorder and video_recorder.is_recording:
+                    video_recorder.stop_recording(save=True)
+
+                    # Rename video file with success/failure indicator
+                    success_label = "success" if success else "failure"
+                    final_video_filename = (
+                        f"{category}_{level_idx:03d}_{success_label}.mp4"
+                    )
+                    final_video_path = (
+                        Path(video_output_dir) / category / final_video_filename
+                    )
+
+                    temp_video_path = (
+                        Path(video_output_dir)
+                        / category
+                        / f"{category}_{level_idx:03d}_temp.mp4"
+                    )
+                    if temp_video_path.exists():
+                        temp_video_path.rename(final_video_path)
+                        videos_recorded += 1
+                        logger.debug(f"Saved video: {final_video_path.name}")
+
+                logger.debug(f"Closing environment for level: {level_id}")
                 env.close()
+                logger.debug(f"Finished evaluation of level: {level_id}")
 
             except Exception as e:
                 logger.error(
