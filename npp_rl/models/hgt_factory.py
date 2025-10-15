@@ -34,15 +34,27 @@ except ImportError:
 
 
 class ProductionHGTConfig:
-    """Configuration class for production HGT systems."""
+    """Configuration class for production HGT systems.
+    
+    NOW USING FULL FEATURES from nclone:
+    - NODE_FEATURE_DIM = 55 (comprehensive features from nclone.graph.common)
+    - EDGE_FEATURE_DIM = 6 (comprehensive features from nclone.graph.common)
+    """
 
-    # Simplified feature dimensions (post-refactoring)
-    NODE_FEATURE_DIM = 8  # Simplified node features
-    EDGE_FEATURE_DIM = 4  # Simplified edge features
-
-    # Entity and edge type counts
-    NUM_NODE_TYPES = 6  # From entity_type_system.py
-    NUM_EDGE_TYPES = 3  # Simplified: ADJACENT, LOGICAL, REACHABLE
+    # Import feature dimensions from nclone
+    try:
+        from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM, N_NODE_TYPES, N_EDGE_TYPES
+        # Use comprehensive feature dimensions
+        NODE_FEATURE_DIM = NODE_FEATURE_DIM  # 55 dims
+        EDGE_FEATURE_DIM = EDGE_FEATURE_DIM  # 6 dims
+        NUM_NODE_TYPES = N_NODE_TYPES  # 6 node types
+        NUM_EDGE_TYPES = N_EDGE_TYPES  # 4 edge types
+    except ImportError:
+        # Fallback to defaults if nclone not available
+        NODE_FEATURE_DIM = 55  # Full node features
+        EDGE_FEATURE_DIM = 6   # Full edge features
+        NUM_NODE_TYPES = 6     # EMPTY, WALL, ENTITY, HAZARD, SPAWN, EXIT
+        NUM_EDGE_TYPES = 4     # ADJACENT, REACHABLE, FUNCTIONAL, BLOCKED
 
     # Architecture parameters (optimized for production)
     HIDDEN_DIM = 128  # Reduced for efficiency

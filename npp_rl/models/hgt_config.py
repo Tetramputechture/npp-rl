@@ -110,18 +110,18 @@ class HGTConfig:
     """Configuration for Heterogeneous Graph Transformer.
     
     NOW USING FULL FEATURES from nclone:
-    - NODE_FEATURE_DIM = 56 (comprehensive features from nclone.graph.common)
+    - NODE_FEATURE_DIM = 55 (comprehensive features from nclone.graph.common)
     - EDGE_FEATURE_DIM = 6 (comprehensive features from nclone.graph.common)
     
     Full features include:
-    - Node (56): Spatial, type, entity (5), tile (38), reachability (2), proximity (2)
+    - Node (55): Spatial, type, entity (5), tile (38), reachability (2), proximity (2)
     - Edge (6): Edge type (4), connectivity (2)
     
     This provides complete level representation for deep RL.
     """
 
-    # FULL FEATURES: Updated to use comprehensive 56-dim node features
-    node_feat_dim: int = 56  # Comprehensive node features (reduced from 61)
+    # FULL FEATURES: Updated to use comprehensive 55-dim node features
+    node_feat_dim: int = 55  # Comprehensive node features
     # FULL FEATURES: Updated to use comprehensive 6-dim edge features
     edge_feat_dim: int = 6  # Comprehensive edge features
 
@@ -131,9 +131,9 @@ class HGTConfig:
     num_layers: int = 3
     dropout: float = 0.1
 
-    # SIMPLIFIED: Node and edge type counts for completion-focused system
-    num_node_types: int = 6  # tile, ninja, mine, exit_switch, exit_door, locked_door
-    num_edge_types: int = 3  # Simplified: ADJACENT, LOGICAL, REACHABLE
+    # Type counts from nclone.graph.common
+    num_node_types: int = 6  # EMPTY, WALL, ENTITY, HAZARD, SPAWN, EXIT
+    num_edge_types: int = 4  # ADJACENT, REACHABLE, FUNCTIONAL, BLOCKED
 
 
 # === Configuration Instances ===
