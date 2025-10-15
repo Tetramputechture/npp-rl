@@ -179,6 +179,22 @@ def parse_args():
         "--s3-sync-freq", type=int, default=500000, help="S3 sync frequency (timesteps)"
     )
 
+    # Video recording options
+    parser.add_argument(
+        "--record-eval-videos",
+        action="store_true",
+        help="Record videos during final evaluation",
+    )
+    parser.add_argument(
+        "--max-videos-per-category",
+        type=int,
+        default=10,
+        help="Maximum videos to record per category",
+    )
+    parser.add_argument(
+        "--video-fps", type=int, default=30, help="Video framerate (default: 30)"
+    )
+
     # Resumption
     parser.add_argument(
         "--resume-from",
@@ -277,7 +293,9 @@ def train_architecture(
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint)
 
         # Setup environments (pass total_timesteps to allow adjustment for minimal training)
-        trainer.setup_environments(num_envs=args.num_envs, total_timesteps=args.total_timesteps)
+        trainer.setup_environments(
+            num_envs=args.num_envs, total_timesteps=args.total_timesteps
+        )
 
         # Train
         training_results = trainer.train(
@@ -291,7 +309,19 @@ def train_architecture(
             logger.info("Skipping final evaluation (--skip-final-eval flag set)")
             eval_results = {"success_rate": 0.0, "level_types": {}, "skipped": True}
         else:
-            eval_results = trainer.evaluate(num_episodes=args.num_eval_episodes)
+            # Setup video recording if enabled
+            video_output_dir = None
+            if args.record_eval_videos:
+                video_output_dir = str(arch_output_dir / "videos")
+                logger.info(f"Video recording enabled: {video_output_dir}")
+
+            eval_results = trainer.evaluate(
+                num_episodes=args.num_eval_episodes,
+                record_videos=args.record_eval_videos,
+                video_output_dir=video_output_dir,
+                max_videos_per_category=args.max_videos_per_category,
+                video_fps=args.video_fps,
+            )
 
         tb_writer.close_all()
 
@@ -411,10 +441,24 @@ def main():
             # Upload to S3 if configured
             if s3_uploader and result.get("status") != "failed":
                 output_dir = Path(result["output_dir"])
+
+                # Upload checkpoints
                 s3_uploader.upload_directory(
                     str(output_dir / "checkpoints"),
                     f"{arch_name}/{condition_name}/checkpoints",
                 )
+
+                # Upload videos if they exist
+                videos_dir = output_dir / "videos"
+                if videos_dir.exists() and videos_dir.is_dir():
+                    logger.info(
+                        f"Uploading videos to S3 for {arch_name}/{condition_name}"
+                    )
+                    s3_uploader.upload_directory(
+                        str(videos_dir),
+                        f"{arch_name}/{condition_name}/videos",
+                        pattern="*.mp4",
+                    )
 
     # Save all results
     results_file = exp_dir / "all_results.json"

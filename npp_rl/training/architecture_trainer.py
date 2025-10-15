@@ -157,7 +157,9 @@ class ArchitectureTrainer:
 
         return None  # Model will be created in setup_environments
 
-    def setup_environments(self, num_envs: int = 64, total_timesteps: int = None) -> None:
+    def setup_environments(
+        self, num_envs: int = 64, total_timesteps: int = None
+    ) -> None:
         """Create vectorized training and eval environments.
 
         Args:
@@ -167,16 +169,16 @@ class ArchitectureTrainer:
         logger.info(f"Setting up {num_envs} training environments...")
 
         # Adjust n_steps if total_timesteps is very small (for CPU testing)
-        if total_timesteps is not None and hasattr(self, 'hyperparams'):
+        if total_timesteps is not None and hasattr(self, "hyperparams"):
             # n_steps should be at most total_timesteps, but also needs to be
             # divisible by batch_size for proper training
             max_n_steps = max(total_timesteps // num_envs, 1)
-            if self.hyperparams['n_steps'] > max_n_steps:
-                old_n_steps = self.hyperparams['n_steps']
-                self.hyperparams['n_steps'] = max_n_steps
+            if self.hyperparams["n_steps"] > max_n_steps:
+                old_n_steps = self.hyperparams["n_steps"]
+                self.hyperparams["n_steps"] = max_n_steps
                 # Adjust batch_size to be compatible
-                if self.hyperparams['batch_size'] > max_n_steps:
-                    self.hyperparams['batch_size'] = max_n_steps
+                if self.hyperparams["batch_size"] > max_n_steps:
+                    self.hyperparams["batch_size"] = max_n_steps
                 logger.info(
                     f"Adjusted n_steps from {old_n_steps} to {max_n_steps} "
                     f"for total_timesteps={total_timesteps}, num_envs={num_envs}"
@@ -332,11 +334,22 @@ class ArchitectureTrainer:
             logger.error(f"Training failed: {e}")
             return {"status": "failed", "error": str(e)}
 
-    def evaluate(self, num_episodes: int = 250) -> Dict[str, float]:
+    def evaluate(
+        self,
+        num_episodes: int = 250,
+        record_videos: bool = False,
+        video_output_dir: Optional[str] = None,
+        max_videos_per_category: int = 10,
+        video_fps: int = 30,
+    ) -> Dict[str, float]:
         """Evaluate model on test dataset.
 
         Args:
             num_episodes: Number of episodes to evaluate (per category)
+            record_videos: Whether to record videos of episodes
+            video_output_dir: Directory to save videos (required if record_videos=True)
+            max_videos_per_category: Maximum number of videos per category
+            video_fps: Video framerate
 
         Returns:
             Evaluation metrics dictionary
@@ -344,7 +357,9 @@ class ArchitectureTrainer:
         if self.model is None:
             raise RuntimeError("Model not initialized")
 
-        logger.info(f"Evaluating model on test suite ({num_episodes} episodes per category)...")
+        logger.info(
+            f"Evaluating model on test suite ({num_episodes} episodes per category)..."
+        )
 
         try:
             evaluator = ComprehensiveEvaluator(
@@ -354,8 +369,7 @@ class ArchitectureTrainer:
 
             # Create episodes per category dict - distribute episodes across all categories
             num_episodes_per_category = {
-                category: num_episodes 
-                for category in evaluator.test_levels.keys()
+                category: num_episodes for category in evaluator.test_levels.keys()
             }
 
             results = evaluator.evaluate_model(
@@ -363,6 +377,10 @@ class ArchitectureTrainer:
                 num_episodes_per_category=num_episodes_per_category,
                 max_steps_per_episode=10000,
                 deterministic=True,
+                record_videos=record_videos,
+                video_output_dir=video_output_dir,
+                max_videos_per_category=max_videos_per_category,
+                video_fps=video_fps,
             )
 
             # Save results
