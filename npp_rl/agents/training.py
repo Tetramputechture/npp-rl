@@ -15,10 +15,10 @@ Key Features:
 Usage:
     # Full HGT architecture (recommended)
     python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --architecture full_hgt
-    
+
     # Simplified for faster training
     python -m npp_rl.agents.training --architecture gat --num_envs 32
-    
+
     # MLP baseline (no graph processing)
     python -m npp_rl.agents.training --architecture mlp_baseline
 """
@@ -50,8 +50,14 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
 from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.optimization.architecture_configs import get_architecture_config
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
-from nclone.gym_environment import create_reachability_aware_env, create_hierarchical_env
-from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
+from nclone.gym_environment import (
+    create_reachability_aware_env,
+    create_hierarchical_env,
+)
+from npp_rl.agents.hierarchical_ppo import (
+    HierarchicalPPO,
+    HierarchicalActorCriticPolicy,
+)
 from npp_rl.hrl.completion_controller import CompletionController
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,36 +66,54 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class HierarchicalLoggingCallback(BaseCallback):
     """
     Custom callback for logging hierarchical RL metrics.
-    
+
     This callback logs subtask transitions, completion controller metrics,
     and hierarchical performance statistics during training.
     """
-    
-    def __init__(self, completion_controller: CompletionController, log_freq: int = 10, verbose: int = 0):
+
+    def __init__(
+        self,
+        completion_controller: CompletionController,
+        log_freq: int = 10,
+        verbose: int = 0,
+    ):
         super().__init__(verbose)
         self.completion_controller = completion_controller
         self.log_freq = log_freq
         self.step_count = 0
-        
+
     def _on_step(self) -> bool:
         self.step_count += 1
-        
+
         if self.step_count % self.log_freq == 0:
             # Log hierarchical metrics
             metrics = self.completion_controller.get_subtask_metrics()
-            
+
             # Log to tensorboard/logger
-            self.logger.record("hierarchical/current_subtask", metrics.get('current_subtask', 'unknown'))
-            self.logger.record("hierarchical/subtask_step_count", metrics.get('subtask_step_count', 0))
-            self.logger.record("hierarchical/subtask_duration", metrics.get('subtask_duration', 0.0))
-            self.logger.record("hierarchical/total_transitions", metrics.get('total_transitions', 0))
-            
+            self.logger.record(
+                "hierarchical/current_subtask",
+                metrics.get("current_subtask", "unknown"),
+            )
+            self.logger.record(
+                "hierarchical/subtask_step_count", metrics.get("subtask_step_count", 0)
+            )
+            self.logger.record(
+                "hierarchical/subtask_duration", metrics.get("subtask_duration", 0.0)
+            )
+            self.logger.record(
+                "hierarchical/total_transitions", metrics.get("total_transitions", 0)
+            )
+
             # Log recent transitions
-            recent_transitions = metrics.get('recent_transitions', [])
+            recent_transitions = metrics.get("recent_transitions", [])
             if recent_transitions:
-                avg_transition_steps = sum(t.get('step_count', 0) for t in recent_transitions) / len(recent_transitions)
-                self.logger.record("hierarchical/avg_transition_steps", avg_transition_steps)
-        
+                avg_transition_steps = sum(
+                    t.get("step_count", 0) for t in recent_transitions
+                ) / len(recent_transitions)
+                self.logger.record(
+                    "hierarchical/avg_transition_steps", avg_transition_steps
+                )
+
         return True
 
 
@@ -138,7 +162,7 @@ def create_environment(render_mode: str = "rgb_array", **kwargs):
         enable_logging=False,
         **kwargs,
     )
-    
+
     # Use the reachability-aware environment factory
     env = create_reachability_aware_env(config=config)
 
@@ -159,10 +183,10 @@ def train_hierarchical_agent(
 ):
     """
     Train the hierarchical agent with completion planner integration.
-    
+
     This function implements hierarchical RL training using the completion planner
     for strategic subtask selection and HGT-based multimodal feature extraction.
-    
+
     Args:
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
@@ -175,7 +199,7 @@ def train_hierarchical_agent(
         enable_subtask_rewards: Whether to enable subtask-specific reward shaping
         subtask_reward_scale: Scaling factor for subtask rewards
     """
-    
+
     # Force single environment for human rendering
     if render_mode == "human":
         num_envs = 1
@@ -228,7 +252,7 @@ def train_hierarchical_agent(
         print("Adaptive exploration disabled")
 
     print("Using hierarchical PPO with HGT-based multimodal extractor")
-    
+
     # Configure hierarchical policy
     extractor_kwargs = {
         "features_dim": 512,
@@ -241,7 +265,7 @@ def train_hierarchical_agent(
     }
 
     policy_kwargs = {
-        "features_extractor_class": HGTMultimodalExtractor,
+        "features_extractor_class": ConfigurableMultimodalExtractor,
         "features_extractor_kwargs": extractor_kwargs,
         "net_arch": [dict(pi=[256, 256], vf=[256, 256])],
         "activation_fn": torch.nn.ReLU,
@@ -254,7 +278,7 @@ def train_hierarchical_agent(
         policy_class=HierarchicalActorCriticPolicy,
         completion_controller=completion_controller,
         policy_kwargs=policy_kwargs,
-        **HYPERPARAMETERS
+        **HYPERPARAMETERS,
     )
 
     # Create or load model
@@ -270,12 +294,12 @@ def train_hierarchical_agent(
 
     # Create callbacks
     callbacks = []
-    
+
     # Early stopping callback (must be passed to EvalCallback)
     stop_callback = StopTrainingOnNoModelImprovement(
         max_no_improvement_evals=10, min_evals=5, verbose=1
     )
-    
+
     # Evaluation callback
     eval_env = DummyVecEnv([make_hierarchical_env])
     eval_callback = EvalCallback(
@@ -420,11 +444,13 @@ def train_agent(
             "3d": "full_hgt",
         }
         architecture_name = architecture_map.get(extractor_type, "full_hgt")
-        print(f"Using architecture (mapped from extractor_type={extractor_type}): {architecture_name}")
-    
+        print(
+            f"Using architecture (mapped from extractor_type={extractor_type}): {architecture_name}"
+        )
+
     # Get architecture configuration
     architecture_config = get_architecture_config(architecture_name)
-    
+
     # Use ConfigurableMultimodalExtractor
     extractor_class = ConfigurableMultimodalExtractor
     extractor_kwargs = {
@@ -602,7 +628,16 @@ def main():
         "--architecture",
         type=str,
         default=None,
-        choices=["full_hgt", "simplified_hgt", "gat", "gcn", "mlp_baseline", "vision_free", "no_global_view", "local_frames_only"],
+        choices=[
+            "full_hgt",
+            "simplified_hgt",
+            "gat",
+            "gcn",
+            "mlp_baseline",
+            "vision_free",
+            "no_global_view",
+            "local_frames_only",
+        ],
         help="Architecture variant to use (overrides --extractor_type). Options: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, no_global_view, local_frames_only",
     )
     parser.add_argument(

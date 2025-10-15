@@ -37,7 +37,6 @@ npp-rl/
 │   ├── wrappers/              # Custom environment wrappers
 │   └── config/                # Configuration management
 ├── bc_pretrain.py             # Behavioral cloning pretraining script
-├── ppo_train.py              # Simple training wrapper (legacy)
 ├── tests/                    # Comprehensive test suite
 ├── docs/                     # Technical documentation and implementation plans
 ├── tools/                    # Utility scripts
