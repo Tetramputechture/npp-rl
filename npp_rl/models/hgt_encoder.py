@@ -150,7 +150,7 @@ class HGTEncoder(nn.Module):
         """
         # Extract graph components
         node_feats = graph_obs["graph_node_feats"]
-        edge_index = graph_obs["graph_edge_index"]
+        edge_index = graph_obs["graph_edge_index"]  # Should already be long from feature extractor
         edge_feats = graph_obs["graph_edge_feats"]
         node_mask = graph_obs["graph_node_mask"]
         edge_mask = graph_obs["graph_edge_mask"]

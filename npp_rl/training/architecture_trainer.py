@@ -157,13 +157,31 @@ class ArchitectureTrainer:
 
         return None  # Model will be created in setup_environments
 
-    def setup_environments(self, num_envs: int = 64) -> None:
+    def setup_environments(self, num_envs: int = 64, total_timesteps: int = None) -> None:
         """Create vectorized training and eval environments.
 
         Args:
             num_envs: Number of parallel environments
+            total_timesteps: Total training timesteps (used to adjust n_steps for small runs)
         """
         logger.info(f"Setting up {num_envs} training environments...")
+
+        # Adjust n_steps if total_timesteps is very small (for CPU testing)
+        if total_timesteps is not None and hasattr(self, 'hyperparams'):
+            # n_steps should be at most total_timesteps, but also needs to be
+            # divisible by batch_size for proper training
+            max_n_steps = max(total_timesteps // num_envs, 1)
+            if self.hyperparams['n_steps'] > max_n_steps:
+                old_n_steps = self.hyperparams['n_steps']
+                self.hyperparams['n_steps'] = max_n_steps
+                # Adjust batch_size to be compatible
+                if self.hyperparams['batch_size'] > max_n_steps:
+                    self.hyperparams['batch_size'] = max_n_steps
+                logger.info(
+                    f"Adjusted n_steps from {old_n_steps} to {max_n_steps} "
+                    f"for total_timesteps={total_timesteps}, num_envs={num_envs}"
+                )
+                logger.info(f"Adjusted batch_size to {self.hyperparams['batch_size']}")
 
         # Set up curriculum manager if enabled
         if self.use_curriculum:

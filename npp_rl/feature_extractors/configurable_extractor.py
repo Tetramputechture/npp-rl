@@ -351,7 +351,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 # nclone environment already provides these keys directly
                 hgt_graph_obs = {
                     "graph_node_feats": observations["graph_node_feats"].float(),
-                    "graph_edge_index": observations["graph_edge_index"],
+                    "graph_edge_index": observations["graph_edge_index"].long(),  # Convert for indexing
                     "graph_edge_feats": observations["graph_edge_feats"].float(),
                     "graph_node_mask": observations["graph_node_mask"],
                     "graph_edge_mask": observations["graph_edge_mask"],
@@ -366,7 +366,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
                 # SimplifiedHGTEncoder takes separate arguments
                 node_features = observations["graph_node_feats"].float()
-                edge_index = observations["graph_edge_index"]
+                edge_index = observations["graph_edge_index"].long()  # Convert for indexing
                 node_mask = observations["graph_node_mask"]
                 node_types = observations.get(
                     "graph_node_types",
@@ -382,7 +382,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             else:
                 # GAT and GCN take separate arguments (no type information)
                 node_features = observations["graph_node_feats"].float()
-                edge_index = observations["graph_edge_index"]
+                edge_index = observations["graph_edge_index"].long()  # Convert for indexing
                 node_mask = observations["graph_node_mask"]
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_mask

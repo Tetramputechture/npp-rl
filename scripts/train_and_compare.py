@@ -101,6 +101,17 @@ def parse_args():
         default=500000,
         help="Checkpoint save frequency (timesteps)",
     )
+    parser.add_argument(
+        "--num-eval-episodes",
+        type=int,
+        default=250,
+        help="Number of episodes for final evaluation (reduce for quick testing)",
+    )
+    parser.add_argument(
+        "--skip-final-eval",
+        action="store_true",
+        help="Skip final evaluation (for quick CPU validation tests)",
+    )
 
     # Multi-GPU options
     parser.add_argument("--num-gpus", type=int, default=1, help="Number of GPUs to use")
@@ -265,8 +276,8 @@ def train_architecture(
         # Setup model
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint)
 
-        # Setup environments
-        trainer.setup_environments(num_envs=args.num_envs)
+        # Setup environments (pass total_timesteps to allow adjustment for minimal training)
+        trainer.setup_environments(num_envs=args.num_envs, total_timesteps=args.total_timesteps)
 
         # Train
         training_results = trainer.train(
@@ -275,8 +286,12 @@ def train_architecture(
             save_freq=args.save_freq,
         )
 
-        # Evaluate
-        eval_results = trainer.evaluate(num_episodes=250)
+        # Evaluate (skip if requested)
+        if args.skip_final_eval:
+            logger.info("Skipping final evaluation (--skip-final-eval flag set)")
+            eval_results = {"success_rate": 0.0, "level_types": {}, "skipped": True}
+        else:
+            eval_results = trainer.evaluate(num_episodes=args.num_eval_episodes)
 
         tb_writer.close_all()
 
