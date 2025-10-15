@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """List available architectures for training."""
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -15,6 +16,14 @@ from npp_rl.training.architecture_configs import (
 
 def main():
     """List all available architectures with descriptions."""
+    parser = argparse.ArgumentParser(description="List available NPP-RL architectures")
+    parser.add_argument(
+        "--detailed",
+        action="store_true",
+        help="Display detailed descriptions for each architecture",
+    )
+    args = parser.parse_args()
+
     print("=" * 70)
     print("Available NPP-RL Architectures")
     print("=" * 70)
@@ -24,7 +33,11 @@ def main():
         try:
             config = get_architecture_config(arch_name)
             print(f"{i}. {arch_name}")
-            print(f"   Description: {config.name}")
+            print(f"   Description: {config.description}")
+
+            if args.detailed:
+                print(f"   Detailed Description: {config.detailed_description}")
+
             print(f"   Features dim: {config.features_dim}")
 
             # Show which modalities are enabled

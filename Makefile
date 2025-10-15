@@ -3,7 +3,7 @@
 # - Removes unused imports automatically when using the "fix" targets
 
 SHELL := /bin/bash
-PY_DIRS := npp_rl tools
+PY_DIRS := npp_rl tools training scripts
 
 .PHONY: help dev-setup lint fix imports
 

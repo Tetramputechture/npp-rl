@@ -146,6 +146,9 @@ class ArchitectureConfig:
 
     name: str
     description: str
+    detailed_description: (
+        str  # Comprehensive description for human-readable documentation
+    )
     modalities: ModalityConfig
     graph: GraphConfig
     visual: VisualConfig
@@ -158,6 +161,7 @@ class ArchitectureConfig:
         return {
             "name": self.name,
             "description": self.description,
+            "detailed_description": self.detailed_description,
             "modalities": self.modalities.__dict__,
             "graph": self.graph.__dict__,
             "visual": self.visual.__dict__,
@@ -175,6 +179,19 @@ def create_full_hgt_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="full_hgt",
         description="Full HGT with all modalities: temporal frames, global view, graph, state, reachability",
+        detailed_description="""
+        Baseline architecture with maximum capacity. Uses all modalities for comprehensive context.
+        
+        Modalities:
+        - Temporal Frames: 512-dim (84x84x12 stack for local spatial/temporal awareness)
+        - Global View: 256-dim (176x100 full level for strategic planning)
+        - Graph (Full HGT): 3 layers, 256 hidden, 8 heads (heterogeneous types)
+        - Game State: 128-dim (position, velocity, physics)
+        - Reachability: 8-dim (navigation planning)
+        
+        Multi-head cross-modal attention fusion (8 heads) learns complex interactions between modalities.
+        Highest capacity but largest computational cost. Feature dim: 512.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=True,
@@ -201,6 +218,19 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="simplified_hgt",
         description="Simplified HGT: reduced layers and dimensions",
+        detailed_description="""
+        Lighter HGT variant balancing performance and efficiency. All modalities with reduced capacity.
+        
+        Modalities (vs full_hgt):
+        - Temporal Frames: 256-dim (vs 512)
+        - Global View: 128-dim (vs 256)
+        - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
+        - Game State: 64-dim (vs 128)
+        - Reachability: 8-dim
+        
+        Single-head attention fusion (4 heads). Feature dim: 256 (vs 512). Faster training and inference
+        with limited resources.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=True,
@@ -233,6 +263,20 @@ def create_gat_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="gat",
         description="Graph Attention Network with all modalities",
+        detailed_description="""
+        Homogeneous graph alternative to HGT. All modalities with GAT for graph processing.
+        
+        Modalities:
+        - Temporal Frames: 512-dim
+        - Global View: 256-dim
+        - Graph (GAT): 3 layers, 256 hidden, 8 heads (homogeneous - no type-specific parameters)
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        GAT uses attention for aggregation but treats all nodes/edges uniformly, reducing complexity
+        vs HGT. Single-head cross-modal attention fusion. Feature dim: 512. Compares heterogeneous
+        vs homogeneous graph processing.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=True,
@@ -260,6 +304,20 @@ def create_gcn_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="gcn",
         description="Graph Convolutional Network (simplest graph baseline)",
+        detailed_description="""
+        Simplest graph architecture. All modalities with basic GCN (mean aggregation only).
+        
+        Modalities:
+        - Temporal Frames: 512-dim
+        - Global View: 256-dim
+        - Graph (GCN): 3 layers, 256 hidden (no attention, no edge features, no type embeddings)
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        GCN uses simple mean aggregation. Most lightweight graph approach. Concatenation fusion.
+        Feature dim: 512. Tests if sophisticated graph mechanisms (HGT, GAT) provide benefits over
+        basic convolutions.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=True,
@@ -287,6 +345,19 @@ def create_mlp_baseline_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="mlp_baseline",
         description="MLP baseline: no graph processing, only vision and state",
+        detailed_description="""
+        Non-graph baseline measuring GNN contribution. Vision and state only.
+        
+        Modalities:
+        - Temporal Frames: 512-dim
+        - Global View: 256-dim
+        - Graph: DISABLED
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        Concatenation fusion. Feature dim: 512. Tests if graph-based relational reasoning is necessary
+        or if spatial relationships can be learned from visual inputs alone.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=True,
@@ -307,6 +378,20 @@ def create_vision_free_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="vision_free",
         description="Vision-free: graph + state + reachability only",
+        detailed_description="""
+        Vision-free with symbolic representations only. 5-10x faster inference than full_hgt.
+        
+        Modalities:
+        - Temporal Frames: DISABLED
+        - Global View: DISABLED
+        - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        No CNN processing for maximum speed. Concatenation fusion. Feature dim: 384. Tests if
+        structured graph representations suffice without pixel-based vision. Trade-off: potentially
+        reduced spatial awareness of fine-grained obstacles.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=False,  # No vision
             use_global_view=False,  # No vision
@@ -331,10 +416,23 @@ def create_no_global_view_config() -> ArchitectureConfig:
     """Remove global view only."""
     return ArchitectureConfig(
         name="no_global_view",
-        description="Full architecture but without global view",
+        description="Full architecture without global view (local frames + graph + state)",
+        detailed_description="""
+        Ablation removing global view to test if local frames + graph suffice for navigation.
+        
+        Modalities:
+        - Temporal Frames: 512-dim (84x84x12 local view)
+        - Global View: DISABLED
+        - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        Tests whether graph structure compensates for lack of strategic level-wide context.
+        Multi-head attention fusion (8 heads). Feature dim: 512.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=True,
-            use_global_view=False,  # Remove global view
+            use_global_view=False,
             use_graph=True,
             use_game_state=True,
             use_reachability=True,
@@ -352,31 +450,25 @@ def create_no_global_view_config() -> ArchitectureConfig:
     )
 
 
-def create_local_frames_only_config() -> ArchitectureConfig:
-    """Keep only local temporal frames for immediate spatial awareness."""
-    return ArchitectureConfig(
-        name="local_frames_only",
-        description="Temporal frames + graph + state (no global view)",
-        modalities=ModalityConfig(
-            use_temporal_frames=True,
-            use_global_view=False,
-            use_graph=True,
-            use_game_state=True,
-            use_reachability=True,
-        ),
-        graph=GraphConfig(architecture=GraphArchitectureType.FULL_HGT),
-        visual=VisualConfig(),
-        state=StateConfig(),
-        fusion=FusionConfig(fusion_type=FusionType.MULTI_HEAD_ATTENTION),
-        features_dim=512,
-    )
-
-
 def create_vision_free_gat_config() -> ArchitectureConfig:
     """Vision-free architecture using GAT instead of HGT (lighter)."""
     return ArchitectureConfig(
         name="vision_free_gat",
         description="Vision-free with Graph Attention Network (lighter than HGT)",
+        detailed_description="""
+        Vision-free with GAT for lighter computation than HGT. Symbolic only.
+        
+        Modalities:
+        - Temporal Frames: DISABLED
+        - Global View: DISABLED
+        - Graph (GAT): 3 layers, 256 hidden, 8 heads (homogeneous)
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        GAT reduces complexity vs HGT while maintaining attention-based aggregation. No type-specific
+        parameters. Concatenation fusion. Feature dim: 384. Tests if heterogeneous types (HGT) are
+        necessary in vision-free settings.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=False,  # No vision
             use_global_view=False,  # No vision
@@ -404,6 +496,19 @@ def create_vision_free_gcn_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="vision_free_gcn",
         description="Vision-free with Graph Convolutional Network (fastest graph option)",
+        detailed_description="""
+        Fastest architecture. Vision-free with simplest graph processing. 10-15x faster than full_hgt.
+        
+        Modalities:
+        - Temporal Frames: DISABLED
+        - Global View: DISABLED
+        - Graph (GCN): 3 layers, 256 hidden (mean aggregation, no attention/edge features/types)
+        - Game State: 128-dim
+        - Reachability: 8-dim
+        
+        Most lightweight overall. Concatenation fusion. Feature dim: 256 (vs 384/512). Ideal for
+        real-time deployment where milliseconds matter. Trades performance for extreme efficiency.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=False,  # No vision
             use_global_view=False,  # No vision
@@ -431,6 +536,20 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
     return ArchitectureConfig(
         name="vision_free_simplified",
         description="Vision-free with simplified HGT (reduced complexity)",
+        detailed_description="""
+        Vision-free with reduced HGT. Balances speed and capability between vision_free and vision_free_gcn.
+        
+        Modalities:
+        - Temporal Frames: DISABLED
+        - Global View: DISABLED
+        - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
+        - Game State: 64-dim (vs 128)
+        - Reachability: 8-dim
+        
+        Maintains heterogeneous processing with reduced capacity. Faster than vision_free (full HGT),
+        more expressive than vision_free_gcn. Concatenation fusion. Feature dim: 256 (vs 384).
+        For resource-constrained deployment needing heterogeneous reasoning.
+        """,
         modalities=ModalityConfig(
             use_temporal_frames=False,  # No vision
             use_global_view=False,  # No vision
@@ -465,7 +584,6 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
     "vision_free_gcn": create_vision_free_gcn_config(),
     "vision_free_simplified": create_vision_free_simplified_config(),
     "no_global_view": create_no_global_view_config(),
-    "local_frames_only": create_local_frames_only_config(),
 }
 
 
@@ -510,3 +628,35 @@ def print_architecture_summary(config: ArchitectureConfig) -> None:
     print(f"\nFusion Type: {config.fusion.fusion_type.value}")
     print(f"Final Feature Dimension: {config.features_dim}")
     print(f"{'=' * 60}\n")
+
+
+def list_architectures(detailed: bool = True) -> None:
+    """
+    Display all available architectures with their descriptions.
+
+    Args:
+        detailed: If True, show detailed descriptions. If False, show only brief descriptions.
+    """
+    print(f"\n{'=' * 80}")
+    print(f"AVAILABLE ARCHITECTURES ({len(ARCHITECTURE_REGISTRY)} total)")
+    print(f"{'=' * 80}\n")
+
+    for name, config in ARCHITECTURE_REGISTRY.items():
+        print(f"{'─' * 80}")
+        print(f"[{name}]")
+        print(f"{'─' * 80}")
+        print(f"Brief: {config.description}")
+
+        if detailed:
+            print("\nDetailed Description:")
+            # Clean up the detailed description (remove extra indentation)
+            detailed_lines = config.detailed_description.strip().split("\n")
+            for line in detailed_lines:
+                print(f"  {line.strip()}")
+
+        print(f"\nModalities: {', '.join(config.modalities.get_enabled_modalities())}")
+        print(f"Graph Type: {config.graph.architecture.value}")
+        print(f"Fusion Type: {config.fusion.fusion_type.value}")
+        print(f"Feature Dim: {config.features_dim}\n")
+
+    print(f"{'=' * 80}\n")

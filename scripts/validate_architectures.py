@@ -79,16 +79,16 @@ def validate_architecture(arch_name, num_actual_edges=1000, batch_size=2):
         obs_space = create_mock_observation_space()
         
         # Create feature extractor
-        print(f"\nCreating feature extractor...")
+        print("\nCreating feature extractor...")
         extractor = ConfigurableMultimodalExtractor(obs_space, arch_config)
-        print(f"✓ Feature extractor created")
+        print("✓ Feature extractor created")
         
         # Create mock observations
         print(f"\nCreating mock observations (batch_size={batch_size}, edges={num_actual_edges})...")
         obs = create_mock_observation(batch_size, num_actual_edges)
         
         # Test forward pass
-        print(f"Testing forward pass...")
+        print("Testing forward pass...")
         start_time = time.time()
         with torch.no_grad():
             features = extractor(obs)
@@ -109,7 +109,7 @@ def validate_architecture(arch_name, num_actual_edges=1000, batch_size=2):
         if torch.isinf(features).any():
             raise ValueError("Output contains Inf values")
         
-        print(f"✓ Output validation passed")
+        print("✓ Output validation passed")
         print(f"\n{'=' * 60}")
         print(f"✓ {arch_name} PASSED")
         print(f"{'=' * 60}")
