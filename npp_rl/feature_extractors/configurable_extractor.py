@@ -194,18 +194,13 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
     def _create_graph_encoder(self, graph_config) -> nn.Module:
         """Create graph encoder based on architecture type."""
-        # Use nclone constants for graph feature dimensions
-        # NODE_FEATURE_DIM = 55, EDGE_FEATURE_DIM = 6 (from nclone.graph.common)
-        node_feature_dim = NODE_FEATURE_DIM
-        edge_feature_dim = EDGE_FEATURE_DIM
-
         arch_type = graph_config.architecture
 
         if arch_type == GraphArchitectureType.FULL_HGT:
             # Use existing production HGT
             return create_hgt_encoder(
-                node_feature_dim=node_feature_dim,
-                edge_feature_dim=edge_feature_dim,
+                node_feature_dim=NODE_FEATURE_DIM,
+                edge_feature_dim=EDGE_FEATURE_DIM,
                 hidden_dim=graph_config.hidden_dim,
                 num_layers=graph_config.num_layers,
                 output_dim=graph_config.output_dim,
@@ -214,7 +209,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
         elif arch_type == GraphArchitectureType.SIMPLIFIED_HGT:
             return SimplifiedHGTEncoder(
-                node_feature_dim=node_feature_dim,
+                node_feature_dim=NODE_FEATURE_DIM,
                 hidden_dim=graph_config.hidden_dim,
                 output_dim=graph_config.output_dim,
                 num_layers=graph_config.num_layers,
@@ -226,7 +221,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
         elif arch_type == GraphArchitectureType.GAT:
             return GATEncoder(
-                node_feature_dim=node_feature_dim,
+                node_feature_dim=NODE_FEATURE_DIM,
                 hidden_dim=graph_config.hidden_dim,
                 output_dim=graph_config.output_dim,
                 num_layers=graph_config.num_layers,
@@ -236,7 +231,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
         elif arch_type == GraphArchitectureType.GCN:
             return GCNEncoder(
-                node_feature_dim=node_feature_dim,
+                node_feature_dim=NODE_FEATURE_DIM,
                 hidden_dim=graph_config.hidden_dim,
                 output_dim=graph_config.output_dim,
                 num_layers=graph_config.num_layers,
@@ -351,7 +346,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 # nclone environment already provides these keys directly
                 hgt_graph_obs = {
                     "graph_node_feats": observations["graph_node_feats"].float(),
-                    "graph_edge_index": observations["graph_edge_index"].long(),  # Convert for indexing
+                    "graph_edge_index": observations[
+                        "graph_edge_index"
+                    ].long(),  # Convert for indexing
                     "graph_edge_feats": observations["graph_edge_feats"].float(),
                     "graph_node_mask": observations["graph_node_mask"],
                     "graph_edge_mask": observations["graph_edge_mask"],
@@ -366,7 +363,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
                 # SimplifiedHGTEncoder takes separate arguments
                 node_features = observations["graph_node_feats"].float()
-                edge_index = observations["graph_edge_index"].long()  # Convert for indexing
+                edge_index = observations[
+                    "graph_edge_index"
+                ].long()  # Convert for indexing
                 node_mask = observations["graph_node_mask"]
                 node_types = observations.get(
                     "graph_node_types",
@@ -382,7 +381,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             else:
                 # GAT and GCN take separate arguments (no type information)
                 node_features = observations["graph_node_feats"].float()
-                edge_index = observations["graph_edge_index"].long()  # Convert for indexing
+                edge_index = observations[
+                    "graph_edge_index"
+                ].long()  # Convert for indexing
                 node_mask = observations["graph_node_mask"]
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_mask

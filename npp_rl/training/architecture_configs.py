@@ -76,9 +76,9 @@ class GraphConfig:
     """
     Configuration for graph neural network architecture.
 
-    Note: Input dimensions come from nclone:
-    - node_feature_dim = 55 (NODE_FEATURE_DIM from nclone.graph.common)
-    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common)
+    Note: Input dimensions come from nclone (optimized):
+    - node_feature_dim = 19 (NODE_FEATURE_DIM from nclone.graph.common, reduced from 55)
+    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common, unchanged)
     These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
     """
 
@@ -90,8 +90,8 @@ class GraphConfig:
     dropout: float = 0.1
 
     # HGT-specific: node and edge types
-    num_node_types: int = 6  # tile, ninja, mine, exit_switch, exit_door, locked_door
-    num_edge_types: int = 2  # adjacent, reachable (simplified from 3)
+    num_node_types: int = 6  # EMPTY, WALL, ENTITY, HAZARD, SPAWN, EXIT
+    num_edge_types: int = 4  # ADJACENT, REACHABLE, FUNCTIONAL, BLOCKED
 
     # Simplification options
     use_type_embeddings: bool = True  # Whether to use separate embeddings per type
