@@ -30,7 +30,7 @@ cd /path/to/npp-rl
 
 python scripts/train_and_compare.py \
     --experiment-name "quick_test" \
-    --architectures mlp_baseline \
+    --architectures vision_free \
     --no-pretraining \
     --train-dataset ../nclone/datasets/train \
     --test-dataset ../nclone/datasets/test \

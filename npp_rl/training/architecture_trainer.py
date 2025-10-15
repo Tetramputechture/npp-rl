@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import torch
+import torch.nn as nn
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from torch.utils.tensorboard import SummaryWriter
@@ -118,11 +119,27 @@ class ArchitectureTrainer:
                 }
             )
 
-        # Default PPO hyperparameters
+        # Default PPO hyperparameters (optimized for multi-GPU training)
+        # Scale batch size and learning rate for multi-GPU setup
+        base_batch_size = 256
+        base_learning_rate = 3e-4
+
+        # Scale up for multi-GPU training (using sqrt scaling for stability)
+        if self.world_size > 1:
+            scaled_batch_size = base_batch_size * self.world_size
+            scaled_learning_rate = base_learning_rate * (self.world_size**0.5)
+            logger.info(
+                f"Scaling hyperparameters for {self.world_size} GPUs: "
+                f"batch_size={scaled_batch_size}, lr={scaled_learning_rate:.2e}"
+            )
+        else:
+            scaled_batch_size = base_batch_size
+            scaled_learning_rate = base_learning_rate
+
         default_hyperparams = {
-            "learning_rate": 3e-4,
-            "n_steps": 1024,
-            "batch_size": 256,
+            "learning_rate": scaled_learning_rate,
+            "n_steps": 2048,  # Increased for better sample efficiency with more envs
+            "batch_size": scaled_batch_size,
             "gamma": 0.999,
             "gae_lambda": 0.998,
             "clip_range": 0.2,
@@ -273,6 +290,30 @@ class ArchitectureTrainer:
                     logger.error(f"Failed to load pretrained weights: {e}")
                     logger.warning("Continuing with random initialization")
 
+            # Wrap policy with DataParallel for multi-GPU training
+            if self.world_size > 1 and torch.cuda.is_available():
+                logger.info(
+                    f"Wrapping policy network with DataParallel for {self.world_size} GPUs"
+                )
+                # Get list of GPU IDs
+                device_ids = list(range(self.world_size))
+
+                # Wrap the feature extractor with DataParallel
+                if hasattr(self.model.policy, "features_extractor"):
+                    self.model.policy.features_extractor = nn.DataParallel(
+                        self.model.policy.features_extractor, device_ids=device_ids
+                    )
+                    logger.info(
+                        f"Feature extractor distributed across GPUs: {device_ids}"
+                    )
+
+                # Wrap mlp_extractor if it exists
+                if hasattr(self.model.policy, "mlp_extractor"):
+                    self.model.policy.mlp_extractor = nn.DataParallel(
+                        self.model.policy.mlp_extractor, device_ids=device_ids
+                    )
+                    logger.info(f"MLP extractor distributed across GPUs: {device_ids}")
+
             logger.info(f"Model initialized with {num_envs} environments")
         elif self.model:
             # Model already exists, just set the environment
@@ -395,6 +436,24 @@ class ArchitectureTrainer:
         except Exception as e:
             logger.error(f"Evaluation failed: {e}")
             return {"success_rate": 0.0, "error": str(e)}
+
+    def cleanup(self) -> None:
+        """Clean up environments and release resources."""
+        if self.env is not None:
+            try:
+                self.env.close()
+                logger.info("Closed training environments")
+            except Exception as e:
+                logger.warning(f"Error closing training environments: {e}")
+            self.env = None
+
+        if self.eval_env is not None:
+            try:
+                self.eval_env.close()
+                logger.info("Closed evaluation environment")
+            except Exception as e:
+                logger.warning(f"Error closing evaluation environment: {e}")
+            self.eval_env = None
 
     def save_checkpoint(self, timestep: int, is_final: bool = False) -> Path:
         """Save model checkpoint with metadata.

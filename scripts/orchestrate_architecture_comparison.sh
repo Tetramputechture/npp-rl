@@ -3,14 +3,21 @@
 # Architecture Comparison Orchestration Script
 #
 # Automates end-to-end architecture comparison on a remote GPU training instance:
+# - Copies npp-rl and nclone code to remote instance via SCP
 # - Dataset generation (500 levels: train + test)
-# - Sequential training of 11 architectures (1M timesteps each)
+# - Sequential training of 10 architectures (1M timesteps each)
 # - Real-time TensorBoard monitoring via SSH port forwarding
 # - Automatic S3 artifact uploads (checkpoints, videos, logs)
 # - Comprehensive logging and error handling
 #
+# Prerequisites:
+#   - Run this script from the npp-rl directory
+#   - nclone directory must be in the same parent directory as npp-rl
+#   - Remote instance must have Python 3, pip, and optionally CUDA/GPU
+#
 # Usage:
-#   ./orchestrate_architecture_comparison.sh \
+#   cd /path/to/npp-rl
+#   ./scripts/orchestrate_architecture_comparison.sh \
 #     --instance-ip 54.123.45.67 \
 #     --aws-access-key AKIA... \
 #     --aws-secret-key wJalr... \
@@ -54,6 +61,15 @@ LOCAL_LOG_DIR="./logs/arch_comparison_${TIMESTAMP}"
 TENSORBOARD_PORT=6006
 TENSORBOARD_PID=""
 LOG_TAIL_PID=""
+
+# Local paths (script runs from npp-rl directory)
+NPP_RL_DIR="$(pwd)"
+NCLONE_DIR="$(dirname "$NPP_RL_DIR")/../nclone"
+
+# Remote paths
+REMOTE_BASE_DIR="~/npp-rl-training"
+REMOTE_NPP_RL_DIR="${REMOTE_BASE_DIR}/npp-rl"
+REMOTE_NCLONE_DIR="${REMOTE_BASE_DIR}/nclone"
 
 # All 11 architectures to compare
 ARCHITECTURES=(
@@ -139,6 +155,11 @@ usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
+Prerequisites:
+  - Run this script from the npp-rl directory
+  - nclone directory must be in ../nclone (same parent as npp-rl)
+  - Remote instance must have Python 3, pip, and SSH access
+
 Required:
   --instance-ip IP          Remote GPU instance IP address
   --aws-access-key KEY      AWS access key ID
@@ -153,6 +174,7 @@ Optional:
   --help                    Show this help message
 
 Example:
+  cd /path/to/npp-rl
   $0 \\
     --instance-ip 54.123.45.67 \\
     --aws-access-key AKIA... \\
@@ -238,9 +260,39 @@ scp_from_remote() {
         -o LogLevel=ERROR -r "${SSH_USER}@${INSTANCE_IP}:${remote_path}" "$local_path"
 }
 
+scp_to_remote() {
+    local local_path=$1
+    local remote_path=$2
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR -r "$local_path" "${SSH_USER}@${INSTANCE_IP}:${remote_path}"
+}
+
 # ============================================================================
 # Validation functions
 # ============================================================================
+validate_local_environment() {
+    log INFO "Validating local environment..."
+    
+    # Check if we're in npp-rl directory
+    if [[ ! -f "setup.py" ]] || [[ ! -d "npp_rl" ]]; then
+        log ERROR "This script must be run from the npp-rl directory"
+        log ERROR "Current directory: $(pwd)"
+        return 1
+    fi
+    
+    # Check if nclone directory exists
+    if [[ ! -d "$NCLONE_DIR" ]]; then
+        log ERROR "nclone directory not found at: ${NCLONE_DIR}"
+        log ERROR "Expected nclone to be in the same parent directory as npp-rl"
+        return 1
+    fi
+    
+    log SUCCESS "Local environment validated"
+    log INFO "  npp-rl: ${NPP_RL_DIR}"
+    log INFO "  nclone: ${NCLONE_DIR}"
+    return 0
+}
+
 validate_ssh_connection() {
     log INFO "Validating SSH connection to ${INSTANCE_IP}..."
     
@@ -262,10 +314,14 @@ validate_remote_dependencies() {
         return 1
     fi
     
-    # Check if npp-rl and nclone repositories exist
-    if ! ssh_cmd "test -d ~/projects/npp-rl && test -d ~/projects/nclone"; then
-        log ERROR "Required repositories not found. Expected: ~/projects/npp-rl and ~/projects/nclone"
-        return 1
+    # Check for GPU (optional warning)
+    if ssh_cmd "which nvidia-smi" > /dev/null 2>&1; then
+        log SUCCESS "GPU detected on remote instance"
+        ssh_cmd "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader" | while read line; do
+            log INFO "  GPU: $line"
+        done
+    else
+        log WARNING "nvidia-smi not found. Training will use CPU (slow)"
     fi
     
     log SUCCESS "Remote dependencies validated"
@@ -325,26 +381,85 @@ setup_tensorboard_forwarding() {
     fi
 }
 
+copy_code_to_remote() {
+    log HEADER "Copying code to remote instance"
+    
+    # Create remote base directory
+    log INFO "Creating remote base directory: ${REMOTE_BASE_DIR}"
+    ssh_cmd "mkdir -p ${REMOTE_BASE_DIR}"
+    
+    # Copy npp-rl
+    log INFO "Copying npp-rl to remote (this may take a few minutes)..."
+    log INFO "  Excluding: .git, __pycache__, *.pyc, experiments, logs, datasets"
+    
+    # Create tarball excluding unnecessary files
+    tar -czf /tmp/npp-rl-${TIMESTAMP}.tar.gz \
+        --exclude='.git' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='experiments' \
+        --exclude='logs' \
+        --exclude='datasets' \
+        --exclude='*.egg-info' \
+        --exclude='build' \
+        --exclude='dist' \
+        -C "$(dirname "$NPP_RL_DIR")" \
+        "$(basename "$NPP_RL_DIR")" 2>&1 | grep -v "Removing leading" || true
+    
+    # Copy tarball and extract
+    scp_to_remote "/tmp/npp-rl-${TIMESTAMP}.tar.gz" "${REMOTE_BASE_DIR}/"
+    ssh_cmd "cd ${REMOTE_BASE_DIR} && tar -xzf npp-rl-${TIMESTAMP}.tar.gz && rm npp-rl-${TIMESTAMP}.tar.gz"
+    rm /tmp/npp-rl-${TIMESTAMP}.tar.gz
+    
+    log SUCCESS "npp-rl copied successfully"
+    
+    # Copy nclone
+    log INFO "Copying nclone to remote..."
+    
+    tar -czf /tmp/nclone-${TIMESTAMP}.tar.gz \
+        --exclude='.git' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='*.egg-info' \
+        --exclude='build' \
+        --exclude='dist' \
+        -C "$(dirname "$NCLONE_DIR")" \
+        "$(basename "$NCLONE_DIR")" 2>&1 | grep -v "Removing leading" || true
+    
+    scp_to_remote "/tmp/nclone-${TIMESTAMP}.tar.gz" "${REMOTE_BASE_DIR}/"
+    ssh_cmd "cd ${REMOTE_BASE_DIR} && tar -xzf nclone-${TIMESTAMP}.tar.gz && rm nclone-${TIMESTAMP}.tar.gz"
+    rm /tmp/nclone-${TIMESTAMP}.tar.gz
+    
+    log SUCCESS "nclone copied successfully"
+    
+    # Install packages in development mode
+    log INFO "Installing packages on remote..."
+    ssh_cmd "cd ${REMOTE_NCLONE_DIR} && pip install -q -e ." || {
+        log WARNING "nclone installation had warnings, continuing..."
+    }
+    ssh_cmd "cd ${REMOTE_NPP_RL_DIR} && pip install -q -e ." || {
+        log WARNING "npp-rl installation had warnings, continuing..."
+    }
+    log SUCCESS "Packages installed"
+}
+
 setup_remote_environment() {
     log HEADER "Setting up remote environment"
     
     # Set AWS credentials
     log INFO "Setting AWS credentials on remote instance..."
-    ssh_cmd "echo 'export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}' >> ~/.bashrc"
-    ssh_cmd "echo 'export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}' >> ~/.bashrc"
+    ssh_cmd "mkdir -p ~/.aws"
+    ssh_cmd "cat > ~/.aws/credentials << EOF
+[default]
+aws_access_key_id = ${AWS_ACCESS_KEY}
+aws_secret_access_key = ${AWS_SECRET_KEY}
+EOF"
     log SUCCESS "AWS credentials configured"
     
     # Create experiment directory
     log INFO "Creating remote experiment directory..."
     ssh_cmd "mkdir -p ~/experiments/${EXPERIMENT_NAME}_${TIMESTAMP}"
     log SUCCESS "Created remote directory: ~/experiments/${EXPERIMENT_NAME}_${TIMESTAMP}"
-    
-    # Install/verify dependencies
-    log INFO "Verifying Python dependencies..."
-    ssh_cmd "cd ~/projects/npp-rl && pip install -q -r requirements.txt" || {
-        log WARNING "Some dependencies may have failed to install, continuing..."
-    }
-    log SUCCESS "Dependencies verified"
 }
 
 # ============================================================================
@@ -368,7 +483,7 @@ generate_datasets() {
     log INFO "This may take 5-15 minutes..."
     
     # Generate datasets
-    ssh_cmd "cd ~/projects/nclone && python -m nclone.map_generation.generate_test_suite_maps --mode both --output_dir ~/datasets" 2>&1 | tee -a "${LOCAL_LOG_DIR}/dataset_generation.log"
+    ssh_cmd "cd ${REMOTE_NCLONE_DIR} && python -m nclone.map_generation.generate_test_suite_maps --mode both --output_dir ~/datasets" 2>&1 | tee -a "${LOCAL_LOG_DIR}/dataset_generation.log"
     
     if ssh_cmd "test -d ~/datasets/train && test -d ~/datasets/test"; then
         log SUCCESS "Datasets generated successfully"
@@ -417,8 +532,9 @@ train_single_architecture() {
     log INFO "Starting training for ${arch}..."
     log INFO "Training logs: ${arch_log}"
     
-    # Build training command
-    local train_cmd="cd ~/projects/npp-rl && \
+    # Build training command optimized for 8x A100 (80 GB)
+    # Use hardware profile for automatic optimization
+    local train_cmd="cd ${REMOTE_NPP_RL_DIR} && \
         export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY} && \
         export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY} && \
         python scripts/train_and_compare.py \
@@ -426,10 +542,9 @@ train_single_architecture() {
             --architectures ${arch} \
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
-            --total-timesteps 1000000 \
-            --num-envs 64 \
-            --num-gpus 1 \
-            --mixed-precision \
+            --hardware-profile 8xA100-80GB \
+            --total-timesteps 10000000 \
+            --distributed-backend nccl \
             --record-eval-videos \
             --max-videos-per-category 5 \
             --video-fps 30 \
@@ -567,25 +682,34 @@ main() {
     log INFO "  Resume Mode: ${RESUME}"
     echo ""
     
+    # Validate local environment first
+    if ! validate_local_environment; then
+        log ERROR "Local environment validation failed"
+        exit 1
+    fi
+    
     # Setup local environment
     setup_local_environment
     
-    # Validate connection
+    # Validate SSH connection
     if ! validate_ssh_connection; then
         log ERROR "Cannot proceed without SSH connection"
         exit 1
     fi
     
-    # Validate dependencies
+    # Validate remote dependencies
     if ! validate_remote_dependencies; then
         log ERROR "Remote environment validation failed"
         exit 1
     fi
     
+    # Copy code to remote instance
+    copy_code_to_remote
+    
     # Setup TensorBoard forwarding
     setup_tensorboard_forwarding
     
-    # Setup remote environment
+    # Setup remote environment (AWS credentials, experiment dirs)
     setup_remote_environment
     
     # Generate datasets

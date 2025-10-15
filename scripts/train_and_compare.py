@@ -8,10 +8,13 @@ with optional pretraining and multi-GPU support.
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
+import torch
+import torch.distributed as dist
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -28,6 +31,11 @@ from npp_rl.utils import (
 )
 from npp_rl.training.architecture_trainer import ArchitectureTrainer
 from npp_rl.training.pretraining_pipeline import run_bc_pretraining_if_available
+from npp_rl.training.hardware_profiles import (
+    get_hardware_profile,
+    auto_detect_profile,
+    HARDWARE_PROFILES,
+)
 
 
 def parse_args():
@@ -113,7 +121,17 @@ def parse_args():
         help="Skip final evaluation (for quick CPU validation tests)",
     )
 
-    # Multi-GPU options
+    # Multi-GPU and hardware profile options
+    parser.add_argument(
+        "--hardware-profile",
+        type=str,
+        default=None,
+        choices=list(HARDWARE_PROFILES.keys()) + ["auto"],
+        help=(
+            "Hardware profile for optimized settings. Use 'auto' for auto-detection. "
+            "If specified, overrides --num-gpus, --num-envs, and batch size settings."
+        ),
+    )
     parser.add_argument("--num-gpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument(
         "--distributed-backend",
@@ -225,6 +243,30 @@ def create_experiment_directory(base_dir: Path, experiment_name: str) -> Path:
     return exp_dir
 
 
+def setup_distributed(rank: int, world_size: int, backend: str = "nccl"):
+    """Setup distributed training process group.
+
+    Args:
+        rank: Process rank (GPU ID)
+        world_size: Total number of processes (GPUs)
+        backend: Distributed backend (nccl for GPU, gloo for CPU)
+    """
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+
+    # Initialize process group
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
+
+    # Set device for this process
+    torch.cuda.set_device(rank)
+
+
+def cleanup_distributed():
+    """Clean up distributed training process group."""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
 def train_architecture(
     architecture_name: str,
     architecture_config,
@@ -232,6 +274,7 @@ def train_architecture(
     args,
     pretrained_checkpoint: str = None,
     condition_name: str = "",
+    device_id: int = 0,
 ) -> dict:
     """Train a single architecture configuration.
 
@@ -242,6 +285,7 @@ def train_architecture(
         args: Command-line arguments
         pretrained_checkpoint: Optional pretrained checkpoint path
         condition_name: Condition name (e.g., "with_pretrain")
+        device_id: GPU device ID for this process
 
     Returns:
         Training results dictionary
@@ -250,7 +294,7 @@ def train_architecture(
 
     condition_suffix = f" ({condition_name})" if condition_name else ""
     logger.info("=" * 70)
-    logger.info(f"Training: {architecture_name}{condition_suffix}")
+    logger.info(f"Training: {architecture_name}{condition_suffix} on GPU {device_id}")
     logger.info("=" * 70)
 
     # Create condition-specific output directory
@@ -261,8 +305,10 @@ def train_architecture(
 
     arch_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create TensorBoard writer
-    tb_writer = TensorBoardManager(arch_output_dir / "tensorboard")
+    # Create TensorBoard writer (only on rank 0 to avoid conflicts)
+    tb_writer = None
+    if device_id == 0:
+        tb_writer = TensorBoardManager(arch_output_dir / "tensorboard")
 
     try:
         # Prepare curriculum kwargs if enabled
@@ -274,15 +320,19 @@ def train_architecture(
                 "min_episodes_per_stage": args.curriculum_min_episodes,
             }
 
+        # Calculate environments per GPU
+        envs_per_gpu = args.num_envs // args.num_gpus
+        logger.info(f"GPU {device_id}: Using {envs_per_gpu} environments")
+
         # Create trainer
         trainer = ArchitectureTrainer(
             architecture_config=architecture_config,
             train_dataset_path=args.train_dataset,
             test_dataset_path=args.test_dataset,
             output_dir=arch_output_dir,
-            device_id=0,  # TODO: Support multi-GPU
+            device_id=device_id,
             world_size=args.num_gpus,
-            tensorboard_writer=tb_writer.get_writer("training"),
+            tensorboard_writer=tb_writer.get_writer("training") if tb_writer else None,
             use_mixed_precision=args.mixed_precision,
             use_hierarchical_ppo=args.use_hierarchical_ppo,
             use_curriculum=args.use_curriculum,
@@ -292,9 +342,9 @@ def train_architecture(
         # Setup model
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint)
 
-        # Setup environments (pass total_timesteps to allow adjustment for minimal training)
+        # Setup environments (use per-GPU environment count)
         trainer.setup_environments(
-            num_envs=args.num_envs, total_timesteps=args.total_timesteps
+            num_envs=envs_per_gpu, total_timesteps=args.total_timesteps
         )
 
         # Train
@@ -304,11 +354,13 @@ def train_architecture(
             save_freq=args.save_freq,
         )
 
-        # Evaluate (skip if requested)
+        # Evaluate (skip if requested, or only run on rank 0 for multi-GPU)
         if args.skip_final_eval:
             logger.info("Skipping final evaluation (--skip-final-eval flag set)")
             eval_results = {"success_rate": 0.0, "level_types": {}, "skipped": True}
-        else:
+        elif device_id == 0:
+            # Only evaluate on primary GPU to avoid conflicts
+            logger.info("Running final evaluation on primary GPU...")
             # Setup video recording if enabled
             video_output_dir = None
             if args.record_eval_videos:
@@ -322,8 +374,18 @@ def train_architecture(
                 max_videos_per_category=args.max_videos_per_category,
                 video_fps=args.video_fps,
             )
+        else:
+            logger.info(f"GPU {device_id}: Skipping evaluation (handled by rank 0)")
+            eval_results = {
+                "success_rate": 0.0,
+                "level_types": {},
+                "skipped_on_worker": True,
+            }
 
-        tb_writer.close_all()
+        # Clean up environments
+        trainer.cleanup()
+        if tb_writer:
+            tb_writer.close_all()
 
         return {
             "architecture": architecture_name,
@@ -335,10 +397,14 @@ def train_architecture(
 
     except Exception as e:
         logger.error(f"Training failed for {architecture_name}{condition_suffix}: {e}")
-        tb_writer.close_all()
+        # Clean up environments even on failure
+        trainer.cleanup()
+        if tb_writer:
+            tb_writer.close_all()
         return {
             "architecture": architecture_name,
             "condition": condition_name,
+            "device_id": device_id,
             "status": "failed",
             "error": str(e),
         }
@@ -364,10 +430,65 @@ def main():
     logger.info(f"Output directory: {exp_dir}")
     logger.info("=" * 70)
 
+    # Apply hardware profile if specified
+    hardware_profile = None
+    if args.hardware_profile:
+        if args.hardware_profile.lower() == "auto":
+            logger.info("Auto-detecting hardware profile...")
+            hardware_profile = auto_detect_profile()
+        else:
+            hardware_profile = get_hardware_profile(args.hardware_profile)
+
+        if hardware_profile:
+            logger.info(f"\nApplying hardware profile: {hardware_profile.name}")
+            logger.info(f"Description: {hardware_profile.description}")
+
+            # Override settings with profile values
+            args.num_gpus = hardware_profile.num_gpus
+            args.num_envs = hardware_profile.num_envs
+            args.mixed_precision = hardware_profile.mixed_precision
+
+            logger.info("Profile settings applied:")
+            logger.info(f"  GPUs: {args.num_gpus}")
+            logger.info(f"  Environments: {args.num_envs}")
+            logger.info(f"  Batch size: {hardware_profile.batch_size}")
+            logger.info(f"  Learning rate: {hardware_profile.learning_rate:.2e}")
+            logger.info(f"  Mixed precision: {args.mixed_precision}")
+
+    # Log GPU configuration
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        logger.info(f"\nGPUs available: {num_gpus}")
+        for i in range(num_gpus):
+            gpu_name = torch.cuda.get_device_name(i)
+            gpu_memory = torch.cuda.get_device_properties(i).total_memory / 1e9
+            logger.info(f"  GPU {i}: {gpu_name} ({gpu_memory:.1f} GB)")
+
+        # Validate num_gpus argument
+        if args.num_gpus > num_gpus:
+            logger.warning(
+                f"Requested {args.num_gpus} GPUs but only {num_gpus} available. "
+                f"Using {num_gpus} GPUs."
+            )
+            args.num_gpus = num_gpus
+    else:
+        logger.warning("No GPUs available, using CPU")
+        args.num_gpus = 0
+
     # Save configuration
     config = vars(args)
     config["experiment_dir"] = str(exp_dir)
     config["start_time"] = datetime.now().isoformat()
+    if hardware_profile:
+        config["hardware_profile_used"] = hardware_profile.name
+        config["hardware_profile_settings"] = {
+            "num_gpus": hardware_profile.num_gpus,
+            "gpu_memory_gb": hardware_profile.gpu_memory_gb,
+            "num_envs": hardware_profile.num_envs,
+            "batch_size": hardware_profile.batch_size,
+            "n_steps": hardware_profile.n_steps,
+            "learning_rate": hardware_profile.learning_rate,
+        }
     save_experiment_config(config, exp_dir)
 
     # Setup S3 uploader if requested
