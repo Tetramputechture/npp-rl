@@ -19,7 +19,7 @@ from npp_rl.optimization.architecture_configs import (
     get_architecture_config,
     list_available_architectures,
 )
-from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 
 
 class TestArchitectureIntegration(unittest.TestCase):

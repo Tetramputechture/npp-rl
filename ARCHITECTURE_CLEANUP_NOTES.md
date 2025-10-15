@@ -124,7 +124,7 @@ trainer.train(
 ### Method 3: Direct Usage in Custom Scripts
 
 ```python
-from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.optimization.architecture_configs import get_architecture_config
 from stable_baselines3 import PPO
 

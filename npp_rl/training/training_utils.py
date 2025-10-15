@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from gymnasium.spaces import Discrete, Dict as SpacesDict
 
-from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.optimization.architecture_configs import get_architecture_config
 
 

@@ -60,7 +60,7 @@ All 8 architecture variants defined in `ARCHITECTURE_REGISTRY` are **READY FOR T
 
 ### 2. Configurable Extractor ✅ VALIDATED
 
-**Location:** `npp_rl/optimization/configurable_extractor.py`
+**Location:** `npp_rl/feature_extractors/configurable_extractor.py`
 
 **Findings:**
 - ✅ Correctly handles all modality combinations

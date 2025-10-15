@@ -43,7 +43,7 @@
 
 ### Files Modified: 4
 
-1. **`npp_rl/optimization/configurable_extractor.py`** (+48 lines)
+1. **`npp_rl/feature_extractors/configurable_extractor.py`** (+48 lines)
    - Fixed global_view dimension permutation [B,H,W,C] → [B,C,H,W]
    - Added interface adapter for different graph encoder types
    - HGTEncoder (dict) vs GAT/GCN/SimplifiedHGT (separate args)

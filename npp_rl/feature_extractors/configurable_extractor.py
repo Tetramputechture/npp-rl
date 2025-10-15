@@ -14,11 +14,11 @@ from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
 
-from .architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
-from ..models.gcn import GCNEncoder
-from ..models.gat import GATEncoder
-from ..models.simplified_hgt import SimplifiedHGTEncoder
-from ..models.hgt_factory import create_hgt_encoder
+from npp_rl.optimization.architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
+from npp_rl.models.gcn import GCNEncoder
+from npp_rl.models.gat import GATEncoder
+from npp_rl.models.simplified_hgt import SimplifiedHGTEncoder
+from npp_rl.models.hgt_factory import create_hgt_encoder
 
 
 class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):

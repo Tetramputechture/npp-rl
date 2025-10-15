@@ -54,7 +54,7 @@ from stable_baselines3.common.logger import configure
 
 from nclone.gym_environment import create_hierarchical_env
 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
-from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.optimization.architecture_configs import get_architecture_config
 from npp_rl.agents.hyperparameters.hierarchical_hyperparameters import (
     HIGH_LEVEL_HYPERPARAMETERS,

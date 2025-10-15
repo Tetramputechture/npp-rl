@@ -139,7 +139,7 @@ All issues have been resolved with minimal code changes.
 - Each config has appropriate modality combinations
 - Graph types correctly match architecture names
 
-### ✓ Configurable Extractor (`npp_rl/optimization/configurable_extractor.py`)
+### ✓ Configurable Extractor (`npp_rl/feature_extractors/configurable_extractor.py`)
 **Status:** FIXED AND VALIDATED ✅  
 **Changes Made:**
 1. Fixed global_view dimension handling (lines 323-330):
@@ -244,7 +244,7 @@ All issues have been resolved with minimal code changes.
 ## Code Changes Summary
 
 ### Files Modified (3)
-1. **`npp_rl/optimization/configurable_extractor.py`**
+1. **`npp_rl/feature_extractors/configurable_extractor.py`**
    - Fixed global_view dimension handling (lines 323-330)
    - Fixed graph encoder interface handling (lines 334-382)
    - Changes: +48 lines (minimal, focused fixes)
