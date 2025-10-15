@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from tqdm import tqdm
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
@@ -152,16 +153,20 @@ class ComprehensiveEvaluator:
 
         for level_data in tqdm(levels, desc=f"Eval {category}", leave=False):
             try:
-                # Create environment with proper config
-                config = EnvironmentConfig.for_training()
-                env = NppEnvironment(config=config)
+                # Create environment factory function to avoid closure issues
+                def make_env(lvl_data=level_data):
+                    config = EnvironmentConfig.for_training()
+                    env = NppEnvironment(config=config)
+                    # Load the specific map from level_data
+                    if "map_data" in lvl_data:
+                        env.nplay_headless.load_map_from_map_data(lvl_data["map_data"])
+                    return env
 
-                # Load the specific map from level_data
-                # The environment has nplay_headless which can load from map_data
-                if "map_data" in level_data:
-                    env.nplay_headless.load_map_from_map_data(level_data["map_data"])
+                # Wrap in DummyVecEnv to match the format expected by the model
+                # Models trained with vectorized environments expect vectorized observations
+                env = DummyVecEnv([make_env])
 
-                obs, _ = env.reset()
+                obs = env.reset()
                 done = False
                 steps = 0
                 episode_reward = 0
@@ -172,7 +177,10 @@ class ComprehensiveEvaluator:
 
                     # Step environment
                     obs, reward, terminated, truncated, info = env.step(action)
-                    done = terminated or truncated
+                    # DummyVecEnv returns arrays, so extract the first element
+                    done = terminated[0] or truncated[0]
+                    reward = reward[0]
+                    info = info[0]
 
                     episode_reward += reward
                     steps += 1
