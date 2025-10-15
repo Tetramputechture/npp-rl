@@ -15,9 +15,8 @@ import json
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple, Set, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass, asdict
-from collections import defaultdict
 import hashlib
 from datetime import datetime
 
@@ -577,7 +576,7 @@ Examples:
                 print(f"  - {warning}")
         
         if result.metrics:
-            print(f"\nQuality Metrics:")
+            print("\nQuality Metrics:")
             print(f"  Total samples: {result.metrics.total_samples}")
             print(f"  Quality score: {result.metrics.quality_score:.3f}")
             print(f"  Temporal consistency: {result.metrics.temporal_consistency:.3f}")
@@ -592,7 +591,7 @@ Examples:
         
         report = generate_quality_report(dataset_paths, args.output)
         
-        print(f"\nQuality Report Summary:")
+        print("\nQuality Report Summary:")
         print(f"Total datasets: {report['summary']['total_datasets']}")
         print(f"Valid datasets: {report['summary']['valid_datasets']}")
         print(f"Invalid datasets: {report['summary']['invalid_datasets']}")
@@ -629,7 +628,7 @@ Examples:
             for key in total_stats:
                 total_stats[key] += stats[key]
         
-        print(f"\nDeduplication Summary:")
+        print("\nDeduplication Summary:")
         print(f"Original samples: {total_stats['original_count']}")
         print(f"Kept samples: {total_stats['kept_count']}")
         print(f"Removed samples: {total_stats['removed_count']}")

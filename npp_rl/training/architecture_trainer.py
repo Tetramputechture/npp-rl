@@ -16,8 +16,8 @@ from torch.utils.tensorboard import SummaryWriter
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
-from npp_rl.optimization.architecture_configs import ArchitectureConfig
-from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.training.architecture_configs import ArchitectureConfig
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.training.curriculum_manager import create_curriculum_manager
 from npp_rl.wrappers.curriculum_env import CurriculumEnv, CurriculumVecEnvWrapper
 

@@ -1,11 +1,9 @@
 """
-Architecture configuration system for Task 3.1 model optimization.
+Architecture configuration system for model optimization.
 
 This module defines standardized configurations for different architecture variants
 to enable systematic comparison and benchmarking. Each configuration specifies
 which modalities to use and how to process them.
-
-Based on Task 3.1 requirements from PHASE_3_ROBUSTNESS_OPTIMIZATION.md
 """
 
 from dataclasses import dataclass
@@ -75,7 +73,14 @@ class ModalityConfig:
 
 @dataclass(frozen=True)
 class GraphConfig:
-    """Configuration for graph neural network architecture."""
+    """
+    Configuration for graph neural network architecture.
+
+    Note: Input dimensions come from nclone:
+    - node_feature_dim = 55 (NODE_FEATURE_DIM from nclone.graph.common)
+    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common)
+    These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
+    """
 
     architecture: GraphArchitectureType = GraphArchitectureType.FULL_HGT
     hidden_dim: int = 256
@@ -113,8 +118,9 @@ class VisualConfig:
 class StateConfig:
     """Configuration for state vector processing."""
 
-    game_state_dim: int = 30  # Input dimension from N++ environment
-    reachability_dim: int = 8  # Input dimension
+    # Dimensions from nclone environment observations
+    game_state_dim: int = 30  # GAME_STATE_CHANNELS from nclone
+    reachability_dim: int = 8  # Reachability features from nclone
     hidden_dim: int = 128
     output_dim: int = 128
 
@@ -297,7 +303,7 @@ def create_mlp_baseline_config() -> ArchitectureConfig:
 
 
 def create_vision_free_config() -> ArchitectureConfig:
-    """Vision-free architecture: graph + state only (Task 3.1 research question)."""
+    """Vision-free architecture: graph + state only."""
     return ArchitectureConfig(
         name="vision_free",
         description="Vision-free: graph + state + reachability only",
@@ -322,10 +328,10 @@ def create_vision_free_config() -> ArchitectureConfig:
 
 
 def create_no_global_view_config() -> ArchitectureConfig:
-    """Remove global view only (Task 3.1 Scenario 1)."""
+    """Remove global view only."""
     return ArchitectureConfig(
         name="no_global_view",
-        description="Full architecture but without global view (Scenario 1 from Task 3.1)",
+        description="Full architecture but without global view",
         modalities=ModalityConfig(
             use_temporal_frames=True,
             use_global_view=False,  # Remove global view

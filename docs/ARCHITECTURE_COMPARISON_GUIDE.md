@@ -1,12 +1,12 @@
-# Architecture Comparison Guide (Task 3.1)
+# Architecture Comparison Guide
 
 ## Overview
 
-This guide explains how to use the architecture comparison tools developed for Task 3.1 of Phase 3: Robustness & Optimization. These tools enable systematic comparison of different model architectures to determine which features and design choices are most effective for N++ gameplay learning.
+These tools enable systematic comparison of different model architectures to determine which features and design choices are most effective for N++ gameplay learning.
 
 ## Key Research Questions
 
-The architecture comparison framework addresses these questions from Task 3.1:
+The architecture comparison framework addresses these questions:
 
 1. **Graph Neural Network Simplification**: Is the full HGT complexity necessary, or can simpler GNN architectures (GAT, GCN) achieve comparable performance?
 
@@ -51,7 +51,7 @@ The framework includes 8 predefined architecture variants:
 - **Expected**: Fast but may struggle with spatial reasoning
 
 ### 6. Vision-Free (`vision_free`)
-- **Description**: No visual input (Task 3.1 research question)
+- **Description**: No visual input
 - **Modalities**: Graph (HGT), game state, reachability only
 - **Use Case**: Test if explicit features suffice without vision
 - **Expected**: 60-70% faster inference, uncertain performance impact
@@ -152,15 +152,6 @@ full_hgt             5.67 ± 0.34  5,678,901    21.67        all
 - `simplified_hgt` provides middle ground
 - `full_hgt` is slowest but potentially highest performance ceiling
 
-### Task 3.1 Selection Criteria
-
-According to Task 3.1, architecture selection uses weighted criteria:
-
-- **Performance**: 40% - Final completion rate (requires training)
-- **Efficiency**: 30% - Inference time and memory usage
-- **Training Speed**: 20% - Time to convergence (requires training)
-- **Generalization**: 10% - Performance across diverse levels (requires training)
-
 **Current benchmarks measure efficiency only. Full evaluation requires training on actual levels.**
 
 ## Integration with Training
@@ -207,7 +198,7 @@ For systematic comparison across training runs:
    - Inference time during rollout
 4. Apply weighted criteria to select final architecture
 
-## Vision-Free Architecture Analysis (Task 3.1 Deep Dive)
+## Vision-Free Architecture Analysis
 
 ### Research Question
 
@@ -258,7 +249,7 @@ python tools/compare_architectures.py --architectures full_hgt vision_free no_gl
 
 ### Adding New Architectures
 
-Create new configuration in `npp_rl/optimization/architecture_configs.py`:
+Create new configuration in `npp_rl/training/architecture_configs.py`:
 
 ```python
 def create_custom_config() -> ArchitectureConfig:
@@ -322,19 +313,11 @@ The architecture comparison uses mock data and doesn't require nclone. For actua
 2. **Prepare training set**: Create standardized set of N++ levels for training comparison (TODO: see note in code)
 3. **Train selected architectures**: Train top 3-5 candidates from efficiency comparison
 4. **Full evaluation**: Evaluate on comprehensive test suite
-5. **Architecture selection**: Apply Task 3.1 weighted criteria
 6. **Fine-tuning**: Optimize selected architecture for production
 
 ## References
 
 - Task 3.1 specification: `docs/tasks/PHASE_3_ROBUSTNESS_OPTIMIZATION.md`
-- Architecture configs: `npp_rl/optimization/architecture_configs.py`
+- Architecture configs: `npp_rl/training/architecture_configs.py`
 - Comparison script: `tools/compare_architectures.py`
 - Benchmarking: `npp_rl/optimization/benchmarking.py`
-
-## Contact & Contributions
-
-For questions or suggestions about architecture comparison:
-- Review Task 3.1 requirements in Phase 3 documentation
-- Check existing configurations in `ARCHITECTURE_REGISTRY`
-- Extend framework following patterns in `architecture_configs.py`

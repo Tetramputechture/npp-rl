@@ -14,11 +14,18 @@ from typing import Dict
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
 
-from .architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
-from ..models.gcn import GCNEncoder
-from ..models.gat import GATEncoder
-from ..models.simplified_hgt import SimplifiedHGTEncoder
-from ..models.hgt_factory import create_hgt_encoder
+# Import nclone constants for graph dimensions
+from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM
+
+from npp_rl.training.architecture_configs import (
+    ArchitectureConfig,
+    GraphArchitectureType,
+    FusionType,
+)
+from npp_rl.models.gcn import GCNEncoder
+from npp_rl.models.gat import GATEncoder
+from npp_rl.models.simplified_hgt import SimplifiedHGTEncoder
+from npp_rl.models.hgt_factory import create_hgt_encoder
 
 
 class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
@@ -50,7 +57,8 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Track which modalities are actually available
         self.has_temporal = "player_frame" in observation_space.spaces
         self.has_global = "global_view" in observation_space.spaces
-        self.has_graph = "graph_obs" in observation_space.spaces
+        # Graph observations come as separate keys (graph_node_feats, graph_edge_index, etc.)
+        self.has_graph = "graph_node_feats" in observation_space.spaces
         self.has_state = "game_state" in observation_space.spaces
         self.has_reachability = "reachability_features" in observation_space.spaces
 
@@ -186,9 +194,10 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
     def _create_graph_encoder(self, graph_config) -> nn.Module:
         """Create graph encoder based on architecture type."""
-        # N++ graph observations from nclone have 67-dimensional node features
-        # This is the standard dimension from HierarchicalGraphBuilder in nclone
-        node_feature_dim = 67  # N++ graph node features from nclone
+        # Use nclone constants for graph feature dimensions
+        # NODE_FEATURE_DIM = 55, EDGE_FEATURE_DIM = 6 (from nclone.graph.common)
+        node_feature_dim = NODE_FEATURE_DIM
+        edge_feature_dim = EDGE_FEATURE_DIM
 
         arch_type = graph_config.architecture
 
@@ -196,7 +205,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             # Use existing production HGT
             return create_hgt_encoder(
                 node_feature_dim=node_feature_dim,
-                edge_feature_dim=9,
+                edge_feature_dim=edge_feature_dim,
                 hidden_dim=graph_config.hidden_dim,
                 num_layers=graph_config.num_layers,
                 output_dim=graph_config.output_dim,
@@ -320,29 +329,61 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Process global view
         if self.global_cnn is not None and "global_view" in observations:
             global_obs = observations["global_view"]
-            # Add channel dimension if needed
-            if global_obs.dim() == 3:
+            # Ensure correct format: [batch, channels, height, width]
+            if global_obs.dim() == 4:
+                # If [batch, H, W, C], permute to [batch, C, H, W]
+                if global_obs.shape[-1] <= 3:  # channels is last dimension
+                    global_obs = global_obs.permute(0, 3, 1, 2)
+            elif global_obs.dim() == 3:
+                # [batch, H, W] -> [batch, 1, H, W]
                 global_obs = global_obs.unsqueeze(1)
             global_features = self.global_cnn(global_obs.float() / 255.0)
             features.append(global_features)
 
         # Process graph
-        if self.graph_encoder is not None and "graph_obs" in observations:
-            graph_obs = observations["graph_obs"]
-            # Extract graph components
-            node_features = graph_obs["node_features"]
-            edge_index = graph_obs["edge_index"]
-            node_mask = graph_obs.get("node_mask", None)
+        # Graph observations come as direct keys in observations (from nclone environment)
+        if self.graph_encoder is not None and "graph_node_feats" in observations:
+            # Handle different encoder types - some take dict, some take separate args
+            from npp_rl.models.hgt_encoder import HGTEncoder
 
-            # Handle different encoder types
-            if isinstance(self.graph_encoder, SimplifiedHGTEncoder):
-                node_types = graph_obs.get(
-                    "node_types", torch.zeros(node_features.shape[:2], dtype=torch.long)
+            if isinstance(self.graph_encoder, HGTEncoder):
+                # HGTEncoder expects a dict with graph_* prefix keys
+                # nclone environment already provides these keys directly
+                hgt_graph_obs = {
+                    "graph_node_feats": observations["graph_node_feats"].float(),
+                    "graph_edge_index": observations["graph_edge_index"],
+                    "graph_edge_feats": observations["graph_edge_feats"].float(),
+                    "graph_node_mask": observations["graph_node_mask"],
+                    "graph_edge_mask": observations["graph_edge_mask"],
+                }
+                # Add type info if available
+                if "graph_node_types" in observations:
+                    hgt_graph_obs["graph_node_types"] = observations["graph_node_types"]
+                if "graph_edge_types" in observations:
+                    hgt_graph_obs["graph_edge_types"] = observations["graph_edge_types"]
+
+                graph_features = self.graph_encoder(hgt_graph_obs)
+            elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
+                # SimplifiedHGTEncoder takes separate arguments
+                node_features = observations["graph_node_feats"].float()
+                edge_index = observations["graph_edge_index"]
+                node_mask = observations["graph_node_mask"]
+                node_types = observations.get(
+                    "graph_node_types",
+                    torch.zeros(
+                        node_features.shape[:2],
+                        dtype=torch.long,
+                        device=node_features.device,
+                    ),
                 )
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_types, node_mask
                 )
             else:
+                # GAT and GCN take separate arguments (no type information)
+                node_features = observations["graph_node_feats"].float()
+                edge_index = observations["graph_edge_index"]
+                node_mask = observations["graph_node_mask"]
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_mask
                 )
@@ -351,7 +392,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
         # Process game state
         if self.state_mlp is not None and "game_state" in observations:
-            state_features = self.state_mlp(observations["game_state"])
+            state_features = self.state_mlp(observations["game_state"].float())
             features.append(state_features)
 
         # Process reachability
@@ -360,7 +401,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             and "reachability_features" in observations
         ):
             reach_features = self.reachability_mlp(
-                observations["reachability_features"]
+                observations["reachability_features"].float()
             )
             features.append(reach_features)
 

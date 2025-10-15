@@ -1,4 +1,4 @@
-# Architecture Optimization Module (Task 3.1)
+# Architecture Optimization Module
 
 This module provides tools for systematically comparing and optimizing model architectures for NPP-RL.
 
@@ -120,29 +120,3 @@ ARCHITECTURE_REGISTRY["my_arch"] = create_my_architecture()
 ```bash
 python tools/compare_architectures.py --architectures my_arch full_hgt
 ```
-
-## Documentation
-
-See `docs/ARCHITECTURE_COMPARISON_GUIDE.md` for comprehensive documentation including:
-- Research questions and hypotheses
-- Detailed architecture descriptions
-- Usage examples and tutorials
-- Integration with training pipeline
-- Troubleshooting
-
-## Task 3.1 Context
-
-This module implements the architecture comparison framework required by Task 3.1 of Phase 3: Robustness & Optimization. The goal is to:
-
-1. Compare different GNN architectures (HGT vs GAT vs GCN)
-2. Test vision-free learning hypothesis
-3. Measure efficiency vs performance trade-offs
-4. Select optimal architecture based on weighted criteria
-
-**Current Status**: Framework complete. Ready for benchmarking and training experiments.
-
-**Next Steps**: 
-1. Prepare standardized training level set (TODO: see comment in code)
-2. Train selected architectures
-3. Evaluate on test suite
-4. Apply selection criteria

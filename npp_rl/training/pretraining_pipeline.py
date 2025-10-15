@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from npp_rl.optimization.architecture_configs import ArchitectureConfig
+from npp_rl.training.architecture_configs import ArchitectureConfig
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 

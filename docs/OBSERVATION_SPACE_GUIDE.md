@@ -20,7 +20,7 @@ See [nclone/OBSERVATION_SPACE_README.md](../../nclone/OBSERVATION_SPACE_README.m
 
 ### Current Architectures
 
-NPP-RL supports the following architectures in `npp_rl/optimization/architecture_configs.py`:
+NPP-RL supports the following architectures in `npp_rl/training/architecture_configs.py`:
 
 | Architecture | Visual | State | Reachability | Graph | Description |
 |---|---|---|---|---|---|
@@ -239,7 +239,7 @@ class CustomExtractor(BaseFeaturesExtractor):
 Register in architecture configs:
 
 ```python
-# In npp_rl/optimization/architecture_configs.py
+# In npp_rl/training/architecture_configs.py
 
 def create_custom_config():
     return ArchitectureConfig(
@@ -371,7 +371,7 @@ When enhanced features are integrated into the main graph builder:
 ## References
 
 - nclone observation space: `nclone/OBSERVATION_SPACE_README.md`
-- Architecture configs: `npp_rl/optimization/architecture_configs.py`
+- Architecture configs: `npp_rl/training/architecture_configs.py`
 - Feature extractors: `npp_rl/feature_extractors/`
 - Training guide: `docs/TRAINING_SYSTEM.md`
 - Architecture comparison: `docs/ARCHITECTURE_COMPARISON_GUIDE.md`

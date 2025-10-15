@@ -8,6 +8,7 @@ numpy>=1.21.0,<1.27.0
 torch>=2.2.0,<2.5.0
 torchvision>=0.17.0,<0.20.0
 torchaudio>=2.2.0,<2.5.0
+torch_geometric>=2.3.0
 
 # Computer vision and image processing
 opencv-python>=4.8.0

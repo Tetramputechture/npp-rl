@@ -7,7 +7,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from npp_rl.optimization.architecture_configs import (
+from npp_rl.training.architecture_configs import (
     ARCHITECTURE_REGISTRY,
     get_architecture_config,
 )

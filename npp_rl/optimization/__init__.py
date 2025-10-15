@@ -21,10 +21,6 @@ from .architecture_configs import (
     ARCHITECTURE_REGISTRY,
 )
 
-from .configurable_extractor import (
-    ConfigurableMultimodalExtractor,
-)
-
 from .benchmarking import (
     BenchmarkResults,
     ArchitectureBenchmark,
@@ -45,8 +41,6 @@ __all__ = [
     "list_available_architectures",
     "print_architecture_summary",
     "ARCHITECTURE_REGISTRY",
-    # Extractor
-    "ConfigurableMultimodalExtractor",
     # Benchmarking
     "BenchmarkResults",
     "ArchitectureBenchmark",
