@@ -37,9 +37,6 @@ from stable_baselines3.common.vec_env import (
 )
 from stable_baselines3.common.logger import configure
 
-from nclone.gym_environment.npp_environment import (
-    NppEnvironment,
-)
 from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
     HYPERPARAMETERS,
     NET_ARCH_SIZE,

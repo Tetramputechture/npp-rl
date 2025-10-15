@@ -7,7 +7,12 @@ and provide consistent defaults across HGT components.
 
 from dataclasses import dataclass
 from typing import Tuple
-
+from nclone.graph.common import (
+    NODE_FEATURE_DIM,
+    EDGE_FEATURE_DIM,
+    N_NODE_TYPES,
+    N_EDGE_TYPES,
+)
 
 # === Configuration Data Structures ===
 
@@ -107,13 +112,13 @@ class MultiplierConfig:
 
 @dataclass(frozen=True)
 class HGTConfig:
-    """Configuration for Heterogeneous Graph Transformer (SIMPLIFIED)."""
+    """Configuration for Heterogeneous Graph Transformer.
 
-    # SIMPLIFIED: Node feature dimensions reduced from 31 to 8
-    node_feat_dim: int = (
-        8  # Simplified node features (position, tile, entity, distances)
-    )
-    edge_feat_dim: int = 4  # Simplified edge features (type + weight)
+    This provides complete level representation for deep RL.
+    """
+
+    node_feat_dim: int = NODE_FEATURE_DIM
+    edge_feat_dim: int = EDGE_FEATURE_DIM
 
     # HGT architecture
     hidden_dim: int = 128
@@ -121,9 +126,8 @@ class HGTConfig:
     num_layers: int = 3
     dropout: float = 0.1
 
-    # SIMPLIFIED: Node and edge type counts for completion-focused system
-    num_node_types: int = 6  # tile, ninja, mine, exit_switch, exit_door, locked_door
-    num_edge_types: int = 3  # Simplified: ADJACENT, LOGICAL, REACHABLE
+    num_node_types: int = N_NODE_TYPES  # EMPTY, WALL, ENTITY, HAZARD, SPAWN, EXIT
+    num_edge_types: int = N_EDGE_TYPES  # ADJACENT, REACHABLE, FUNCTIONAL, BLOCKED
 
 
 # === Configuration Instances ===
