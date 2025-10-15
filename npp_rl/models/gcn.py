@@ -7,9 +7,10 @@ Implements GCN layers and encoder based on Kipf & Welling (2017)
 This is a simplified baseline for Task 3.1 architecture comparison.
 
 PERFORMANCE NOTES:
-- Uses iterative aggregation for simplicity (not optimized for large graphs)
-- Suitable for N++ level graphs (100-1000 nodes)
-- For production use with large graphs, use PyTorch Geometric's GCNConv
+- Uses vectorized scatter_add for efficient aggregation (optimized for CPU)
+- Avoids nested Python loops over edges - uses torch operations instead
+- Suitable for N++ level graphs with up to ~130K edges
+- Much faster than naive loop-based implementations on CPU
 """
 
 import torch
@@ -52,13 +53,14 @@ class GCNLayer(nn.Module):
         Returns:
             Updated node features [batch_size, max_nodes, out_dim]
         """
-        batch_size, max_nodes, _ = node_features.shape
+        batch_size, max_nodes, in_dim = node_features.shape
         
         # Transform features
         h = self.linear(node_features)  # [batch, max_nodes, out_dim]
+        out_dim = h.shape[-1]
         
-        # Simple aggregation: mean of neighbor features
-        # For each node, collect features from all nodes that connect to it
+        # Vectorized aggregation using scatter_add
+        # This is MUCH faster than nested Python loops
         aggregated = torch.zeros_like(h)
         
         for b in range(batch_size):
@@ -66,16 +68,21 @@ class GCNLayer(nn.Module):
             if edges.shape[1] == 0:
                 continue
                 
-            src_nodes = edges[0]  # Source nodes
-            tgt_nodes = edges[1]  # Target nodes
+            src_nodes = edges[0].long()  # Source nodes [num_edges]
+            tgt_nodes = edges[1].long()  # Target nodes [num_edges]
             
-            # Aggregate features from source to target
-            for i in range(edges.shape[1]):
-                src, tgt = src_nodes[i].item(), tgt_nodes[i].item()
-                if node_mask is None or (node_mask[b, src] and node_mask[b, tgt]):
-                    aggregated[b, tgt] += h[b, src]
+            # Get source node features to aggregate
+            src_features = h[b, src_nodes]  # [num_edges, out_dim]
+            
+            # Aggregate features from source to target using scatter_add
+            # This replaces the slow nested loop with a single vectorized operation
+            aggregated[b].scatter_add_(
+                0,  # dimension to scatter along
+                tgt_nodes.unsqueeze(1).expand(-1, out_dim),  # [num_edges, out_dim]
+                src_features  # [num_edges, out_dim]
+            )
         
-        # Normalize by degree (approximate)
+        # Normalize by degree (approximate - using sqrt of max_nodes as in original)
         h = h + aggregated / (max_nodes ** 0.5)
         
         # Apply dropout and normalization

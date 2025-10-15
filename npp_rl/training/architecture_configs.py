@@ -372,6 +372,86 @@ def create_local_frames_only_config() -> ArchitectureConfig:
     )
 
 
+def create_vision_free_gat_config() -> ArchitectureConfig:
+    """Vision-free architecture using GAT instead of HGT (lighter)."""
+    return ArchitectureConfig(
+        name="vision_free_gat",
+        description="Vision-free with Graph Attention Network (lighter than HGT)",
+        modalities=ModalityConfig(
+            use_temporal_frames=False,  # No vision
+            use_global_view=False,  # No vision
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.GAT,
+            hidden_dim=256,
+            num_layers=3,
+            output_dim=256,
+            num_heads=8,
+            use_type_embeddings=False,  # GAT doesn't use heterogeneous types
+        ),
+        visual=VisualConfig(),  # Not used
+        state=StateConfig(),
+        fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+        features_dim=384,  # Smaller since no vision
+    )
+
+
+def create_vision_free_gcn_config() -> ArchitectureConfig:
+    """Vision-free architecture using GCN (fastest graph option)."""
+    return ArchitectureConfig(
+        name="vision_free_gcn",
+        description="Vision-free with Graph Convolutional Network (fastest graph option)",
+        modalities=ModalityConfig(
+            use_temporal_frames=False,  # No vision
+            use_global_view=False,  # No vision
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.GCN,
+            hidden_dim=256,
+            num_layers=3,
+            output_dim=256,
+            use_type_embeddings=False,
+            use_edge_features=False,
+        ),
+        visual=VisualConfig(),  # Not used
+        state=StateConfig(),
+        fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+        features_dim=256,  # Even smaller for efficiency
+    )
+
+
+def create_vision_free_simplified_config() -> ArchitectureConfig:
+    """Vision-free architecture using simplified HGT (reduced complexity)."""
+    return ArchitectureConfig(
+        name="vision_free_simplified",
+        description="Vision-free with simplified HGT (reduced complexity)",
+        modalities=ModalityConfig(
+            use_temporal_frames=False,  # No vision
+            use_global_view=False,  # No vision
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.SIMPLIFIED_HGT,
+            hidden_dim=128,
+            num_layers=2,
+            output_dim=128,
+            num_heads=4,
+        ),
+        visual=VisualConfig(),  # Not used
+        state=StateConfig(hidden_dim=64, output_dim=64),
+        fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+        features_dim=256,
+    )
+
+
 # ===== Configuration Registry =====
 
 ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
@@ -381,6 +461,9 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
     "gcn": create_gcn_config(),
     "mlp_baseline": create_mlp_baseline_config(),
     "vision_free": create_vision_free_config(),
+    "vision_free_gat": create_vision_free_gat_config(),
+    "vision_free_gcn": create_vision_free_gcn_config(),
+    "vision_free_simplified": create_vision_free_simplified_config(),
     "no_global_view": create_no_global_view_config(),
     "local_frames_only": create_local_frames_only_config(),
 }

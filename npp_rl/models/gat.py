@@ -7,10 +7,10 @@ Implements GAT layers and encoder based on Veličković et al. (2018)
 Uses attention mechanism to weight neighbor contributions for Task 3.1 comparison.
 
 PERFORMANCE NOTES:
-- Uses dense attention over all nodes for simplicity
-- Not sparse edge-based attention (trade-off for readability)
-- Suitable for N++ level graphs (100-1000 nodes)
-- For production use, consider PyTorch Geometric's GATConv for sparse attention
+- Uses sparse edge-based attention (optimized for CPU)
+- Avoids dense 15K x 15K attention matrices - only computes attention on edges
+- Suitable for N++ level graphs with up to ~130K edges
+- Much more memory and compute efficient than dense attention
 """
 
 import torch
@@ -86,33 +86,55 @@ class GATLayer(nn.Module):
         K = self.key(node_features)
         V = self.value(node_features)
         
-        # Reshape for multi-head attention: [batch, num_heads, max_nodes, head_dim]
-        Q = Q.view(batch_size, max_nodes, self.num_heads, self.head_dim).transpose(1, 2)
-        K = K.view(batch_size, max_nodes, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(batch_size, max_nodes, self.num_heads, self.head_dim).transpose(1, 2)
+        # Reshape for multi-head attention: [batch, max_nodes, num_heads, head_dim]
+        Q = Q.view(batch_size, max_nodes, self.num_heads, self.head_dim)
+        K = K.view(batch_size, max_nodes, self.num_heads, self.head_dim)
+        V = V.view(batch_size, max_nodes, self.num_heads, self.head_dim)
         
-        # Simplified attention: use dense attention over all nodes
-        # In practice, should use edge_index to compute sparse attention
-        # For simplicity, computing dense attention here
-        # scores: [batch, num_heads, max_nodes, max_nodes]
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        # Use sparse edge-based attention instead of dense attention
+        # This is MUCH more efficient for large graphs
+        out = torch.zeros(batch_size, max_nodes, self.num_heads, self.head_dim, device=node_features.device)
         
-        # Apply mask to attention scores
-        if node_mask is not None:
-            # Expand mask to [batch, 1, 1, max_nodes] to broadcast across heads and query nodes
-            mask_expanded = node_mask.unsqueeze(1).unsqueeze(2)
-            scores = scores.masked_fill(~mask_expanded.bool(), float('-inf'))
+        for b in range(batch_size):
+            edges = edge_index[b]  # [2, num_edges]
+            if edges.shape[1] == 0:
+                # No edges, just use self-attention
+                out[b] = V[b]
+                continue
+                
+            src_nodes = edges[0].long()  # [num_edges]
+            tgt_nodes = edges[1].long()  # [num_edges]
+            
+            # Get Q, K, V for edges
+            q_tgt = Q[b, tgt_nodes]  # [num_edges, num_heads, head_dim]
+            k_src = K[b, src_nodes]  # [num_edges, num_heads, head_dim]
+            v_src = V[b, src_nodes]  # [num_edges, num_heads, head_dim]
+            
+            # Compute attention scores for edges only
+            # scores: [num_edges, num_heads]
+            scores = (q_tgt * k_src).sum(dim=-1) / (self.head_dim ** 0.5)
+            
+            # For each target node, compute softmax over its incoming edges
+            # Group edges by target node
+            unique_tgts = torch.unique(tgt_nodes)
+            
+            for tgt in unique_tgts:
+                # Find all edges incoming to this target
+                edge_mask = (tgt_nodes == tgt)
+                tgt_scores = scores[edge_mask]  # [num_incoming_edges, num_heads]
+                tgt_values = v_src[edge_mask]  # [num_incoming_edges, num_heads, head_dim]
+                
+                # Softmax over incoming edges
+                attn_weights = F.softmax(tgt_scores, dim=0)  # [num_incoming_edges, num_heads]
+                attn_weights = self.dropout(attn_weights)
+                
+                # Weighted sum of values
+                # attn_weights: [num_incoming_edges, num_heads] -> [num_incoming_edges, num_heads, 1]
+                # tgt_values: [num_incoming_edges, num_heads, head_dim]
+                aggregated = (attn_weights.unsqueeze(-1) * tgt_values).sum(dim=0)  # [num_heads, head_dim]
+                out[b, tgt] = aggregated
         
-        # Softmax over nodes (key dimension)
-        attn_weights = F.softmax(scores, dim=-1)
-        attn_weights = self.dropout(attn_weights)
-        
-        # Apply attention to values: [batch, num_heads, max_nodes, head_dim]
-        out = torch.matmul(attn_weights, V)
-        
-        # Transpose back to [batch, max_nodes, num_heads, head_dim]
-        out = out.transpose(1, 2)
-        
+        # Transpose to [batch, max_nodes, num_heads, head_dim]
         # Concatenate or average heads
         if self.concat_heads:
             out = out.reshape(batch_size, max_nodes, -1)  # [batch, max_nodes, head_dim * num_heads]
