@@ -48,7 +48,7 @@ from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
     NET_ARCH_SIZE,
 )
 from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
-from npp_rl.optimization.architecture_configs import get_architecture_config
+from npp_rl.training.architecture_configs import get_architecture_config
 from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
 from nclone.gym_environment import (
     create_reachability_aware_env,

@@ -15,7 +15,7 @@ from nclone.gym_environment import create_reachability_aware_env
 from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM
 
 from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
-from npp_rl.optimization.architecture_configs import (
+from npp_rl.training.architecture_configs import (
     get_architecture_config,
     ARCHITECTURE_REGISTRY,
 )
@@ -65,7 +65,9 @@ class TestArchitectureEnvironmentIntegration(unittest.TestCase):
         )
 
         # Check state dimensions
-        self.assertEqual(obs["game_state"].shape[0], 30, "Game state should be 30-dimensional")
+        self.assertEqual(
+            obs["game_state"].shape[0], 30, "Game state should be 30-dimensional"
+        )
         self.assertEqual(
             obs["reachability_features"].shape[0],
             8,
@@ -157,7 +159,9 @@ class TestArchitectureEnvironmentIntegration(unittest.TestCase):
         extractor = ConfigurableMultimodalExtractor(self.obs_space, config)
 
         # Should not have graph encoder
-        self.assertIsNone(extractor.graph_encoder, "MLP baseline should not have graph encoder")
+        self.assertIsNone(
+            extractor.graph_encoder, "MLP baseline should not have graph encoder"
+        )
 
         # Should still work with environment observations
         torch_obs = self._get_observation_tensor()
@@ -172,11 +176,17 @@ class TestArchitectureEnvironmentIntegration(unittest.TestCase):
         extractor = ConfigurableMultimodalExtractor(self.obs_space, config)
 
         # Should not have vision CNNs
-        self.assertIsNone(extractor.temporal_cnn, "Vision-free should not have temporal CNN")
-        self.assertIsNone(extractor.global_cnn, "Vision-free should not have global CNN")
+        self.assertIsNone(
+            extractor.temporal_cnn, "Vision-free should not have temporal CNN"
+        )
+        self.assertIsNone(
+            extractor.global_cnn, "Vision-free should not have global CNN"
+        )
 
         # Should have graph encoder
-        self.assertIsNotNone(extractor.graph_encoder, "Vision-free should have graph encoder")
+        self.assertIsNotNone(
+            extractor.graph_encoder, "Vision-free should have graph encoder"
+        )
 
         # Should work with environment observations
         torch_obs = self._get_observation_tensor()

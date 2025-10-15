@@ -14,7 +14,7 @@ import torch
 import gymnasium as gym
 from gymnasium.spaces import Box, Dict as SpacesDict
 
-from npp_rl.optimization.architecture_configs import (
+from npp_rl.training.architecture_configs import (
     ARCHITECTURE_REGISTRY,
     get_architecture_config,
     list_available_architectures,
@@ -30,36 +30,28 @@ class TestArchitectureIntegration(unittest.TestCase):
         # Complete observation space with all modalities
         self.full_obs_space = SpacesDict(
             {
-                "player_frame": Box(
-                    low=0, high=255, shape=(12, 84, 84), dtype='uint8'
-                ),
-                "global_view": Box(
-                    low=0, high=255, shape=(176, 100, 1), dtype='uint8'
-                ),
+                "player_frame": Box(low=0, high=255, shape=(12, 84, 84), dtype="uint8"),
+                "global_view": Box(low=0, high=255, shape=(176, 100, 1), dtype="uint8"),
                 "graph_obs": SpacesDict(
                     {
                         "node_features": Box(
-                            low=-float('inf'),
-                            high=float('inf'),
+                            low=-float("inf"),
+                            high=float("inf"),
                             shape=(50, 67),  # max 50 nodes, 67 features
-                            dtype='float32',
+                            dtype="float32",
                         ),
                         "edge_index": Box(
-                            low=0, high=49, shape=(2, 200), dtype='int64'
+                            low=0, high=49, shape=(2, 200), dtype="int64"
                         ),
-                        "node_mask": Box(
-                            low=0, high=1, shape=(50,), dtype='bool'
-                        ),
-                        "node_types": Box(
-                            low=0, high=5, shape=(50,), dtype='int64'
-                        ),
+                        "node_mask": Box(low=0, high=1, shape=(50,), dtype="bool"),
+                        "node_types": Box(low=0, high=5, shape=(50,), dtype="int64"),
                     }
                 ),
                 "game_state": Box(
-                    low=-float('inf'), high=float('inf'), shape=(30,), dtype='float32'
+                    low=-float("inf"), high=float("inf"), shape=(30,), dtype="float32"
                 ),
                 "reachability_features": Box(
-                    low=-float('inf'), high=float('inf'), shape=(8,), dtype='float32'
+                    low=-float("inf"), high=float("inf"), shape=(8,), dtype="float32"
                 ),
             }
         )
@@ -368,9 +360,7 @@ class TestArchitectureConfigurations(unittest.TestCase):
             config = get_architecture_config(arch_name)
             count = config.modalities.count_modalities()
 
-            self.assertGreater(
-                count, 0, f"{arch_name} has no modalities enabled"
-            )
+            self.assertGreater(count, 0, f"{arch_name} has no modalities enabled")
             self.assertLessEqual(
                 count, 5, f"{arch_name} has too many modalities ({count})"
             )
@@ -378,14 +368,10 @@ class TestArchitectureConfigurations(unittest.TestCase):
     def test_graph_configs_match_architecture_types(self):
         """Test that graph configs match their declared architecture types."""
         config = get_architecture_config("full_hgt")
-        self.assertEqual(
-            config.graph.architecture.value, "full_hgt"
-        )
+        self.assertEqual(config.graph.architecture.value, "full_hgt")
 
         config = get_architecture_config("simplified_hgt")
-        self.assertEqual(
-            config.graph.architecture.value, "simplified_hgt"
-        )
+        self.assertEqual(config.graph.architecture.value, "simplified_hgt")
 
         config = get_architecture_config("gat")
         self.assertEqual(config.graph.architecture.value, "gat")
@@ -394,9 +380,7 @@ class TestArchitectureConfigurations(unittest.TestCase):
         self.assertEqual(config.graph.architecture.value, "gcn")
 
         config = get_architecture_config("mlp_baseline")
-        self.assertEqual(
-            config.graph.architecture.value, "none"
-        )
+        self.assertEqual(config.graph.architecture.value, "none")
 
     def test_vision_free_has_no_visual_modalities(self):
         """Test vision_free config correctly disables visual modalities."""

@@ -17,7 +17,11 @@ import gymnasium as gym
 # Import nclone constants for graph dimensions
 from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM
 
-from npp_rl.optimization.architecture_configs import ArchitectureConfig, GraphArchitectureType, FusionType
+from npp_rl.training.architecture_configs import (
+    ArchitectureConfig,
+    GraphArchitectureType,
+    FusionType,
+)
 from npp_rl.models.gcn import GCNEncoder
 from npp_rl.models.gat import GATEncoder
 from npp_rl.models.simplified_hgt import SimplifiedHGTEncoder
@@ -341,7 +345,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         if self.graph_encoder is not None and "graph_node_feats" in observations:
             # Handle different encoder types - some take dict, some take separate args
             from npp_rl.models.hgt_encoder import HGTEncoder
-            
+
             if isinstance(self.graph_encoder, HGTEncoder):
                 # HGTEncoder expects a dict with graph_* prefix keys
                 # nclone environment already provides these keys directly
@@ -357,7 +361,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                     hgt_graph_obs["graph_node_types"] = observations["graph_node_types"]
                 if "graph_edge_types" in observations:
                     hgt_graph_obs["graph_edge_types"] = observations["graph_edge_types"]
-                
+
                 graph_features = self.graph_encoder(hgt_graph_obs)
             elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
                 # SimplifiedHGTEncoder takes separate arguments
@@ -365,8 +369,12 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 edge_index = observations["graph_edge_index"]
                 node_mask = observations["graph_node_mask"]
                 node_types = observations.get(
-                    "graph_node_types", 
-                    torch.zeros(node_features.shape[:2], dtype=torch.long, device=node_features.device)
+                    "graph_node_types",
+                    torch.zeros(
+                        node_features.shape[:2],
+                        dtype=torch.long,
+                        device=node_features.device,
+                    ),
                 )
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_types, node_mask

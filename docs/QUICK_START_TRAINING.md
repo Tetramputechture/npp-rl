@@ -178,7 +178,7 @@ cat experiments/your_experiment_*/*/eval_results.json | python -m json.tool
 List all available architectures:
 
 ```python
-from npp_rl.optimization.architecture_configs import ARCHITECTURE_REGISTRY
+from npp_rl.training.architecture_configs import ARCHITECTURE_REGISTRY
 print(list(ARCHITECTURE_REGISTRY.keys()))
 ```
 
@@ -289,7 +289,7 @@ python -m nclone.map_generation.generate_test_suite_maps \
 
 **Solution:** Check available architectures:
 ```python
-from npp_rl.optimization.architecture_configs import ARCHITECTURE_REGISTRY
+from npp_rl.training.architecture_configs import ARCHITECTURE_REGISTRY
 print(list(ARCHITECTURE_REGISTRY.keys()))
 ```
 
@@ -312,7 +312,7 @@ print(list(ARCHITECTURE_REGISTRY.keys()))
 ## Next Steps
 
 1. **Read full documentation**: See `docs/TRAINING_SYSTEM.md`
-2. **Explore architectures**: Review `npp_rl/optimization/architecture_configs.py`
+2. **Explore architectures**: Review `npp_rl/training/architecture_configs.py`
 3. **Customize training**: Modify `npp_rl/training/architecture_trainer.py`
 4. **Add analysis**: Implement comparison and visualization tools
 5. **Run experiments**: Use the provided example scripts

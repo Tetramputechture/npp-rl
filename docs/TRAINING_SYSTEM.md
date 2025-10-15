@@ -20,7 +20,7 @@ This document describes the comprehensive training and architecture comparison s
 └───────────────┬─────────────────────────────────────────────┘
                 │
                 ├─► Architecture Configuration Loading
-                │   └─► npp_rl/optimization/architecture_configs.py
+                │   └─► npp_rl/training/architecture_configs.py
                 │
                 ├─► Pretraining Pipeline (Optional)
                 │   └─► npp_rl/training/pretraining_pipeline.py
@@ -274,7 +274,7 @@ The following architectures are available in `ARCHITECTURE_REGISTRY`:
 6. **simplified_hgt**: Reduced HGT complexity
 7. **mlp_baseline**: Simple MLP baseline (state only)
 
-Configurations defined in: `npp_rl/optimization/architecture_configs.py`
+Configurations defined in: `npp_rl/training/architecture_configs.py`
 
 ## Output Structure
 
@@ -463,7 +463,7 @@ aws configure
 
 **4. Architecture Loading Errors**
 - Verify architecture name in `ARCHITECTURE_REGISTRY`
-- Check `npp_rl/optimization/architecture_configs.py`
+- Check `npp_rl/training/architecture_configs.py`
 - Use `--debug` for detailed error messages
 
 **5. Multi-GPU Issues**
