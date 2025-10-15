@@ -14,47 +14,20 @@ import torch.nn as nn
 from typing import Dict, Optional
 import logging
 
-# Import HGT components
 from .hgt_layer import HGTLayer, create_hgt_layer
 from .hgt_encoder import HGTEncoder, create_hgt_encoder
 from .attention_mechanisms import create_cross_modal_attention
-
-# Try to import PyTorch Geometric for enhanced functionality
-try:
-    import torch_geometric
-    from torch_geometric.nn import HGTConv
-    from torch_geometric.data import HeteroData
-
-    HAS_TORCH_GEOMETRIC = True
-except ImportError:
-    HAS_TORCH_GEOMETRIC = False
-    logging.warning(
-        "PyTorch Geometric not available. Using custom HGT implementation only."
-    )
+from nclone.graph.common import (
+    NODE_FEATURE_DIM,
+    EDGE_FEATURE_DIM,
+)
 
 
-class ProductionHGTConfig:
-    """Configuration class for production HGT systems.
-    
-    NOW USING FULL FEATURES from nclone:
-    - NODE_FEATURE_DIM = 55 (comprehensive features from nclone.graph.common)
-    - EDGE_FEATURE_DIM = 6 (comprehensive features from nclone.graph.common)
-    """
+from torch_geometric.nn import HGTConv
 
-    # Import feature dimensions from nclone
-    try:
-        from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM, N_NODE_TYPES, N_EDGE_TYPES
-        # Use comprehensive feature dimensions
-        NODE_FEATURE_DIM = NODE_FEATURE_DIM  # 55 dims
-        EDGE_FEATURE_DIM = EDGE_FEATURE_DIM  # 6 dims
-        NUM_NODE_TYPES = N_NODE_TYPES  # 6 node types
-        NUM_EDGE_TYPES = N_EDGE_TYPES  # 4 edge types
-    except ImportError:
-        # Fallback to defaults if nclone not available
-        NODE_FEATURE_DIM = 55  # Full node features
-        EDGE_FEATURE_DIM = 6   # Full edge features
-        NUM_NODE_TYPES = 6     # EMPTY, WALL, ENTITY, HAZARD, SPAWN, EXIT
-        NUM_EDGE_TYPES = 4     # ADJACENT, REACHABLE, FUNCTIONAL, BLOCKED
+
+class HGTConfig:
+    """Configuration class for HGT system."""
 
     # Architecture parameters (optimized for production)
     HIDDEN_DIM = 128  # Reduced for efficiency
@@ -77,14 +50,14 @@ class HGTFactory:
     systems with optimized configurations for the NPP-RL domain.
     """
 
-    def __init__(self, config: Optional[ProductionHGTConfig] = None):
+    def __init__(self, config: Optional[HGTConfig] = None):
         """
         Initialize HGT factory.
 
         Args:
             config: Configuration object (uses defaults if None)
         """
-        self.config = config or ProductionHGTConfig()
+        self.config = config or HGTConfig()
         self.logger = logging.getLogger(__name__)
 
     def create_hgt_layer(
@@ -116,34 +89,6 @@ class HGTFactory:
 
         return create_hgt_layer(**params)
 
-    def create_hgt_encoder(self, **kwargs) -> HGTEncoder:
-        """
-        Create production-ready HGT encoder.
-
-        Args:
-            **kwargs: Parameters to override defaults
-
-        Returns:
-            Configured HGTEncoder instance
-        """
-        params = {
-            "node_feature_dim": self.config.NODE_FEATURE_DIM,
-            "edge_feature_dim": self.config.EDGE_FEATURE_DIM,
-            "hidden_dim": self.config.HIDDEN_DIM,
-            "num_layers": self.config.NUM_LAYERS,
-            "num_heads": self.config.NUM_HEADS,
-            "output_dim": self.config.OUTPUT_DIM,
-            "num_node_types": self.config.NUM_NODE_TYPES,
-            "num_edge_types": self.config.NUM_EDGE_TYPES,
-            "dropout": self.config.DROPOUT,
-            "global_pool": self.config.GLOBAL_POOL,
-        }
-
-        # Override with provided kwargs
-        params.update(kwargs)
-
-        return create_hgt_encoder(**params)
-
     def create_pytorch_geometric_hgt(
         self, metadata: Optional[tuple] = None, **kwargs
     ) -> Optional[nn.Module]:
@@ -157,10 +102,6 @@ class HGTFactory:
         Returns:
             PyTorch Geometric HGT model or None if not available
         """
-        if not HAS_TORCH_GEOMETRIC:
-            self.logger.warning("PyTorch Geometric not available")
-            return None
-
         # Default metadata for NPP-RL
         if metadata is None:
             node_types = ["tile", "ninja", "hazard", "collectible", "switch", "exit"]
@@ -174,7 +115,7 @@ class HGTFactory:
         # Create PyTorch Geometric HGT
         try:
             model = HGTConv(
-                in_channels=self.config.NODE_FEATURE_DIM,
+                in_channels=NODE_FEATURE_DIM,
                 out_channels=self.config.HIDDEN_DIM,
                 metadata=metadata,
                 heads=self.config.NUM_HEADS,
@@ -204,7 +145,11 @@ class HGTFactory:
             Complete multimodal HGT system
         """
         return MultimodalHGTSystem(
-            hgt_encoder=self.create_hgt_encoder(**kwargs),
+            hgt_encoder=create_hgt_encoder(
+                node_feature_dim=NODE_FEATURE_DIM,
+                edge_feature_dim=EDGE_FEATURE_DIM,
+                **kwargs,
+            ),
             visual_dim=visual_dim,
             state_dim=state_dim,
             graph_dim=self.config.OUTPUT_DIM,
@@ -226,7 +171,7 @@ class MultimodalHGTSystem(nn.Module):
         visual_dim: int = 512,
         state_dim: int = 64,
         graph_dim: int = 256,
-        config: Optional[ProductionHGTConfig] = None,
+        config: Optional[HGTConfig] = None,
     ):
         """
         Initialize multimodal HGT system.
@@ -240,7 +185,7 @@ class MultimodalHGTSystem(nn.Module):
         """
         super().__init__()
 
-        self.config = config or ProductionHGTConfig()
+        self.config = config or HGTConfig()
         self.hgt_encoder = hgt_encoder
 
         # Cross-modal attention mechanisms
@@ -344,28 +289,3 @@ class MultimodalHGTSystem(nn.Module):
         output = self.output_projection(fused_features)
 
         return output
-
-
-# Global factory instance for easy access
-default_hgt_factory = HGTFactory()
-
-
-# Convenience functions using the default factory
-def create_production_hgt_layer(**kwargs) -> HGTLayer:
-    """Create production HGT layer with default factory."""
-    return default_hgt_factory.create_hgt_layer(**kwargs)
-
-
-def create_production_hgt_encoder(**kwargs) -> HGTEncoder:
-    """Create production HGT encoder with default factory."""
-    return default_hgt_factory.create_hgt_encoder(**kwargs)
-
-
-def create_production_multimodal_hgt(**kwargs) -> MultimodalHGTSystem:
-    """Create production multimodal HGT system with default factory."""
-    return default_hgt_factory.create_multimodal_hgt_system(**kwargs)
-
-
-def get_production_hgt_config() -> ProductionHGTConfig:
-    """Get production HGT configuration."""
-    return ProductionHGTConfig()

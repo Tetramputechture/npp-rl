@@ -21,12 +21,13 @@ import logging
 
 from ..models.hgt_factory import (
     HGTFactory,
-    ProductionHGTConfig,
-    create_production_hgt_encoder,
+    HGTConfig,
 )
 from ..models.hgt_config import CNN_CONFIG, POOLING_CONFIG, DEFAULT_CONFIG, HGT_CONFIG
 from ..models.attention_mechanisms import create_cross_modal_attention
 from ..models.spatial_attention import SpatialAttentionModule
+
+from ..models.hgt_encoder import create_hgt_encoder
 
 
 class TemporalCNN3D(nn.Module):
@@ -406,7 +407,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         self.logger = logging.getLogger(__name__)
 
         # Initialize HGT factory for graph processing
-        self.hgt_factory = HGTFactory(ProductionHGTConfig())
+        self.hgt_factory = HGTFactory(HGTConfig())
 
         # 1. Temporal processing (3D CNN for frame stacks)
         self.temporal_cnn = TemporalCNN3D(
@@ -419,7 +420,7 @@ class HGTMultimodalExtractor(BaseFeaturesExtractor):
         )
 
         # 3. Graph processing (Full HGT)
-        self.graph_processor = create_production_hgt_encoder(
+        self.graph_processor = create_hgt_encoder(
             node_feature_dim=HGT_CONFIG.node_feat_dim,
             edge_feature_dim=HGT_CONFIG.edge_feat_dim,
             hidden_dim=HGT_CONFIG.hidden_dim,
