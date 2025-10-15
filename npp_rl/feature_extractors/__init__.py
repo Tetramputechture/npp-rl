@@ -1,66 +1,53 @@
 """
 Feature Extractors Package for N++ RL Agent
 
-This package provides feature extractors for the N++ RL environment,
-using various architectures for multimodal processing.
+This package previously contained legacy feature extractors that have been
+replaced by the unified ConfigurableMultimodalExtractor system.
 
-## Recommended Extractors (Architecture System)
+## Current Approach (Use This)
 
-For systematic architecture comparison and production training, use:
+For all training and architecture comparison, use:
 
     **ConfigurableMultimodalExtractor** (npp_rl.optimization.configurable_extractor)
     - Unified system supporting 8 validated architectures
-    - Use with ArchitectureTrainer for best results
-    - Supports: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, etc.
+    - Use with ArchitectureTrainer or directly with PPO
+    - Architectures: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, 
+                     vision_free, no_global_view, local_frames_only
     
     from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
     from npp_rl.optimization.architecture_configs import get_architecture_config
     
+    # Example: Full HGT architecture
     config = get_architecture_config("full_hgt")
     extractor = ConfigurableMultimodalExtractor(observation_space, config)
-
-## Legacy Extractors (Maintained for Compatibility)
-
-These extractors are maintained for backward compatibility and specific use cases:
-
-    **HGTMultimodalExtractor** [LEGACY - Use ConfigurableMultimodalExtractor instead]
-    - Original HGT implementation
-    - Replaced by ConfigurableMultimodalExtractor with "full_hgt" config
-    - Still used by: train_hierarchical_stable.py, npp_rl/agents/training.py
     
-    **VisionFreeExtractor** [SPECIAL PURPOSE]
-    - For environments WITHOUT graph observations
-    - Uses only: game_state, reachability_features, entity_positions
-    - Suitable for CPU training and rapid prototyping
-    - Different from "vision_free" architecture config (which uses graphs)
+    # Example: MLP baseline (no graph processing)
+    config = get_architecture_config("mlp_baseline")
+    extractor = ConfigurableMultimodalExtractor(observation_space, config)
     
-    **MinimalStateExtractor** [SPECIAL PURPOSE]
-    - Minimal state-only processing (game_state + reachability)
-    - Fastest option for CPU training and debugging
-    - No visual or graph processing
+    # Example: Vision-free (no visual processing)
+    config = get_architecture_config("vision_free")
+    extractor = ConfigurableMultimodalExtractor(observation_space, config)
 
-Usage Examples:
+## Removed Legacy Extractors
 
-    # RECOMMENDED: Configurable system with validated architectures
+The following extractors have been removed and replaced by ConfigurableMultimodalExtractor:
+
+    - HGTMultimodalExtractor → Use get_architecture_config("full_hgt")
+    - VisionFreeExtractor → Use get_architecture_config("vision_free")
+    - MinimalStateExtractor → Use get_architecture_config("mlp_baseline")
+
+All training scripts have been updated to use the new unified system.
+
+Usage with Training Scripts:
+
+    # Using npp_rl/agents/training.py
+    python -m npp_rl.agents.training --architecture full_hgt --num_envs 64
+    
+    # Using ArchitectureTrainer for systematic comparison
     from npp_rl.training.architecture_trainer import ArchitectureTrainer
     trainer = ArchitectureTrainer(config_name="full_hgt", env_id="NPP-v0")
     trainer.train()
-
-    # Legacy HGT extractor (use ConfigurableMultimodalExtractor instead)
-    from npp_rl.feature_extractors import HGTMultimodalExtractor
-    extractor = HGTMultimodalExtractor(observation_space, features_dim=512)
-    
-    # Special purpose: CPU training without graph obs
-    from npp_rl.feature_extractors import VisionFreeExtractor
-    extractor = VisionFreeExtractor(observation_space, features_dim=256)
 """
 
-__all__ = [
-    "HGTMultimodalExtractor",
-    "VisionFreeExtractor", 
-    "MinimalStateExtractor",
-]
-
-# Import extractors
-from .hgt_multimodal import HGTMultimodalExtractor
-from .vision_free_extractor import VisionFreeExtractor, MinimalStateExtractor
+__all__ = []  # No extractors exported from this package anymore

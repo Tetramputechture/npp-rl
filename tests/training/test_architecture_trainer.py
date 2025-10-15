@@ -118,7 +118,7 @@ class TestArchitectureTrainer(unittest.TestCase):
         
         self.assertTrue(output_dir.exists())
     
-    @patch('npp_rl.training.architecture_trainer.create_graph_enhanced_env')
+    @patch('npp_rl.training.architecture_trainer.NppEnvironment')
     @patch('npp_rl.training.architecture_trainer.DummyVecEnv')
     def test_setup_environment_without_curriculum(self, mock_vec_env, mock_create_env):
         """Test environment setup without curriculum learning."""
@@ -140,7 +140,7 @@ class TestArchitectureTrainer(unittest.TestCase):
         # For this test, we just verify initialization
         self.assertIsNone(trainer.curriculum_manager)
     
-    @patch('npp_rl.training.architecture_trainer.create_graph_enhanced_env')
+    @patch('npp_rl.training.architecture_trainer.NppEnvironment')
     @patch('npp_rl.training.architecture_trainer.create_curriculum_manager')
     def test_setup_environment_with_curriculum(self, mock_create_curriculum, mock_create_env):
         """Test environment setup with curriculum learning."""
@@ -308,7 +308,7 @@ class TestArchitectureTrainerWithMockedEnvironment(unittest.TestCase):
             features_dim=256,
         )
     
-    @patch('npp_rl.training.architecture_trainer.create_graph_enhanced_env')
+    @patch('npp_rl.training.architecture_trainer.NppEnvironment')
     def test_environment_creation_called(self, mock_create_env):
         """Test that environment creation is called during setup."""
         mock_env = MagicMock()

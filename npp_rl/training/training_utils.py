@@ -10,7 +10,8 @@ import torch
 import torch.nn as nn
 from gymnasium.spaces import Discrete, Dict as SpacesDict
 
-from npp_rl.feature_extractors import HGTMultimodalExtractor
+from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.optimization.architecture_configs import get_architecture_config
 
 
 def create_training_policy(
@@ -35,16 +36,17 @@ def create_training_policy(
         PyTorch neural network module representing the policy
     """
     if policy_class == "npp":
-        # Create custom policy with multimodal feature extractor
-        features_extractor = HGTMultimodalExtractor(
+        # Create custom policy with configurable multimodal feature extractor
+        architecture_config = get_architecture_config("full_hgt")
+        features_extractor = ConfigurableMultimodalExtractor(
             observation_space=observation_space,
-            features_dim=features_dim,
+            config=architecture_config,
         )
 
         # Create policy network with appropriate architecture
         policy = nn.Sequential(
             features_extractor,
-            nn.Linear(features_dim, 256),
+            nn.Linear(features_extractor.features_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(256, action_space.n),

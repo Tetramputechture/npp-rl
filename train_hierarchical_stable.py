@@ -54,7 +54,8 @@ from stable_baselines3.common.logger import configure
 
 from nclone.gym_environment import create_hierarchical_env
 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO, HierarchicalActorCriticPolicy
-from npp_rl.feature_extractors import HGTMultimodalExtractor
+from npp_rl.optimization.configurable_extractor import ConfigurableMultimodalExtractor
+from npp_rl.optimization.architecture_configs import get_architecture_config
 from npp_rl.agents.hyperparameters.hierarchical_hyperparameters import (
     HIGH_LEVEL_HYPERPARAMETERS,
     LOW_LEVEL_HYPERPARAMETERS,
@@ -174,15 +175,12 @@ def create_hierarchical_model(
     """
     print("Creating hierarchical PPO model...")
     
-    # Policy kwargs with HGT feature extractor
+    # Policy kwargs with ConfigurableMultimodalExtractor
+    architecture_config = get_architecture_config("full_hgt")
     policy_kwargs = {
-        'features_extractor_class': HGTMultimodalExtractor,
+        'features_extractor_class': ConfigurableMultimodalExtractor,
         'features_extractor_kwargs': {
-            'features_dim': 512,
-            'use_hgt': True,
-            'hgt_num_layers': 3,
-            'hgt_hidden_dim': 128,
-            'hgt_num_heads': 4,
+            'config': architecture_config,
         },
         'high_level_update_frequency': high_level_update_freq,
         'max_steps_per_subtask': max_steps_per_subtask,
