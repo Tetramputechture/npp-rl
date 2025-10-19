@@ -9,27 +9,25 @@ from typing import Dict, Any
 
 import gymnasium as gym
 import numpy as np
+from stable_baselines3.common.vec_env import VecEnvWrapper
 
 logger = logging.getLogger(__name__)
 
 
 class CurriculumEnv(gym.Wrapper):
     """Environment wrapper that samples levels from curriculum manager.
-    
+
     This wrapper integrates with the curriculum manager to:
     1. Sample levels from appropriate difficulty stage
     2. Track episode success for curriculum advancement
     3. Automatically progress through difficulty levels
     """
-    
+
     def __init__(
-        self,
-        env: gym.Env,
-        curriculum_manager,
-        check_advancement_freq: int = 10
+        self, env: gym.Env, curriculum_manager, check_advancement_freq: int = 10
     ):
         """Initialize curriculum environment wrapper.
-        
+
         Args:
             env: Base N++ environment
             curriculum_manager: CurriculumManager instance
@@ -38,105 +36,113 @@ class CurriculumEnv(gym.Wrapper):
         super().__init__(env)
         self.curriculum_manager = curriculum_manager
         self.check_advancement_freq = check_advancement_freq
-        
+
         # Episode tracking
         self.episode_count = 0
         self.current_level_stage = None
         self.current_level_data = None
-        
+
         logger.info("Curriculum environment initialized")
         logger.info(f"Starting stage: {curriculum_manager.get_current_stage()}")
-    
+
     def reset(self, **kwargs):
         """Reset environment with level from curriculum.
-        
+
         Returns:
             observation, info dict
         """
         # Sample level from curriculum
         level_data = self.curriculum_manager.sample_level()
-        
+
         if level_data is None:
             # Fallback to default reset if no curriculum level available
             logger.warning("No curriculum level available, using default reset")
             return self.env.reset(**kwargs)
-        
+
         # Store current level info
         self.current_level_data = level_data
         self.current_level_stage = level_data.get(
-            'category',
-            level_data.get('metadata', {}).get('category', 'unknown')
+            "category", level_data.get("metadata", {}).get("category", "unknown")
         )
-        
-        # Reset environment with curriculum level
-        if hasattr(self.env, 'reset_with_level'):
-            # Use custom reset if available
-            obs, info = self.env.reset_with_level(level_data, **kwargs)
-        elif 'map_data' in level_data:
-            # Standard reset with map data
-            # This requires the environment to accept map_data in reset
-            obs, info = self.env.reset(seed=level_data.get('seed'), **kwargs)
-            # Note: Actual level loading depends on environment implementation
+
+        # Load the specific map from level data
+        if "map_data" in level_data:
+            # Access the unwrapped environment to load the map
+            base_env = self.env.unwrapped
+            if hasattr(base_env, "nplay_headless"):
+                logger.debug(
+                    f"Loading curriculum level: {level_data.get('level_id', 'unknown')} "
+                    f"from stage: {self.current_level_stage}"
+                )
+                base_env.nplay_headless.load_map_from_map_data(level_data["map_data"])
+            else:
+                logger.warning(
+                    "Environment does not have nplay_headless attribute, "
+                    "cannot load map data"
+                )
         else:
-            # Fallback to default reset
-            obs, info = self.env.reset(**kwargs)
-        
+            logger.warning(
+                f"Level data missing 'map_data' key for level: "
+                f"{level_data.get('level_id', 'unknown')}"
+            )
+
+        # Reset environment after loading the map
+        obs, info = self.env.reset(**kwargs)
+
         # Add curriculum info
-        info['curriculum_stage'] = self.current_level_stage
-        info['curriculum_level_id'] = level_data.get('level_id', 'unknown')
-        
+        info["curriculum_stage"] = self.current_level_stage
+        info["curriculum_level_id"] = level_data.get("level_id", "unknown")
+
         return obs, info
-    
+
     def step(self, action):
         """Execute action in environment.
-        
+
         Args:
             action: Action to execute
-            
+
         Returns:
             observation, reward, terminated, truncated, info
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         # Add curriculum info
-        info['curriculum_stage'] = self.current_level_stage
-        
+        info["curriculum_stage"] = self.current_level_stage
+
         # Track episode completion
         if terminated or truncated:
             self._on_episode_end(info)
-        
+
         return obs, reward, terminated, truncated, info
-    
+
     def _on_episode_end(self, info: Dict[str, Any]) -> None:
         """Handle episode completion.
-        
+
         Args:
             info: Episode info dict
         """
         self.episode_count += 1
-        
+
         # Record episode result in curriculum
-        success = info.get('success', False)
-        
+        # NppEnvironment returns "is_success", but we check both for compatibility
+        success = info.get("is_success", info.get("success", False))
+
         if self.current_level_stage:
-            self.curriculum_manager.record_episode(
-                self.current_level_stage,
-                success
-            )
-        
+            self.curriculum_manager.record_episode(self.current_level_stage, success)
+
         # Periodically check for curriculum advancement
         if self.episode_count % self.check_advancement_freq == 0:
             advanced = self.curriculum_manager.check_advancement()
-            
+
             if advanced:
                 logger.info(
                     f"Curriculum advanced to: "
                     f"{self.curriculum_manager.get_current_stage()}"
                 )
-    
+
     def get_curriculum_progress(self) -> str:
         """Get curriculum progress summary.
-        
+
         Returns:
             Progress summary string
         """
@@ -144,42 +150,31 @@ class CurriculumEnv(gym.Wrapper):
 
 
 def make_curriculum_env(
-    base_env_fn,
-    curriculum_manager,
-    check_advancement_freq: int = 10
+    base_env_fn, curriculum_manager, check_advancement_freq: int = 10
 ):
     """Create curriculum environment from base environment function.
-    
+
     Args:
         base_env_fn: Function that creates base environment
         curriculum_manager: CurriculumManager instance
         check_advancement_freq: Advancement check frequency
-        
+
     Returns:
         Wrapped curriculum environment
     """
     base_env = base_env_fn()
-    return CurriculumEnv(
-        base_env,
-        curriculum_manager,
-        check_advancement_freq
-    )
+    return CurriculumEnv(base_env, curriculum_manager, check_advancement_freq)
 
 
-class CurriculumVecEnvWrapper(gym.Wrapper):
+class CurriculumVecEnvWrapper(VecEnvWrapper):
     """Wrapper for vectorized environments with curriculum learning.
-    
+
     This wraps a VecEnv to add curriculum tracking across all parallel environments.
     """
-    
-    def __init__(
-        self,
-        venv,
-        curriculum_manager,
-        check_advancement_freq: int = 10
-    ):
+
+    def __init__(self, venv, curriculum_manager, check_advancement_freq: int = 10):
         """Initialize vectorized curriculum wrapper.
-        
+
         Args:
             venv: Vectorized environment
             curriculum_manager: CurriculumManager instance
@@ -188,42 +183,49 @@ class CurriculumVecEnvWrapper(gym.Wrapper):
         super().__init__(venv)
         self.curriculum_manager = curriculum_manager
         self.check_advancement_freq = check_advancement_freq
-        
+
         # Track episodes per environment
         self.env_episode_counts = np.zeros(self.num_envs, dtype=int)
         self.total_episodes = 0
-        
+
         logger.info(f"Curriculum VecEnv wrapper initialized for {self.num_envs} envs")
-    
+
     def step_wait(self):
         """Wait for step to complete and track curriculum progress."""
         obs, rewards, dones, infos = self.venv.step_wait()
-        
+
         # Track episode completions
         for i, (done, info) in enumerate(zip(dones, infos)):
             if done:
                 self.env_episode_counts[i] += 1
                 self.total_episodes += 1
-                
+
                 # Record in curriculum
-                success = info.get('success', False)
-                stage = info.get('curriculum_stage', 'unknown')
-                
-                if stage != 'unknown':
+                # NppEnvironment returns "is_success", but we check both for compatibility
+                success = info.get("is_success", info.get("success", False))
+                stage = info.get("curriculum_stage", "unknown")
+
+                if stage != "unknown":
                     self.curriculum_manager.record_episode(stage, success)
-                
+
                 # Check advancement
                 if self.total_episodes % self.check_advancement_freq == 0:
-                    self.curriculum_manager.check_advancement()
-        
+                    advanced = self.curriculum_manager.check_advancement()
+
+                    if advanced:
+                        logger.info(
+                            f"Curriculum advanced to: "
+                            f"{self.curriculum_manager.get_current_stage()}"
+                        )
+
         return obs, rewards, dones, infos
-    
+
     def reset(self):
         """Reset all environments."""
         # Note: Actual curriculum level sampling needs to be implemented
         # in the base environment factory function
         return self.venv.reset()
-    
+
     def get_curriculum_progress(self) -> str:
         """Get curriculum progress summary."""
         return self.curriculum_manager.get_progress_summary()

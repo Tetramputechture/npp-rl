@@ -87,6 +87,9 @@ class VideoRecorder:
                 # Likely (W, H, C), transpose to (H, W, C)
                 frame_copy = frame_copy.transpose(1, 0, 2)
 
+        # Rotate video 90 degrees counter-clockwise
+        frame_copy = np.rot90(frame_copy, k=3)
+
         self.frames.append(frame_copy)
 
     def stop_recording(self, save: bool = True) -> bool:

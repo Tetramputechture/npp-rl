@@ -5,12 +5,14 @@ setup, training loop, evaluation, and checkpointing.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.nn as nn
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from torch.utils.tensorboard import SummaryWriter
 
@@ -23,6 +25,63 @@ from npp_rl.training.curriculum_manager import create_curriculum_manager
 from npp_rl.wrappers.curriculum_env import CurriculumEnv, CurriculumVecEnvWrapper
 
 logger = logging.getLogger(__name__)
+
+
+class VerboseTrainingCallback(BaseCallback):
+    """Callback for verbose logging during training to help debug hangs."""
+
+    def __init__(self, log_freq: int = 1, verbose: int = 1):
+        """
+        Args:
+            log_freq: How often to log (in number of rollouts/updates)
+            verbose: Verbosity level
+        """
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self.update_count = 0
+        self.start_time = None
+        self.last_log_time = None
+
+    def _on_training_start(self) -> None:
+        """Called before the first rollout."""
+        self.start_time = time.time()
+        self.last_log_time = self.start_time
+        logger.info("=" * 60)
+        logger.info("VerboseTrainingCallback: Training started")
+        logger.info("Beginning first environment reset and rollout collection...")
+        logger.info("=" * 60)
+
+    def _on_rollout_start(self) -> None:
+        """Called before collecting a new rollout."""
+        if self.update_count % self.log_freq == 0:
+            current_time = time.time()
+            elapsed = current_time - self.start_time
+            since_last = current_time - self.last_log_time
+            logger.info(
+                f"[Update {self.update_count}] Starting rollout collection "
+                f"(elapsed: {elapsed:.1f}s, since last: {since_last:.1f}s)"
+            )
+            self.last_log_time = current_time
+
+    def _on_step(self) -> bool:
+        """Called after each environment step during rollout."""
+        return True
+
+    def _on_rollout_end(self) -> None:
+        """Called after rollout is collected."""
+        if self.update_count % self.log_freq == 0:
+            logger.info(
+                f"[Update {self.update_count}] Rollout complete - "
+                f"timesteps: {self.num_timesteps}, starting gradient update..."
+            )
+        self.update_count += 1
+
+    def _on_training_end(self) -> None:
+        """Called at the end of training."""
+        total_time = time.time() - self.start_time
+        logger.info("=" * 60)
+        logger.info(f"VerboseTrainingCallback: Training ended after {total_time:.1f}s")
+        logger.info("=" * 60)
 
 
 class ArchitectureTrainer:
@@ -220,12 +279,16 @@ class ArchitectureTrainer:
 
         def make_env(rank: int, use_curr: bool, curr_mgr):
             def _init():
+                logger.info(f"[Env {rank}] Creating NppEnvironment instance...")
                 env = NppEnvironment(config=EnvironmentConfig.for_training())
+                logger.info(f"[Env {rank}] ✓ NppEnvironment created")
 
                 # Wrap with curriculum if enabled
                 if use_curr and curr_mgr:
+                    logger.info(f"[Env {rank}] Wrapping with CurriculumEnv...")
                     env = CurriculumEnv(env, curr_mgr, check_advancement_freq=10)
 
+                logger.info(f"[Env {rank}] ✓ Environment ready")
                 return env
 
             return _init
@@ -233,40 +296,67 @@ class ArchitectureTrainer:
         # Create vectorized training environment
         # For small numbers of envs, use DummyVecEnv to avoid multiprocessing overhead
         if num_envs > 4:
+            logger.info(f"Creating {num_envs} environment factory functions...")
             env_fns = [
                 make_env(i, use_curriculum, curriculum_manager) for i in range(num_envs)
             ]
+            logger.info(
+                f"Initializing SubprocVecEnv with {num_envs} worker processes..."
+            )
+            logger.info(
+                "This may take time as each process spawns and initializes its environment"
+            )
             self.env = SubprocVecEnv(env_fns)
+            logger.info("SubprocVecEnv initialization complete")
         else:
+            logger.info(f"Creating {num_envs} environment factory functions...")
             env_fns = [
                 make_env(i, use_curriculum, curriculum_manager) for i in range(num_envs)
             ]
+            logger.info(
+                f"Initializing DummyVecEnv with {num_envs} environments (single process)..."
+            )
             self.env = DummyVecEnv(env_fns)
+            logger.info("DummyVecEnv initialization complete")
 
         # Wrap vectorized env with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
+            logger.info("Wrapping environments with curriculum tracking...")
             self.env = CurriculumVecEnvWrapper(
                 self.env, self.curriculum_manager, check_advancement_freq=10
             )
 
         # Create evaluation environment (single, no curriculum)
+        logger.info("Creating evaluation environment...")
+
         def make_eval_env():
             return NppEnvironment(config=EnvironmentConfig.for_training())
 
         self.eval_env = DummyVecEnv([make_eval_env])
 
-        logger.info(f"Environments created: {num_envs} training, 1 eval")
-        logger.info(f"Using {'DummyVecEnv' if num_envs <= 4 else 'SubprocVecEnv'}")
+        logger.info(f"✓ Environments created: {num_envs} training, 1 eval")
+        logger.info(f"✓ Using {'DummyVecEnv' if num_envs <= 4 else 'SubprocVecEnv'}")
 
         # Now create the model with the correct environment
         if self.model is None and hasattr(self, "policy_kwargs"):
+            logger.info("=" * 60)
             logger.info("Creating PPO model with training environment...")
+            logger.info(f"Policy class: {self.policy_class}")
+            logger.info(f"Device: {self.hyperparams.get('device')}")
+            logger.info("Feature extractor: ConfigurableMultimodalExtractor")
+            logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
+            logger.info("Initializing policy networks and moving to device...")
+
             self.model = PPO(
                 policy=self.policy_class,
                 env=self.env,
                 policy_kwargs=self.policy_kwargs,
                 **self.hyperparams,
             )
+
+            logger.info("✓ PPO model created successfully")
+            logger.info(f"✓ Model is on device: {self.model.device}")
+            logger.info("=" * 60)
 
             # Load pretrained weights if provided
             if self.pretrained_checkpoint:
@@ -292,29 +382,38 @@ class ArchitectureTrainer:
 
             # Wrap policy with DataParallel for multi-GPU training
             if self.world_size > 1 and torch.cuda.is_available():
+                logger.info("=" * 60)
                 logger.info(
-                    f"Wrapping policy network with DataParallel for {self.world_size} GPUs"
+                    f"Setting up multi-GPU training with DataParallel for {self.world_size} GPUs"
                 )
                 # Get list of GPU IDs
                 device_ids = list(range(self.world_size))
+                logger.info(f"GPU device IDs: {device_ids}")
 
                 # Wrap the feature extractor with DataParallel
                 if hasattr(self.model.policy, "features_extractor"):
+                    logger.info("Wrapping feature extractor with DataParallel...")
                     self.model.policy.features_extractor = nn.DataParallel(
                         self.model.policy.features_extractor, device_ids=device_ids
                     )
                     logger.info(
-                        f"Feature extractor distributed across GPUs: {device_ids}"
+                        f"✓ Feature extractor distributed across GPUs: {device_ids}"
                     )
 
                 # Wrap mlp_extractor if it exists
                 if hasattr(self.model.policy, "mlp_extractor"):
+                    logger.info("Wrapping MLP extractor with DataParallel...")
                     self.model.policy.mlp_extractor = nn.DataParallel(
                         self.model.policy.mlp_extractor, device_ids=device_ids
                     )
-                    logger.info(f"MLP extractor distributed across GPUs: {device_ids}")
+                    logger.info(
+                        f"✓ MLP extractor distributed across GPUs: {device_ids}"
+                    )
 
-            logger.info(f"Model initialized with {num_envs} environments")
+                logger.info("✓ Multi-GPU setup complete")
+                logger.info("=" * 60)
+
+            logger.info(f"✓ Model fully initialized with {num_envs} environments")
         elif self.model:
             # Model already exists, just set the environment
             self.model.set_env(self.env)
@@ -356,10 +455,41 @@ class ArchitectureTrainer:
         logger.info(f"Save frequency: {save_freq:,}")
         logger.info("=" * 60)
 
+        # Log model and environment details before starting
+        logger.info(f"Model device: {self.model.device}")
+        logger.info(f"Number of environments: {self.env.num_envs}")
+        logger.info(f"Policy architecture: {self.policy_class}")
+        logger.info(
+            f"PPO hyperparameters: n_steps={self.hyperparams.get('n_steps')}, "
+            f"batch_size={self.hyperparams.get('batch_size')}, "
+            f"learning_rate={self.hyperparams.get('learning_rate')}"
+        )
+
         try:
+            logger.info("Initializing environment reset...")
+            # This will trigger the first reset of all environments
+            logger.info(
+                "Calling model.learn() - this will reset environments and start rollout collection"
+            )
+            logger.info(
+                "First rollout collection may take time - collecting experience from all environments"
+            )
+
+            # Create verbose callback to monitor training progress
+            verbose_callback = VerboseTrainingCallback(log_freq=1)
+
+            # Combine with user callback if provided
+            callbacks = [verbose_callback]
+            if callback_fn is not None:
+                callbacks.append(callback_fn)
+
+            logger.info("Starting model.learn() with verbose callback...")
+
             # Train model
             self.model.learn(
-                total_timesteps=total_timesteps, callback=callback_fn, progress_bar=True
+                total_timesteps=total_timesteps,
+                callback=callbacks if len(callbacks) > 1 else verbose_callback,
+                progress_bar=True,
             )
 
             logger.info("Training completed successfully")

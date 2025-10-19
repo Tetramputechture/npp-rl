@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+
 import torch
 import torch.distributed as dist
 
@@ -321,8 +322,13 @@ def train_architecture(
             }
 
         # Calculate environments per GPU
-        envs_per_gpu = args.num_envs // args.num_gpus
-        logger.info(f"GPU {device_id}: Using {envs_per_gpu} environments")
+        if args.num_gpus > 0:
+            envs_per_gpu = args.num_envs // args.num_gpus
+            logger.info(f"GPU {device_id}: Using {envs_per_gpu} environments")
+        else:
+            # CPU mode: use all environments on single device
+            envs_per_gpu = args.num_envs
+            logger.info(f"CPU mode: Using {envs_per_gpu} environments")
 
         # Create trainer
         trainer = ArchitectureTrainer(
@@ -397,8 +403,9 @@ def train_architecture(
 
     except Exception as e:
         logger.error(f"Training failed for {architecture_name}{condition_suffix}: {e}")
-        # Clean up environments even on failure
-        trainer.cleanup()
+        # Clean up environments even on failure (if trainer was initialized)
+        if "trainer" in locals():
+            trainer.cleanup()
         if tb_writer:
             tb_writer.close_all()
         return {
@@ -455,14 +462,25 @@ def main():
             logger.info(f"  Learning rate: {hardware_profile.learning_rate:.2e}")
             logger.info(f"  Mixed precision: {args.mixed_precision}")
 
-    # Log GPU configuration
+    # Log GPU configuration with detailed diagnostics
+    logger.info("\n" + "=" * 70)
+    logger.info("CUDA/GPU Diagnostics")
+    logger.info("=" * 70)
+    logger.info(f"PyTorch version: {torch.__version__}")
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+
     if torch.cuda.is_available():
+        logger.info(f"CUDA version: {torch.version.cuda}")
+        logger.info(f"cuDNN version: {torch.backends.cudnn.version()}")
         num_gpus = torch.cuda.device_count()
-        logger.info(f"\nGPUs available: {num_gpus}")
+        logger.info(f"GPU count: {num_gpus}")
+
         for i in range(num_gpus):
             gpu_name = torch.cuda.get_device_name(i)
-            gpu_memory = torch.cuda.get_device_properties(i).total_memory / 1e9
+            gpu_props = torch.cuda.get_device_properties(i)
+            gpu_memory = gpu_props.total_memory / 1e9
             logger.info(f"  GPU {i}: {gpu_name} ({gpu_memory:.1f} GB)")
+            logger.info(f"    Compute capability: {gpu_props.major}.{gpu_props.minor}")
 
         # Validate num_gpus argument
         if args.num_gpus > num_gpus:
@@ -472,8 +490,32 @@ def main():
             )
             args.num_gpus = num_gpus
     else:
-        logger.warning("No GPUs available, using CPU")
+        logger.warning("No GPUs available via torch.cuda.is_available()")
+        logger.info("Possible reasons:")
+        logger.info("  1. PyTorch not built with CUDA support")
+        logger.info("  2. CUDA drivers not installed or incompatible")
+        logger.info("  3. Environment variable issues (check CUDA_VISIBLE_DEVICES)")
+
+        # Try to provide more diagnostics
+        import subprocess
+
+        try:
+            nvidia_smi = subprocess.run(
+                ["nvidia-smi"], capture_output=True, text=True, timeout=5
+            )
+            if nvidia_smi.returncode == 0:
+                logger.warning("nvidia-smi found GPUs but PyTorch cannot access them!")
+                logger.info("nvidia-smi output (first 10 lines):")
+                for line in nvidia_smi.stdout.split("\n")[:10]:
+                    logger.info(f"  {line}")
+            else:
+                logger.info("nvidia-smi not available or failed")
+        except Exception as e:
+            logger.info(f"Could not run nvidia-smi: {e}")
+
         args.num_gpus = 0
+
+    logger.info("=" * 70)
 
     # Save configuration
     config = vars(args)

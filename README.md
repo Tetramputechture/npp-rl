@@ -22,11 +22,13 @@ Deep Reinforcement Learning system for training agents to play N++, a physics-ba
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.11+
 - CUDA 11.8+ (for GPU training)
-- System packages: `libcairo2-dev pkg-config python3-dev`
+- System packages: `libcairo2-dev pkg-config python3-dev build-essential`
 
 ### Setup
+
+#### Standard x86_64 Installation
 ```bash
 # Clone and install nclone simulator (required dependency)
 git clone https://github.com/Tetramputechture/nclone.git
@@ -34,8 +36,45 @@ cd nclone && pip install -e . && cd ..
 
 # Clone and install npp-rl
 git clone https://github.com/Tetramputechture/npp-rl.git
-cd npp-rl && pip install -r requirements.txt
+cd npp-rl && pip install -e .
 ```
+
+#### ARM64/aarch64 Installation (NVIDIA Grace Hopper, etc.)
+
+**Important**: Standard pip installation may install CPU-only PyTorch on ARM64 systems. Use one of these methods:
+
+**Option 1 - PyTorch Nightly (Recommended for ARM64 CUDA)**
+```bash
+# Install PyTorch with CUDA support FIRST
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
+
+# Verify CUDA is available
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Then install npp-rl
+cd npp-rl && pip install -e .
+```
+
+**Option 2 - PyTorch 2.4.0 with CUDA 12.1**
+```bash
+# Install PyTorch with CUDA support FIRST
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+
+# Verify CUDA is available
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Then install npp-rl
+cd npp-rl && pip install -e .
+```
+
+**Troubleshooting ARM64 CUDA Issues:**
+If PyTorch cannot access CUDA:
+1. Check your PyTorch version: `python -c "import torch; print(torch.__version__)"`
+2. If version has `+cpu` suffix, reinstall using options above
+3. Verify NVIDIA driver: `nvidia-smi`
+4. Check environment: `echo $CUDA_VISIBLE_DEVICES` (should be empty or show GPU IDs)
+
+The orchestration script (`scripts/orchestrate_architecture_comparison.sh`) will automatically detect and fix CPU-only PyTorch on ARM64 systems.
 
 ## Training
 
@@ -318,3 +357,12 @@ make format
 - GPUs: 2-4x V100 / A100
 - RAM: 64GB+
 - Training time: ~4-8 hours for 100M steps with 4 GPUs
+
+### ARM64 Systems (NVIDIA Grace Hopper)
+- GPU: NVIDIA GH200 (96-480GB HBM3)
+- Architecture: aarch64 (ARM Neoverse)
+- Special considerations:
+  - Requires PyTorch nightly or 2.4.0+ with CUDA 12.1+
+  - Standard pip may install CPU-only PyTorch (see Installation section)
+  - Orchestration script auto-detects and fixes CUDA issues
+- Performance: Excellent for large-scale training (unified memory architecture)

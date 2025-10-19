@@ -67,3 +67,5 @@ tune_logs/
 
 # experiments
 experiments/
+
+logs/

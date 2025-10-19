@@ -199,7 +199,7 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
     gpu_name = torch.cuda.get_device_name(0).lower()
     gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
 
-    # Match based on GPU count and type
+    # Match based on GPU count and type (exact matches first)
     if num_gpus == 8:
         if "a100" in gpu_name:
             if gpu_memory_gb > 70:
@@ -212,20 +212,33 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
         if "a100" in gpu_name and gpu_memory_gb > 70:
             return A100_1X_80GB
 
-    # Default: create a conservative profile
-    envs_per_gpu = max(16, int(gpu_memory_gb / 4))
+    # Default: create a conservative profile based on available memory
+    # Use heuristics: 4GB per environment for graph-based models
+    envs_per_gpu = max(8, min(32, int(gpu_memory_gb / 8)))
+
+    # Scale learning rate with square root of GPU count (common practice)
+    base_lr = 3e-4
+    scaled_lr = base_lr * (num_gpus**0.5) if num_gpus > 1 else base_lr
+
+    # Enable mixed precision for modern GPUs (Volta+, compute capability >= 7.0)
+    compute_cap = torch.cuda.get_device_properties(0).major
+    use_mixed_precision = compute_cap >= 7
+
     return HardwareProfile(
-        name=f"{num_gpus}xGPU-{gpu_memory_gb:.0f}GB",
+        name=f"Auto-{num_gpus}xGPU-{gpu_memory_gb:.0f}GB",
         num_gpus=num_gpus,
         gpu_memory_gb=gpu_memory_gb,
         num_envs=envs_per_gpu * num_gpus,
-        batch_size=256 * num_gpus,
+        batch_size=max(32, 256 * num_gpus),  # Ensure minimum batch size
         n_steps=1024,
-        learning_rate=3e-4 * (num_gpus**0.5),
-        mixed_precision=True,
-        num_workers=envs_per_gpu * num_gpus // 4,
+        learning_rate=scaled_lr,
+        mixed_precision=use_mixed_precision,
+        num_workers=max(2, (envs_per_gpu * num_gpus) // 4),
         prefetch_factor=2,
-        description=f"Auto-detected profile for {num_gpus}x GPUs",
+        description=(
+            f"Auto-detected profile for {num_gpus}x {gpu_name.upper()} "
+            f"({gpu_memory_gb:.0f}GB). Conservative settings for safety."
+        ),
     )
 
 
