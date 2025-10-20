@@ -4,6 +4,79 @@ Subtask-specific reward functions for hierarchical RL.
 Implements dense rewards for navigate_to_exit_switch, navigate_to_locked_door_switch,
 navigate_to_exit_door, and explore_for_switches subtasks. Integrates with PBRS for
 theoretically grounded shaping and includes mine avoidance incentives.
+
+Reward Scale Design Philosophy:
+-------------------------------
+All reward constants are designed relative to base environment rewards:
+- Exit door: +1.0 (terminal success)
+- Switch activation: +0.1 (milestone progress)
+- Death: -0.5 (terminal failure)
+
+The hierarchical reward magnitudes follow these principles:
+1. Shaped rewards must be small relative to sparse rewards (Ng et al., 1999)
+2. Progress rewards scale with difficulty to prevent exploitation
+3. PBRS guarantees policy invariance when properly tuned (γ-discounting)
+
+Research Foundations:
+---------------------
+- PBRS (Potential-Based Reward Shaping): Ng et al. (1999)
+  "Policy invariance under reward shaping"
+  → Ensures shaped rewards don't change optimal policy
+  
+- Hierarchical RL reward decomposition: Dietterich (2000)
+  "Hierarchical Reinforcement Learning with the MAXQ Value Function Decomposition"
+  → Subtask-specific rewards aid credit assignment
+  
+- Dense reward design: Popov et al. (2017)
+  "Data-efficient Deep Reinforcement Learning for Dexterous Manipulation"
+  → Progress-based shaping accelerates learning in sparse environments
+
+Reward Constant Rationale:
+--------------------------
+PROGRESS_REWARD_SCALE = 0.02
+  → 2% of switch bonus per unit distance
+  → Typical navigation: 10-50 units → 0.2-1.0 cumulative progress
+  → Keeps progress rewards < terminal rewards
+
+PROXIMITY_BONUS_SCALE = 0.05
+  → 50% of switch activation bonus when very close
+  → Encourages precise positioning for interaction
+  
+ACTIVATION_BONUS_LOCKED = 0.05
+  → Matches proximity bonus magnitude
+  → Reinforces correct switch identification
+  
+DOOR_OPENING_BONUS = 0.03
+  → Smaller than activation (indirect consequence)
+  → Still reinforces correct causal chain
+  
+EFFICIENCY_BONUS = 0.2
+  → 20% of exit reward for fast completion
+  → Encourages optimal paths without overwhelming sparse signal
+  
+EXPLORATION_REWARD = 0.01
+  → Small constant for new tile visitation
+  → Prevents aimless wandering while encouraging coverage
+  
+DISCOVERY_BONUS = 0.05
+  → 50% of switch bonus for finding new objectives
+  → Balances exploration vs exploitation
+  
+CONNECTIVITY_BONUS = 0.02
+  → Rewards expanding reachable state space
+  → Based on reachability graph metrics
+  
+TIMEOUT_PENALTY_MAJOR = -0.1
+  → Negative but smaller than death penalty
+  → Prevents infinite subtask loops
+  
+MINE_PROXIMITY_PENALTY = -0.02
+  → Small penalty discourages risky paths
+  → Doesn't dominate optimal route selection
+  
+SAFE_NAVIGATION_BONUS = 0.01
+  → Matches exploration reward magnitude
+  → Reinforces mine-aware behavior
 """
 
 from typing import Dict, Any, Optional

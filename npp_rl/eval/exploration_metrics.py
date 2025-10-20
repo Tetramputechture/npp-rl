@@ -167,6 +167,9 @@ class ExplorationMetrics:
 
         # Compute probabilities
         total_visits = len(self.position_history)
+        if total_visits == 0:
+            return 0.0
+        
         probabilities = [count / total_visits for count in cell_counts.values()]
 
         # Compute entropy
