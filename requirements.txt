@@ -30,4 +30,3 @@ pytest>=8.4.1
 # - For manual installation: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 #   Then: pip install -r requirements.txt
 # - CPU-only PyTorch is ~700MB (much smaller than CUDA versions)
-torch-geometric
