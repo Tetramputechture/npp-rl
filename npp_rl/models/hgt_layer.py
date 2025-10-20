@@ -13,16 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from typing import Optional
-from enum import IntEnum
-
-
-class EdgeType(IntEnum):
-    """Types of edges in the heterogeneous graph."""
-
-    # Movement edges (simplified from complex physics)
-    ADJACENT = 0  # Basic 4-connectivity between traversable tiles
-    LOGICAL = 1  # Switch-door relationships
-    REACHABLE = 2  # Simple flood-fill connectivity
 
 
 class HGTLayer(nn.Module):

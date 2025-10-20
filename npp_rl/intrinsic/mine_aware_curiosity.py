@@ -259,6 +259,9 @@ class MineAwareCuriosityModulator:
     def _update_running_average(self, modulation: float) -> None:
         """Update running average of modulation factors."""
         total = self._stats['total_modulations']
+        if total == 0:
+            return
+        
         current_avg = self._stats['average_modulation']
         
         # Incremental average update

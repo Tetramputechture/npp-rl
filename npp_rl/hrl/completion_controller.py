@@ -12,14 +12,7 @@ from enum import Enum
 import numpy as np
 
 from nclone.planning.completion_planner import LevelCompletionPlanner
-
-
-class Subtask(Enum):
-    """Enumeration of available subtasks for hierarchical control."""
-    NAVIGATE_TO_EXIT_SWITCH = 0
-    NAVIGATE_TO_LOCKED_DOOR_SWITCH = 1
-    NAVIGATE_TO_EXIT_DOOR = 2
-    AVOID_MINE = 3
+from npp_rl.hrl.high_level_policy import Subtask
 
 
 class CompletionController:

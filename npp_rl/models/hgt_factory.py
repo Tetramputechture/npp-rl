@@ -21,13 +21,11 @@ from nclone.graph.common import (
     NODE_FEATURE_DIM,
     EDGE_FEATURE_DIM,
 )
-
-
 from torch_geometric.nn import HGTConv
 
 
-class HGTConfig:
-    """Configuration class for HGT system."""
+class HGTFactoryConfig:
+    """Configuration class for HGT factory system."""
 
     # Architecture parameters (optimized for production)
     HIDDEN_DIM = 128  # Reduced for efficiency
@@ -50,14 +48,14 @@ class HGTFactory:
     systems with optimized configurations for the NPP-RL domain.
     """
 
-    def __init__(self, config: Optional[HGTConfig] = None):
+    def __init__(self, config: Optional[HGTFactoryConfig] = None):
         """
         Initialize HGT factory.
 
         Args:
             config: Configuration object (uses defaults if None)
         """
-        self.config = config or HGTConfig()
+        self.config = config or HGTFactoryConfig()
         self.logger = logging.getLogger(__name__)
 
     def create_hgt_layer(
@@ -171,7 +169,7 @@ class MultimodalHGTSystem(nn.Module):
         visual_dim: int = 512,
         state_dim: int = 64,
         graph_dim: int = 256,
-        config: Optional[HGTConfig] = None,
+        config: Optional[HGTFactoryConfig] = None,
     ):
         """
         Initialize multimodal HGT system.
@@ -185,7 +183,7 @@ class MultimodalHGTSystem(nn.Module):
         """
         super().__init__()
 
-        self.config = config or HGTConfig()
+        self.config = config or HGTFactoryConfig()
         self.hgt_encoder = hgt_encoder
 
         # Cross-modal attention mechanisms
