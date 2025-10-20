@@ -164,8 +164,14 @@ class ArchitectureTrainer:
             "net_arch": {"pi": [256, 256, 128], "vf": [256, 256, 128]},
         }
 
-        # Add hierarchical PPO specific kwargs if needed
+        # Set policy class based on hierarchical PPO flag
         if self.use_hierarchical_ppo:
+            # Import hierarchical policy
+            from npp_rl.agents.hierarchical_ppo import HierarchicalActorCriticPolicy
+
+            self.policy_class = HierarchicalActorCriticPolicy
+
+            # Add hierarchical PPO specific kwargs
             self.policy_kwargs.update(
                 {
                     "high_level_update_frequency": ppo_kwargs.pop(
@@ -177,6 +183,12 @@ class ArchitectureTrainer:
                     "use_icm": ppo_kwargs.pop("use_icm", True),
                 }
             )
+            logger.info(
+                "Using HierarchicalActorCriticPolicy with hierarchical parameters"
+            )
+        else:
+            # Use standard MultiInputPolicy
+            self.policy_class = "MultiInputPolicy"
 
         # Default PPO hyperparameters (optimized for multi-GPU training)
         # Scale batch size and learning rate for multi-GPU setup
@@ -213,15 +225,6 @@ class ArchitectureTrainer:
 
         # Merge with provided hyperparameters
         self.hyperparams = {**default_hyperparams, **ppo_kwargs}
-
-        # Choose PPO class based on configuration
-        if self.use_hierarchical_ppo:
-            logger.info("Using Hierarchical PPO")
-            self.policy_class = (
-                "MultiInputPolicy"  # Will use hierarchical policy internally
-            )
-        else:
-            self.policy_class = "MultiInputPolicy"
 
         # Store pretrained checkpoint path for later loading
         self.pretrained_checkpoint = pretrained_checkpoint

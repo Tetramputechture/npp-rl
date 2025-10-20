@@ -438,7 +438,7 @@ def create_no_global_view_config() -> ArchitectureConfig:
             use_reachability=True,
         ),
         graph=GraphConfig(
-            architecture=GraphArchitectureType.FULL_HGT,
+            architecture=GraphArchitectureType.GCN,
             hidden_dim=256,
             num_layers=3,
             output_dim=256,

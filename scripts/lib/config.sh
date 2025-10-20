@@ -58,8 +58,7 @@ ARCHITECTURES=(
     # "vision_free_gat"
     # "vision_free_gcn"
     # "vision_free_simplified"
-    "no_global_view"
-    "local_frames_only"
+    # "no_global_view"
 )
 
 COMPLETED_ARCHITECTURES=()

@@ -91,6 +91,7 @@ train_single_architecture() {
             --architectures ${arch} \
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
+            --use-curriculum \
             --hardware-profile auto \
             --total-timesteps 10000000 \
             --distributed-backend nccl \
@@ -102,6 +103,9 @@ train_single_architecture() {
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
             --no-pretraining"
+
+    echo $train_cmd
+    return 0
     
     # Execute training
     if ssh_cmd "$train_cmd" 2>&1 | tee "$arch_log"; then

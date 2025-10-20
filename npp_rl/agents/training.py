@@ -636,7 +636,6 @@ def main():
             "mlp_baseline",
             "vision_free",
             "no_global_view",
-            "local_frames_only",
         ],
         help="Architecture variant to use (overrides --extractor_type). Options: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, no_global_view, local_frames_only",
     )

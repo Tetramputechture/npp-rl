@@ -213,8 +213,8 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
             return A100_1X_80GB
 
     # Default: create a conservative profile based on available memory
-    # Use heuristics: 4GB per environment for graph-based models
-    envs_per_gpu = max(8, min(32, int(gpu_memory_gb / 8)))
+    # Use heuristics: 1GB per environment for graph-based models
+    envs_per_gpu = max(8, min(64, int(gpu_memory_gb)))
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4
@@ -261,20 +261,3 @@ def print_profile_info(profile: HardwareProfile) -> None:
     print("\nDescription:")
     print(f"  {profile.description}")
     print(f"{'=' * 70}\n")
-
-
-if __name__ == "__main__":
-    # Print all available profiles
-    print("\nAvailable Hardware Profiles:")
-    print("=" * 70)
-
-    for name, profile in HARDWARE_PROFILES.items():
-        print_profile_info(profile)
-
-    # Try auto-detection
-    print("\nAuto-detected profile:")
-    auto_profile = auto_detect_profile()
-    if auto_profile:
-        print_profile_info(auto_profile)
-    else:
-        print("No GPUs detected")

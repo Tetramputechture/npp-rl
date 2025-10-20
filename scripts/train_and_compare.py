@@ -170,7 +170,7 @@ def parse_args():
     parser.add_argument(
         "--curriculum-start-stage",
         type=str,
-        default="simple",
+        default="very_simple",
         choices=[
             "very_simple",
             "simple",
