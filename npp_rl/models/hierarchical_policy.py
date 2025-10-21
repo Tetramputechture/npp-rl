@@ -13,6 +13,7 @@ Architecture:
 
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict, Any, Optional, Tuple, List
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
@@ -133,6 +134,77 @@ class HierarchicalPolicyNetwork(nn.Module):
         # Register current_subtask as a buffer so it moves with the model
         self.register_buffer("current_subtask", torch.tensor([0], dtype=torch.long))
 
+    def _ensure_required_obs_keys(
+        self, obs: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Ensure observation dictionary has all required keys with proper defaults.
+
+        Args:
+            obs: Observation dictionary (potentially incomplete, may contain numpy arrays)
+
+        Returns:
+            Complete observation dictionary with all required keys as torch tensors
+        """
+
+        # Helper function to convert to tensor if needed
+        def to_tensor(value, device):
+            if isinstance(value, np.ndarray):
+                return torch.from_numpy(value).to(device)
+            elif isinstance(value, torch.Tensor):
+                return value.to(device)
+            else:
+                return torch.tensor(value, device=device)
+
+        # Determine batch size and device from any available tensor
+        batch_size = 1
+        device = torch.device("cpu")
+
+        for key in [
+            "reachability_features",
+            "game_state",
+            "player_frame",
+            "global_view",
+        ]:
+            if key in obs:
+                val = obs[key]
+                if isinstance(val, (torch.Tensor, np.ndarray)):
+                    if hasattr(val, "shape") and len(val.shape) > 0:
+                        batch_size = val.shape[0]
+                    if isinstance(val, torch.Tensor):
+                        device = val.device
+                    break
+
+        # Ensure all required keys exist with proper defaults
+        complete_obs = {}
+
+        # Copy existing keys, converting numpy to tensor if needed
+        for key, value in obs.items():
+            complete_obs[key] = value.to(device)
+
+        # Add missing required keys with defaults
+        if "reachability_features" not in complete_obs:
+            complete_obs["reachability_features"] = torch.zeros(
+                batch_size, 8, dtype=torch.float32, device=device
+            )
+
+        if "switch_states" not in complete_obs:
+            complete_obs["switch_states"] = torch.zeros(
+                batch_size, 5, dtype=torch.float32, device=device
+            )
+
+        if "ninja_position" not in complete_obs:
+            complete_obs["ninja_position"] = torch.zeros(
+                batch_size, 2, dtype=torch.float32, device=device
+            )
+
+        if "time_remaining" not in complete_obs:
+            complete_obs["time_remaining"] = torch.ones(
+                batch_size, 1, dtype=torch.float32, device=device
+            )
+
+        return complete_obs
+
     def forward(
         self,
         obs: Dict[str, torch.Tensor],
@@ -159,6 +231,9 @@ class HierarchicalPolicyNetwork(nn.Module):
                 - log_probs: [batch_size] log probabilities
                 - info: Dictionary with additional information
         """
+        # Ensure observation has all required keys
+        obs = self._ensure_required_obs_keys(obs)
+
         batch_size = obs["reachability_features"].shape[0]
 
         # Extract shared features
@@ -180,9 +255,22 @@ class HierarchicalPolicyNetwork(nn.Module):
             )
 
             # Update current subtask if changed
-            if new_subtask.item() != self.current_subtask.item():
-                self.transition_manager.update_subtask(Subtask(new_subtask.item()))
-                self.current_subtask = new_subtask
+            # For batched environments, use the first environment's subtask decision
+            # and apply it to all environments (shared high-level policy)
+            new_subtask_value = (
+                new_subtask[0].item() if batch_size > 1 else new_subtask.item()
+            )
+            current_subtask_value = self.current_subtask[0].item()
+
+            if new_subtask_value != current_subtask_value:
+                self.transition_manager.update_subtask(Subtask(new_subtask_value))
+                # Update current_subtask to match batch size
+                self.current_subtask = torch.full(
+                    (batch_size,),
+                    new_subtask_value,
+                    dtype=torch.long,
+                    device=new_subtask.device,
+                )
         else:
             # Keep current subtask
             subtask_log_prob = torch.zeros(batch_size, device=shared_features.device)
@@ -314,6 +402,9 @@ class HierarchicalPolicyNetwork(nn.Module):
         Returns:
             Value estimates [batch_size]
         """
+        # Ensure observation has all required keys
+        obs = self._ensure_required_obs_keys(obs)
+
         # Pass the full observation dict to the feature extractor
         shared_features = self.features_extractor(obs)
 
@@ -345,6 +436,9 @@ class HierarchicalPolicyNetwork(nn.Module):
         Returns:
             Tuple of (values, log_probs, entropy)
         """
+        # Ensure observation has all required keys
+        obs = self._ensure_required_obs_keys(obs)
+
         # Pass the full observation dict to the feature extractor
         shared_features = self.features_extractor(obs)
 
@@ -380,11 +474,17 @@ class HierarchicalPolicyNetwork(nn.Module):
         return values, log_probs, entropy
 
     def reset_episode(self):
-        """Reset policy state for new episode."""
+        """
+        Reset policy state for new episode.
+
+        Note: This maintains the current batch size. If you need to change batch size,
+        the next forward pass will automatically adjust via _ensure_required_obs_keys.
+        """
         self.step_count = 0
-        # Reset to NAVIGATE_TO_EXIT_SWITCH, maintaining device
-        self.current_subtask = torch.tensor(
-            [0], dtype=torch.long, device=self.current_subtask.device
+        # Reset to NAVIGATE_TO_EXIT_SWITCH, maintaining device and batch size
+        current_batch_size = self.current_subtask.shape[0]
+        self.current_subtask = torch.zeros(
+            current_batch_size, dtype=torch.long, device=self.current_subtask.device
         )
         self.transition_manager.reset()
 

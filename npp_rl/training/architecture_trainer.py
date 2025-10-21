@@ -191,26 +191,38 @@ class ArchitectureTrainer:
             self.policy_class = "MultiInputPolicy"
 
         # Default PPO hyperparameters (optimized for multi-GPU training)
-        # Scale batch size and learning rate for multi-GPU setup
-        base_batch_size = 256
-        base_learning_rate = 3e-4
-
-        # Scale up for multi-GPU training (using sqrt scaling for stability)
-        if self.world_size > 1:
-            scaled_batch_size = base_batch_size * self.world_size
-            scaled_learning_rate = base_learning_rate * (self.world_size**0.5)
+        # Only apply automatic scaling if hyperparameters not explicitly provided
+        # (e.g., from hardware profile)
+        if "batch_size" in ppo_kwargs and "learning_rate" in ppo_kwargs:
+            # Hyperparameters explicitly provided (likely from hardware profile)
+            # Use them directly without automatic scaling
             logger.info(
-                f"Scaling hyperparameters for {self.world_size} GPUs: "
-                f"batch_size={scaled_batch_size}, lr={scaled_learning_rate:.2e}"
+                "Using explicitly provided hyperparameters "
+                "(automatic multi-GPU scaling skipped)"
             )
+            default_batch_size = ppo_kwargs.get("batch_size", 256)
+            default_learning_rate = ppo_kwargs.get("learning_rate", 3e-4)
         else:
-            scaled_batch_size = base_batch_size
-            scaled_learning_rate = base_learning_rate
+            # Apply automatic scaling for multi-GPU training
+            base_batch_size = 256
+            base_learning_rate = 3e-4
+
+            # Scale up for multi-GPU training (using sqrt scaling for stability)
+            if self.world_size > 1:
+                default_batch_size = base_batch_size * self.world_size
+                default_learning_rate = base_learning_rate * (self.world_size**0.5)
+                logger.info(
+                    f"Scaling hyperparameters for {self.world_size} GPUs: "
+                    f"batch_size={default_batch_size}, lr={default_learning_rate:.2e}"
+                )
+            else:
+                default_batch_size = base_batch_size
+                default_learning_rate = base_learning_rate
 
         default_hyperparams = {
-            "learning_rate": scaled_learning_rate,
-            "n_steps": 2048,  # Increased for better sample efficiency with more envs
-            "batch_size": scaled_batch_size,
+            "learning_rate": default_learning_rate,
+            "n_steps": 1024,  # Increased for better sample efficiency with more envs
+            "batch_size": default_batch_size,
             "gamma": 0.999,
             "gae_lambda": 0.998,
             "clip_range": 0.2,
@@ -223,8 +235,16 @@ class ArchitectureTrainer:
             "device": f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         }
 
-        # Merge with provided hyperparameters
+        # Merge with provided hyperparameters (ppo_kwargs override defaults)
         self.hyperparams = {**default_hyperparams, **ppo_kwargs}
+
+        # Log final hyperparameters being used
+        logger.info("Final PPO hyperparameters:")
+        logger.info(f"  Learning rate: {self.hyperparams['learning_rate']:.2e}")
+        logger.info(f"  Batch size: {self.hyperparams['batch_size']}")
+        logger.info(f"  N steps: {self.hyperparams['n_steps']}")
+        logger.info(f"  Gamma: {self.hyperparams['gamma']}")
+        logger.info(f"  GAE lambda: {self.hyperparams['gae_lambda']}")
 
         # Store pretrained checkpoint path for later loading
         self.pretrained_checkpoint = pretrained_checkpoint

@@ -283,6 +283,7 @@ def train_architecture(
     pretrained_checkpoint: str = None,
     condition_name: str = "",
     device_id: int = 0,
+    hardware_profile=None,
 ) -> dict:
     """Train a single architecture configuration.
 
@@ -294,6 +295,7 @@ def train_architecture(
         pretrained_checkpoint: Optional pretrained checkpoint path
         condition_name: Condition name (e.g., "with_pretrain")
         device_id: GPU device ID for this process
+        hardware_profile: Optional hardware profile with optimized hyperparameters
 
     Returns:
         Training results dictionary
@@ -352,8 +354,21 @@ def train_architecture(
             curriculum_kwargs=curriculum_kwargs,
         )
 
+        # Build PPO hyperparameters from hardware profile
+        ppo_kwargs = {}
+        if hardware_profile:
+            logger.info(
+                f"Applying hardware profile hyperparameters: {hardware_profile.name}"
+            )
+            ppo_kwargs["batch_size"] = hardware_profile.batch_size
+            ppo_kwargs["n_steps"] = hardware_profile.n_steps
+            ppo_kwargs["learning_rate"] = hardware_profile.learning_rate
+            logger.info(f"  Batch size: {ppo_kwargs['batch_size']}")
+            logger.info(f"  N steps: {ppo_kwargs['n_steps']}")
+            logger.info(f"  Learning rate: {ppo_kwargs['learning_rate']:.2e}")
+
         # Setup model
-        trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint)
+        trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs)
 
         # Setup environments (use per-GPU environment count)
         trainer.setup_environments(
@@ -605,6 +620,7 @@ def main():
                 args=args,
                 pretrained_checkpoint=pretrained_checkpoint,
                 condition_name=condition_name if args.test_pretraining else "",
+                hardware_profile=hardware_profile,
             )
             all_results.append(result)
 

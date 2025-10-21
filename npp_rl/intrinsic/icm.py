@@ -192,12 +192,14 @@ class ICMNetwork(nn.Module):
             obs_i = self._extract_single_observation(observations, i)
 
             # Get reachability analysis from nclone
+            # Use dict version of switch_states for reachability systems
+            switch_states = obs_i.get("switch_states_dict", obs_i.get("switch_states", {}))
             reward_info = (
                 self.reachability_calculator.calculate_reachability_aware_reward(
                     player_x=obs_i.get("player_x", 0.0),
                     player_y=obs_i.get("player_y", 0.0),
                     level_data=obs_i.get("level_data"),
-                    switch_states=obs_i.get("switch_states", {}),
+                    switch_states=switch_states,
                 )
             )
 
@@ -298,11 +300,14 @@ class ICMNetwork(nn.Module):
         # Extract first observation
         obs = self._extract_single_observation(observations, 0)
 
+        # Use dict version of switch_states for reachability systems
+        switch_states = obs.get("switch_states_dict", obs.get("switch_states", {}))
+
         # Get compact features (8-dimensional)
         compact_features = self.reachability_calculator.extract_compact_features(
             level_data=obs.get("level_data"),
             player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
-            switch_states=obs.get("switch_states", {}),
+            switch_states=switch_states,
             entities=obs.get("entities", []),
         )
 
@@ -310,7 +315,7 @@ class ICMNetwork(nn.Module):
         frontiers = self.reachability_calculator.get_frontier_information(
             level_data=obs.get("level_data"),
             player_position=(obs.get("player_x", 0.0), obs.get("player_y", 0.0)),
-            switch_states=obs.get("switch_states", {}),
+            switch_states=switch_states,
         )
 
         return {

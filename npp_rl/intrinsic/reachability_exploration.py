@@ -339,7 +339,8 @@ def extract_reachability_info_from_observations(
     player_x = observations.get("player_x")
     player_y = observations.get("player_y")
     level_data = observations.get("level_data")
-    switch_states = observations.get("switch_states", {})
+    # Use dict version of switch_states for reachability systems
+    switch_states = observations.get("switch_states_dict", observations.get("switch_states", {}))
     entities = observations.get("entities", [])
 
     if player_x is None or player_y is None:
