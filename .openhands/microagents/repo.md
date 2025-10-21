@@ -140,7 +140,7 @@ pip install -r requirements.txt
 python scripts/list_architectures.py
 
 # Available architectures:
-# - full_hgt: Full HGT with all modalities (temporal frames, global view, graph, game state, reachability)
+# - full_hgt: Full HGT with all modalities (player frame, global view, graph, game state, reachability)
 # - vision_free: Vision-free architecture (graph, game state, reachability only)
 # - gat: Graph Attention Network
 # - gcn: Graph Convolutional Network

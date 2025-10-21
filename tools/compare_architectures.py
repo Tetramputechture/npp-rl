@@ -46,8 +46,8 @@ def create_observation_space() -> SpacesDict:
     """
     return SpacesDict(
         {
-            "player_frame": Box(low=0, high=255, shape=(12, 84, 84), dtype="uint8"),
-            "global_view": Box(low=0, high=255, shape=(176, 100), dtype="uint8"),
+            "player_frame": Box(low=0, high=255, shape=(84, 84, 1), dtype="uint8"),
+            "global_view": Box(low=0, high=255, shape=(176, 100, 1), dtype="uint8"),
             "game_state": Box(
                 low=-float("inf"), high=float("inf"), shape=(30,), dtype="float32"
             ),

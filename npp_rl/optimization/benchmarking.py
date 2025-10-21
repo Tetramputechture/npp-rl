@@ -359,11 +359,11 @@ def create_mock_observations(
         Dictionary of mock observations matching NPP-RL observation space
     """
     observations = {
-        # Temporal frames: [batch, 12, 84, 84]
-        "player_frame": torch.randint(0, 256, (batch_size, 12, 84, 84), dtype=torch.uint8, device=device),
+        # Player frame: [batch, 84, 84, 1] (single grayscale frame)
+        "player_frame": torch.randint(0, 256, (batch_size, 84, 84, 1), dtype=torch.uint8, device=device),
         
-        # Global view: [batch, 176, 100]
-        "global_view": torch.randint(0, 256, (batch_size, 176, 100), dtype=torch.uint8, device=device),
+        # Global view: [batch, 176, 100, 1] (single grayscale frame)
+        "global_view": torch.randint(0, 256, (batch_size, 176, 100, 1), dtype=torch.uint8, device=device),
         
         # Game state: [batch, 30]
         "game_state": torch.randn(batch_size, 30, device=device),

@@ -31,7 +31,7 @@ class QualityMetrics:
     invalid_samples: int
     action_distribution: Dict[int, int]
     observation_stats: Dict[str, Dict[str, float]]
-    temporal_consistency: float
+    sequence_consistency: float
     completeness_score: float
     quality_score: float
 

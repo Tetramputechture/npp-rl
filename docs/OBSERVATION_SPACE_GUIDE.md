@@ -8,11 +8,13 @@ This guide explains how the NPP-RL project integrates with the comprehensive obs
 
 The nclone environment provides 5 observation modalities:
 
-1. **Visual**: Player-centered frames (84×84×12) and global view (176×100×1)
-2. **Game State**: Physics vector (26 core + entity states)
+1. **Visual**: Player-centered frame (84×84×1 grayscale) and global view (176×100×1 grayscale)
+2. **Game State**: Physics vector (26 core + entity states) - includes velocity for Markov property
 3. **Reachability**: Path planning features (8 dimensions)
 4. **Graph**: GNN-compatible structure (nodes, edges, masks)
 5. **Entity Positions**: Direct position information (6 dimensions)
+
+**Note**: Uses single-frame grayscale system with explicit velocity for 6.66x faster performance.
 
 See [nclone/OBSERVATION_SPACE_README.md](../../nclone/OBSERVATION_SPACE_README.md) for detailed specifications.
 
@@ -45,7 +47,7 @@ class HGTMultiModalExtractor(BaseFeaturesExtractor):
     Multimodal feature extractor with Heterogeneous Graph Transformer.
     
     Supports:
-    - 3D CNN for temporal frames
+    - 2D CNN for single grayscale frame
     - 2D CNN for global view
     - MLP for game state + reachability
     - HGT for graph representation
@@ -56,7 +58,7 @@ class HGTMultiModalExtractor(BaseFeaturesExtractor):
         
         # Visual encoders
         if 'player_frame' in observation_space.spaces:
-            self.cnn_temporal = self._build_3d_cnn()
+            self.cnn_player_frame = self._build_2d_cnn()
         
         if 'global_view' in observation_space.spaces:
             self.cnn_global = self._build_2d_cnn()
@@ -208,56 +210,6 @@ This will train each architecture and generate comparison metrics:
 - Final performance statistics
 - Wall-clock time comparisons
 - Architecture-specific insights
-
-## Custom Feature Extractors
-
-To create a custom feature extractor:
-
-```python
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-import torch.nn as nn
-
-class CustomExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space, features_dim=512):
-        super().__init__(observation_space, features_dim)
-        
-        # Build your custom architecture
-        # Access observation spaces:
-        #   observation_space['player_frame'].shape
-        #   observation_space['game_state'].shape
-        #   observation_space['graph_node_feats'].shape
-        # etc.
-        
-        self._features_dim = features_dim
-    
-    def forward(self, observations):
-        # Process observations and return features
-        # Must return tensor of shape (batch_size, features_dim)
-        pass
-```
-
-Register in architecture configs:
-
-```python
-# In npp_rl/training/architecture_configs.py
-
-def create_custom_config():
-    return ArchitectureConfig(
-        name="custom",
-        description="Custom architecture",
-        modalities=ModalityConfig(
-            use_temporal_frames=True,
-            use_global_view=True,
-            use_graph=True,
-            use_game_state=True,
-            use_reachability=True
-        ),
-        features_dim=512,
-        # ... other config
-    )
-
-ARCHITECTURE_REGISTRY["custom"] = create_custom_config()
-```
 
 ## Information Completeness
 

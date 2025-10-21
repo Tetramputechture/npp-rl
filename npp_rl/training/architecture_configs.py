@@ -35,8 +35,8 @@ class FusionType(Enum):
 class ModalityConfig:
     """Configuration for which input modalities to use."""
 
-    use_temporal_frames: bool = True  # 3D CNN on 84x84x12 temporal frames
-    use_global_view: bool = True  # 2D CNN on 176x100 global view
+    use_player_frame: bool = True  # 2D CNN on 84x84x1 single grayscale frame
+    use_global_view: bool = True  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
         True  # Game state vector (26 features after redundancy removal)
@@ -46,8 +46,8 @@ class ModalityConfig:
     def get_enabled_modalities(self) -> List[str]:
         """Return list of enabled modality names."""
         modalities = []
-        if self.use_temporal_frames:
-            modalities.append("temporal")
+        if self.use_player_frame:
+            modalities.append("player_frame")
         if self.use_global_view:
             modalities.append("global")
         if self.use_graph:
@@ -62,7 +62,7 @@ class ModalityConfig:
         """Return count of enabled modalities."""
         return sum(
             [
-                self.use_temporal_frames,
+                self.use_player_frame,
                 self.use_global_view,
                 self.use_graph,
                 self.use_game_state,
@@ -102,11 +102,12 @@ class GraphConfig:
 class VisualConfig:
     """Configuration for visual processing (CNNs)."""
 
-    # 3D CNN (temporal frames)
-    temporal_output_dim: int = 512
-    temporal_channels: tuple[int, int, int] = (32, 64, 128)
+    # 2D CNN (single grayscale frame - player view)
+    # Changed from 3D CNN (12 frames) for 6.66x speedup and 50% memory reduction
+    player_frame_output_dim: int = 512
+    player_frame_channels: tuple[int, int, int] = (32, 64, 128)
 
-    # 2D CNN (global view)
+    # 2D CNN (global view - also grayscale now)
     global_output_dim: int = 256
     global_channels: tuple[int, int, int] = (32, 64, 128)
 
@@ -178,22 +179,22 @@ def create_full_hgt_config() -> ArchitectureConfig:
     """Full HGT architecture with all modalities (current baseline)."""
     return ArchitectureConfig(
         name="full_hgt",
-        description="Full HGT with all modalities: temporal frames, global view, graph, state, reachability",
+        description="Full HGT with all modalities: player frame, global view, graph, state, reachability",
         detailed_description="""
         Baseline architecture with maximum capacity. Uses all modalities for comprehensive context.
         
         Modalities:
-        - Temporal Frames: 512-dim (84x84x12 stack for local spatial/temporal awareness)
-        - Global View: 256-dim (176x100 full level for strategic planning)
+        - Player Frame: 512-dim (84x84x1 single grayscale frame for local spatial awareness)
+        - Global View: 256-dim (176x100x1 grayscale full level for strategic planning)
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads (heterogeneous types)
-        - Game State: 128-dim (position, velocity, physics)
+        - Game State: 128-dim (position, velocity, physics - velocity satisfies Markov property)
         - Reachability: 8-dim (navigation planning)
         
         Multi-head cross-modal attention fusion (8 heads) learns complex interactions between modalities.
         Highest capacity but largest computational cost. Feature dim: 512.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -222,7 +223,7 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
         Lighter HGT variant balancing performance and efficiency. All modalities with reduced capacity.
         
         Modalities (vs full_hgt):
-        - Temporal Frames: 256-dim (vs 512)
+        - Player Frame: 256-dim (vs 512, single grayscale)
         - Global View: 128-dim (vs 256)
         - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
         - Game State: 64-dim (vs 128)
@@ -232,7 +233,7 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
         with limited resources.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -246,7 +247,7 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
             num_heads=4,
         ),
         visual=VisualConfig(
-            temporal_output_dim=256,
+            player_frame_output_dim=256,
             global_output_dim=128,
         ),
         state=StateConfig(hidden_dim=64, output_dim=64),
@@ -267,7 +268,7 @@ def create_gat_config() -> ArchitectureConfig:
         Homogeneous graph alternative to HGT. All modalities with GAT for graph processing.
         
         Modalities:
-        - Temporal Frames: 512-dim
+        - Player Frame: 512-dim (84x84x1 grayscale)
         - Global View: 256-dim
         - Graph (GAT): 3 layers, 256 hidden, 8 heads (homogeneous - no type-specific parameters)
         - Game State: 128-dim
@@ -278,7 +279,7 @@ def create_gat_config() -> ArchitectureConfig:
         vs homogeneous graph processing.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -308,7 +309,7 @@ def create_gcn_config() -> ArchitectureConfig:
         Simplest graph architecture. All modalities with basic GCN (mean aggregation only).
         
         Modalities:
-        - Temporal Frames: 512-dim
+        - Player Frame: 512-dim (84x84x1 grayscale)
         - Global View: 256-dim
         - Graph (GCN): 3 layers, 256 hidden (no attention, no edge features, no type embeddings)
         - Game State: 128-dim
@@ -319,7 +320,7 @@ def create_gcn_config() -> ArchitectureConfig:
         basic convolutions.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -349,7 +350,7 @@ def create_mlp_baseline_config() -> ArchitectureConfig:
         Non-graph baseline measuring GNN contribution. Vision and state only.
         
         Modalities:
-        - Temporal Frames: 512-dim
+        - Player Frame: 512-dim (84x84x1 grayscale)
         - Global View: 256-dim
         - Graph: DISABLED
         - Game State: 128-dim
@@ -359,7 +360,7 @@ def create_mlp_baseline_config() -> ArchitectureConfig:
         or if spatial relationships can be learned from visual inputs alone.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=False,  # No graph processing
             use_game_state=True,
@@ -382,7 +383,7 @@ def create_vision_free_config() -> ArchitectureConfig:
         Vision-free with symbolic representations only. 5-10x faster inference than full_hgt.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
         - Game State: 128-dim
@@ -393,7 +394,7 @@ def create_vision_free_config() -> ArchitectureConfig:
         reduced spatial awareness of fine-grained obstacles.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -421,7 +422,7 @@ def create_no_global_view_config() -> ArchitectureConfig:
         Ablation removing global view to test if local frames + graph suffice for navigation.
         
         Modalities:
-        - Temporal Frames: 512-dim (84x84x12 local view)
+        - Player Frames: 512-dim (84x84x1 grayscale local view)
         - Global View: DISABLED
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
         - Game State: 128-dim
@@ -431,7 +432,7 @@ def create_no_global_view_config() -> ArchitectureConfig:
         Multi-head attention fusion (8 heads). Feature dim: 512.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=False,
             use_graph=True,
             use_game_state=True,
@@ -459,7 +460,7 @@ def create_vision_free_gat_config() -> ArchitectureConfig:
         Vision-free with GAT for lighter computation than HGT. Symbolic only.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (GAT): 3 layers, 256 hidden, 8 heads (homogeneous)
         - Game State: 128-dim
@@ -470,7 +471,7 @@ def create_vision_free_gat_config() -> ArchitectureConfig:
         necessary in vision-free settings.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -500,7 +501,7 @@ def create_vision_free_gcn_config() -> ArchitectureConfig:
         Fastest architecture. Vision-free with simplest graph processing. 10-15x faster than full_hgt.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (GCN): 3 layers, 256 hidden (mean aggregation, no attention/edge features/types)
         - Game State: 128-dim
@@ -510,7 +511,7 @@ def create_vision_free_gcn_config() -> ArchitectureConfig:
         real-time deployment where milliseconds matter. Trades performance for extreme efficiency.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -540,7 +541,7 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
         Vision-free with reduced HGT. Balances speed and capability between vision_free and vision_free_gcn.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
         - Game State: 64-dim (vs 128)
@@ -551,7 +552,7 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
         For resource-constrained deployment needing heterogeneous reasoning.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,

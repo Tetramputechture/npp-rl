@@ -15,14 +15,14 @@ triggers: ['machine learning', 'reinforcement learning', 'neural network', 'mode
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch.nn as nn
 
-class 3DFeatureExtractor(BaseFeaturesExtractor):
+class MultimodalFeatureExtractor(BaseFeaturesExtractor):
     """
-    3D CNN feature extractor for temporal N++ observations.
+    2D CNN feature extractor for N++ observations.
     
-    Based on research showing 37.9% improvement with:
-    - 12-frame temporal stacking (Cobbe et al., 2020)
-    - 3D convolutions for spatiotemporal features (Ji et al., 2013)
-    - Multi-modal fusion (visual + physics state)
+    Key design:
+    - Single grayscale frame (84x84) with explicit velocity in game state
+    - 2D convolutions for spatial features
+    - Multi-modal fusion (visual + physics state + graph)
     """
     
     def __init__(self, observation_space: SpacesDict, features_dim: int = 512):

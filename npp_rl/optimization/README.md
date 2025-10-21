@@ -16,7 +16,7 @@ Defines standardized configurations for different architecture variants:
 - Local frames only
 
 Each configuration specifies:
-- Which modalities to use (temporal, global, graph, state, reachability)
+- Which modalities to use (player frame, global view, graph, state, reachability)
 - Graph architecture type and parameters
 - Fusion mechanism
 - Feature dimensions
@@ -91,32 +91,4 @@ python tools/compare_architectures.py --architectures full_hgt vision_free
 
 # Save results
 python tools/compare_architectures.py --all --save-results results/
-```
-
-## Adding Custom Architectures
-
-1. Create configuration in `architecture_configs.py`:
-```python
-def create_my_architecture() -> ArchitectureConfig:
-    return ArchitectureConfig(
-        name="my_arch",
-        description="My custom architecture",
-        modalities=ModalityConfig(
-            use_temporal_frames=True,
-            use_global_view=False,
-            use_graph=True,
-            use_game_state=True,
-            use_reachability=True,
-        ),
-        graph=GraphConfig(architecture=GraphArchitectureType.GAT),
-        # ... other configs
-        features_dim=512,
-    )
-
-ARCHITECTURE_REGISTRY["my_arch"] = create_my_architecture()
-```
-
-2. Use in comparison:
-```bash
-python tools/compare_architectures.py --architectures my_arch full_hgt
 ```

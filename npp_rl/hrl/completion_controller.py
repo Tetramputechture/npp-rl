@@ -8,7 +8,6 @@ on reachability analysis and level completion heuristics.
 
 import time
 from typing import Dict, Any, Optional, Tuple
-from enum import Enum
 import numpy as np
 
 from nclone.planning.completion_planner import LevelCompletionPlanner
