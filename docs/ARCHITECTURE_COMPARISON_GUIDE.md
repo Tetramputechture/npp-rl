@@ -245,47 +245,6 @@ python tools/compare_architectures.py --architectures full_hgt vision_free no_gl
 2. Select winner or hybrid approach
 3. Fine-tune selected architecture
 
-## Extending the Framework
-
-### Adding New Architectures
-
-Create new configuration in `npp_rl/training/architecture_configs.py`:
-
-```python
-def create_custom_config() -> ArchitectureConfig:
-    """Your custom architecture."""
-    return ArchitectureConfig(
-        name="custom",
-        description="Your description",
-        modalities=ModalityConfig(
-            use_temporal_frames=True,
-            use_global_view=False,
-            # ... configure modalities
-        ),
-        graph=GraphConfig(
-            architecture=GraphArchitectureType.GAT,
-            # ... configure graph
-        ),
-        # ... other configs
-        features_dim=512,
-    )
-
-# Add to registry
-ARCHITECTURE_REGISTRY["custom"] = create_custom_config()
-```
-
-### Custom Graph Architectures
-
-Implement new graph encoder in `npp_rl/models/simplified_gnn.py` or separate file:
-
-```python
-class CustomGraphEncoder(nn.Module):
-    def forward(self, node_features, edge_index, node_mask=None):
-        # Your graph processing logic
-        return node_embeddings, graph_embedding
-```
-
-Update `configurable_extractor.py` to support new architecture type.
 
 ## Troubleshooting
 
@@ -302,22 +261,3 @@ Ensure NPP-RL is in Python path:
 ```bash
 export PYTHONPATH=/path/to/npp-rl:$PYTHONPATH
 ```
-
-### Missing nclone
-
-The architecture comparison uses mock data and doesn't require nclone. For actual training, install nclone as sibling directory.
-
-## Next Steps
-
-1. **Run baseline comparison**: Test all architectures to establish efficiency baselines
-2. **Prepare training set**: Create standardized set of N++ levels for training comparison (TODO: see note in code)
-3. **Train selected architectures**: Train top 3-5 candidates from efficiency comparison
-4. **Full evaluation**: Evaluate on comprehensive test suite
-6. **Fine-tuning**: Optimize selected architecture for production
-
-## References
-
-- Task 3.1 specification: `docs/tasks/PHASE_3_ROBUSTNESS_OPTIMIZATION.md`
-- Architecture configs: `npp_rl/training/architecture_configs.py`
-- Comparison script: `tools/compare_architectures.py`
-- Benchmarking: `npp_rl/optimization/benchmarking.py`

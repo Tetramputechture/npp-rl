@@ -47,26 +47,6 @@ HYPERPARAMETERS = {
 }
 ```
 
-### Forward Pass Implementation
-
-- Use clear variable names that describe the data flow
-- Add comments for complex tensor transformations
-- Handle different input shapes gracefully
-- Include shape information in comments
-
-```python
-def forward(self, observations: dict) -> torch.Tensor:
-    # Process player frame with 3D convolutions
-    # Input: (batch, height, width, temporal_frames)
-    # Need: (batch, 1, temporal_frames, height, width) for 3D conv
-    player_frame = observations['player_frame'].permute(0, 3, 1, 2).float() / 255.0
-    player_frame = player_frame.unsqueeze(1)  # Add channel dimension
-    
-    player_features = self.player_conv3d(player_frame)  # (B, C, T, H, W)
-    player_features = self.player_pool(player_features)  # (B, C, 1, 4, 4)
-    player_features = player_features.view(player_features.size(0), -1)  # Flatten
-```
-
 ## Model Testing and Validation
 
 ### Architectural Tests

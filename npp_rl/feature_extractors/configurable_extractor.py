@@ -1,14 +1,9 @@
 """
-Configurable multimodal feature extractor for architecture comparison (Task 3.1).
+Configurable multimodal feature extractor for architecture comparison.
 
 This extractor allows enabling/disabling different modalities (player frames,
 global view, graph, state, reachability) to test which features are necessary
 for effective N++ learning.
-
-Updated for single-frame grayscale system (84x84x1) - optimized for 6.66x faster
-performance vs previous 12-frame stacking system.
-
-Based on Task 3.1 vision-free architecture analysis requirements.
 """
 
 import torch
@@ -43,10 +38,6 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     - Reachability (8-dim vector)
 
     This enables systematic comparison of architecture variants.
-    
-    Note: Updated from 12-frame temporal stacking to single-frame grayscale
-    for 6.66x faster performance. Velocity information is now provided
-    explicitly in game_state, satisfying the Markov property.
     """
 
     def __init__(self, observation_space: gym.spaces.Dict, config: ArchitectureConfig):
@@ -62,7 +53,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self.modalities = config.modalities
 
         # Track which modalities are actually available
-        self.has_temporal = "player_frame" in observation_space.spaces
+        self.has_player_frame = "player_frame" in observation_space.spaces
         self.has_global = "global_view" in observation_space.spaces
         # Graph observations come as separate keys (graph_node_feats, graph_edge_index, etc.)
         self.has_graph = "graph_node_feats" in observation_space.spaces
@@ -70,7 +61,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self.has_reachability = "reachability_features" in observation_space.spaces
 
         # Initialize enabled modality processors
-        self.temporal_cnn = None
+        self.player_frame_cnn = None
         self.global_cnn = None
         self.graph_encoder = None
         self.state_mlp = None
@@ -79,9 +70,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         feature_dims = []
 
         # 1. Player frame processing (2D CNN for single grayscale frame)
-        if self.modalities.use_temporal_frames and self.has_temporal:
-            self.temporal_cnn = self._create_player_frame_cnn(config.visual)
-            feature_dims.append(config.visual.temporal_output_dim)
+        if self.has_player_frame:
+            self.player_frame_cnn = self._create_player_frame_cnn(config.visual)
+            feature_dims.append(config.visual.player_frame_output_dim)
 
         # 2. Global view processing (2D CNN)
         if self.modalities.use_global_view and self.has_global:
@@ -120,50 +111,52 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     def _create_player_frame_cnn(self, visual_config) -> nn.Module:
         """
         Create 2D CNN for single grayscale frame processing.
-        
+
         Updated from 3D CNN (12 frames) to 2D CNN (1 frame) for:
         - 6.66x faster performance
         - 50% memory reduction
         - Simpler architecture (Markov property satisfied with game_state)
-        
+
         Input: [batch, 1, 84, 84] (grayscale frame)
-        Output: [batch, temporal_output_dim] features
+        Output: [batch, player_frame_output_dim] features
         """
         return nn.Sequential(
             # Input: [batch, 1, 84, 84] (grayscale)
             nn.Conv2d(
                 1,
-                visual_config.temporal_channels[0],
+                visual_config.player_frame_channels[0],
                 kernel_size=8,
                 stride=4,
                 padding=0,
             ),
-            nn.BatchNorm2d(visual_config.temporal_channels[0]),
+            nn.BatchNorm2d(visual_config.player_frame_channels[0]),
             nn.ReLU(inplace=True),
             nn.Dropout2d(visual_config.cnn_dropout),
             nn.Conv2d(
-                visual_config.temporal_channels[0],
-                visual_config.temporal_channels[1],
+                visual_config.player_frame_channels[0],
+                visual_config.player_frame_channels[1],
                 kernel_size=4,
                 stride=2,
                 padding=0,
             ),
-            nn.BatchNorm2d(visual_config.temporal_channels[1]),
+            nn.BatchNorm2d(visual_config.player_frame_channels[1]),
             nn.ReLU(inplace=True),
             nn.Dropout2d(visual_config.cnn_dropout),
             nn.Conv2d(
-                visual_config.temporal_channels[1],
-                visual_config.temporal_channels[2],
+                visual_config.player_frame_channels[1],
+                visual_config.player_frame_channels[2],
                 kernel_size=3,
                 stride=1,
                 padding=0,
             ),
-            nn.BatchNorm2d(visual_config.temporal_channels[2]),
+            nn.BatchNorm2d(visual_config.player_frame_channels[2]),
             nn.ReLU(inplace=True),
             nn.Flatten(),
             nn.Linear(
-                visual_config.temporal_channels[2] * 7 * 7,  # After convolutions: 7x7 feature map
-                visual_config.temporal_output_dim,
+                visual_config.player_frame_channels[2]
+                * 7
+                * 7,  # After convolutions: 7x7 feature map
+                visual_config.player_frame_output_dim,
             ),
             nn.ReLU(),
             nn.Dropout(0.2),
@@ -329,19 +322,21 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         features = []
 
         # Process player frame (single grayscale frame)
-        if self.temporal_cnn is not None and "player_frame" in observations:
-            temporal_obs = observations["player_frame"]
+        if self.player_frame_cnn is not None and "player_frame" in observations:
+            player_frame_obs = observations["player_frame"]
             # Handle different input formats
-            if temporal_obs.dim() == 4:
+            if player_frame_obs.dim() == 4:
                 # [batch, H, W, 1] -> [batch, 1, H, W]
-                if temporal_obs.shape[-1] == 1:
-                    temporal_obs = temporal_obs.permute(0, 3, 1, 2)
+                if player_frame_obs.shape[-1] == 1:
+                    player_frame_obs = player_frame_obs.permute(0, 3, 1, 2)
                 # [batch, 1, H, W] -> already correct
-            elif temporal_obs.dim() == 3:
+            elif player_frame_obs.dim() == 3:
                 # [batch, H, W] -> [batch, 1, H, W]
-                temporal_obs = temporal_obs.unsqueeze(1)
-            temporal_features = self.temporal_cnn(temporal_obs.float() / 255.0)
-            features.append(temporal_features)
+                player_frame_obs = player_frame_obs.unsqueeze(1)
+            player_frame_features = self.player_frame_cnn(
+                player_frame_obs.float() / 255.0
+            )
+            features.append(player_frame_features)
 
         # Process global view
         if self.global_cnn is not None and "global_view" in observations:

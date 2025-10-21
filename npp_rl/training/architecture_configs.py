@@ -35,7 +35,7 @@ class FusionType(Enum):
 class ModalityConfig:
     """Configuration for which input modalities to use."""
 
-    use_temporal_frames: bool = True  # 2D CNN on 84x84x1 single grayscale frame
+    use_player_frame: bool = True  # 2D CNN on 84x84x1 single grayscale frame
     use_global_view: bool = True  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
@@ -46,8 +46,8 @@ class ModalityConfig:
     def get_enabled_modalities(self) -> List[str]:
         """Return list of enabled modality names."""
         modalities = []
-        if self.use_temporal_frames:
-            modalities.append("temporal")
+        if self.use_player_frame:
+            modalities.append("player_frame")
         if self.use_global_view:
             modalities.append("global")
         if self.use_graph:
@@ -62,7 +62,7 @@ class ModalityConfig:
         """Return count of enabled modalities."""
         return sum(
             [
-                self.use_temporal_frames,
+                self.use_player_frame,
                 self.use_global_view,
                 self.use_graph,
                 self.use_game_state,
@@ -104,8 +104,8 @@ class VisualConfig:
 
     # 2D CNN (single grayscale frame - player view)
     # Changed from 3D CNN (12 frames) for 6.66x speedup and 50% memory reduction
-    temporal_output_dim: int = 512
-    temporal_channels: tuple[int, int, int] = (32, 64, 128)
+    player_frame_output_dim: int = 512
+    player_frame_channels: tuple[int, int, int] = (32, 64, 128)
 
     # 2D CNN (global view - also grayscale now)
     global_output_dim: int = 256
@@ -196,7 +196,7 @@ def create_full_hgt_config() -> ArchitectureConfig:
         Note: Updated from 12-frame stacking to single frame for 6.66x speedup and 50% memory reduction.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -235,7 +235,7 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
         with limited resources.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -249,7 +249,7 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
             num_heads=4,
         ),
         visual=VisualConfig(
-            temporal_output_dim=256,
+            player_frame_output_dim=256,
             global_output_dim=128,
         ),
         state=StateConfig(hidden_dim=64, output_dim=64),
@@ -281,7 +281,7 @@ def create_gat_config() -> ArchitectureConfig:
         vs homogeneous graph processing.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -322,7 +322,7 @@ def create_gcn_config() -> ArchitectureConfig:
         basic convolutions.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=True,
             use_game_state=True,
@@ -362,7 +362,7 @@ def create_mlp_baseline_config() -> ArchitectureConfig:
         or if spatial relationships can be learned from visual inputs alone.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=True,
             use_graph=False,  # No graph processing
             use_game_state=True,
@@ -396,7 +396,7 @@ def create_vision_free_config() -> ArchitectureConfig:
         reduced spatial awareness of fine-grained obstacles.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -434,7 +434,7 @@ def create_no_global_view_config() -> ArchitectureConfig:
         Multi-head attention fusion (8 heads). Feature dim: 512.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=True,
+            use_player_frame=True,
             use_global_view=False,
             use_graph=True,
             use_game_state=True,
@@ -473,7 +473,7 @@ def create_vision_free_gat_config() -> ArchitectureConfig:
         necessary in vision-free settings.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -513,7 +513,7 @@ def create_vision_free_gcn_config() -> ArchitectureConfig:
         real-time deployment where milliseconds matter. Trades performance for extreme efficiency.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,
@@ -554,7 +554,7 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
         For resource-constrained deployment needing heterogeneous reasoning.
         """,
         modalities=ModalityConfig(
-            use_temporal_frames=False,  # No vision
+            use_player_frame=False,  # No vision
             use_global_view=False,  # No vision
             use_graph=True,
             use_game_state=True,

@@ -136,32 +136,6 @@ def test_movement_classifier_trajectory_calculator_consistency(self):
 ### Test Model Architecture
 
 ```python
-def test_3d_feature_extractor_handles_temporal_input(self):
-    """Test that 3D feature extractor processes temporal frames correctly."""
-    obs_space = SpacesDict({
-        'player_frame': Box(low=0, high=255, shape=(84, 84, 12), dtype=np.uint8),
-        'global_view': Box(low=0, high=255, shape=(176, 100, 1), dtype=np.uint8),
-        'game_state': Box(low=-np.inf, high=np.inf, shape=(32,), dtype=np.float32)
-    })
-    
-    extractor = 3DFeatureExtractor(obs_space, features_dim=512)
-    
-    # Test with realistic batch sizes
-    for batch_size in [1, 4, 16]:
-        mock_obs = {
-            'player_frame': torch.randint(0, 256, (batch_size, 84, 84, 12), dtype=torch.uint8),
-            'global_view': torch.randint(0, 256, (batch_size, 176, 100, 1), dtype=torch.uint8),
-            'game_state': torch.randn(batch_size, 32, dtype=torch.float32)
-        }
-        
-        with torch.no_grad():
-            features = extractor(mock_obs)
-        
-        # Test output properties
-        self.assertEqual(features.shape, (batch_size, 512))
-        self.assertTrue(torch.all(torch.isfinite(features)))
-        self.assertGreater(torch.norm(features), 0)  # Not all zeros
-
 def test_model_handles_different_input_ranges(self):
     """Test that models work with various input value ranges."""
     model = self.create_test_model()
