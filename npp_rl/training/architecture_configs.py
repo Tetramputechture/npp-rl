@@ -120,7 +120,7 @@ class StateConfig:
     """Configuration for state vector processing."""
 
     # Dimensions from nclone environment observations
-    game_state_dim: int = 30  # GAME_STATE_CHANNELS from nclone
+    game_state_dim: int = 26  # GAME_STATE_CHANNELS from nclone (ninja_state only, entity counts removed)
     reachability_dim: int = 8  # Reachability features from nclone
     hidden_dim: int = 128
     output_dim: int = 128
