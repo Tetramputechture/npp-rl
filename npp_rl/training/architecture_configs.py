@@ -179,7 +179,7 @@ def create_full_hgt_config() -> ArchitectureConfig:
     """Full HGT architecture with all modalities (current baseline)."""
     return ArchitectureConfig(
         name="full_hgt",
-        description="Full HGT with all modalities: temporal frames, global view, graph, state, reachability",
+        description="Full HGT with all modalities: player frame, global view, graph, state, reachability",
         detailed_description="""
         Baseline architecture with maximum capacity. Uses all modalities for comprehensive context.
         
@@ -192,8 +192,6 @@ def create_full_hgt_config() -> ArchitectureConfig:
         
         Multi-head cross-modal attention fusion (8 heads) learns complex interactions between modalities.
         Highest capacity but largest computational cost. Feature dim: 512.
-        
-        Note: Updated from 12-frame stacking to single frame for 6.66x speedup and 50% memory reduction.
         """,
         modalities=ModalityConfig(
             use_player_frame=True,

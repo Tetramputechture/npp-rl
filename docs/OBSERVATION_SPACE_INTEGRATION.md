@@ -148,7 +148,7 @@ result = reachability_sys.analyze_reachability(
 **Key Points**:
 - Uses OpenCV flood-fill (<1ms computation)
 - Provides connectivity information, NOT physics simulation
-- Agent learns movement dynamics from temporal frames
+- Agent learns movement dynamics from game state (explicit velocity and acceleration)
 - Integrated automatically in node features (indices 52-53)
 
 ## Best Practices
@@ -157,7 +157,7 @@ The observation space follows RL/ML best practices:
 
 ✅ **Normalized observations**: All features in [0, 1] range  
 ✅ **Minimal redundancy**: Removed 5 unused entity features (61 → 56 dims)  
-✅ **Temporal context**: single frame (velocity explicit in game_state)ing with 3D CNNs  
+✅ **Markov property satisfied**: Single frame with explicit velocity in game_state  
 ✅ **Spatial invariance**: CNNs for vision, GNNs for graphs  
 ✅ **Multi-modal fusion**: Specialized encoders + late fusion  
 ✅ **Markov property**: Sufficient information for optimal decisions  

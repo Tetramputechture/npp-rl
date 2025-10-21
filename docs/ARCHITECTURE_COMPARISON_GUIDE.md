@@ -12,7 +12,7 @@ The architecture comparison framework addresses these questions:
 
 2. **Vision-Free Learning**: Can the agent learn effectively without visual input by relying solely on graph, game state, and reachability features?
 
-3. **Modality Importance**: Which input modalities (temporal frames, global view, graph, state, reachability) contribute most to learning?
+3. **Modality Importance**: Which input modalities (player frame, global view, graph, state, reachability) contribute most to learning?
 
 4. **Efficiency vs Performance Trade-offs**: What is the optimal balance between model complexity and inference speed?
 
@@ -22,7 +22,7 @@ The framework includes 8 predefined architecture variants:
 
 ### 1. Full HGT (`full_hgt`)
 - **Description**: Full Heterogeneous Graph Transformer with all modalities
-- **Modalities**: Temporal frames, global view, graph (HGT), game state, reachability
+- **Modalities**: Player frame, global view, graph (HGT), game state, reachability
 - **Use Case**: Current baseline architecture
 - **Expected**: Best performance but highest computational cost
 
@@ -57,14 +57,14 @@ The framework includes 8 predefined architecture variants:
 - **Expected**: 60-70% faster inference, uncertain performance impact
 
 ### 7. No Global View (`no_global_view`)
-- **Description**: Remove global view, keep local temporal frames (Scenario 1)
-- **Modalities**: Temporal frames, graph, state, reachability
+- **Description**: Remove global view, keep local player frame (Scenario 1)
+- **Modalities**: Player frame, graph, state, reachability
 - **Use Case**: Test if global view is redundant with graph
 - **Expected**: 30-40% faster, minimal performance loss
 
 ### 8. Local Frames Only (`local_frames_only`)
-- **Description**: Local temporal awareness + graph + state
-- **Modalities**: Temporal frames, graph, state, reachability
+- **Description**: Local spatial awareness + graph + state
+- **Modalities**: Player frame, graph, state, reachability
 - **Use Case**: Alternative to no_global_view
 - **Expected**: Similar to no_global_view
 

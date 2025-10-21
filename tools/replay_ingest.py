@@ -209,7 +209,7 @@ class ReplayValidator:
         if not frames:
             return False, ["Empty trajectory"]
 
-        # Check temporal consistency
+        # Check timestamp consistency
         timestamps = [f.timestamp for f in frames]
         if not all(
             timestamps[i] <= timestamps[i + 1] for i in range(len(timestamps) - 1)

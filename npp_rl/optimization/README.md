@@ -16,7 +16,7 @@ Defines standardized configurations for different architecture variants:
 - Local frames only
 
 Each configuration specifies:
-- Which modalities to use (temporal, global, graph, state, reachability)
+- Which modalities to use (player frame, global view, graph, state, reachability)
 - Graph architecture type and parameters
 - Fusion mechanism
 - Feature dimensions

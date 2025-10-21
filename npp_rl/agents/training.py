@@ -8,7 +8,7 @@ with support for multiple architecture variants (HGT, GAT, GCN, MLP baseline, et
 Key Features:
 - Configurable architecture system with 8 validated variants
 - Full HGT, Simplified HGT, GAT, GCN support
-- MLP baseline, vision-free, and temporal-only options
+- MLP baseline, vision-free, and local-frames-only options
 - Adaptive exploration with ICM and novelty detection
 - Comprehensive logging and evaluation
 

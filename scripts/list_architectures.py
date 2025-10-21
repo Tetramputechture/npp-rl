@@ -43,7 +43,7 @@ def main():
             # Show which modalities are enabled
             modalities = []
             if config.modalities.use_player_frame:
-                modalities.append("temporal frames")
+                modalities.append("player frame")
             if config.modalities.use_global_view:
                 modalities.append("global view")
             if config.modalities.use_graph:

@@ -32,7 +32,7 @@ class ConvLayerConfig:
 class CNNArchitectureConfig:
     """Complete CNN architecture configuration for multimodal processing."""
 
-    # 3D CNN layers for temporal visual processing
+    # 2D CNN layers for player frame processing
     conv3d_layer1: ConvLayerConfig
     conv3d_layer2: ConvLayerConfig
     conv3d_layer3: ConvLayerConfig
@@ -134,7 +134,7 @@ class HGTConfig:
 
 # CNN Architecture Configuration
 CNN_CONFIG = CNNArchitectureConfig(
-    # 3D CNN for temporal visual processing
+    # 2D CNN for player frame visual processing
     conv3d_layer1=ConvLayerConfig(
         in_channels=1,
         out_channels=32,

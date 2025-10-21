@@ -14,7 +14,7 @@ The nclone environment provides 5 observation modalities:
 4. **Graph**: GNN-compatible structure (nodes, edges, masks)
 5. **Entity Positions**: Direct position information (6 dimensions)
 
-**Note**: Updated to single-frame grayscale system for 6.66x faster performance vs previous 12-frame stacking.
+**Note**: Uses single-frame grayscale system with explicit velocity for 6.66x faster performance.
 
 See [nclone/OBSERVATION_SPACE_README.md](../../nclone/OBSERVATION_SPACE_README.md) for detailed specifications.
 
@@ -58,7 +58,7 @@ class HGTMultiModalExtractor(BaseFeaturesExtractor):
         
         # Visual encoders
         if 'player_frame' in observation_space.spaces:
-            self.cnn_temporal = self._build_3d_cnn()
+            self.cnn_player_frame = self._build_2d_cnn()
         
         if 'global_view' in observation_space.spaces:
             self.cnn_global = self._build_2d_cnn()

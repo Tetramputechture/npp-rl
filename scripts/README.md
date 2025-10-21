@@ -42,7 +42,7 @@ Available NPP-RL Architectures
 1. full_hgt
    Description: Full HGT Architecture
    Features dim: 512
-   Modalities: temporal frames, global view, graph (hgt), game state, reachability
+   Modalities: player frame, global view, graph (hgt), game state, reachability
 
 2. vision_free
    Description: Vision-Free Architecture
