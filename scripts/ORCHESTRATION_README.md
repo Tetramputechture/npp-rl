@@ -26,7 +26,7 @@ The script trains and evaluates these 11 architectures:
 8. `vision_free_gcn` - Vision-free with GCN
 9. `vision_free_simplified` - Vision-free with simplified HGT
 10. `no_global_view` - Full architecture without global view
-11. `local_frames_only` - Temporal frames + graph + state
+11. `local_frames_only` - Player-centered frame + graph + state
 
 ## Requirements
 

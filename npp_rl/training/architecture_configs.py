@@ -383,7 +383,7 @@ def create_vision_free_config() -> ArchitectureConfig:
         Vision-free with symbolic representations only. 5-10x faster inference than full_hgt.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
         - Game State: 128-dim
@@ -422,7 +422,7 @@ def create_no_global_view_config() -> ArchitectureConfig:
         Ablation removing global view to test if local frames + graph suffice for navigation.
         
         Modalities:
-        - Temporal Frames: 512-dim (84x84x1 grayscale local view)
+        - Player Frames: 512-dim (84x84x1 grayscale local view)
         - Global View: DISABLED
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
         - Game State: 128-dim
@@ -460,7 +460,7 @@ def create_vision_free_gat_config() -> ArchitectureConfig:
         Vision-free with GAT for lighter computation than HGT. Symbolic only.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (GAT): 3 layers, 256 hidden, 8 heads (homogeneous)
         - Game State: 128-dim
@@ -501,7 +501,7 @@ def create_vision_free_gcn_config() -> ArchitectureConfig:
         Fastest architecture. Vision-free with simplest graph processing. 10-15x faster than full_hgt.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (GCN): 3 layers, 256 hidden (mean aggregation, no attention/edge features/types)
         - Game State: 128-dim
@@ -541,7 +541,7 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
         Vision-free with reduced HGT. Balances speed and capability between vision_free and vision_free_gcn.
         
         Modalities:
-        - Temporal Frames: DISABLED
+        - Player Frames: DISABLED
         - Global View: DISABLED
         - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
         - Game State: 64-dim (vs 128)

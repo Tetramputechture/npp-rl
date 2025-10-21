@@ -46,7 +46,7 @@ The framework includes 8 predefined architecture variants:
 
 ### 5. MLP Baseline (`mlp_baseline`)
 - **Description**: No graph processing, only vision and state
-- **Modalities**: Temporal frames, global view, game state, reachability (no graph)
+- **Modalities**: Player frame, global view, game state, reachability (no graph)
 - **Use Case**: Baseline to measure graph contribution
 - **Expected**: Fast but may struggle with spatial reasoning
 

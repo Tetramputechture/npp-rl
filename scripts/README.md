@@ -33,24 +33,6 @@ Displays all available architecture configurations with descriptions.
 python scripts/list_architectures.py
 ```
 
-Output:
-```
-======================================================================
-Available NPP-RL Architectures
-======================================================================
-
-1. full_hgt
-   Description: Full HGT Architecture
-   Features dim: 512
-   Modalities: player frame, global view, graph (hgt), game state, reachability
-
-2. vision_free
-   Description: Vision-Free Architecture
-   Features dim: 512
-   Modalities: graph (hgt), game state, reachability
-
-...
-```
 
 ## Example Scripts
 
