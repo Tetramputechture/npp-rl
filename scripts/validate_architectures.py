@@ -23,7 +23,7 @@ import numpy as np
 def create_mock_observation_space():
     """Create mock observation space matching N++ environment."""
     return SpacesDict({
-        'player_frame': Box(low=0, high=255, shape=(12, 84, 84), dtype=np.uint8),
+        'player_frame': Box(low=0, high=255, shape=(84, 84, 1), dtype=np.uint8),
         'global_view': Box(low=0, high=255, shape=(176, 100, 1), dtype=np.uint8),
         'game_state': Box(low=-np.inf, high=np.inf, shape=(30,), dtype=np.float32),
         'reachability_features': Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32),
@@ -40,7 +40,7 @@ def create_mock_observation_space():
 def create_mock_observation(batch_size=1, num_actual_edges=1000):
     """Create mock observation tensors with realistic graph data."""
     obs = {
-        'player_frame': torch.randint(0, 256, (batch_size, 12, 84, 84), dtype=torch.uint8),
+        'player_frame': torch.randint(0, 256, (batch_size, 84, 84, 1), dtype=torch.uint8),
         'global_view': torch.randint(0, 256, (batch_size, 176, 100, 1), dtype=torch.uint8),
         'game_state': torch.randn(batch_size, 30),
         'reachability_features': torch.randn(batch_size, 8),

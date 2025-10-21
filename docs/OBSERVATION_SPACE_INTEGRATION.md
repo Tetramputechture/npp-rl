@@ -9,7 +9,7 @@ This document describes how npp-rl integrates with the nclone observation space 
 The nclone observation space provides:
 
 ### 1. Visual Observations
-- **player_frame**: `(84, 84, 12)` - Local player-centered view with 12-frame temporal stacking
+- **player_frame**: `(84, 84, 1)` - Local player-centered view with single grayscale frame
 - **global_view**: `(176, 100, 1)` - Downsampled full-level overview
 
 ### 2. Game State Vector  
@@ -157,7 +157,7 @@ The observation space follows RL/ML best practices:
 
 ✅ **Normalized observations**: All features in [0, 1] range  
 ✅ **Minimal redundancy**: Removed 5 unused entity features (61 → 56 dims)  
-✅ **Temporal context**: 12-frame stacking with 3D CNNs  
+✅ **Temporal context**: single frame (velocity explicit in game_state)ing with 3D CNNs  
 ✅ **Spatial invariance**: CNNs for vision, GNNs for graphs  
 ✅ **Multi-modal fusion**: Specialized encoders + late fusion  
 ✅ **Markov property**: Sufficient information for optimal decisions  

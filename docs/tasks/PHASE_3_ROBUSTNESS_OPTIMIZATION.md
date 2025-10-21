@@ -192,7 +192,7 @@ The agent currently receives rich non-visual features that encode comprehensive 
 
 **What visual input provides**:
 1. **Fine-grained spatial awareness**: Pixel-level detail of nearby tiles and slopes
-2. **Temporal motion patterns**: 12-frame stack captures movement dynamics
+2. **Temporal motion patterns**: single frame (velocity in game_state) captures movement dynamics
 3. **Global level layout**: 176x100 downsampled view of entire level
 4. **Immediate surroundings**: Visual context around ninja position
 5. **Slope angles and geometry**: Precise visual representation of terrain
@@ -331,7 +331,7 @@ class ConfigurableMultimodalExtractor(nn.Module):
         self,
         observation_space,
         features_dim=512,
-        use_temporal_frames=True,  # 84x84x12 local frames
+        use_temporal_frames=True,  # 84x84x1 grayscale local frame
         use_global_view=True,      # 176x100 global view
         use_graph=True,
         use_state=True,

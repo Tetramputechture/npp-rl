@@ -8,11 +8,13 @@ This guide explains how the NPP-RL project integrates with the comprehensive obs
 
 The nclone environment provides 5 observation modalities:
 
-1. **Visual**: Player-centered frames (84×84×12) and global view (176×100×1)
-2. **Game State**: Physics vector (26 core + entity states)
+1. **Visual**: Player-centered frame (84×84×1 grayscale) and global view (176×100×1 grayscale)
+2. **Game State**: Physics vector (26 core + entity states) - includes velocity for Markov property
 3. **Reachability**: Path planning features (8 dimensions)
 4. **Graph**: GNN-compatible structure (nodes, edges, masks)
 5. **Entity Positions**: Direct position information (6 dimensions)
+
+**Note**: Updated to single-frame grayscale system for 6.66x faster performance vs previous 12-frame stacking.
 
 See [nclone/OBSERVATION_SPACE_README.md](../../nclone/OBSERVATION_SPACE_README.md) for detailed specifications.
 
@@ -45,7 +47,7 @@ class HGTMultiModalExtractor(BaseFeaturesExtractor):
     Multimodal feature extractor with Heterogeneous Graph Transformer.
     
     Supports:
-    - 3D CNN for temporal frames
+    - 2D CNN for single grayscale frame
     - 2D CNN for global view
     - MLP for game state + reachability
     - HGT for graph representation
