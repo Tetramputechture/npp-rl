@@ -214,11 +214,26 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
 
     # Default: create a conservative profile based on available memory
     # Use heuristics: 1GB per environment for graph-based models
-    envs_per_gpu = max(8, min(64, int(gpu_memory_gb)))
+    envs_per_gpu = max(8, min(256, int(gpu_memory_gb)))
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4
     scaled_lr = base_lr * (num_gpus**0.5) if num_gpus > 1 else base_lr
+
+    # Scale n_steps based on GPU count and memory
+    # More GPUs/memory = larger rollout buffer for better sample efficiency
+    # Base: 1024 for single GPU, scale up to 2048 for 8 GPUs
+    base_n_steps = 1024
+    # if num_gpus >= 8 and gpu_memory_gb >= 70:
+    #     n_steps = 2048  # High-end multi-GPU setup
+    # elif num_gpus >= 8 and gpu_memory_gb >= 40:
+    #     n_steps = 1536  # Mid-range multi-GPU setup
+    # elif num_gpus >= 4:
+    #     n_steps = 1536  # 4 GPUs
+    # elif num_gpus >= 2:
+    #     n_steps = 1280  # 2 GPUs
+    # else:
+    #     n_steps = base_n_steps  # Single GPU
 
     # Enable mixed precision for modern GPUs (Volta+, compute capability >= 7.0)
     compute_cap = torch.cuda.get_device_properties(0).major
@@ -230,7 +245,7 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
         gpu_memory_gb=gpu_memory_gb,
         num_envs=envs_per_gpu * num_gpus,
         batch_size=max(32, 256 * num_gpus),  # Ensure minimum batch size
-        n_steps=1024,
+        n_steps=base_n_steps,
         learning_rate=scaled_lr,
         mixed_precision=use_mixed_precision,
         num_workers=max(2, (envs_per_gpu * num_gpus) // 4),

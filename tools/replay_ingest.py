@@ -242,7 +242,7 @@ class ObservationProcessor:
         """Get or create environment instance for observation processing."""
         if self.env is None:
             self.env = NppEnvironment(
-                render_mode="rgb_array",
+                render_mode="grayscale_array",
             )
         return self.env
 
@@ -284,7 +284,7 @@ class ObservationProcessor:
         Create observation from replay frame data.
 
         TODO: Implement proper observation extraction using replay infrastructure.
-        
+
         Production Implementation Plan:
         ----------------------------
         The N++ simulation is fully deterministic, so we can reconstruct
@@ -292,40 +292,40 @@ class ObservationProcessor:
         - Exact visual observations matching training data format
         - Correct entity states and game state vectors
         - 100-1000x storage efficiency vs storing raw observations
-        
+
         Implementation Steps:
         1. Load level map from replay frame.level_id
         2. Initialize nclone simulation with that map
         3. Step simulation using recorded inputs up to frame_number
         4. Use UnifiedObservationExtractor to extract proper observations
         5. Return observations in NppEnvironment format
-        
+
         Required Components:
         - nclone.replay.map_loader.MapLoader (already exists)
         - nclone.replay.replay_executor.ReplayExecutor (already exists)
         - nclone.replay.unified_observation_extractor.UnifiedObservationExtractor (already exists)
-        
+
         Example Code:
         ```python
         from nclone.replay.map_loader import MapLoader
         from nclone.replay.replay_executor import ReplayExecutor
         from nclone.replay.unified_observation_extractor import UnifiedObservationExtractor
-        
+
         # Load map
         map_loader = MapLoader()
         level_map = map_loader.load_level(frame.level_id)
-        
+
         # Execute replay up to current frame
         executor = ReplayExecutor(level_map)
         executor.replay_to_frame(inputs=recorded_inputs, target_frame=frame.frame_number)
-        
+
         # Extract observations
         obs_extractor = UnifiedObservationExtractor(enable_visual_observations=True)
         observation = obs_extractor.extract_observation(executor.sim)
         ```
-        
+
         See: docs/tasks/REPLAY_PRETRAINING_PIPELINE.md for full architecture
-        
+
         Current Placeholder Implementation:
         -----------------------------------
         For now, we create mock data with correct shapes for testing the pipeline.
@@ -333,7 +333,7 @@ class ObservationProcessor:
         """
         # PLACEHOLDER: Mock observations for testing purposes only
         # Replace with actual replay-based observation extraction
-        
+
         # Mock player frame (64x64x3)
         player_frame = np.random.randint(0, 256, (64, 64, 3), dtype=np.uint8)
 
@@ -372,7 +372,6 @@ class ObservationProcessor:
             "global_view": global_view,
             "game_state": game_state,
         }
-
 
 
 class ReplayIngester:

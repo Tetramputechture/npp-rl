@@ -146,7 +146,7 @@ class ExplorationLoggingCallback(BaseCallback):
         return True
 
 
-def create_environment(render_mode: str = "rgb_array", **kwargs):
+def create_environment(render_mode: str = "grayscale_array", **kwargs):
     """Create environment with hierarchical graph observations and reachability features."""
     from nclone.gym_environment.config import EnvironmentConfig, RenderConfig
 
@@ -173,7 +173,7 @@ def train_hierarchical_agent(
     num_envs: int = 64,
     total_timesteps: int = 10_000_000,
     load_model: str = None,
-    render_mode: str = "rgb_array",
+    render_mode: str = "grayscale_array",
     disable_exploration: bool = False,
     save_freq: int = 100_000,
     eval_freq: int = 50_000,
@@ -191,7 +191,7 @@ def train_hierarchical_agent(
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model: Path to existing model to resume training
-        render_mode: Rendering mode ('rgb_array' for headless, 'human' for visual)
+        render_mode: Rendering mode ('grayscale_array' for headless, 'human' for visual)
         disable_exploration: Whether to disable adaptive exploration
         save_freq: Frequency of model saves
         eval_freq: Frequency of evaluation
@@ -366,7 +366,7 @@ def train_agent(
     num_envs: int = 64,
     total_timesteps: int = 10_000_000,
     load_model: str = None,
-    render_mode: str = "rgb_array",
+    render_mode: str = "grayscale_array",
     disable_exploration: bool = False,
     save_freq: int = 100_000,
     eval_freq: int = 50_000,
@@ -381,7 +381,7 @@ def train_agent(
         num_envs: Number of parallel environments
         total_timesteps: Total training timesteps
         load_model: Path to existing model to resume training
-        render_mode: Rendering mode ('rgb_array' for headless, 'human' for visual)
+        render_mode: Rendering mode ('grayscale_array' for headless, 'human' for visual)
         disable_exploration: Whether to disable adaptive exploration
         save_freq: Frequency of model saves
         eval_freq: Frequency of evaluation
@@ -593,9 +593,9 @@ def main():
     parser.add_argument(
         "--render_mode",
         type=str,
-        default="rgb_array",
-        choices=["rgb_array", "human"],
-        help="Rendering mode (default: rgb_array)",
+        default="grayscale_array",
+        choices=["grayscale_array", "human"],
+        help="Rendering mode (default: grayscale_array)",
     )
     parser.add_argument(
         "--disable_exploration",
