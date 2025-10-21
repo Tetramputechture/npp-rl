@@ -9,6 +9,7 @@ which modalities to use and how to process them.
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from enum import Enum
+from nclone.gym_environment.constants import GAME_STATE_CHANNELS
 
 
 class GraphArchitectureType(Enum):
@@ -120,7 +121,7 @@ class StateConfig:
     """Configuration for state vector processing."""
 
     # Dimensions from nclone environment observations
-    game_state_dim: int = 30  # GAME_STATE_CHANNELS from nclone
+    game_state_dim: int = GAME_STATE_CHANNELS
     reachability_dim: int = 8  # Reachability features from nclone
     hidden_dim: int = 128
     output_dim: int = 128

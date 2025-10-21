@@ -34,7 +34,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     - Player frame (2D CNN on 84x84x1 grayscale)
     - Global view (2D CNN on 176x100x1 grayscale)
     - Graph (HGT/GAT/GCN/None)
-    - Game state (30-dim vector)
+    - Game state (26-dim vector, ninja_state only)
     - Reachability (8-dim vector)
 
     This enables systematic comparison of architecture variants.

@@ -365,8 +365,8 @@ def create_mock_observations(
         # Global view: [batch, 176, 100, 1] (single grayscale frame)
         "global_view": torch.randint(0, 256, (batch_size, 176, 100, 1), dtype=torch.uint8, device=device),
         
-        # Game state: [batch, 30]
-        "game_state": torch.randn(batch_size, 30, device=device),
+        # Game state: [batch, 26] (ninja_state only, entity counts removed)
+        "game_state": torch.randn(batch_size, 26, device=device),
         
         # Reachability features: [batch, 8]
         "reachability_features": torch.randn(batch_size, 8, device=device),
