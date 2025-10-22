@@ -200,30 +200,71 @@ class ArchitectureTrainer:
             )
             return
         
-        # Determine which mapping to use (priority-based to avoid duplicates)
-        # Hierarchical policies may have features_extractor.* as a reference,
-        # but we should only map to mlp_extractor.features_extractor.*
+        # Determine which mappings to use
+        # Important: Hierarchical policies may have BOTH hierarchical and shared/separate
+        # extractors in the state_dict. We need to check if they're references or separate.
+        #
+        # Strategy:
+        # 1. If hierarchical extractor exists, always map to it
+        # 2. Also check if shared/separate extractors are the SAME object as hierarchical
+        # 3. If they're references (same object), mapping to hierarchical is enough
+        # 4. If they're separate objects, we need to map to ALL of them
+        
+        # Check if extractors are references or separate objects
+        map_hierarchical = uses_hierarchical_extractor
+        map_shared = False
+        map_separate = False
+        
         if uses_hierarchical_extractor:
-            # Use only hierarchical mapping
-            map_hierarchical = True
-            map_shared = False
-            map_separate = False
-            extractor_type = "hierarchical"
+            # Hierarchical always needs mapping
+            # Check if shared/separate are references or separate objects
+            if hasattr(self.model.policy, 'features_extractor') and \
+               hasattr(self.model.policy, 'mlp_extractor') and \
+               hasattr(self.model.policy.mlp_extractor, 'features_extractor'):
+                # Check if they're the same object
+                is_same_object = (
+                    self.model.policy.features_extractor is 
+                    self.model.policy.mlp_extractor.features_extractor
+                )
+                if not is_same_object and uses_shared_extractor:
+                    # They're separate objects - need to map to both
+                    map_shared = True
+                    logger.info("  Note: Model has separate features_extractor and mlp_extractor.features_extractor")
+            
+            if hasattr(self.model.policy, 'pi_features_extractor') and \
+               hasattr(self.model.policy, 'mlp_extractor') and \
+               hasattr(self.model.policy.mlp_extractor, 'features_extractor'):
+                # Check if pi_features_extractor is the same object
+                is_same_pi = (
+                    self.model.policy.pi_features_extractor is
+                    self.model.policy.mlp_extractor.features_extractor
+                )
+                if not is_same_pi and uses_separate_extractors:
+                    # They're separate objects - need to map to both
+                    map_separate = True
+                    logger.info("  Note: Model has separate pi/vf_features_extractor and mlp_extractor.features_extractor")
+        
         elif uses_separate_extractors:
-            # Use only separate mapping
-            map_hierarchical = False
-            map_shared = False
+            # No hierarchical, just separate
             map_separate = True
-            extractor_type = "separate"
+        
         elif uses_shared_extractor:
-            # Use only shared mapping
-            map_hierarchical = False
+            # No hierarchical, just shared
             map_shared = True
-            map_separate = False
-            extractor_type = "shared"
+        
         else:
             logger.warning("Cannot determine feature extractor type!")
             return
+        
+        # Determine extractor type for logging
+        extractor_types = []
+        if map_hierarchical:
+            extractor_types.append("hierarchical")
+        if map_shared:
+            extractor_types.append("shared")
+        if map_separate:
+            extractor_types.append("separate")
+        extractor_type = " + ".join(extractor_types)
 
         # Map BC feature_extractor weights to appropriate PPO structure
         # BC saves: feature_extractor.*
@@ -291,6 +332,23 @@ class ArchitectureTrainer:
                     f"  Missing keys (will use random init): {len(missing_keys)}"
                 )
                 logger.info(f"    Examples: {missing_keys[:5]}")
+                
+                # Categorize missing keys to understand what's not loaded
+                feature_ext_missing = [k for k in missing_keys if 'features_extractor.' in k]
+                hierarchical_missing = [k for k in missing_keys if 'mlp_extractor.' in k and 'features_extractor' not in k]
+                action_value_missing = [k for k in missing_keys if 'action_net.' in k or 'value_net.' in k]
+                other_missing = [k for k in missing_keys if k not in feature_ext_missing + hierarchical_missing + action_value_missing]
+                
+                if feature_ext_missing:
+                    logger.info(f"    Features extractor keys missing: {len(feature_ext_missing)}")
+                    if map_hierarchical and 'features_extractor.' in feature_ext_missing[0]:
+                        logger.info("      (These may be references to mlp_extractor.features_extractor - OK)")
+                if hierarchical_missing:
+                    logger.info(f"    Hierarchical policy keys missing: {len(hierarchical_missing)} (expected)")
+                if action_value_missing:
+                    logger.info(f"    Action/value head keys missing: {len(action_value_missing)} (expected)")
+                if other_missing:
+                    logger.info(f"    Other keys missing: {len(other_missing)}")
 
             if unexpected_keys:
                 logger.warning(
@@ -301,8 +359,10 @@ class ArchitectureTrainer:
             # Log what was actually loaded based on extractor type
             logger.info("  ✓ Feature extractor weights loaded successfully")
             
-            if extractor_type == "hierarchical":
+            if "hierarchical" in extractor_type:
                 logger.info("  ✓ Using hierarchical feature extractor (nested in mlp_extractor)")
+                if map_shared or map_separate:
+                    logger.info(f"  ✓ Also mapped to {extractor_type.replace('hierarchical + ', '')}")
                 logger.info("  → High-level and low-level policy heads will be trained from scratch")
             elif extractor_type == "shared":
                 logger.info("  ✓ Using shared feature extractor for policy and value")
