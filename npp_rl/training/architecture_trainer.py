@@ -146,86 +146,100 @@ class ArchitectureTrainer:
 
     def _load_bc_pretrained_weights(self, checkpoint_path: str):
         """Load BC pretrained weights into PPO policy.
-        
+
         Maps BC checkpoint structure to PPO policy structure:
         - BC: feature_extractor.* → PPO: pi_features_extractor.* and vf_features_extractor.*
         - BC policy_head is ignored (PPO trains its own action/value heads)
-        
+
         PPO ActorCriticPolicy has separate feature extractors for policy and value function,
         so we load the same BC weights into both.
-        
+
         Args:
             checkpoint_path: Path to BC checkpoint file
         """
-        checkpoint = torch.load(checkpoint_path, map_location=self.model.device, weights_only=False)
-        
+        checkpoint = torch.load(
+            checkpoint_path, map_location=self.model.device, weights_only=False
+        )
+
         if "policy_state_dict" not in checkpoint:
             logger.warning(
                 f"Checkpoint does not contain 'policy_state_dict'. "
                 f"Found keys: {list(checkpoint.keys())}"
             )
             return
-        
+
         bc_state_dict = checkpoint["policy_state_dict"]
-        
+
         # Map BC feature_extractor weights to BOTH pi_features_extractor and vf_features_extractor
         # BC saves: feature_extractor.*
         # PPO expects: pi_features_extractor.* (for policy) and vf_features_extractor.* (for value function)
         mapped_state_dict = {}
-        
+
         for key, value in bc_state_dict.items():
             if key.startswith("feature_extractor."):
                 # Remove "feature_extractor." prefix to get the sub-key
-                sub_key = key[len("feature_extractor."):]
-                
+                sub_key = key[len("feature_extractor.") :]
+
                 # Map to both pi_features_extractor and vf_features_extractor
                 pi_key = f"pi_features_extractor.{sub_key}"
                 vf_key = f"vf_features_extractor.{sub_key}"
-                
+
                 mapped_state_dict[pi_key] = value
-                mapped_state_dict[vf_key] = value.clone()  # Clone to avoid shared references
-                
+                mapped_state_dict[vf_key] = (
+                    value.clone()
+                )  # Clone to avoid shared references
+
                 logger.debug(f"Mapped {key} → {pi_key} and {vf_key}")
             elif key.startswith("policy_head."):
                 # Skip policy head weights (PPO will train its own)
                 logger.debug(f"Skipping {key} (policy head not used in PPO)")
             else:
                 logger.debug(f"Skipping unknown key: {key}")
-        
+
         if not mapped_state_dict:
             logger.warning("No feature extractor weights found in BC checkpoint")
             return
-        
+
         # Load only the feature extractor weights with strict=False
         # This allows loading partial weights without errors
         try:
             missing_keys, unexpected_keys = self.model.policy.load_state_dict(
                 mapped_state_dict, strict=False
             )
-            
+
             # Log summary
-            logger.info(f"✓ Loaded BC pretrained feature extractor weights")
-            logger.info(f"  Loaded {len(mapped_state_dict)} weight tensors (BC → pi/vf)")
-            
+            logger.info("✓ Loaded BC pretrained feature extractor weights")
+            logger.info(
+                f"  Loaded {len(mapped_state_dict)} weight tensors (BC → pi/vf)"
+            )
+
             if missing_keys:
-                logger.info(f"  Missing keys (will use random init): {len(missing_keys)}")
+                logger.info(
+                    f"  Missing keys (will use random init): {len(missing_keys)}"
+                )
                 logger.info(f"    Examples: {missing_keys[:5]}")
-            
+
             if unexpected_keys:
-                logger.warning(f"  Unexpected keys in checkpoint: {len(unexpected_keys)}")
+                logger.warning(
+                    f"  Unexpected keys in checkpoint: {len(unexpected_keys)}"
+                )
                 logger.info(f"    Examples: {unexpected_keys[:5]}")
-            
+
             # Log what was actually loaded
-            pi_loaded = any("pi_features_extractor" in key for key in mapped_state_dict.keys())
-            vf_loaded = any("vf_features_extractor" in key for key in mapped_state_dict.keys())
-            
+            pi_loaded = any(
+                "pi_features_extractor" in key for key in mapped_state_dict.keys()
+            )
+            vf_loaded = any(
+                "vf_features_extractor" in key for key in mapped_state_dict.keys()
+            )
+
             if pi_loaded and vf_loaded:
                 logger.info("  ✓ Feature extractor weights loaded successfully")
                 logger.info("  ✓ Loaded into both policy and value feature extractors")
                 logger.info("  → Action/value heads will be trained from scratch")
             else:
                 logger.warning("  ✗ Feature extractor weights were not properly loaded")
-                
+
         except Exception as e:
             logger.error(f"Failed to load mapped weights: {e}")
             raise

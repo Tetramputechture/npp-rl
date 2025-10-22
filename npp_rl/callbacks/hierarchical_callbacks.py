@@ -612,7 +612,7 @@ class CurriculumProgressionCallback(BaseCallback):
 
         if self.verbose > 0:
             print("\n" + "=" * 60)
-            print(f"CURRICULUM ADVANCEMENT!")
+            print("CURRICULUM ADVANCEMENT!")
             print(f"New stage: {new_stage} (stage {new_stage_idx + 1}/6)")
             print("=" * 60 + "\n")
 
