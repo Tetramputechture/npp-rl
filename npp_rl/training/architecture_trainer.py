@@ -148,8 +148,11 @@ class ArchitectureTrainer:
         """Load BC pretrained weights into PPO policy.
         
         Maps BC checkpoint structure to PPO policy structure:
-        - BC: feature_extractor.* → PPO: features_extractor.*
+        - BC: feature_extractor.* → PPO: pi_features_extractor.* and vf_features_extractor.*
         - BC policy_head is ignored (PPO trains its own action/value heads)
+        
+        PPO ActorCriticPolicy has separate feature extractors for policy and value function,
+        so we load the same BC weights into both.
         
         Args:
             checkpoint_path: Path to BC checkpoint file
@@ -165,17 +168,24 @@ class ArchitectureTrainer:
         
         bc_state_dict = checkpoint["policy_state_dict"]
         
-        # Map BC feature_extractor weights to PPO features_extractor
+        # Map BC feature_extractor weights to BOTH pi_features_extractor and vf_features_extractor
         # BC saves: feature_extractor.*
-        # PPO expects: features_extractor.* (note the 's')
+        # PPO expects: pi_features_extractor.* (for policy) and vf_features_extractor.* (for value function)
         mapped_state_dict = {}
         
         for key, value in bc_state_dict.items():
             if key.startswith("feature_extractor."):
-                # Map to features_extractor (with 's')
-                new_key = key.replace("feature_extractor.", "features_extractor.", 1)
-                mapped_state_dict[new_key] = value
-                logger.debug(f"Mapped {key} → {new_key}")
+                # Remove "feature_extractor." prefix to get the sub-key
+                sub_key = key[len("feature_extractor."):]
+                
+                # Map to both pi_features_extractor and vf_features_extractor
+                pi_key = f"pi_features_extractor.{sub_key}"
+                vf_key = f"vf_features_extractor.{sub_key}"
+                
+                mapped_state_dict[pi_key] = value
+                mapped_state_dict[vf_key] = value.clone()  # Clone to avoid shared references
+                
+                logger.debug(f"Mapped {key} → {pi_key} and {vf_key}")
             elif key.startswith("policy_head."):
                 # Skip policy head weights (PPO will train its own)
                 logger.debug(f"Skipping {key} (policy head not used in PPO)")
@@ -195,26 +205,26 @@ class ArchitectureTrainer:
             
             # Log summary
             logger.info(f"✓ Loaded BC pretrained feature extractor weights")
-            logger.info(f"  Loaded {len(mapped_state_dict)} weight tensors")
+            logger.info(f"  Loaded {len(mapped_state_dict)} weight tensors (BC → pi/vf)")
             
             if missing_keys:
                 logger.info(f"  Missing keys (will use random init): {len(missing_keys)}")
-                logger.debug(f"    Examples: {missing_keys[:5]}")
+                logger.info(f"    Examples: {missing_keys[:5]}")
             
             if unexpected_keys:
                 logger.warning(f"  Unexpected keys in checkpoint: {len(unexpected_keys)}")
-                logger.debug(f"    Examples: {unexpected_keys[:5]}")
+                logger.info(f"    Examples: {unexpected_keys[:5]}")
             
             # Log what was actually loaded
-            feature_extractor_loaded = any(
-                "features_extractor" in key for key in mapped_state_dict.keys()
-            )
+            pi_loaded = any("pi_features_extractor" in key for key in mapped_state_dict.keys())
+            vf_loaded = any("vf_features_extractor" in key for key in mapped_state_dict.keys())
             
-            if feature_extractor_loaded:
+            if pi_loaded and vf_loaded:
                 logger.info("  ✓ Feature extractor weights loaded successfully")
-                logger.info("  → Policy and value heads will be trained from scratch")
+                logger.info("  ✓ Loaded into both policy and value feature extractors")
+                logger.info("  → Action/value heads will be trained from scratch")
             else:
-                logger.warning("  ✗ No feature extractor weights were loaded")
+                logger.warning("  ✗ Feature extractor weights were not properly loaded")
                 
         except Exception as e:
             logger.error(f"Failed to load mapped weights: {e}")

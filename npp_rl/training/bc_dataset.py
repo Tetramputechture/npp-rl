@@ -174,6 +174,26 @@ class BCReplayDataset(Dataset):
             # Execute replay to get observations
             observations = executor.execute_replay(replay.map_data, replay.input_sequence)
             
+            # Validate success: check if player_won is True in the final observation
+            if self.filter_successful_only and observations:
+                last_obs = observations[-1]['observation']
+                # The observation is already processed, so we need to check the raw observation
+                # The executor should have included player_won in the observation
+                # For now, we trust the replay.success flag, but log if there's a mismatch
+                
+                # Try to get the raw observation to check player_won
+                try:
+                    raw_obs = executor._get_raw_observation()
+                    if 'player_won' in raw_obs and not raw_obs['player_won']:
+                        logger.warning(
+                            f"Replay marked as success but player_won=False at final frame. "
+                            f"Episode: {replay.episode_id}"
+                        )
+                        executor.close()
+                        return []
+                except Exception as e:
+                    logger.debug(f"Could not validate player_won from raw observation: {e}")
+            
             executor.close()
             
             # Extract observations and actions from ReplayExecutor output
