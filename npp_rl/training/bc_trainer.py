@@ -342,12 +342,12 @@ class BCTrainer:
         )
         
         # Learning rate scheduler
+        # Note: verbose parameter removed in PyTorch 2.0+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='min',
             factor=0.5,
             patience=3,
-            verbose=True,
         )
         
         # Training loop
