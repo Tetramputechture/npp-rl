@@ -80,6 +80,12 @@ class BCReplayDataset(Dataset):
         """
         replay_files = sorted(self.replay_dir.glob("*.replay"))
         
+        if not replay_files:
+            logger.warning(
+                f"No .replay files found in {self.replay_dir}. "
+                f"Please ensure replay data is available for BC pretraining."
+            )
+        
         if max_replays is not None:
             replay_files = replay_files[:max_replays]
         
