@@ -148,11 +148,13 @@ class ArchitectureTrainer:
         """Load BC pretrained weights into PPO policy.
 
         Maps BC checkpoint structure to PPO policy structure:
-        - BC: feature_extractor.* → PPO: pi_features_extractor.* and vf_features_extractor.*
+        - BC: feature_extractor.* → PPO: features_extractor.* (if shared)
+                                  OR pi_features_extractor.* and vf_features_extractor.* (if separate)
         - BC policy_head is ignored (PPO trains its own action/value heads)
 
-        PPO ActorCriticPolicy has separate feature extractors for policy and value function,
-        so we load the same BC weights into both.
+        PPO ActorCriticPolicy can use either:
+        1. Shared features extractor (share_features_extractor=True, default): features_extractor.*
+        2. Separate feature extractors (share_features_extractor=False): pi_features_extractor.* and vf_features_extractor.*
 
         Args:
             checkpoint_path: Path to BC checkpoint file
@@ -170,9 +172,30 @@ class ArchitectureTrainer:
 
         bc_state_dict = checkpoint["policy_state_dict"]
 
-        # Map BC feature_extractor weights to BOTH pi_features_extractor and vf_features_extractor
+        # Detect if PPO model uses shared or separate feature extractors
+        policy_keys = list(self.model.policy.state_dict().keys())
+        uses_shared_extractor = any(
+            k.startswith("features_extractor.") for k in policy_keys
+        )
+        uses_separate_extractors = any(
+            k.startswith("pi_features_extractor.") for k in policy_keys
+        ) or any(k.startswith("vf_features_extractor.") for k in policy_keys)
+
+        if uses_shared_extractor and uses_separate_extractors:
+            logger.warning(
+                "PPO model has both shared and separate feature extractors! "
+                "This is unexpected. Attempting to load into all."
+            )
+        elif not uses_shared_extractor and not uses_separate_extractors:
+            logger.warning(
+                "PPO model has no recognizable feature extractor keys! "
+                "Cannot load BC weights."
+            )
+            return
+
+        # Map BC feature_extractor weights to appropriate PPO structure
         # BC saves: feature_extractor.*
-        # PPO expects: pi_features_extractor.* (for policy) and vf_features_extractor.* (for value function)
+        # PPO expects: features_extractor.* (shared) OR pi_features_extractor.* + vf_features_extractor.* (separate)
         mapped_state_dict = {}
 
         for key, value in bc_state_dict.items():
@@ -180,16 +203,25 @@ class ArchitectureTrainer:
                 # Remove "feature_extractor." prefix to get the sub-key
                 sub_key = key[len("feature_extractor.") :]
 
-                # Map to both pi_features_extractor and vf_features_extractor
-                pi_key = f"pi_features_extractor.{sub_key}"
-                vf_key = f"vf_features_extractor.{sub_key}"
+                # Map to appropriate target(s) based on PPO model structure
+                if uses_shared_extractor:
+                    # Map to shared features_extractor
+                    shared_key = f"features_extractor.{sub_key}"
+                    mapped_state_dict[shared_key] = value
+                    logger.debug(f"Mapped {key} → {shared_key}")
 
-                mapped_state_dict[pi_key] = value
-                mapped_state_dict[vf_key] = (
-                    value.clone()
-                )  # Clone to avoid shared references
+                if uses_separate_extractors:
+                    # Map to both pi_features_extractor and vf_features_extractor
+                    pi_key = f"pi_features_extractor.{sub_key}"
+                    vf_key = f"vf_features_extractor.{sub_key}"
 
-                logger.debug(f"Mapped {key} → {pi_key} and {vf_key}")
+                    mapped_state_dict[pi_key] = value
+                    mapped_state_dict[vf_key] = (
+                        value.clone()
+                    )  # Clone to avoid shared references
+
+                    logger.debug(f"Mapped {key} → {pi_key} and {vf_key}")
+
             elif key.startswith("policy_head."):
                 # Skip policy head weights (PPO will train its own)
                 logger.debug(f"Skipping {key} (policy head not used in PPO)")
@@ -207,10 +239,18 @@ class ArchitectureTrainer:
                 mapped_state_dict, strict=False
             )
 
+            # Determine extractor type for logging
+            if uses_shared_extractor and not uses_separate_extractors:
+                extractor_type = "shared"
+            elif uses_separate_extractors and not uses_shared_extractor:
+                extractor_type = "separate (pi/vf)"
+            else:
+                extractor_type = "mixed (shared + separate)"
+
             # Log summary
             logger.info("✓ Loaded BC pretrained feature extractor weights")
             logger.info(
-                f"  Loaded {len(mapped_state_dict)} weight tensors (BC → pi/vf)"
+                f"  Loaded {len(mapped_state_dict)} weight tensors (BC → {extractor_type})"
             )
 
             if missing_keys:
@@ -226,6 +266,10 @@ class ArchitectureTrainer:
                 logger.info(f"    Examples: {unexpected_keys[:5]}")
 
             # Log what was actually loaded
+            shared_loaded = any(
+                "features_extractor." in key and not key.startswith(("pi_", "vf_"))
+                for key in mapped_state_dict.keys()
+            )
             pi_loaded = any(
                 "pi_features_extractor" in key for key in mapped_state_dict.keys()
             )
@@ -233,7 +277,11 @@ class ArchitectureTrainer:
                 "vf_features_extractor" in key for key in mapped_state_dict.keys()
             )
 
-            if pi_loaded and vf_loaded:
+            if shared_loaded:
+                logger.info("  ✓ Feature extractor weights loaded successfully")
+                logger.info("  ✓ Using shared feature extractor for policy and value")
+                logger.info("  → Action/value heads will be trained from scratch")
+            elif pi_loaded and vf_loaded:
                 logger.info("  ✓ Feature extractor weights loaded successfully")
                 logger.info("  ✓ Loaded into both policy and value feature extractors")
                 logger.info("  → Action/value heads will be trained from scratch")
