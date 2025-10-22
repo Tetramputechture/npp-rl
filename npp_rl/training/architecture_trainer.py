@@ -470,6 +470,22 @@ class ArchitectureTrainer:
         logger.info("=" * 60)
         logger.info(f"Starting training: {self.architecture_config.name}")
         logger.info(f"Total timesteps: {total_timesteps:,}")
+
+        # Add distributed training info
+        if self.use_distributed and self.world_size > 1:
+            from npp_rl.training.distributed_utils import is_main_process
+
+            logger.info(f"Distributed training: {self.world_size} GPUs")
+            logger.info(f"Current rank: {self.device_id}")
+            logger.info(
+                f"Effective batch size: {self.hyperparams.get('batch_size', 'N/A')} (per GPU)"
+            )
+            logger.info(
+                f"Global batch size: {self.hyperparams.get('batch_size', 0) * self.world_size}"
+            )
+            if not is_main_process():
+                logger.info("Worker process - progress bar disabled to avoid conflicts")
+
         logger.info(f"Eval frequency: {eval_freq:,}")
         logger.info(f"Save frequency: {save_freq:,}")
         logger.info("=" * 60)
@@ -502,21 +518,53 @@ class ArchitectureTrainer:
             if callback_fn is not None:
                 callbacks.append(callback_fn)
 
+            # Add distributed progress callback if using multi-GPU training
+            if self.use_distributed and self.world_size > 1:
+                from npp_rl.callbacks import DistributedProgressCallback
+
+                distributed_callback = DistributedProgressCallback(
+                    log_freq=1000, verbose=1
+                )
+                callbacks.append(distributed_callback)
+                logger.info(
+                    "Added distributed progress callback for multi-GPU coordination"
+                )
+
             logger.info("Starting model.learn() with verbose callback...")
+
+            # Only show progress bar on main process (rank 0) to avoid flickering
+            from npp_rl.training.distributed_utils import is_main_process
+
+            show_progress = is_main_process() if self.use_distributed else True
 
             # Train model
             self.model.learn(
                 total_timesteps=total_timesteps,
                 callback=callbacks if len(callbacks) > 1 else verbose_callback,
-                progress_bar=True,
+                progress_bar=show_progress,
             )
 
             logger.info("Training completed successfully")
 
-            # Save final model
+            # Save final model (unwrap DDP if needed)
             final_path = self.output_dir / "final_model.zip"
-            self.model.save(str(final_path))
-            logger.info(f"Saved final model to {final_path}")
+
+            from npp_rl.training.distributed_utils import is_model_wrapped_ddp
+
+            policy_was_wrapped = is_model_wrapped_ddp(self.model.policy)
+            original_policy = self.model.policy
+
+            if policy_was_wrapped:
+                self.model.policy = self.model.policy.module
+                logger.debug("Unwrapped DDP policy for final model saving")
+
+            try:
+                self.model.save(str(final_path))
+                logger.info(f"Saved final model to {final_path}")
+            finally:
+                if policy_was_wrapped:
+                    self.model.policy = original_policy
+                    logger.debug("Re-wrapped policy with DDP after saving")
 
             return {"status": "completed", "total_timesteps": total_timesteps}
 
@@ -640,8 +688,25 @@ class ArchitectureTrainer:
         else:
             checkpoint_path = checkpoint_dir / f"checkpoint_{timestep}.zip"
 
-        self.model.save(str(checkpoint_path))
-        logger.info(f"Saved checkpoint to {checkpoint_path}")
+        # Unwrap DDP-wrapped policy before saving
+        from npp_rl.training.distributed_utils import is_model_wrapped_ddp
+
+        policy_was_wrapped = is_model_wrapped_ddp(self.model.policy)
+        original_policy = self.model.policy
+
+        if policy_was_wrapped:
+            # Temporarily unwrap for saving
+            self.model.policy = self.model.policy.module
+            logger.debug("Unwrapped DDP policy for checkpoint saving")
+
+        try:
+            self.model.save(str(checkpoint_path))
+            logger.info(f"Saved checkpoint to {checkpoint_path}")
+        finally:
+            if policy_was_wrapped:
+                # Re-wrap after saving
+                self.model.policy = original_policy
+                logger.debug("Re-wrapped policy with DDP after saving")
 
         # Signal to other processes that save is complete
         if self.use_distributed:

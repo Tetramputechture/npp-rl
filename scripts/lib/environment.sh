@@ -272,8 +272,8 @@ verify_tensorboard_installation() {
             ssh_cmd "python3 -m pip uninstall -y tensorboard tensorboard-plugin-wit" > /dev/null 2>&1 || true
             
             # Reinstall from pip with compatible version
-            log INFO "Installing TensorBoard from pip..."
-            if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0'" > /dev/null 2>&1; then
+            log INFO "Installing TensorBoard with compatible protobuf and rich..."
+            if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<4.0.0' 'rich>=13.0.0'" > /dev/null 2>&1; then
                 log SUCCESS "TensorBoard reinstalled successfully"
                 
                 # Verify it works now
@@ -291,7 +291,7 @@ verify_tensorboard_installation() {
         fi
     else
         log WARNING "TensorBoard not found, installing..."
-        if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0'" > /dev/null 2>&1; then
+        if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<4.0.0' 'rich>=13.0.0'" > /dev/null 2>&1; then
             log SUCCESS "TensorBoard installed successfully"
             return 0
         else

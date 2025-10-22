@@ -19,6 +19,7 @@ from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
 from npp_rl.utils.video_recorder import create_video_recorder
+from npp_rl.training.distributed_utils import unwrap_policy_for_inference
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +268,9 @@ class ComprehensiveEvaluator:
                     if steps % 100 == 0:  # Log every 100 steps to avoid spam
                         logger.debug(f"Level {level_id}: step {steps}/{max_steps}")
 
-                    action, _ = model.predict(obs, deterministic=deterministic)
+                    # Unwrap DDP-wrapped policy for inference if needed
+                    with unwrap_policy_for_inference(model):
+                        action, _ = model.predict(obs, deterministic=deterministic)
 
                     # Step environment
                     # Note: DummyVecEnv returns 4 values (old gym API) even though

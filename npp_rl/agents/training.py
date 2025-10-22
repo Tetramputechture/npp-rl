@@ -137,8 +137,17 @@ class ExplorationLoggingCallback(BaseCallback):
                 self.logger.record(f"exploration/{key}", value)
 
         # Log hierarchical extractor auxiliary losses if available
-        if hasattr(self.model.policy.features_extractor, "get_auxiliary_losses"):
-            aux_losses = self.model.policy.features_extractor.get_auxiliary_losses()
+        # Handle DDP-wrapped policies
+        from npp_rl.training.distributed_utils import is_model_wrapped_ddp
+
+        policy = (
+            self.model.policy.module
+            if is_model_wrapped_ddp(self.model.policy)
+            else self.model.policy
+        )
+
+        if hasattr(policy.features_extractor, "get_auxiliary_losses"):
+            aux_losses = policy.features_extractor.get_auxiliary_losses()
             for loss_name, loss_value in aux_losses.items():
                 if isinstance(loss_value, torch.Tensor):
                     self.logger.record(f"hierarchical/{loss_name}", loss_value.item())
@@ -337,12 +346,20 @@ def train_hierarchical_agent(
     print("Starting hierarchical training...")
     print(f"Logs will be saved to: {log_dir}")
 
+    # Only main process shows progress bar in distributed mode
+    import torch.distributed as dist
+    from npp_rl.training.distributed_utils import is_main_process
+
+    show_progress = True
+    if dist.is_initialized():
+        show_progress = is_main_process()
+
     # Train the model
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,
         log_interval=log_interval,
-        progress_bar=True,
+        progress_bar=show_progress,
     )
 
     # Save final model
@@ -541,13 +558,21 @@ def train_agent(
     print(f"Logs will be saved to: {log_dir}")
     print(f"Monitor tensorboard with: tensorboard --logdir {log_dir / 'tensorboard'}")
 
+    # Only main process shows progress bar in distributed mode
+    import torch.distributed as dist
+    from npp_rl.training.distributed_utils import is_main_process
+
+    show_progress = True
+    if dist.is_initialized():
+        show_progress = is_main_process()
+
     # Train the model
     try:
         model.learn(
             total_timesteps=total_timesteps,
             callback=callbacks,
             log_interval=log_interval,
-            progress_bar=True,
+            progress_bar=show_progress,
         )
 
         # Save final model

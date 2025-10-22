@@ -116,9 +116,136 @@ def is_main_process() -> bool:
     return get_rank() == 0
 
 
+class DDPPolicyWrapper(DDP):
+    """DDP wrapper that forwards SB3 policy methods to the underlying module.
+
+    Stable-baselines3 expects certain methods on the policy (like set_training_mode,
+    features_extractor, etc.) that DDP doesn't expose. This wrapper forwards
+    both method calls and property access to the underlying module.
+
+    This is necessary because SB3's PPO algorithm calls various policy methods
+    that are not part of the standard nn.Module interface.
+    """
+
+    def set_training_mode(self, mode: bool) -> None:
+        """Forward set_training_mode to the underlying module."""
+        self.module.set_training_mode(mode)
+
+    @property
+    def features_extractor(self):
+        """Forward features_extractor property to the underlying module."""
+        return self.module.features_extractor
+
+    def _get_name(self):
+        """Forward _get_name to the underlying module."""
+        return self.module._get_name()
+
+    def reset_noise(self, *args, **kwargs):
+        """Forward reset_noise to the underlying module (for SDE support)."""
+        if hasattr(self.module, "reset_noise"):
+            return self.module.reset_noise(*args, **kwargs)
+
+    def __getattr__(self, name):
+        """Forward any other attribute access to the underlying module.
+
+        This is a fallback for any attributes/methods we haven't explicitly forwarded.
+        """
+        # First, try to get the attribute from the parent DDP class
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
+
+        # If not found in DDP, try the underlying module
+        # Use object.__getattribute__ to directly access 'module' to avoid recursion
+        try:
+            module = object.__getattribute__(self, "module")
+        except AttributeError:
+            # If module doesn't exist yet (during __init__), re-raise original error
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
+
+        # Try to get the attribute from the wrapped module
+        try:
+            return getattr(module, name)
+        except AttributeError:
+            raise AttributeError(
+                f"Neither '{type(self).__name__}' nor its wrapped module have attribute '{name}'"
+            )
+
+
+def unwrap_ddp_model(model: torch.nn.Module) -> torch.nn.Module:
+    """Unwrap DistributedDataParallel model to access the underlying module.
+
+    This is useful for inference, saving, and evaluation where DDP wrapper
+    should be bypassed.
+
+    Args:
+        model: Model (potentially DDP-wrapped)
+
+    Returns:
+        Unwrapped model
+    """
+    # Check for both standard DDP and our custom wrapper
+    if isinstance(model, (DDP, DDPPolicyWrapper)):
+        return model.module
+    return model
+
+
+def is_model_wrapped_ddp(model: torch.nn.Module) -> bool:
+    """Check if model is wrapped with DistributedDataParallel.
+
+    Args:
+        model: Model to check
+
+    Returns:
+        True if model is DDP-wrapped
+    """
+    return isinstance(model, (DDP, DDPPolicyWrapper))
+
+
+def unwrap_policy_for_inference(model):
+    """Temporarily unwrap DDP-wrapped policy for inference.
+
+    When using DDP for training, the policy is wrapped which breaks
+    SB3's predict() method. This function temporarily unwraps the policy.
+
+    Usage:
+        with unwrap_policy_for_inference(model):
+            action, _ = model.predict(obs)
+
+    Args:
+        model: SB3 model (PPO, SAC, etc.)
+
+    Returns:
+        Context manager that unwraps/rewraps the policy
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _unwrap():
+        # Check if policy is DDP-wrapped (standard DDP or our custom wrapper)
+        policy_was_wrapped = isinstance(model.policy, (DDP, DDPPolicyWrapper))
+        original_policy = model.policy
+
+        if policy_was_wrapped:
+            # Temporarily unwrap for inference
+            model.policy = model.policy.module
+
+        try:
+            yield model
+        finally:
+            if policy_was_wrapped:
+                # Re-wrap after inference
+                model.policy = original_policy
+
+    return _unwrap()
+
+
 def wrap_model_ddp(
     model: torch.nn.Module, device_id: int, find_unused_parameters: bool = False
-) -> DDP:
+) -> DDPPolicyWrapper:
     """Wrap model with DistributedDataParallel.
 
     Args:
@@ -128,7 +255,7 @@ def wrap_model_ddp(
             (useful for complex models with conditional execution)
 
     Returns:
-        DDP-wrapped model
+        DDP-wrapped model with SB3-compatible attribute forwarding
     """
     if not dist.is_initialized():
         raise RuntimeError(
@@ -136,11 +263,11 @@ def wrap_model_ddp(
         )
 
     model = model.to(device_id)
-    ddp_model = DDP(
+    ddp_model = DDPPolicyWrapper(
         model, device_ids=[device_id], find_unused_parameters=find_unused_parameters
     )
 
-    logger.info(f"Wrapped model with DDP on device {device_id}")
+    logger.info(f"Wrapped model with DDP (SB3-compatible) on device {device_id}")
     return ddp_model
 
 
