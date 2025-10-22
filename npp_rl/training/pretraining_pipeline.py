@@ -14,8 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 from npp_rl.training.architecture_configs import ArchitectureConfig
 from npp_rl.training.bc_dataset import BCReplayDataset
 from npp_rl.training.bc_trainer import BCTrainer
-from nclone.gym_environment.npp_environment import NppEnvironment
-from nclone.gym_environment.config import EnvironmentConfig
 
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,6 @@ from typing import Dict, Optional, Tuple
 import time
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
