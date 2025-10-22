@@ -12,6 +12,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from npp_rl.training.architecture_configs import ArchitectureConfig
+from npp_rl.training.bc_dataset import BCReplayDataset
+from npp_rl.training.bc_trainer import BCTrainer
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 
@@ -62,103 +64,117 @@ class PretrainingPipeline:
         logger.info(f"Replay data: {self.replay_data_dir}")
         logger.info(f"Output directory: {self.output_dir}")
 
-    def prepare_bc_data(self, use_cache: bool = True) -> Optional[str]:
+    def prepare_bc_data(
+        self,
+        use_cache: bool = True,
+        max_replays: Optional[int] = None,
+        filter_successful_only: bool = True,
+    ) -> Optional[BCReplayDataset]:
         """Process replay data into BC training format.
 
-        This checks for existing processed data or generates it from replay files.
+        Creates a BCReplayDataset from replay files, with optional caching.
 
         Args:
             use_cache: If True, use cached processed data if available
+            max_replays: Maximum number of replays to load (None for all)
+            filter_successful_only: Only include successful replays
 
         Returns:
-            Path to BC dataset file, or None if no data available
+            BCReplayDataset instance, or None if no data available
         """
-        # Check for existing processed data
-        cached_data = self.output_dir / "bc_dataset.pkl"
-
-        if use_cache and cached_data.exists():
-            logger.info(f"Using cached BC data: {cached_data}")
-            return str(cached_data)
-
         # Look for replay files
-        replay_files = list(self.replay_data_dir.glob("*.npz"))
+        replay_files = list(self.replay_data_dir.glob("*.replay"))
 
         if not replay_files:
             logger.warning(
-                f"No replay files found in {self.replay_data_dir}. "
+                f"No .replay files found in {self.replay_data_dir}. "
                 "Skipping BC pretraining."
             )
             return None
 
         logger.info(f"Found {len(replay_files)} replay files")
 
-        # Check if bc_pretrain.py processing is needed
-        # For now, we assume data is pre-processed or will use existing BC script
-        logger.info(
-            "Replay data processing should be done using bc_pretrain.py "
-            "or existing processed datasets"
-        )
+        try:
+            # Create BC dataset
+            dataset = BCReplayDataset(
+                replay_dir=str(self.replay_data_dir),
+                cache_dir=str(self.output_dir / "cache"),
+                use_cache=use_cache,
+                filter_successful_only=filter_successful_only,
+                max_replays=max_replays,
+            )
 
-        return None  # Caller should use bc_pretrain.py directly
+            if len(dataset) == 0:
+                logger.warning("No training samples generated from replays")
+                return None
+
+            logger.info(f"BC dataset ready with {len(dataset)} training samples")
+            return dataset
+
+        except Exception as e:
+            logger.error(f"Failed to create BC dataset: {e}")
+            return None
 
     def run_pretraining(
         self,
-        bc_data_path: Optional[str],
+        bc_dataset: Optional[BCReplayDataset],
         epochs: int = 10,
         batch_size: int = 64,
         learning_rate: float = 3e-4,
-        checkpoint_name: str = "bc_checkpoint.pth",
+        num_workers: int = 4,
+        device: str = "auto",
     ) -> Optional[str]:
         """Run behavioral cloning training.
 
         Args:
-            bc_data_path: Path to BC dataset (if None, skips pretraining)
+            bc_dataset: BC replay dataset (if None, skips pretraining)
             epochs: Number of training epochs
             batch_size: Batch size for training
             learning_rate: Learning rate
-            checkpoint_name: Name for saved checkpoint
+            num_workers: Number of data loading workers
+            device: Device to train on ('auto', 'cpu', 'cuda')
 
         Returns:
             Path to pretrained checkpoint, or None if skipped
         """
-        if bc_data_path is None:
-            logger.info("No BC data available, skipping pretraining")
+        if bc_dataset is None:
+            logger.info("No BC dataset available, skipping pretraining")
             return None
 
         logger.info("=" * 60)
         logger.info(f"Starting BC pretraining for {self.architecture_config.name}")
         logger.info(f"Architecture: {self.architecture_config.name}")
+        logger.info(f"Dataset size: {len(bc_dataset)} samples")
         logger.info(f"Epochs: {epochs}, Batch size: {batch_size}")
         logger.info(f"Learning rate: {learning_rate}")
         logger.info("=" * 60)
 
         try:
-            # Create environment to get observation/action spaces
-            env = NppEnvironment(config=EnvironmentConfig.for_training())
-            env.close()
-
             # Create BC trainer
-            # Note: This is a simplified version. Full integration would require
-            # loading the actual BC dataset and configuring the policy based on
-            # architecture_config
-            logger.warning(
-                "BC pretraining integration is currently simplified. "
-                "For full pretraining, use bc_pretrain.py directly with "
-                "the appropriate architecture configuration."
+            trainer = BCTrainer(
+                architecture_config=self.architecture_config,
+                dataset=bc_dataset,
+                output_dir=str(self.output_dir),
+                device=device,
+                validation_split=0.1,
+                tensorboard_writer=self.tensorboard_writer,
             )
 
-            checkpoint_path = self.output_dir / checkpoint_name
+            # Run training
+            best_checkpoint_path = trainer.train(
+                epochs=epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                num_workers=num_workers,
+                save_frequency=5,
+                early_stopping_patience=5,
+            )
 
-            # NOTE: By design, this delegates to bc_pretrain.py script for actual BC training
-            # This pipeline provides orchestration and validation, not the training loop itself
-            # Users should run: python bc_pretrain.py --dataset_dir <path> --epochs 20
-            logger.info(f"BC pretraining checkpoint location: {checkpoint_path}")
-            logger.info("Run bc_pretrain.py separately for actual BC training")
-
-            return str(checkpoint_path) if checkpoint_path.exists() else None
+            logger.info(f"BC pretraining completed: {best_checkpoint_path}")
+            return best_checkpoint_path
 
         except Exception as e:
-            logger.error(f"BC pretraining failed: {e}")
+            logger.error(f"BC pretraining failed: {e}", exc_info=True)
             logger.warning("Continuing without pretrained checkpoint")
             return None
 
@@ -229,6 +245,10 @@ def run_bc_pretraining_if_available(
     output_dir: Path,
     epochs: int = 10,
     batch_size: int = 64,
+    learning_rate: float = 3e-4,
+    num_workers: int = 4,
+    device: str = "auto",
+    max_replays: Optional[int] = None,
     tensorboard_writer: Optional[SummaryWriter] = None,
 ) -> Optional[str]:
     """Convenience function to run BC pretraining if replay data available.
@@ -239,6 +259,10 @@ def run_bc_pretraining_if_available(
         output_dir: Output directory for checkpoints
         epochs: Number of BC epochs
         batch_size: BC batch size
+        learning_rate: Learning rate
+        num_workers: Number of data loading workers
+        device: Device to train on
+        max_replays: Maximum number of replays to use (None for all)
         tensorboard_writer: Optional TensorBoard writer
 
     Returns:
@@ -274,11 +298,20 @@ def run_bc_pretraining_if_available(
                 return str(existing_checkpoint)
 
         # Prepare BC data
-        bc_data = pipeline.prepare_bc_data(use_cache=True)
+        bc_dataset = pipeline.prepare_bc_data(
+            use_cache=True,
+            max_replays=max_replays,
+            filter_successful_only=True,
+        )
 
         # Run pretraining
         checkpoint_path = pipeline.run_pretraining(
-            bc_data_path=bc_data, epochs=epochs, batch_size=batch_size
+            bc_dataset=bc_dataset,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_workers=num_workers,
+            device=device,
         )
 
         if checkpoint_path and pipeline.validate_checkpoint(checkpoint_path):
@@ -289,6 +322,6 @@ def run_bc_pretraining_if_available(
             return None
 
     except Exception as e:
-        logger.error(f"BC pretraining pipeline failed: {e}")
+        logger.error(f"BC pretraining pipeline failed: {e}", exc_info=True)
         logger.warning("Continuing without pretraining")
         return None
