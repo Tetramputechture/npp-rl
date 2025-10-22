@@ -204,6 +204,7 @@ class CurriculumManager:
             "success_rate": success_rate,
             "episodes": episodes,
             "can_advance": can_advance,
+            "advancement_threshold": self.advancement_threshold,
         }
 
     def get_stage_success_rate(self, stage: str) -> float:

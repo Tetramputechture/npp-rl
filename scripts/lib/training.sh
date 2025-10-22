@@ -92,6 +92,10 @@ train_single_architecture() {
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
             --use-curriculum \
+            --use-hierarchical-ppo \
+            --replay-data-dir ../nclone/bc_replays \
+            --bc-epochs 1000 \
+            --bc-batch-size 128 \
             --hardware-profile auto \
             --total-timesteps 10000000 \
             --distributed-backend nccl \
@@ -101,8 +105,7 @@ train_single_architecture() {
             --video-fps 30 \
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
-            --output-dir ~/experiments \
-            --no-pretraining"
+            --output-dir ~/experiments"
 
     echo $train_cmd
     return 0

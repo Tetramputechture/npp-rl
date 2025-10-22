@@ -146,30 +146,32 @@ class ArchitectureTrainer:
 
     def _load_bc_pretrained_weights(self, checkpoint_path: str):
         """Load BC pretrained weights into PPO policy.
-        
+
         Maps BC checkpoint structure to PPO policy structure:
         - BC: feature_extractor.* → PPO: features_extractor.*
         - BC policy_head is ignored (PPO trains its own action/value heads)
-        
+
         Args:
             checkpoint_path: Path to BC checkpoint file
         """
-        checkpoint = torch.load(checkpoint_path, map_location=self.model.device, weights_only=False)
-        
+        checkpoint = torch.load(
+            checkpoint_path, map_location=self.model.device, weights_only=False
+        )
+
         if "policy_state_dict" not in checkpoint:
             logger.warning(
                 f"Checkpoint does not contain 'policy_state_dict'. "
                 f"Found keys: {list(checkpoint.keys())}"
             )
             return
-        
+
         bc_state_dict = checkpoint["policy_state_dict"]
-        
+
         # Map BC feature_extractor weights to PPO features_extractor
         # BC saves: feature_extractor.*
         # PPO expects: features_extractor.* (note the 's')
         mapped_state_dict = {}
-        
+
         for key, value in bc_state_dict.items():
             if key.startswith("feature_extractor."):
                 # Map to features_extractor (with 's')
@@ -181,41 +183,45 @@ class ArchitectureTrainer:
                 logger.debug(f"Skipping {key} (policy head not used in PPO)")
             else:
                 logger.debug(f"Skipping unknown key: {key}")
-        
+
         if not mapped_state_dict:
             logger.warning("No feature extractor weights found in BC checkpoint")
             return
-        
+
         # Load only the feature extractor weights with strict=False
         # This allows loading partial weights without errors
         try:
             missing_keys, unexpected_keys = self.model.policy.load_state_dict(
                 mapped_state_dict, strict=False
             )
-            
+
             # Log summary
             logger.info(f"✓ Loaded BC pretrained feature extractor weights")
             logger.info(f"  Loaded {len(mapped_state_dict)} weight tensors")
-            
+
             if missing_keys:
-                logger.info(f"  Missing keys (will use random init): {len(missing_keys)}")
-                logger.debug(f"    Examples: {missing_keys[:5]}")
-            
+                logger.info(
+                    f"  Missing keys (will use random init): {len(missing_keys)}"
+                )
+                logger.info(f"    Examples: {missing_keys[:5]}")
+
             if unexpected_keys:
-                logger.warning(f"  Unexpected keys in checkpoint: {len(unexpected_keys)}")
+                logger.warning(
+                    f"  Unexpected keys in checkpoint: {len(unexpected_keys)}"
+                )
                 logger.debug(f"    Examples: {unexpected_keys[:5]}")
-            
+
             # Log what was actually loaded
             feature_extractor_loaded = any(
                 "features_extractor" in key for key in mapped_state_dict.keys()
             )
-            
+
             if feature_extractor_loaded:
                 logger.info("  ✓ Feature extractor weights loaded successfully")
                 logger.info("  → Policy and value heads will be trained from scratch")
             else:
                 logger.warning("  ✗ No feature extractor weights were loaded")
-                
+
         except Exception as e:
             logger.error(f"Failed to load mapped weights: {e}")
             raise
