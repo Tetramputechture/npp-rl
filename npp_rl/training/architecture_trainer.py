@@ -144,6 +144,82 @@ class ArchitectureTrainer:
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
 
+    def _load_bc_pretrained_weights(self, checkpoint_path: str):
+        """Load BC pretrained weights into PPO policy.
+        
+        Maps BC checkpoint structure to PPO policy structure:
+        - BC: feature_extractor.* → PPO: features_extractor.*
+        - BC policy_head is ignored (PPO trains its own action/value heads)
+        
+        Args:
+            checkpoint_path: Path to BC checkpoint file
+        """
+        checkpoint = torch.load(checkpoint_path, map_location=self.model.device, weights_only=False)
+        
+        if "policy_state_dict" not in checkpoint:
+            logger.warning(
+                f"Checkpoint does not contain 'policy_state_dict'. "
+                f"Found keys: {list(checkpoint.keys())}"
+            )
+            return
+        
+        bc_state_dict = checkpoint["policy_state_dict"]
+        
+        # Map BC feature_extractor weights to PPO features_extractor
+        # BC saves: feature_extractor.*
+        # PPO expects: features_extractor.* (note the 's')
+        mapped_state_dict = {}
+        
+        for key, value in bc_state_dict.items():
+            if key.startswith("feature_extractor."):
+                # Map to features_extractor (with 's')
+                new_key = key.replace("feature_extractor.", "features_extractor.", 1)
+                mapped_state_dict[new_key] = value
+                logger.debug(f"Mapped {key} → {new_key}")
+            elif key.startswith("policy_head."):
+                # Skip policy head weights (PPO will train its own)
+                logger.debug(f"Skipping {key} (policy head not used in PPO)")
+            else:
+                logger.debug(f"Skipping unknown key: {key}")
+        
+        if not mapped_state_dict:
+            logger.warning("No feature extractor weights found in BC checkpoint")
+            return
+        
+        # Load only the feature extractor weights with strict=False
+        # This allows loading partial weights without errors
+        try:
+            missing_keys, unexpected_keys = self.model.policy.load_state_dict(
+                mapped_state_dict, strict=False
+            )
+            
+            # Log summary
+            logger.info(f"✓ Loaded BC pretrained feature extractor weights")
+            logger.info(f"  Loaded {len(mapped_state_dict)} weight tensors")
+            
+            if missing_keys:
+                logger.info(f"  Missing keys (will use random init): {len(missing_keys)}")
+                logger.debug(f"    Examples: {missing_keys[:5]}")
+            
+            if unexpected_keys:
+                logger.warning(f"  Unexpected keys in checkpoint: {len(unexpected_keys)}")
+                logger.debug(f"    Examples: {unexpected_keys[:5]}")
+            
+            # Log what was actually loaded
+            feature_extractor_loaded = any(
+                "features_extractor" in key for key in mapped_state_dict.keys()
+            )
+            
+            if feature_extractor_loaded:
+                logger.info("  ✓ Feature extractor weights loaded successfully")
+                logger.info("  → Policy and value heads will be trained from scratch")
+            else:
+                logger.warning("  ✗ No feature extractor weights were loaded")
+                
+        except Exception as e:
+            logger.error(f"Failed to load mapped weights: {e}")
+            raise
+
     def setup_model(self, pretrained_checkpoint: Optional[str] = None, **ppo_kwargs):
         """Initialize model from architecture config or checkpoint.
 
@@ -392,18 +468,7 @@ class ArchitectureTrainer:
                     f"Loading pretrained weights from {self.pretrained_checkpoint}"
                 )
                 try:
-                    checkpoint = torch.load(
-                        self.pretrained_checkpoint, map_location=self.model.device
-                    )
-                    if "policy_state_dict" in checkpoint:
-                        self.model.policy.load_state_dict(
-                            checkpoint["policy_state_dict"]
-                        )
-                        logger.info("Loaded pretrained policy weights")
-                    else:
-                        logger.warning(
-                            "Checkpoint does not contain 'policy_state_dict'"
-                        )
+                    self._load_bc_pretrained_weights(self.pretrained_checkpoint)
                 except Exception as e:
                     logger.error(f"Failed to load pretrained weights: {e}")
                     logger.warning("Continuing with random initialization")
