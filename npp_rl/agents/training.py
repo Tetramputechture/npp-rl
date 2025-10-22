@@ -29,7 +29,7 @@ from pathlib import Path
 import json
 import datetime
 from stable_baselines3 import PPO
-from stable_baselines3.common.utils import get_linear_fn
+from stable_baselines3.common.utils import LinearSchedule
 from stable_baselines3.common.callbacks import (
     EvalCallback,
     StopTrainingOnNoModelImprovement,
@@ -486,7 +486,7 @@ def train_agent(
         )
 
     # Configure learning rate schedule
-    model.learning_rate = get_linear_fn(3e-4, 1e-6, 0.8)
+    model.learning_rate = LinearSchedule(3e-4, 1e-6, 0.8)
 
     # Setup logging
     logger = configure(str(log_dir / "tensorboard"), ["tensorboard", "csv"])
