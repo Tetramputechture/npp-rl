@@ -312,3 +312,30 @@ class HierarchicalPPO:
 
         self.ppo_model = PPO.load(*args, **kwargs)
         return self.ppo_model
+
+    def set_env(self, *args, **kwargs):
+        """Set the environment for the hierarchical model."""
+        if self.ppo_model is None:
+            raise ValueError("Model not created. Call create_model() first.")
+        return self.ppo_model.set_env(*args, **kwargs)
+
+    @property
+    def device(self):
+        """Get the device of the underlying PPO model."""
+        if self.ppo_model is None:
+            raise ValueError("Model not created. Call create_model() first.")
+        return self.ppo_model.device
+
+    @property
+    def policy(self):
+        """Get the policy of the underlying PPO model."""
+        if self.ppo_model is None:
+            raise ValueError("Model not created. Call create_model() first.")
+        return self.ppo_model.policy
+
+    @policy.setter
+    def policy(self, value):
+        """Set the policy of the underlying PPO model."""
+        if self.ppo_model is None:
+            raise ValueError("Model not created. Call create_model() first.")
+        self.ppo_model.policy = value

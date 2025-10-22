@@ -516,21 +516,51 @@ class ArchitectureTrainer:
         # Now create the model with the correct environment
         if self.model is None and hasattr(self, "policy_kwargs"):
             logger.info("=" * 60)
-            logger.info("Creating PPO model with training environment...")
-            logger.info(f"Policy class: {self.policy_class}")
-            logger.info(f"Device: {self.hyperparams.get('device')}")
-            logger.info("Feature extractor: ConfigurableMultimodalExtractor")
-            logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
-            logger.info("Initializing policy networks and moving to device...")
+            
+            if self.use_hierarchical_ppo:
+                # Use HierarchicalPPO wrapper
+                from npp_rl.agents.hierarchical_ppo import HierarchicalPPO
+                
+                logger.info("Creating HierarchicalPPO model with training environment...")
+                logger.info(f"Policy class: {self.policy_class}")
+                logger.info(f"Device: {self.hyperparams.get('device')}")
+                logger.info("Feature extractor: ConfigurableMultimodalExtractor")
+                logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
+                logger.info(f"High-level update frequency: {self.policy_kwargs.get('high_level_update_frequency')}")
+                logger.info(f"Max steps per subtask: {self.policy_kwargs.get('max_steps_per_subtask')}")
+                logger.info(f"Using ICM: {self.policy_kwargs.get('use_icm')}")
+                logger.info("Initializing hierarchical policy networks and moving to device...")
+                
+                # Create HierarchicalPPO wrapper
+                hierarchical_ppo = HierarchicalPPO(
+                    policy_class=self.policy_class,
+                    high_level_update_frequency=self.policy_kwargs.get('high_level_update_frequency', 50),
+                    max_steps_per_subtask=self.policy_kwargs.get('max_steps_per_subtask', 500),
+                    use_icm=self.policy_kwargs.get('use_icm', True),
+                    policy_kwargs=self.policy_kwargs,
+                    **self.hyperparams,
+                )
+                
+                # Create the model with environment
+                self.model = hierarchical_ppo.create_model(env=self.env)
+                logger.info("✓ HierarchicalPPO model created successfully")
+            else:
+                # Use standard PPO
+                logger.info("Creating PPO model with training environment...")
+                logger.info(f"Policy class: {self.policy_class}")
+                logger.info(f"Device: {self.hyperparams.get('device')}")
+                logger.info("Feature extractor: ConfigurableMultimodalExtractor")
+                logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
+                logger.info("Initializing policy networks and moving to device...")
 
-            self.model = PPO(
-                policy=self.policy_class,
-                env=self.env,
-                policy_kwargs=self.policy_kwargs,
-                **self.hyperparams,
-            )
+                self.model = PPO(
+                    policy=self.policy_class,
+                    env=self.env,
+                    policy_kwargs=self.policy_kwargs,
+                    **self.hyperparams,
+                )
+                logger.info("✓ PPO model created successfully")
 
-            logger.info("✓ PPO model created successfully")
             logger.info(f"✓ Model is on device: {self.model.device}")
             logger.info("=" * 60)
 
