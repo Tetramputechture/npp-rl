@@ -205,27 +205,41 @@ class BCReplayDataset(Dataset):
         """
         samples = []
         
-        # Create a temporary level file from the map data
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.npp', delete=False) as tmp:
-            tmp.write(replay.map_data)
-            tmp_path = tmp.name
+        # Create environment
+        config = EnvironmentConfig.for_training()
+        env = NppEnvironment(config=config)
         
         try:
-            # Create environment
-            config = EnvironmentConfig.for_training()
-            env = NppEnvironment(config=config)
+            # Load map data directly into NPlayHeadless
+            env.nplay_headless.load_map_from_map_data(list(replay.map_data))
             
-            # Load level from file
-            env.load_level(tmp_path)
-            
-            # Get initial observation
-            obs, _ = env.reset()
+            # Get initial observation without calling reset()
+            # (reset would reload a random map, we want the replay map)
+            obs = env._get_observation()
             
             # Execute each input from the replay
-            for action in replay.input_sequence:
+            for input_byte in replay.input_sequence:
+                # Decode input to controls (same format as ReplayExecutor)
+                from nclone.replay.input_utils import decode_input_to_controls
+                horizontal, jump = decode_input_to_controls(input_byte)
+                
+                # Convert to action index for environment
+                # Environment action space: 0=NOOP, 1=LEFT, 2=RIGHT, 3=JUMP, 4=LEFT+JUMP, 5=RIGHT+JUMP
+                if horizontal < 0 and jump:
+                    action = 4  # LEFT+JUMP
+                elif horizontal > 0 and jump:
+                    action = 5  # RIGHT+JUMP
+                elif horizontal < 0:
+                    action = 1  # LEFT
+                elif horizontal > 0:
+                    action = 2  # RIGHT
+                elif jump:
+                    action = 3  # JUMP
+                else:
+                    action = 0  # NOOP
+                
                 # Store the observation-action pair
-                samples.append((self._process_observation(obs), int(action)))
+                samples.append((self._process_observation(obs), action))
                 
                 # Step environment
                 obs, _, terminated, truncated, _ = env.step(action)
@@ -234,15 +248,8 @@ class BCReplayDataset(Dataset):
                 if terminated or truncated:
                     break
             
-            env.close()
-            
         finally:
-            # Clean up temp file
-            import os
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
+            env.close()
         
         return samples
     
