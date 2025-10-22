@@ -176,10 +176,12 @@ class BCReplayDataset(Dataset):
             
             executor.close()
             
-            # Pair observations with actions
-            # Note: input_sequence has one action per frame, observations align with frames
-            for i, (obs, action) in enumerate(zip(observations, replay.input_sequence)):
-                samples.append((self._process_observation(obs), int(action)))
+            # Extract observations and actions from ReplayExecutor output
+            # ReplayExecutor returns list of dicts with keys: 'observation', 'action', 'frame'
+            for obs_data in observations:
+                observation = obs_data['observation']
+                action = obs_data['action']
+                samples.append((self._process_observation(observation), int(action)))
             
         except Exception as e:
             logger.warning(f"Failed to simulate replay: {e}")
@@ -257,26 +259,33 @@ class BCReplayDataset(Dataset):
         """Process observation into format suitable for caching.
         
         Args:
-            obs: Raw observation from environment
+            obs: Raw observation from environment or ReplayExecutor
             
         Returns:
             Processed observation dictionary
         """
         # Extract only the components needed for training
-        # Skip complex objects like level_data that can't be easily cached
-        processed = {
-            'game_state': obs['game_state'].copy(),
-            'global_view': obs['global_view'].copy(),
-            'reachability_features': obs['reachability_features'].copy(),
-            'player_frame': obs['player_frame'].copy(),
-            'graph_node_feats': obs['graph_node_feats'].copy(),
-            'graph_edge_index': obs['graph_edge_index'].copy(),
-            'graph_edge_feats': obs['graph_edge_feats'].copy(),
-            'graph_node_mask': obs['graph_node_mask'].copy(),
-            'graph_edge_mask': obs['graph_edge_mask'].copy(),
-            'graph_node_types': obs['graph_node_types'].copy(),
-            'graph_edge_types': obs['graph_edge_types'].copy(),
-        }
+        # Handle both full environment observations and ReplayExecutor observations
+        processed = {}
+        
+        # Core features that should always be present
+        core_keys = ['game_state', 'global_view', 'reachability_features', 'player_frame']
+        for key in core_keys:
+            if key in obs:
+                processed[key] = obs[key].copy()
+        
+        # Optional entity positions (from ReplayExecutor)
+        if 'entity_positions' in obs:
+            processed['entity_positions'] = obs['entity_positions'].copy()
+        
+        # Optional graph features (from full environment)
+        graph_keys = [
+            'graph_node_feats', 'graph_edge_index', 'graph_edge_feats',
+            'graph_node_mask', 'graph_edge_mask', 'graph_node_types', 'graph_edge_types'
+        ]
+        for key in graph_keys:
+            if key in obs:
+                processed[key] = obs[key].copy()
         
         return processed
     
