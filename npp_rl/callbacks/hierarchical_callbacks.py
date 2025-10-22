@@ -516,105 +516,172 @@ class AdaptiveLearningRateCallback(BaseCallback):
 
 class CurriculumProgressionCallback(BaseCallback):
     """
-    Manage curriculum progression from simple to complex levels.
+    Coordinate curriculum progression with CurriculumManager.
 
-    Tracks:
-    - Success rates on current difficulty
-    - Episode completion metrics
-    - Progression readiness
+    This callback serves as a bridge between the training loop and the
+    CurriculumManager, providing automatic progression monitoring and
+    environment updates during training.
 
-    Manages:
-    - Level difficulty advancement
-    - Curriculum stage transitions
+    Responsibilities:
+    - Record episode outcomes to CurriculumManager
+    - Periodically check for curriculum advancement readiness
+    - Update environment wrappers when advancing stages
+    - Log curriculum metrics to TensorBoard
+
+    Note: This callback delegates all curriculum logic to CurriculumManager.
+    It does not reimplement progression logic - it coordinates it.
     """
 
     def __init__(
         self,
-        very_simple_threshold: float = 0.3,
-        simple_threshold: float = 0.3,
-        medium_threshold: float = 0.5,
-        evaluation_episodes: int = 100,
+        curriculum_manager=None,
+        check_freq: int = 10000,
         log_freq: int = 1000,
         verbose: int = 1,
     ):
-        super().__init__(verbose)
-        self.very_simple_threshold = very_simple_threshold
-        self.simple_threshold = simple_threshold
-        self.medium_threshold = medium_threshold
-        self.evaluation_episodes = evaluation_episodes
-        self.log_freq = log_freq
+        """
+        Initialize curriculum progression callback.
 
-        # Curriculum tracking
-        self.current_difficulty = "very_simple"
-        self.episode_successes = deque(maxlen=evaluation_episodes)
+        Args:
+            curriculum_manager: CurriculumManager instance to coordinate with.
+                               If None, callback operates in standalone mode.
+            check_freq: Frequency (in steps) to check for advancement readiness
+            log_freq: Frequency (in steps) to log curriculum metrics
+            verbose: Verbosity level
+        """
+        super().__init__(verbose)
+        self.curriculum_manager = curriculum_manager
+        self.check_freq = check_freq
+        self.log_freq = log_freq
         self.step_count = 0
+        self.last_stage_idx = -1
+
+        # Validate curriculum manager if provided
+        if curriculum_manager is not None:
+            from npp_rl.training.curriculum_manager import CurriculumManager
+
+            if not isinstance(curriculum_manager, CurriculumManager):
+                warnings.warn(
+                    f"curriculum_manager should be CurriculumManager instance, got {type(curriculum_manager)}"
+                )
 
     def _on_step(self) -> bool:
+        """Called at each training step."""
         self.step_count += 1
 
-        # Track episode outcomes
+        # Record episode outcomes if curriculum manager available
+        if self.curriculum_manager is not None:
+            self._record_episodes()
+
+        # Check for advancement periodically
+        if self.step_count % self.check_freq == 0:
+            if self.curriculum_manager is not None:
+                advanced = self.curriculum_manager.check_advancement()
+                if advanced:
+                    self._handle_advancement()
+
+        # Log metrics periodically
+        if self.step_count % self.log_freq == 0:
+            self._log_curriculum_metrics()
+
+        return True
+
+    def _record_episodes(self):
+        """Record episode outcomes to curriculum manager."""
+        # Extract episode outcomes from training data
         if hasattr(self.locals, "dones"):
             dones = self.locals.get("dones", [])
             infos = self.locals.get("infos", [])
 
             for done, info in zip(dones, infos):
                 if done:
-                    success = info.get("is_success", False)
-                    self.episode_successes.append(success)
+                    # Try multiple keys for episode success
+                    success = (
+                        info.get("is_success", False)
+                        or info.get("episode_success", False)
+                        or info.get("success", False)
+                    )
 
-        # Periodic evaluation
-        if self.step_count % self.log_freq == 0:
-            self._evaluate_progression()
+                    # Record to curriculum manager
+                    self.curriculum_manager.record_episode(success)
 
-        return True
+    def _handle_advancement(self):
+        """Handle curriculum stage advancement."""
+        new_stage = self.curriculum_manager.get_current_stage()
+        new_stage_idx = self.curriculum_manager.current_stage_idx
 
-    def _evaluate_progression(self):
-        """Evaluate if ready to progress to next difficulty."""
-        if len(self.episode_successes) < self.evaluation_episodes:
+        if self.verbose > 0:
+            print("\n" + "=" * 60)
+            print(f"CURRICULUM ADVANCEMENT!")
+            print(f"New stage: {new_stage} (stage {new_stage_idx + 1}/6)")
+            print("=" * 60 + "\n")
+
+        # Update environment wrappers if possible
+        self._update_environments()
+
+    def _update_environments(self):
+        """Update environment wrappers with new curriculum stage."""
+        if not hasattr(self, "training_env"):
             return
 
-        success_rate = np.mean(self.episode_successes)
+        new_stage = self.curriculum_manager.get_current_stage()
 
-        # Log current performance
-        if self.logger:
-            self.logger.record("curriculum/success_rate", success_rate)
+        # Try to update vectorized environment attributes
+        try:
+            if hasattr(self.training_env, "set_attr"):
+                self.training_env.set_attr("current_curriculum_stage", new_stage)
+            elif hasattr(self.training_env, "envs"):
+                # Direct attribute setting for each environment
+                for env in self.training_env.envs:
+                    if hasattr(env, "current_curriculum_stage"):
+                        env.current_curriculum_stage = new_stage
+        except Exception as e:
+            if self.verbose > 0:
+                warnings.warn(
+                    f"Could not update environment curriculum stage: {e}. "
+                    f"Manual intervention may be required."
+                )
+
+    def _log_curriculum_metrics(self):
+        """Log curriculum metrics to TensorBoard."""
+        if not self.logger or self.curriculum_manager is None:
+            return
+
+        # Current stage info
+        current_stage = self.curriculum_manager.get_current_stage()
+        current_stage_idx = self.curriculum_manager.current_stage_idx
+
+        # Get performance for current stage
+        perf = self.curriculum_manager.get_stage_performance(current_stage)
+
+        # Log metrics
+        self.logger.record("curriculum/current_stage_idx", current_stage_idx)
+        self.logger.record("curriculum/current_stage_name", current_stage)
+        self.logger.record("curriculum/success_rate", perf["success_rate"])
+        self.logger.record("curriculum/episodes_in_stage", perf["episodes"])
+        self.logger.record(
+            "curriculum/can_advance", 1.0 if perf["can_advance"] else 0.0
+        )
+        self.logger.record(
+            "curriculum/advancement_threshold", perf["advancement_threshold"]
+        )
+
+        # Log performance for all stages (for comparison)
+        for stage_name in self.curriculum_manager.CURRICULUM_ORDER:
+            stage_perf = self.curriculum_manager.get_stage_performance(stage_name)
             self.logger.record(
-                "curriculum/difficulty",
-                {"simple": 0, "medium": 1, "complex": 2}[self.current_difficulty],
+                f"curriculum_stages/{stage_name}_success_rate",
+                stage_perf["success_rate"],
             )
-
-        # Check progression
-        if self.current_difficulty == "very_simple":
-            if success_rate >= self.simple_threshold:
-                self.current_difficulty = "simple"
-                if self.verbose > 0:
-                    print(
-                        f"Progressing to simple difficulty (success rate: {success_rate:.2%})"
-                    )
-        elif (
-            self.current_difficulty == "simple"
-            and success_rate >= self.simple_threshold
-        ):
-            self.current_difficulty = "medium"
-            if self.verbose > 0:
-                print(
-                    f"Progressing to medium difficulty (success rate: {success_rate:.2%})"
-                )
-
-        elif (
-            self.current_difficulty == "medium"
-            and success_rate >= self.medium_threshold
-        ):
-            self.current_difficulty = "complex"
-            if self.verbose > 0:
-                print(
-                    f"Progressing to complex difficulty (success rate: {success_rate:.2%})"
-                )
+            self.logger.record(
+                f"curriculum_stages/{stage_name}_episodes", stage_perf["episodes"]
+            )
 
 
 def create_hierarchical_callbacks(
     log_freq: int = 100,
     adjustment_freq: int = 10000,
+    curriculum_manager=None,
     verbose: int = 1,
 ) -> List[BaseCallback]:
     """
@@ -623,6 +690,7 @@ def create_hierarchical_callbacks(
     Args:
         log_freq: Logging frequency (steps)
         adjustment_freq: Adaptive adjustment frequency (steps)
+        curriculum_manager: Optional CurriculumManager for curriculum progression
         verbose: Verbosity level
 
     Returns:
@@ -643,7 +711,17 @@ def create_hierarchical_callbacks(
             adjustment_freq=adjustment_freq,
             verbose=verbose,
         ),
-        CurriculumProgressionCallback(log_freq=log_freq * 10, verbose=verbose),
     ]
+
+    # Add curriculum callback if curriculum manager provided
+    if curriculum_manager is not None:
+        callbacks.append(
+            CurriculumProgressionCallback(
+                curriculum_manager=curriculum_manager,
+                check_freq=adjustment_freq,  # Check advancement at same freq as LR adjustments
+                log_freq=log_freq * 10,
+                verbose=verbose,
+            )
+        )
 
     return callbacks

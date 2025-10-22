@@ -518,6 +518,23 @@ class ArchitectureTrainer:
             if callback_fn is not None:
                 callbacks.append(callback_fn)
 
+            # Add curriculum progression callback if curriculum learning is enabled
+            if self.use_curriculum and self.curriculum_manager is not None:
+                from npp_rl.callbacks.hierarchical_callbacks import (
+                    CurriculumProgressionCallback,
+                )
+
+                curriculum_callback = CurriculumProgressionCallback(
+                    curriculum_manager=self.curriculum_manager,
+                    check_freq=10000,  # Check advancement every 10K steps
+                    log_freq=1000,  # Log metrics every 1K steps
+                    verbose=1,
+                )
+                callbacks.append(curriculum_callback)
+                logger.info(
+                    f"Added curriculum progression callback (current stage: {self.curriculum_manager.get_current_stage()})"
+                )
+
             # Add distributed progress callback if using multi-GPU training
             if self.use_distributed and self.world_size > 1:
                 from npp_rl.callbacks import DistributedProgressCallback
