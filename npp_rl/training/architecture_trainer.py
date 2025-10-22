@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import torch
-import torch.nn as nn
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -100,6 +99,7 @@ class ArchitectureTrainer:
         use_hierarchical_ppo: bool = False,
         use_curriculum: bool = False,
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
+        use_distributed: bool = False,
     ):
         """Initialize architecture trainer.
 
@@ -115,6 +115,7 @@ class ArchitectureTrainer:
             use_hierarchical_ppo: Use hierarchical PPO instead of standard PPO
             use_curriculum: Enable curriculum learning
             curriculum_kwargs: Curriculum manager configuration
+            use_distributed: Enable DistributedDataParallel mode for multi-GPU
         """
         self.architecture_config = architecture_config
         self.train_dataset_path = Path(train_dataset_path)
@@ -127,6 +128,7 @@ class ArchitectureTrainer:
         self.use_hierarchical_ppo = use_hierarchical_ppo
         self.use_curriculum = use_curriculum
         self.curriculum_kwargs = curriculum_kwargs or {}
+        self.use_distributed = use_distributed
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -203,16 +205,19 @@ class ArchitectureTrainer:
             default_batch_size = ppo_kwargs.get("batch_size", 256)
             default_learning_rate = ppo_kwargs.get("learning_rate", 3e-4)
         else:
-            # Apply automatic scaling for multi-GPU training
+            # Apply automatic scaling for multi-GPU DDP training
             base_batch_size = 256
             base_learning_rate = 3e-4
 
-            # Scale up for multi-GPU training (using sqrt scaling for stability)
-            if self.world_size > 1:
+            # DDP scaling: Each GPU processes batch_size samples independently
+            # Effective global batch = batch_size * world_size
+            # Learning rate scaled by sqrt(world_size) for training stability
+            # This follows standard practice from "Accurate, Large Minibatch SGD" (Goyal et al.)
+            if self.world_size > 1 and self.use_distributed:
                 default_batch_size = base_batch_size * self.world_size
                 default_learning_rate = base_learning_rate * (self.world_size**0.5)
                 logger.info(
-                    f"Scaling hyperparameters for {self.world_size} GPUs: "
+                    f"DDP hyperparameter scaling for {self.world_size} GPUs: "
                     f"batch_size={default_batch_size}, lr={default_learning_rate:.2e}"
                 )
             else:
@@ -403,37 +408,28 @@ class ArchitectureTrainer:
                     logger.error(f"Failed to load pretrained weights: {e}")
                     logger.warning("Continuing with random initialization")
 
-            # Wrap policy with DataParallel for multi-GPU training
-            if self.world_size > 1 and torch.cuda.is_available():
+            # Wrap policy with DistributedDataParallel for multi-GPU training
+            if self.use_distributed and self.world_size > 1:
+                from npp_rl.training.distributed_utils import wrap_model_ddp
+
                 logger.info("=" * 60)
                 logger.info(
-                    f"Setting up multi-GPU training with DataParallel for {self.world_size} GPUs"
+                    f"Setting up DistributedDataParallel (DDP) for rank {self.device_id}/{self.world_size}"
                 )
-                # Get list of GPU IDs
-                device_ids = list(range(self.world_size))
-                logger.info(f"GPU device IDs: {device_ids}")
+                logger.info(
+                    "DDP will synchronize gradients across all GPUs during training"
+                )
 
-                # Wrap the feature extractor with DataParallel
-                if hasattr(self.model.policy, "features_extractor"):
-                    logger.info("Wrapping feature extractor with DataParallel...")
-                    self.model.policy.features_extractor = nn.DataParallel(
-                        self.model.policy.features_extractor, device_ids=device_ids
-                    )
-                    logger.info(
-                        f"✓ Feature extractor distributed across GPUs: {device_ids}"
-                    )
+                # Wrap ENTIRE policy with DDP (not just parts like DataParallel)
+                # This is the correct way to do distributed training in PyTorch
+                self.model.policy = wrap_model_ddp(
+                    self.model.policy,
+                    device_id=self.device_id,
+                    find_unused_parameters=False,
+                )
 
-                # Wrap mlp_extractor if it exists
-                if hasattr(self.model.policy, "mlp_extractor"):
-                    logger.info("Wrapping MLP extractor with DataParallel...")
-                    self.model.policy.mlp_extractor = nn.DataParallel(
-                        self.model.policy.mlp_extractor, device_ids=device_ids
-                    )
-                    logger.info(
-                        f"✓ MLP extractor distributed across GPUs: {device_ids}"
-                    )
-
-                logger.info("✓ Multi-GPU setup complete")
+                logger.info(f"✓ Policy wrapped with DDP on GPU {self.device_id}")
+                logger.info("✓ Multi-GPU distributed training setup complete")
                 logger.info("=" * 60)
 
             logger.info(f"✓ Model fully initialized with {num_envs} environments")
@@ -551,6 +547,16 @@ class ArchitectureTrainer:
         if self.model is None:
             raise RuntimeError("Model not initialized")
 
+        # Only evaluate on rank 0 to avoid conflicts
+        if self.use_distributed:
+            from npp_rl.training.distributed_utils import is_main_process
+
+            if not is_main_process():
+                logger.info(
+                    f"[Rank {self.device_id}] Skipping evaluation (only rank 0 evaluates)"
+                )
+                return {"success_rate": 0.0, "skipped_on_worker": True}
+
         logger.info(
             f"Evaluating model on test suite ({num_episodes} episodes per category)..."
         )
@@ -616,8 +622,16 @@ class ArchitectureTrainer:
             is_final: Whether this is the final checkpoint
 
         Returns:
-            Path to saved checkpoint
+            Path to saved checkpoint (or None on worker processes)
         """
+        # Only save on rank 0 to avoid conflicts
+        if self.use_distributed:
+            from npp_rl.training.distributed_utils import is_main_process, barrier
+
+            if not is_main_process():
+                barrier()  # Wait for rank 0 to finish saving
+                return None
+
         checkpoint_dir = self.output_dir / "checkpoints"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -628,6 +642,12 @@ class ArchitectureTrainer:
 
         self.model.save(str(checkpoint_path))
         logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+        # Signal to other processes that save is complete
+        if self.use_distributed:
+            from npp_rl.training.distributed_utils import barrier
+
+            barrier()
 
         return checkpoint_path
 

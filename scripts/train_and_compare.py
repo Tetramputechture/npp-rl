@@ -8,14 +8,13 @@ with optional pretraining and multi-GPU support.
 import argparse
 import json
 import logging
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 
 import torch
-import torch.distributed as dist
+import torch.multiprocessing as mp
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,6 +35,13 @@ from npp_rl.training.hardware_profiles import (
     get_hardware_profile,
     auto_detect_profile,
     HARDWARE_PROFILES,
+)
+from npp_rl.training.distributed_utils import (
+    setup_distributed,
+    cleanup_distributed,
+    is_main_process,
+    configure_cuda_for_training,
+    barrier,
 )
 
 
@@ -251,30 +257,6 @@ def create_experiment_directory(base_dir: Path, experiment_name: str) -> Path:
     return exp_dir
 
 
-def setup_distributed(rank: int, world_size: int, backend: str = "nccl"):
-    """Setup distributed training process group.
-
-    Args:
-        rank: Process rank (GPU ID)
-        world_size: Total number of processes (GPUs)
-        backend: Distributed backend (nccl for GPU, gloo for CPU)
-    """
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-
-    # Initialize process group
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
-
-    # Set device for this process
-    torch.cuda.set_device(rank)
-
-
-def cleanup_distributed():
-    """Clean up distributed training process group."""
-    if dist.is_initialized():
-        dist.destroy_process_group()
-
-
 def train_architecture(
     architecture_name: str,
     architecture_config,
@@ -284,6 +266,7 @@ def train_architecture(
     condition_name: str = "",
     device_id: int = 0,
     hardware_profile=None,
+    use_distributed: bool = False,
 ) -> dict:
     """Train a single architecture configuration.
 
@@ -296,6 +279,7 @@ def train_architecture(
         condition_name: Condition name (e.g., "with_pretrain")
         device_id: GPU device ID for this process
         hardware_profile: Optional hardware profile with optimized hyperparameters
+        use_distributed: If True, enable DistributedDataParallel mode for multi-GPU
 
     Returns:
         Training results dictionary
@@ -352,6 +336,7 @@ def train_architecture(
             use_hierarchical_ppo=args.use_hierarchical_ppo,
             use_curriculum=args.use_curriculum,
             curriculum_kwargs=curriculum_kwargs,
+            use_distributed=use_distributed,
         )
 
         # Build PPO hyperparameters from hardware profile
@@ -437,6 +422,176 @@ def train_architecture(
             "status": "failed",
             "error": str(e),
         }
+
+
+def train_worker(
+    rank: int,
+    world_size: int,
+    args,
+    exp_dir: Path,
+    hardware_profile,
+    s3_bucket: str,
+    s3_prefix: str,
+    experiment_name: str,
+):
+    """Training worker for single GPU in distributed training setup.
+
+    This function runs in a separate process for each GPU. It initializes
+    distributed training, creates its own environments, and trains models
+    using DistributedDataParallel for gradient synchronization.
+
+    Args:
+        rank: GPU rank (0 to world_size-1)
+        world_size: Total number of GPUs
+        args: Parsed command-line arguments
+        exp_dir: Experiment directory
+        hardware_profile: Hardware profile (if any)
+        s3_bucket: S3 bucket name (or None)
+        s3_prefix: S3 prefix for uploads
+        experiment_name: Name of experiment
+    """
+    try:
+        # CRITICAL: Initialize distributed training using distributed_utils
+        setup_distributed(
+            rank=rank, world_size=world_size, backend=args.distributed_backend
+        )
+        configure_cuda_for_training(rank)
+
+        # Setup logging for this worker
+        logger = logging.getLogger("npp_rl.training")
+
+        if is_main_process():
+            logger.info(
+                f"[Rank {rank}] Main process - will handle logging/checkpointing/evaluation"
+            )
+        else:
+            logger.info(f"[Rank {rank}] Worker process - training only, no I/O")
+
+        # Setup S3 uploader (only on rank 0 to avoid conflicts)
+        s3_uploader = None
+        if is_main_process() and s3_bucket:
+            s3_uploader = create_s3_uploader(
+                bucket=s3_bucket,
+                prefix=s3_prefix,
+                experiment_name=experiment_name,
+            )
+            if s3_uploader:
+                s3_uploader.upload_file(str(exp_dir / "config.json"), "config.json")
+
+        # Track results (only on rank 0)
+        all_results = []
+
+        # Train each architecture
+        for arch_name in args.architectures:
+            logger.info(f"\n[Rank {rank}] {'=' * 70}")
+            logger.info(f"[Rank {rank}] Processing architecture: {arch_name}")
+            logger.info(f"[Rank {rank}] {'=' * 70}\n")
+
+            # Get architecture config
+            try:
+                arch_config = get_architecture_config(arch_name)
+            except Exception as e:
+                logger.error(
+                    f"[Rank {rank}] Failed to load architecture config for '{arch_name}': {e}"
+                )
+                continue
+
+            # Determine pretraining conditions (only on rank 0 to avoid conflicts)
+            if is_main_process():
+                if args.no_pretraining:
+                    conditions = [("no_pretrain", None)]
+                elif args.test_pretraining:
+                    pretrained_ckpt = run_bc_pretraining_if_available(
+                        replay_data_dir=args.replay_data_dir,
+                        architecture_config=arch_config,
+                        output_dir=exp_dir / arch_name / "pretrain",
+                        epochs=args.bc_epochs,
+                        batch_size=args.bc_batch_size,
+                    )
+                    conditions = [
+                        ("no_pretrain", None),
+                        ("with_pretrain", pretrained_ckpt),
+                    ]
+                else:
+                    pretrained_ckpt = run_bc_pretraining_if_available(
+                        replay_data_dir=args.replay_data_dir,
+                        architecture_config=arch_config,
+                        output_dir=exp_dir / arch_name / "pretrain",
+                        epochs=args.bc_epochs,
+                        batch_size=args.bc_batch_size,
+                    )
+                    if pretrained_ckpt:
+                        conditions = [("with_pretrain", pretrained_ckpt)]
+                    else:
+                        conditions = [("no_pretrain", None)]
+            else:
+                # Workers skip pretraining
+                conditions = [("no_pretrain", None)]
+
+            # Synchronize all processes before training
+            barrier()
+
+            # Train each condition
+            for condition_name, pretrained_checkpoint in conditions:
+                result = train_architecture(
+                    architecture_name=arch_name,
+                    architecture_config=arch_config,
+                    output_dir=exp_dir,
+                    args=args,
+                    pretrained_checkpoint=pretrained_checkpoint,
+                    condition_name=condition_name if args.test_pretraining else "",
+                    device_id=rank,
+                    hardware_profile=hardware_profile,
+                    use_distributed=True,  # Enable DDP mode
+                )
+
+                # Only rank 0 collects results and uploads to S3
+                if is_main_process():
+                    all_results.append(result)
+
+                    # Upload to S3 if configured
+                    if s3_uploader and result.get("status") != "failed":
+                        output_dir = Path(result["output_dir"])
+
+                        # Upload checkpoints
+                        s3_uploader.upload_directory(
+                            str(output_dir / "checkpoints"),
+                            f"{arch_name}/{condition_name}/checkpoints",
+                        )
+
+                        # Upload videos if they exist
+                        videos_dir = output_dir / "videos"
+                        if videos_dir.exists() and videos_dir.is_dir():
+                            logger.info(
+                                f"Uploading videos to S3 for {arch_name}/{condition_name}"
+                            )
+                            s3_uploader.upload_directory(
+                                str(videos_dir),
+                                f"{arch_name}/{condition_name}/videos",
+                                pattern="*.mp4",
+                            )
+
+                # Synchronize after each training run
+                barrier()
+
+        # Save all results (only rank 0)
+        if is_main_process():
+            results_file = exp_dir / "all_results.json"
+            with open(results_file, "w") as f:
+                json.dump(all_results, f, indent=2, default=str)
+
+            logger.info("\n" + "=" * 70)
+            logger.info("Experiment complete!")
+            logger.info(f"Results saved to: {exp_dir}")
+            logger.info("=" * 70)
+
+            # Upload final manifest
+            if s3_uploader:
+                s3_uploader.save_manifest(str(exp_dir / "s3_manifest.json"))
+
+    finally:
+        # CRITICAL: Clean up distributed training
+        cleanup_distributed()
 
 
 def main():
@@ -561,6 +716,40 @@ def main():
         prefix=args.s3_prefix,
         experiment_name=args.experiment_name,
     )
+
+    # CRITICAL: Detect multi-GPU scenario and spawn workers
+    if args.num_gpus > 1:
+        logger.info("\n" + "=" * 70)
+        logger.info("MULTI-GPU TRAINING DETECTED")
+        logger.info(f"Spawning {args.num_gpus} worker processes (one per GPU)")
+        logger.info("Each worker will use distributed_utils for coordination")
+        logger.info("Using DistributedDataParallel for gradient synchronization")
+        logger.info("=" * 70 + "\n")
+
+        # Spawn one process per GPU using torch.multiprocessing
+        mp.spawn(
+            train_worker,
+            args=(
+                args.num_gpus,  # world_size
+                args,  # parsed args
+                exp_dir,  # experiment directory
+                hardware_profile,  # hardware profile
+                args.s3_bucket,  # s3 bucket
+                args.s3_prefix,  # s3 prefix
+                args.experiment_name,  # experiment name
+            ),
+            nprocs=args.num_gpus,
+            join=True,
+        )
+
+        logger.info("\n" + "=" * 70)
+        logger.info("All GPU workers completed successfully")
+        logger.info("=" * 70)
+
+        return 0
+
+    # Single GPU/CPU training (existing code path)
+    logger.info("Single GPU/CPU training - no distributed coordination needed")
 
     # Upload configuration
     if s3_uploader:
