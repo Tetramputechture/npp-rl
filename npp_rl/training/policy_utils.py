@@ -62,7 +62,8 @@ def create_policy_network(
         observation_space: Observation space
         action_space: Action space
         architecture_config: Architecture configuration
-        features_dim: Dimension of feature extractor output
+        features_dim: DEPRECATED - ignored, features_dim is now taken from 
+            architecture_config.features_dim
         net_arch: Network architecture for policy head (default: [256, 256])
         
     Returns:
@@ -74,13 +75,15 @@ def create_policy_network(
     # Create feature extractor
     feature_extractor = ConfigurableMultimodalExtractor(
         observation_space=observation_space,
-        architecture_config=architecture_config,
-        features_dim=features_dim,
+        config=architecture_config,
     )
+    
+    # Get features_dim from the feature extractor (set in config)
+    actual_features_dim = architecture_config.features_dim
     
     # Create policy head (MLP that outputs action logits)
     policy_layers = []
-    in_dim = features_dim
+    in_dim = actual_features_dim
     
     for hidden_dim in net_arch:
         policy_layers.extend([
@@ -128,9 +131,9 @@ def create_policy_network(
             """
             return self.feature_extractor(observations)
     
-    policy_network = PolicyNetwork(feature_extractor, policy_head, features_dim)
+    policy_network = PolicyNetwork(feature_extractor, policy_head, actual_features_dim)
     
-    logger.info(f"Created policy network with {features_dim}-dim features")
+    logger.info(f"Created policy network with {actual_features_dim}-dim features")
     logger.info(f"Policy architecture: {net_arch} -> {action_space.n} actions")
     
     return policy_network
