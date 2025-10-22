@@ -68,9 +68,9 @@ def test_bc_loading():
     for i, key in enumerate(simulated_ppo_keys[:10]):
         print(f"  {i+1}. {key}")
     
-    # Test detection logic
+    # Test detection logic (OLD - would detect multiple)
     print("\n" + "="*60)
-    print("Detection Logic Test")
+    print("Detection Logic Test (OLD)")
     print("="*60)
     
     uses_shared_extractor = any(
@@ -87,9 +87,40 @@ def test_bc_loading():
     print(f"Uses separate extractors: {uses_separate_extractors}")
     print(f"Uses hierarchical extractor: {uses_hierarchical_extractor}")
     
-    # Test mapping logic
+    # Test priority-based selection (NEW)
     print("\n" + "="*60)
-    print("Mapping Logic Test")
+    print("Priority-Based Selection (NEW FIX)")
+    print("="*60)
+    
+    if uses_hierarchical_extractor:
+        map_hierarchical = True
+        map_shared = False
+        map_separate = False
+        extractor_type = "hierarchical"
+    elif uses_separate_extractors:
+        map_hierarchical = False
+        map_shared = False
+        map_separate = True
+        extractor_type = "separate"
+    elif uses_shared_extractor:
+        map_hierarchical = False
+        map_shared = True
+        map_separate = False
+        extractor_type = "shared"
+    else:
+        map_hierarchical = False
+        map_shared = False
+        map_separate = False
+        extractor_type = "unknown"
+    
+    print(f"Selected extractor type: {extractor_type}")
+    print(f"Map to hierarchical: {map_hierarchical}")
+    print(f"Map to shared: {map_shared}")
+    print(f"Map to separate: {map_separate}")
+    
+    # Test mapping logic (using priority-based flags)
+    print("\n" + "="*60)
+    print("Mapping Logic Test (NEW FIX)")
     print("="*60)
     
     mapped_state_dict = {}
@@ -98,15 +129,15 @@ def test_bc_loading():
         if key.startswith("feature_extractor."):
             sub_key = key[len("feature_extractor."):]
             
-            if uses_hierarchical_extractor:
+            if map_hierarchical:
                 hierarchical_key = f"mlp_extractor.features_extractor.{sub_key}"
                 mapped_state_dict[hierarchical_key] = value
             
-            if uses_shared_extractor:
+            if map_shared:
                 shared_key = f"features_extractor.{sub_key}"
                 mapped_state_dict[shared_key] = value
             
-            if uses_separate_extractors:
+            if map_separate:
                 pi_key = f"pi_features_extractor.{sub_key}"
                 vf_key = f"vf_features_extractor.{sub_key}"
                 mapped_state_dict[pi_key] = value

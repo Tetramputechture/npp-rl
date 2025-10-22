@@ -175,15 +175,22 @@ class ArchitectureTrainer:
         bc_state_dict = checkpoint["policy_state_dict"]
 
         # Detect if PPO model uses shared, separate, or hierarchical (nested) feature extractors
+        # Priority: hierarchical > separate > shared (to avoid duplicate mappings)
         policy_keys = list(self.model.policy.state_dict().keys())
-        uses_shared_extractor = any(
-            k.startswith("features_extractor.") for k in policy_keys
+        
+        # Check for hierarchical first (HierarchicalActorCriticPolicy)
+        uses_hierarchical_extractor = any(
+            "mlp_extractor.features_extractor." in k for k in policy_keys
         )
+        
+        # Check for separate extractors (share_features_extractor=False)
         uses_separate_extractors = any(
             k.startswith("pi_features_extractor.") for k in policy_keys
         ) or any(k.startswith("vf_features_extractor.") for k in policy_keys)
-        uses_hierarchical_extractor = any(
-            "mlp_extractor.features_extractor." in k for k in policy_keys
+        
+        # Check for shared extractor (share_features_extractor=True, default)
+        uses_shared_extractor = any(
+            k.startswith("features_extractor.") for k in policy_keys
         )
 
         if not uses_shared_extractor and not uses_separate_extractors and not uses_hierarchical_extractor:
@@ -191,6 +198,31 @@ class ArchitectureTrainer:
                 "PPO model has no recognizable feature extractor keys! "
                 "Cannot load BC weights."
             )
+            return
+        
+        # Determine which mapping to use (priority-based to avoid duplicates)
+        # Hierarchical policies may have features_extractor.* as a reference,
+        # but we should only map to mlp_extractor.features_extractor.*
+        if uses_hierarchical_extractor:
+            # Use only hierarchical mapping
+            map_hierarchical = True
+            map_shared = False
+            map_separate = False
+            extractor_type = "hierarchical"
+        elif uses_separate_extractors:
+            # Use only separate mapping
+            map_hierarchical = False
+            map_shared = False
+            map_separate = True
+            extractor_type = "separate"
+        elif uses_shared_extractor:
+            # Use only shared mapping
+            map_hierarchical = False
+            map_shared = True
+            map_separate = False
+            extractor_type = "shared"
+        else:
+            logger.warning("Cannot determine feature extractor type!")
             return
 
         # Map BC feature_extractor weights to appropriate PPO structure
@@ -206,20 +238,20 @@ class ArchitectureTrainer:
                 # Remove "feature_extractor." prefix to get the sub-key
                 sub_key = key[len("feature_extractor.") :]
 
-                # Map to appropriate target(s) based on PPO model structure
-                if uses_hierarchical_extractor:
+                # Map to appropriate target based on determined extractor type
+                if map_hierarchical:
                     # Map to hierarchical extractor (nested in mlp_extractor)
                     hierarchical_key = f"mlp_extractor.features_extractor.{sub_key}"
                     mapped_state_dict[hierarchical_key] = value
                     logger.debug(f"Mapped {key} → {hierarchical_key}")
                 
-                if uses_shared_extractor:
+                if map_shared:
                     # Map to shared features_extractor
                     shared_key = f"features_extractor.{sub_key}"
                     mapped_state_dict[shared_key] = value
                     logger.debug(f"Mapped {key} → {shared_key}")
 
-                if uses_separate_extractors:
+                if map_separate:
                     # Map to both pi_features_extractor and vf_features_extractor
                     pi_key = f"pi_features_extractor.{sub_key}"
                     vf_key = f"vf_features_extractor.{sub_key}"
@@ -248,18 +280,7 @@ class ArchitectureTrainer:
                 mapped_state_dict, strict=False
             )
 
-            # Determine extractor type for logging
-            extractor_types = []
-            if uses_hierarchical_extractor:
-                extractor_types.append("hierarchical")
-            if uses_shared_extractor:
-                extractor_types.append("shared")
-            if uses_separate_extractors:
-                extractor_types.append("separate")
-            
-            extractor_type = " + ".join(extractor_types) if extractor_types else "unknown"
-
-            # Log summary
+            # Log summary (extractor_type already determined above)
             logger.info("✓ Loaded BC pretrained feature extractor weights")
             logger.info(
                 f"  Loaded {len(mapped_state_dict)} weight tensors (BC → {extractor_type})"
@@ -277,34 +298,20 @@ class ArchitectureTrainer:
                 )
                 logger.info(f"    Examples: {unexpected_keys[:5]}")
 
-            # Log what was actually loaded
-            hierarchical_loaded = any(
-                "mlp_extractor.features_extractor." in key for key in mapped_state_dict.keys()
-            )
-            shared_loaded = any(
-                key.startswith("features_extractor.") for key in mapped_state_dict.keys()
-            )
-            pi_loaded = any(
-                "pi_features_extractor" in key for key in mapped_state_dict.keys()
-            )
-            vf_loaded = any(
-                "vf_features_extractor" in key for key in mapped_state_dict.keys()
-            )
-
-            if hierarchical_loaded:
-                logger.info("  ✓ Feature extractor weights loaded successfully")
+            # Log what was actually loaded based on extractor type
+            logger.info("  ✓ Feature extractor weights loaded successfully")
+            
+            if extractor_type == "hierarchical":
                 logger.info("  ✓ Using hierarchical feature extractor (nested in mlp_extractor)")
                 logger.info("  → High-level and low-level policy heads will be trained from scratch")
-            elif shared_loaded:
-                logger.info("  ✓ Feature extractor weights loaded successfully")
+            elif extractor_type == "shared":
                 logger.info("  ✓ Using shared feature extractor for policy and value")
-                logger.info("  → Action/value heads will be trained from scratch")
-            elif pi_loaded and vf_loaded:
-                logger.info("  ✓ Feature extractor weights loaded successfully")
+                logger.info("  → Policy and value heads will be trained from scratch")
+            elif extractor_type == "separate":
                 logger.info("  ✓ Loaded into both policy and value feature extractors")
-                logger.info("  → Action/value heads will be trained from scratch")
+                logger.info("  → Policy and value heads will be trained from scratch")
             else:
-                logger.warning("  ✗ Feature extractor weights were not properly loaded")
+                logger.warning(f"  ⚠ Unknown extractor type: {extractor_type}")
 
         except Exception as e:
             logger.error(f"Failed to load mapped weights: {e}")
