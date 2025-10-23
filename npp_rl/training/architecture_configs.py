@@ -574,7 +574,13 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
 
 
 def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
-    """Full HGT with frame stacking for temporal information."""
+    """Full HGT architecture designed for use with frame stacking.
+    
+    Note: This config defines the architecture that processes stacked frames.
+    Frame stacking must be enabled separately via command-line flags:
+        --enable-visual-frame-stacking --visual-stack-size 4
+        --enable-state-stacking --state-stack-size 4
+    """
     return ArchitectureConfig(
         name="full_hgt_frame_stacked",
         description="Full HGT with 4-frame stacking for temporal dynamics (velocity, acceleration)",
@@ -582,7 +588,12 @@ def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
         Full HGT architecture enhanced with frame stacking for temporal reasoning.
         Follows DQN approach (Mnih et al. 2015) of stacking 4 frames to capture motion.
         
-        Frame Stacking (4 frames):
+        IMPORTANT: Frame stacking is NOT automatically enabled by this config.
+        You must also pass frame stacking flags when training:
+            --enable-visual-frame-stacking --visual-stack-size 4
+            --enable-state-stacking --state-stack-size 4
+        
+        Frame Stacking (4 frames recommended):
         - Visual: 4 consecutive frames stacked along channel dimension (4x input channels)
         - State: 4 consecutive states concatenated (4x state_dim)
         - Enables inference of velocity and acceleration without explicit features
@@ -619,7 +630,11 @@ def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
 
 
 def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
-    """Vision-free architecture with state stacking for temporal physics understanding."""
+    """Vision-free architecture designed for use with state stacking.
+    
+    Note: This config defines the architecture. Frame stacking must be enabled 
+    separately via: --enable-state-stacking --state-stack-size 4
+    """
     return ArchitectureConfig(
         name="vision_free_frame_stacked",
         description="Vision-free with 4-state stacking for velocity/acceleration inference",
@@ -627,7 +642,10 @@ def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
         Fast vision-free architecture using only physics states with frame stacking.
         Demonstrates whether temporal state information alone is sufficient.
         
-        Frame Stacking (4 frames):
+        IMPORTANT: State stacking is NOT automatically enabled by this config.
+        You must also pass: --enable-state-stacking --state-stack-size 4
+        
+        Frame Stacking (4 frames recommended):
         - State: 4 consecutive states stacked (4x26 = 104 total dimensions)
         - Enables velocity and acceleration inference without visual data
         
@@ -656,13 +674,22 @@ def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
 
 
 def create_visual_frame_stacked_only_config() -> ArchitectureConfig:
-    """Visual frames with stacking only - tests if visual temporal info is sufficient."""
+    """Visual frames with stacking only - tests if visual temporal info is sufficient.
+    
+    Note: This config defines the architecture. Visual frame stacking must be enabled 
+    separately via: --enable-visual-frame-stacking --visual-stack-size 4
+    (Do NOT enable state stacking for this config)
+    """
     return ArchitectureConfig(
         name="visual_frame_stacked_only",
         description="Visual frames with 4-frame stacking, no state stacking",
         detailed_description="""
         Tests whether visual frame stacking alone provides sufficient temporal information.
         Isolates the contribution of visual temporal patterns vs state temporal patterns.
+        
+        IMPORTANT: Enable ONLY visual stacking for this config:
+            --enable-visual-frame-stacking --visual-stack-size 4
+        Do NOT enable state stacking (--enable-state-stacking should be omitted).
         
         Frame Stacking:
         - Visual: 4 frames stacked (player_frame and global_view)
