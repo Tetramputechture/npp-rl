@@ -542,6 +542,17 @@ def train_worker(
                 )
                 continue
 
+            # Build frame stacking configuration for BC pretraining
+            bc_frame_stack_config = None
+            if args.enable_visual_frame_stacking or args.enable_state_stacking:
+                bc_frame_stack_config = {
+                    'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
+                    'visual_stack_size': args.visual_stack_size,
+                    'enable_state_stacking': args.enable_state_stacking,
+                    'state_stack_size': args.state_stack_size,
+                    'padding_type': args.frame_stack_padding,
+                }
+
             # Determine pretraining conditions (only on rank 0 to avoid conflicts)
             if is_main_process():
                 if args.no_pretraining:
@@ -553,6 +564,7 @@ def train_worker(
                         output_dir=exp_dir / arch_name / "pretrain",
                         epochs=args.bc_epochs,
                         batch_size=args.bc_batch_size,
+                        frame_stack_config=bc_frame_stack_config,
                     )
                     conditions = [
                         ("no_pretrain", None),
@@ -565,6 +577,7 @@ def train_worker(
                         output_dir=exp_dir / arch_name / "pretrain",
                         epochs=args.bc_epochs,
                         batch_size=args.bc_batch_size,
+                        frame_stack_config=bc_frame_stack_config,
                     )
                     if pretrained_ckpt:
                         conditions = [("with_pretrain", pretrained_ckpt)]
@@ -817,6 +830,17 @@ def main():
             logger.error(f"Failed to load architecture config for '{arch_name}': {e}")
             continue
 
+        # Build frame stacking configuration for BC pretraining
+        bc_frame_stack_config = None
+        if args.enable_visual_frame_stacking or args.enable_state_stacking:
+            bc_frame_stack_config = {
+                'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
+                'visual_stack_size': args.visual_stack_size,
+                'enable_state_stacking': args.enable_state_stacking,
+                'state_stack_size': args.state_stack_size,
+                'padding_type': args.frame_stack_padding,
+            }
+
         # Determine pretraining conditions
         if args.no_pretraining:
             # No pretraining at all
@@ -830,6 +854,7 @@ def main():
                 output_dir=exp_dir / arch_name / "pretrain",
                 epochs=args.bc_epochs,
                 batch_size=args.bc_batch_size,
+                frame_stack_config=bc_frame_stack_config,
             )
             conditions = [("no_pretrain", None), ("with_pretrain", pretrained_ckpt)]
         else:
@@ -840,6 +865,7 @@ def main():
                 output_dir=exp_dir / arch_name / "pretrain",
                 epochs=args.bc_epochs,
                 batch_size=args.bc_batch_size,
+                frame_stack_config=bc_frame_stack_config,
             )
             if pretrained_ckpt:
                 conditions = [("with_pretrain", pretrained_ckpt)]

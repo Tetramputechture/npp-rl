@@ -143,6 +143,7 @@ def save_policy_checkpoint(
     epoch: Optional[int] = None,
     metrics: Optional[Dict[str, float]] = None,
     architecture_config: Optional[ArchitectureConfig] = None,
+    frame_stack_config: Optional[Dict] = None,
 ) -> None:
     """Save policy network checkpoint in format compatible with RL training.
     
@@ -155,6 +156,7 @@ def save_policy_checkpoint(
         epoch: Training epoch (optional)
         metrics: Training metrics (optional)
         architecture_config: Architecture configuration (optional)
+        frame_stack_config: Frame stacking configuration (optional)
     """
     checkpoint = {
         'policy_state_dict': policy_network.state_dict(),
@@ -170,12 +172,23 @@ def save_policy_checkpoint(
     if architecture_config is not None:
         checkpoint['architecture'] = architecture_config.name
     
+    if frame_stack_config is not None:
+        checkpoint['frame_stacking'] = frame_stack_config
+    
     # Save checkpoint
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     
     torch.save(checkpoint, path)
     logger.info(f"Saved policy checkpoint to {path}")
+    
+    # Log frame stacking info if present
+    if frame_stack_config:
+        logger.info(f"  Frame stacking config saved in checkpoint:")
+        logger.info(f"    Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
+                   f"(size: {frame_stack_config.get('visual_stack_size', 1)})")
+        logger.info(f"    State: {frame_stack_config.get('enable_state_stacking', False)} "
+                   f"(size: {frame_stack_config.get('state_stack_size', 1)})")
     
     # Log checkpoint info
     if epoch is not None:

@@ -50,6 +50,7 @@ class BCTrainer:
         device: str = "auto",
         validation_split: float = 0.1,
         tensorboard_writer: Optional[SummaryWriter] = None,
+        frame_stack_config: Optional[Dict] = None,
     ):
         """Initialize BC trainer.
         
@@ -60,11 +61,13 @@ class BCTrainer:
             device: Device to train on ('auto', 'cpu', 'cuda')
             validation_split: Fraction of data to use for validation
             tensorboard_writer: Optional TensorBoard writer
+            frame_stack_config: Frame stacking configuration dict
         """
         self.architecture_config = architecture_config
         self.dataset = dataset
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.frame_stack_config = frame_stack_config or {}
         
         # Setup device
         if device == "auto":
@@ -702,6 +705,7 @@ class BCTrainer:
                     epoch=epoch,
                     metrics=val_metrics,
                     architecture_config=self.architecture_config,
+                    frame_stack_config=self.frame_stack_config,
                 )
             
             # Check for best model
@@ -715,6 +719,7 @@ class BCTrainer:
                     epoch=epoch,
                     metrics=val_metrics,
                     architecture_config=self.architecture_config,
+                    frame_stack_config=self.frame_stack_config,
                 )
                 
                 logger.info(f"  ✓ New best model! Val loss: {val_metrics['loss']:.4f}")
@@ -740,6 +745,7 @@ class BCTrainer:
             epoch=epoch,
             metrics=val_metrics,
             architecture_config=self.architecture_config,
+            frame_stack_config=self.frame_stack_config,
         )
         
         logger.info("=" * 60)

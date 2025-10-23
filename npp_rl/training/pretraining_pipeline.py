@@ -6,7 +6,7 @@ for architecture comparison experiments.
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -36,6 +36,7 @@ class PretrainingPipeline:
         architecture_config: ArchitectureConfig,
         output_dir: Path,
         tensorboard_writer: Optional[SummaryWriter] = None,
+        frame_stack_config: Optional[Dict] = None,
     ):
         """Initialize pretraining pipeline.
 
@@ -44,11 +45,18 @@ class PretrainingPipeline:
             architecture_config: Architecture configuration
             output_dir: Output directory for BC checkpoints
             tensorboard_writer: Optional TensorBoard writer
+            frame_stack_config: Frame stacking configuration dict with keys:
+                - enable_visual_frame_stacking: bool
+                - visual_stack_size: int
+                - enable_state_stacking: bool
+                - state_stack_size: int
+                - padding_type: str ('zero' or 'repeat')
         """
         self.replay_data_dir = Path(replay_data_dir)
         self.architecture_config = architecture_config
         self.output_dir = Path(output_dir)
         self.tensorboard_writer = tensorboard_writer
+        self.frame_stack_config = frame_stack_config or {}
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,6 +69,15 @@ class PretrainingPipeline:
         logger.info(f"Initialized pretraining pipeline for {architecture_config.name}")
         logger.info(f"Replay data: {self.replay_data_dir}")
         logger.info(f"Output directory: {self.output_dir}")
+        
+        # Log frame stacking configuration
+        if frame_stack_config:
+            logger.info(f"Frame stacking configuration:")
+            logger.info(f"  Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
+                       f"(size: {frame_stack_config.get('visual_stack_size', 4)})")
+            logger.info(f"  State: {frame_stack_config.get('enable_state_stacking', False)} "
+                       f"(size: {frame_stack_config.get('state_stack_size', 4)})")
+            logger.info(f"  Padding: {frame_stack_config.get('padding_type', 'zero')}")
 
     def prepare_bc_data(
         self,
@@ -93,7 +110,7 @@ class PretrainingPipeline:
         logger.info(f"Found {len(replay_files)} replay files")
 
         try:
-            # Create BC dataset with architecture config for filtering observations
+            # Create BC dataset with architecture config and frame stacking
             dataset = BCReplayDataset(
                 replay_dir=str(self.replay_data_dir),
                 cache_dir=str(self.output_dir / "cache"),
@@ -101,6 +118,7 @@ class PretrainingPipeline:
                 filter_successful_only=filter_successful_only,
                 max_replays=max_replays,
                 architecture_config=self.architecture_config,
+                frame_stack_config=self.frame_stack_config,
             )
 
             if len(dataset) == 0:
@@ -157,6 +175,7 @@ class PretrainingPipeline:
                 device=device,
                 validation_split=0.1,
                 tensorboard_writer=self.tensorboard_writer,
+                frame_stack_config=self.frame_stack_config,
             )
 
             # Run training
@@ -249,6 +268,7 @@ def run_bc_pretraining_if_available(
     device: str = "auto",
     max_replays: Optional[int] = None,
     tensorboard_writer: Optional[SummaryWriter] = None,
+    frame_stack_config: Optional[Dict] = None,
 ) -> Optional[str]:
     """Convenience function to run BC pretraining if replay data available.
 
@@ -263,6 +283,7 @@ def run_bc_pretraining_if_available(
         device: Device to train on
         max_replays: Maximum number of replays to use (None for all)
         tensorboard_writer: Optional TensorBoard writer
+        frame_stack_config: Frame stacking configuration dict
 
     Returns:
         Path to pretrained checkpoint, or None if skipped/failed
@@ -286,6 +307,7 @@ def run_bc_pretraining_if_available(
             architecture_config=architecture_config,
             output_dir=output_dir,
             tensorboard_writer=tensorboard_writer,
+            frame_stack_config=frame_stack_config,
         )
 
         # Check for existing checkpoint

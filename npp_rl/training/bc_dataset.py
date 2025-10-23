@@ -7,6 +7,7 @@ and generating training data for behavioral cloning pretraining.
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+from collections import deque
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -159,6 +160,7 @@ class BCReplayDataset(Dataset):
         max_replays: Optional[int] = None,
         architecture_config: Optional[Any] = None,
         normalize_observations: bool = True,
+        frame_stack_config: Optional[Dict] = None,
     ):
         """Initialize BC replay dataset.
         
@@ -170,6 +172,12 @@ class BCReplayDataset(Dataset):
             max_replays: Maximum number of replays to load (None for all)
             architecture_config: Optional architecture config to filter observations
             normalize_observations: Whether to normalize observations (recommended)
+            frame_stack_config: Frame stacking configuration dict with keys:
+                - enable_visual_frame_stacking: bool
+                - visual_stack_size: int
+                - enable_state_stacking: bool
+                - state_stack_size: int
+                - padding_type: str ('zero' or 'repeat')
         """
         self.replay_dir = Path(replay_dir)
         self.cache_dir = Path(cache_dir) if cache_dir else self.replay_dir / "cache"
@@ -177,6 +185,27 @@ class BCReplayDataset(Dataset):
         self.filter_successful_only = filter_successful_only
         self.architecture_config = architecture_config
         self.normalize_observations = normalize_observations
+        
+        # Frame stacking configuration
+        self.frame_stack_config = frame_stack_config or {}
+        self.enable_visual_stacking = self.frame_stack_config.get('enable_visual_frame_stacking', False)
+        self.visual_stack_size = self.frame_stack_config.get('visual_stack_size', 4)
+        self.enable_state_stacking = self.frame_stack_config.get('enable_state_stacking', False)
+        self.state_stack_size = self.frame_stack_config.get('state_stack_size', 4)
+        self.padding_type = self.frame_stack_config.get('padding_type', 'zero')
+        
+        # Log frame stacking configuration
+        if self.enable_visual_stacking or self.enable_state_stacking:
+            logger.info(f"Frame stacking enabled in BC dataset:")
+            if self.enable_visual_stacking:
+                logger.info(f"  Visual: {self.visual_stack_size} frames (padding: {self.padding_type})")
+            if self.enable_state_stacking:
+                logger.info(f"  State: {self.state_stack_size} states (padding: {self.padding_type})")
+        
+        # Initialize frame buffers (will be reset for each replay)
+        self.player_frame_buffer = deque(maxlen=self.visual_stack_size if self.enable_visual_stacking else 1)
+        self.global_view_buffer = deque(maxlen=self.visual_stack_size if self.enable_visual_stacking else 1)
+        self.game_state_buffer = deque(maxlen=self.state_stack_size if self.enable_state_stacking else 1)
         
         # Create cache directory
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -298,8 +327,95 @@ class BCReplayDataset(Dataset):
         
         return samples
     
+    def _reset_frame_buffers(self):
+        """Reset frame buffers for a new replay."""
+        self.player_frame_buffer.clear()
+        self.global_view_buffer.clear()
+        self.game_state_buffer.clear()
+    
+    def _add_to_visual_buffer(self, obs: Dict):
+        """Add visual frames to buffer with padding if needed."""
+        if not self.enable_visual_stacking:
+            return
+        
+        player_frame = obs.get('player_frame')
+        global_view = obs.get('global_view')
+        
+        if player_frame is not None:
+            self.player_frame_buffer.append(player_frame.copy())
+        if global_view is not None:
+            self.global_view_buffer.append(global_view.copy())
+        
+        # Pad initial frames
+        while len(self.player_frame_buffer) < self.visual_stack_size:
+            if self.padding_type == 'repeat' and len(self.player_frame_buffer) > 0:
+                self.player_frame_buffer.appendleft(self.player_frame_buffer[0].copy())
+            elif player_frame is not None:
+                self.player_frame_buffer.appendleft(np.zeros_like(player_frame))
+            else:
+                break
+        
+        while len(self.global_view_buffer) < self.visual_stack_size:
+            if self.padding_type == 'repeat' and len(self.global_view_buffer) > 0:
+                self.global_view_buffer.appendleft(self.global_view_buffer[0].copy())
+            elif global_view is not None:
+                self.global_view_buffer.appendleft(np.zeros_like(global_view))
+            else:
+                break
+    
+    def _add_to_state_buffer(self, obs: Dict):
+        """Add game state to buffer with padding if needed."""
+        if not self.enable_state_stacking:
+            return
+        
+        game_state = obs.get('game_state')
+        if game_state is None:
+            return
+        
+        self.game_state_buffer.append(game_state.copy())
+        
+        # Pad initial states
+        while len(self.game_state_buffer) < self.state_stack_size:
+            if self.padding_type == 'repeat' and len(self.game_state_buffer) > 0:
+                self.game_state_buffer.appendleft(self.game_state_buffer[0].copy())
+            else:
+                self.game_state_buffer.appendleft(np.zeros_like(game_state))
+    
+    def _buffers_ready(self) -> bool:
+        """Check if all buffers have enough frames."""
+        visual_ready = (not self.enable_visual_stacking or 
+                       (len(self.player_frame_buffer) >= self.visual_stack_size))
+        state_ready = (not self.enable_state_stacking or 
+                      (len(self.game_state_buffer) >= self.state_stack_size))
+        return visual_ready and state_ready
+    
+    def _stack_observations(self, current_obs: Dict) -> Dict:
+        """Stack buffered observations into final format.
+        
+        Args:
+            current_obs: Current observation dict
+            
+        Returns:
+            Observation dict with stacked frames
+        """
+        stacked_obs = current_obs.copy()
+        
+        if self.enable_visual_stacking:
+            # Stack visual frames: (stack_size, H, W, C)
+            if 'player_frame' in current_obs and len(self.player_frame_buffer) > 0:
+                stacked_obs['player_frame'] = np.array(list(self.player_frame_buffer))
+            if 'global_view' in current_obs and len(self.global_view_buffer) > 0:
+                stacked_obs['global_view'] = np.array(list(self.global_view_buffer))
+        
+        if self.enable_state_stacking:
+            # Stack game states: concatenate along first dimension
+            if 'game_state' in current_obs and len(self.game_state_buffer) > 0:
+                stacked_obs['game_state'] = np.concatenate(list(self.game_state_buffer))
+        
+        return stacked_obs
+    
     def _simulate_replay(self, replay: CompactReplay) -> List[Tuple[Dict, int]]:
-        """Simulate a replay to generate observations and actions.
+        """Simulate a replay to generate observations and actions with frame stacking.
         
         Args:
             replay: CompactReplay object
@@ -308,6 +424,9 @@ class BCReplayDataset(Dataset):
             List of (observation, action) tuples
         """
         samples = []
+        
+        # Reset frame buffers for new replay
+        self._reset_frame_buffers()
         
         try:
             # Use ReplayExecutor to regenerate observations deterministically
@@ -345,12 +464,20 @@ class BCReplayDataset(Dataset):
             
             executor.close()
             
-            # Extract observations and actions from ReplayExecutor output
+            # Extract observations and actions from ReplayExecutor output with frame stacking
             # ReplayExecutor returns list of dicts with keys: 'observation', 'action', 'frame'
             for obs_data in observations:
-                observation = obs_data['observation']
+                observation = self._process_observation(obs_data['observation'])
                 action = obs_data['action']
-                samples.append((self._process_observation(observation), int(action)))
+                
+                # Add to frame buffers
+                self._add_to_visual_buffer(observation)
+                self._add_to_state_buffer(observation)
+                
+                # Only create samples once buffers are ready
+                if self._buffers_ready():
+                    stacked_obs = self._stack_observations(observation)
+                    samples.append((stacked_obs, int(action)))
             
         except Exception as e:
             logger.warning(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
@@ -364,7 +491,7 @@ class BCReplayDataset(Dataset):
         return samples
     
     def _simulate_replay_with_env(self, replay: CompactReplay) -> List[Tuple[Dict, int]]:
-        """Fallback method: simulate replay using environment directly.
+        """Fallback method: simulate replay using environment directly with frame stacking.
         
         This is less efficient but more compatible if ReplayExecutor has issues.
         
@@ -375,6 +502,9 @@ class BCReplayDataset(Dataset):
             List of (observation, action) tuples
         """
         samples = []
+        
+        # Reset frame buffers for new replay
+        self._reset_frame_buffers()
         
         # Create environment
         config = EnvironmentConfig.for_training()
@@ -409,8 +539,15 @@ class BCReplayDataset(Dataset):
                 else:
                     action = 0  # NOOP
                 
-                # Store the observation-action pair
-                samples.append((self._process_observation(obs), action))
+                # Process observation and add to frame buffers
+                processed_obs = self._process_observation(obs)
+                self._add_to_visual_buffer(processed_obs)
+                self._add_to_state_buffer(processed_obs)
+                
+                # Only create samples once buffers are ready
+                if self._buffers_ready():
+                    stacked_obs = self._stack_observations(processed_obs)
+                    samples.append((stacked_obs, action))
                 
                 # Step environment
                 obs, _, terminated, truncated, _ = env.step(action)
