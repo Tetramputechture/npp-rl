@@ -28,13 +28,13 @@ from npp_rl.models.hgt_factory import create_hgt_encoder
 
 class PlayerFrameCNN(nn.Module):
     """CNN for player frame processing with dynamic frame stacking support."""
-    
+
     def __init__(self, visual_config):
         super().__init__()
         self.visual_config = visual_config
         self.conv_layers = None
         self.fc = None
-    
+
     def _build_layers(self, in_channels: int):
         """Build convolutional layers based on input channel count."""
         self.conv_layers = nn.Sequential(
@@ -77,13 +77,13 @@ class PlayerFrameCNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
         )
-    
+
     def forward(self, x):
         """Forward pass with dynamic input channel handling."""
         # Handle different input shapes:
         # Single frame: [batch, H, W, C] or [batch, C, H, W]
         # Stacked frames: [batch, stack_size, H, W, C]
-        
+
         if x.dim() == 4 and x.shape[-1] == 1:
             # [batch, H, W, 1] -> [batch, 1, H, W]
             x = x.permute(0, 3, 1, 2).contiguous()
@@ -92,14 +92,14 @@ class PlayerFrameCNN(nn.Module):
             batch_size, stack_size, H, W, C = x.shape
             x = x.permute(0, 1, 4, 2, 3).contiguous()
             x = x.view(batch_size, stack_size * C, H, W)
-        
+
         # Build layers on first forward pass
         if self.conv_layers is None:
             in_channels = x.shape[1]
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
             self.fc = self.fc.to(x.device)
-        
+
         x = self.conv_layers(x)
         x = self.fc(x)
         return x
@@ -107,19 +107,22 @@ class PlayerFrameCNN(nn.Module):
 
 class GlobalViewCNN(nn.Module):
     """CNN for global view processing with dynamic frame stacking support."""
-    
+
     def __init__(self, visual_config):
         super().__init__()
         self.visual_config = visual_config
         self.conv_layers = None
         self.fc = None
-    
+
     def _build_layers(self, in_channels: int):
         """Build convolutional layers based on input channel count."""
         self.conv_layers = nn.Sequential(
             nn.Conv2d(
-                in_channels, self.visual_config.global_channels[0], 
-                kernel_size=3, stride=2, padding=1
+                in_channels,
+                self.visual_config.global_channels[0],
+                kernel_size=3,
+                stride=2,
+                padding=1,
             ),
             nn.BatchNorm2d(self.visual_config.global_channels[0]),
             nn.ReLU(inplace=True),
@@ -154,7 +157,7 @@ class GlobalViewCNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
         )
-    
+
     def forward(self, x):
         """Forward pass with dynamic input channel handling."""
         # Handle different input shapes similar to PlayerFrameCNN
@@ -166,14 +169,14 @@ class GlobalViewCNN(nn.Module):
             batch_size, stack_size, H, W, C = x.shape
             x = x.permute(0, 1, 4, 2, 3).contiguous()
             x = x.view(batch_size, stack_size * C, H, W)
-        
+
         # Build layers on first forward pass
         if self.conv_layers is None:
             in_channels = x.shape[1]
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
             self.fc = self.fc.to(x.device)
-        
+
         x = self.conv_layers(x)
         x = self.fc(x)
         return x
@@ -181,14 +184,14 @@ class GlobalViewCNN(nn.Module):
 
 class StateMLP(nn.Module):
     """MLP for game state processing with dynamic state stacking support."""
-    
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
         self.base_input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.mlp = None
-    
+
     def _build_layers(self, actual_input_dim: int):
         """Build MLP layers based on actual input dimension (may be stacked)."""
         self.mlp = nn.Sequential(
@@ -198,10 +201,10 @@ class StateMLP(nn.Module):
             nn.Linear(self.hidden_dim, self.output_dim),
             nn.ReLU(),
         )
-    
+
     def forward(self, x):
         """Forward pass with dynamic input dimension handling.
-        
+
         Handles:
         - Single state: [batch, state_dim]
         - Stacked states: [batch, stack_size, state_dim] -> flatten to [batch, stack_size * state_dim]
@@ -210,13 +213,13 @@ class StateMLP(nn.Module):
             # Stacked states: [batch, stack_size, state_dim] -> [batch, stack_size * state_dim]
             batch_size, stack_size, state_dim = x.shape
             x = x.view(batch_size, stack_size * state_dim)
-        
+
         # Build layers on first forward pass
         if self.mlp is None:
             actual_input_dim = x.shape[-1]
             self._build_layers(actual_input_dim)
             self.mlp = self.mlp.to(x.device)
-        
+
         return self.mlp(x)
 
 
@@ -309,16 +312,16 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         Handles both single frames and stacked frames:
         - Single frame: [batch, H, W, 1] -> [batch, 1, H, W] after channel reordering
         - Stacked frames: [batch, stack_size, H, W, 1] -> [batch, stack_size, H, W] after channel reordering
-        
+
         For stacked frames, we treat the stack dimension as the input channel dimension,
         allowing the network to learn temporal patterns through the convolutions.
 
         Input shapes:
         - Single frame: [batch, 1, 84, 84] (grayscale)
         - Stacked frames: [batch, stack_size, 84, 84] (e.g., [batch, 4, 84, 84] for 4-frame stack)
-        
+
         Output: [batch, player_frame_output_dim] features
-        
+
         References:
         - Mnih et al. (2015): DQN uses 4-frame stacking with similar CNN architecture
         """

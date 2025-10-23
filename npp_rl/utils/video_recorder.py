@@ -8,15 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
-
-try:
-    import imageio
-
-    IMAGEIO_AVAILABLE = True
-except ImportError:
-    IMAGEIO_AVAILABLE = False
-    imageio = None
-
+import imageio
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +31,6 @@ class VideoRecorder:
             codec: Video codec (default: libx264)
             quality: Video quality, lower is better (default: 8)
         """
-        if not IMAGEIO_AVAILABLE:
-            raise ImportError(
-                "imageio is required for video recording. "
-                "Install with: pip install imageio imageio-ffmpeg"
-            )
-
         self.output_path = Path(output_path)
         self.fps = fps
         self.codec = codec
@@ -180,13 +166,6 @@ def create_video_recorder(
     Returns:
         VideoRecorder instance or None if imageio not available
     """
-    if not IMAGEIO_AVAILABLE:
-        logger.warning(
-            "imageio not available, video recording disabled. "
-            "Install with: pip install imageio imageio-ffmpeg"
-        )
-        return None
-
     try:
         return VideoRecorder(
             output_path=output_path,
