@@ -94,10 +94,10 @@ train_single_architecture() {
             --use-curriculum \
             --use-hierarchical-ppo \
             --replay-data-dir ../nclone/bc_replays \
-            --bc-epochs 1000 \
+            --bc-epochs 50 \
             --bc-batch-size 128 \
             --hardware-profile auto \
-            --total-timesteps 10000000 \
+            --total-timesteps 1000000 \
             --distributed-backend nccl \
             --record-eval-videos \
             --max-videos-per-category 5 \

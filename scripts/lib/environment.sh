@@ -260,28 +260,52 @@ verify_tensorboard_installation() {
         local tb_version=$(ssh_cmd "python3 -c 'import tensorboard; print(tensorboard.__version__)' 2>/dev/null" || echo "unknown")
         log INFO "TensorBoard version: ${tb_version}"
         
-        # Test if the problematic import works
-        if ssh_cmd "python3 -c 'from tensorboard.compat import notf' 2>/dev/null"; then
+        # Test if the actually important imports work
+        local test_result=$(ssh_cmd "python3 -c '
+import sys
+try:
+    from tensorboard.backend.event_processing import event_accumulator
+    from torch.utils.tensorboard import SummaryWriter
+    print(\"SUCCESS\")
+    sys.exit(0)
+except Exception as e:
+    print(f\"FAILED: {e}\")
+    sys.exit(1)
+' 2>&1")
+        
+        if echo "$test_result" | grep -q "SUCCESS"; then
             log SUCCESS "TensorBoard is working correctly"
             return 0
         else
-            log WARNING "TensorBoard has import issues (notf import failed)"
+            log WARNING "TensorBoard has import issues: $test_result"
             log INFO "Attempting to fix TensorBoard installation..."
             
-            # Uninstall all tensorboard packages (system and user)
+            # Uninstall all tensorboard packages
             ssh_cmd "python3 -m pip uninstall -y tensorboard tensorboard-plugin-wit" > /dev/null 2>&1 || true
             
             # Reinstall from pip with compatible version
-            log INFO "Installing TensorBoard with compatible protobuf and rich..."
-            if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<4.0.0' 'rich>=13.0.0'" > /dev/null 2>&1; then
+            log INFO "Installing TensorBoard with compatible dependencies..."
+            if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<5.0.0'" > /dev/null 2>&1; then
                 log SUCCESS "TensorBoard reinstalled successfully"
                 
                 # Verify it works now
-                if ssh_cmd "python3 -c 'from tensorboard.compat import notf' 2>/dev/null"; then
+                local retest_result=$(ssh_cmd "python3 -c '
+import sys
+try:
+    from tensorboard.backend.event_processing import event_accumulator
+    from torch.utils.tensorboard import SummaryWriter
+    print(\"SUCCESS\")
+    sys.exit(0)
+except Exception as e:
+    print(f\"FAILED: {e}\")
+    sys.exit(1)
+' 2>&1")
+                
+                if echo "$retest_result" | grep -q "SUCCESS"; then
                     log SUCCESS "TensorBoard import issue fixed!"
                     return 0
                 else
-                    log ERROR "TensorBoard still has import issues after reinstall"
+                    log ERROR "TensorBoard still has import issues: $retest_result"
                     return 1
                 fi
             else
@@ -291,9 +315,17 @@ verify_tensorboard_installation() {
         fi
     else
         log WARNING "TensorBoard not found, installing..."
-        if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<4.0.0' 'rich>=13.0.0'" > /dev/null 2>&1; then
+        if ssh_cmd "python3 -m pip install --user 'tensorboard>=2.11.0,<3.0.0' 'protobuf>=3.20.0,<5.0.0'" > /dev/null 2>&1; then
             log SUCCESS "TensorBoard installed successfully"
-            return 0
+            
+            # Verify the installation worked
+            if ssh_cmd "python3 -c 'from tensorboard.backend.event_processing import event_accumulator; from torch.utils.tensorboard import SummaryWriter' 2>/dev/null"; then
+                log SUCCESS "TensorBoard verified working"
+                return 0
+            else
+                log WARNING "TensorBoard installed but imports failing"
+                return 1
+            fi
         else
             log ERROR "Failed to install TensorBoard"
             return 1
