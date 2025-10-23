@@ -20,8 +20,8 @@ class TestSuiteLoader:
         "simple",
         "medium",
         "complex",
-        "mine_heavy",
         "exploration",
+        "mine_heavy",
     ]
 
     def __init__(self, dataset_path: str):
