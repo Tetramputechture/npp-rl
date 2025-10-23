@@ -211,6 +211,39 @@ def parse_args():
         "--s3-sync-freq", type=int, default=500000, help="S3 sync frequency (timesteps)"
     )
 
+    # Frame stacking options
+    parser.add_argument(
+        "--enable-visual-frame-stacking",
+        action="store_true",
+        help="Enable frame stacking for visual observations (player_frame, global_view)",
+    )
+    parser.add_argument(
+        "--visual-stack-size",
+        type=int,
+        default=4,
+        choices=[2, 3, 4, 6, 8, 12],
+        help="Number of visual frames to stack (2-12)",
+    )
+    parser.add_argument(
+        "--enable-state-stacking",
+        action="store_true",
+        help="Enable frame stacking for game state observations",
+    )
+    parser.add_argument(
+        "--state-stack-size",
+        type=int,
+        default=4,
+        choices=[2, 3, 4, 6, 8, 12],
+        help="Number of game states to stack (2-12)",
+    )
+    parser.add_argument(
+        "--frame-stack-padding",
+        type=str,
+        default="zero",
+        choices=["zero", "repeat"],
+        help="Padding type for initial frames (zero or repeat)",
+    )
+
     # Video recording options
     parser.add_argument(
         "--record-eval-videos",
@@ -323,6 +356,18 @@ def train_architecture(
             envs_per_gpu = args.num_envs
             logger.info(f"CPU mode: Using {envs_per_gpu} environments")
 
+        # Build frame stacking configuration
+        frame_stack_config = None
+        if args.enable_visual_frame_stacking or args.enable_state_stacking:
+            frame_stack_config = {
+                'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
+                'visual_stack_size': args.visual_stack_size,
+                'enable_state_stacking': args.enable_state_stacking,
+                'state_stack_size': args.state_stack_size,
+                'padding_type': args.frame_stack_padding,
+            }
+            logger.info(f"Frame stacking configuration: {frame_stack_config}")
+        
         # Create trainer
         trainer = ArchitectureTrainer(
             architecture_config=architecture_config,
@@ -337,6 +382,7 @@ def train_architecture(
             use_curriculum=args.use_curriculum,
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
+            frame_stack_config=frame_stack_config,
         )
 
         # Build PPO hyperparameters from hardware profile

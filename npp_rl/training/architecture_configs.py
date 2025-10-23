@@ -573,6 +573,131 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
     )
 
 
+def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
+    """Full HGT with frame stacking for temporal information."""
+    return ArchitectureConfig(
+        name="full_hgt_frame_stacked",
+        description="Full HGT with 4-frame stacking for temporal dynamics (velocity, acceleration)",
+        detailed_description="""
+        Full HGT architecture enhanced with frame stacking for temporal reasoning.
+        Follows DQN approach (Mnih et al. 2015) of stacking 4 frames to capture motion.
+        
+        Frame Stacking (4 frames):
+        - Visual: 4 consecutive frames stacked along channel dimension (4x input channels)
+        - State: 4 consecutive states concatenated (4x state_dim)
+        - Enables inference of velocity and acceleration without explicit features
+        
+        Modalities:
+        - Player Frame: 512-dim (processes 4-stacked 84x84x1 frames)
+        - Global View: 256-dim (processes 4-stacked 176x100x1 frames)
+        - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
+        - Game State: 128-dim (processes 4-stacked 26-dim vectors)
+        - Reachability: 8-dim
+        
+        Best for: Tasks requiring motion understanding (jumping, navigation timing).
+        Trade-off: 4x visual input channels increases computation slightly.
+        """,
+        modalities=ModalityConfig(
+            use_player_frame=True,
+            use_global_view=True,
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.FULL_HGT,
+            hidden_dim=256,
+            num_layers=3,
+            output_dim=256,
+            num_heads=8,
+        ),
+        visual=VisualConfig(),
+        state=StateConfig(),
+        fusion=FusionConfig(fusion_type=FusionType.MULTI_HEAD_ATTENTION),
+        features_dim=512,
+    )
+
+
+def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
+    """Vision-free architecture with state stacking for temporal physics understanding."""
+    return ArchitectureConfig(
+        name="vision_free_frame_stacked",
+        description="Vision-free with 4-state stacking for velocity/acceleration inference",
+        detailed_description="""
+        Fast vision-free architecture using only physics states with frame stacking.
+        Demonstrates whether temporal state information alone is sufficient.
+        
+        Frame Stacking (4 frames):
+        - State: 4 consecutive states stacked (4x26 = 104 total dimensions)
+        - Enables velocity and acceleration inference without visual data
+        
+        Modalities:
+        - Game State: 128-dim (processes 4-stacked 26-dim vectors)
+        - Reachability: 8-dim
+        - No Visual Processing (fastest)
+        - No Graph Processing
+        
+        Best for: Rapid experimentation, baseline for temporal reasoning value.
+        Fastest architecture with temporal understanding.
+        """,
+        modalities=ModalityConfig(
+            use_player_frame=False,
+            use_global_view=False,
+            use_graph=False,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(architecture=GraphArchitectureType.NONE),
+        visual=VisualConfig(),
+        state=StateConfig(),
+        fusion=FusionConfig(fusion_type=FusionType.CONCAT),
+        features_dim=256,
+    )
+
+
+def create_visual_frame_stacked_only_config() -> ArchitectureConfig:
+    """Visual frames with stacking only - tests if visual temporal info is sufficient."""
+    return ArchitectureConfig(
+        name="visual_frame_stacked_only",
+        description="Visual frames with 4-frame stacking, no state stacking",
+        detailed_description="""
+        Tests whether visual frame stacking alone provides sufficient temporal information.
+        Isolates the contribution of visual temporal patterns vs state temporal patterns.
+        
+        Frame Stacking:
+        - Visual: 4 frames stacked (player_frame and global_view)
+        - State: Single frame only (no stacking)
+        
+        Modalities:
+        - Player Frame: 512-dim (4-stacked frames)
+        - Global View: 256-dim (4-stacked frames)
+        - Graph (Full HGT): 3 layers, 256 hidden, 8 heads
+        - Game State: 128-dim (single state, no stacking)
+        - Reachability: 8-dim
+        
+        Best for: Understanding importance of visual vs state temporal information.
+        """,
+        modalities=ModalityConfig(
+            use_player_frame=True,
+            use_global_view=True,
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.FULL_HGT,
+            hidden_dim=256,
+            num_layers=3,
+            output_dim=256,
+            num_heads=8,
+        ),
+        visual=VisualConfig(),
+        state=StateConfig(),
+        fusion=FusionConfig(fusion_type=FusionType.MULTI_HEAD_ATTENTION),
+        features_dim=512,
+    )
+
+
 # ===== Configuration Registry =====
 
 ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
@@ -586,6 +711,10 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
     "vision_free_gcn": create_vision_free_gcn_config(),
     "vision_free_simplified": create_vision_free_simplified_config(),
     "no_global_view": create_no_global_view_config(),
+    # Frame stacking variants
+    "full_hgt_frame_stacked": create_full_hgt_frame_stacked_config(),
+    "vision_free_frame_stacked": create_vision_free_frame_stacked_config(),
+    "visual_frame_stacked_only": create_visual_frame_stacked_only_config(),
 }
 
 

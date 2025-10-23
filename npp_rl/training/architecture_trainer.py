@@ -100,6 +100,7 @@ class ArchitectureTrainer:
         use_curriculum: bool = False,
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
+        frame_stack_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize architecture trainer.
 
@@ -117,6 +118,12 @@ class ArchitectureTrainer:
             use_curriculum: Enable curriculum learning
             curriculum_kwargs: Curriculum manager configuration
             use_distributed: Enable DistributedDataParallel mode for multi-GPU
+            frame_stack_config: Frame stacking configuration dict with keys:
+                - enable_visual_frame_stacking: bool
+                - visual_stack_size: int
+                - enable_state_stacking: bool
+                - state_stack_size: int
+                - padding_type: str
         """
         self.architecture_config = architecture_config
         self.train_dataset_path = Path(train_dataset_path)
@@ -130,6 +137,7 @@ class ArchitectureTrainer:
         self.use_curriculum = use_curriculum
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
+        self.frame_stack_config = frame_stack_config or {}
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -144,6 +152,8 @@ class ArchitectureTrainer:
         logger.info(f"Device: cuda:{device_id}")
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
+        if frame_stack_config:
+            logger.info(f"Frame stacking: {frame_stack_config}")
 
     def _load_bc_pretrained_weights(self, checkpoint_path: str):
         """Load BC pretrained weights into PPO policy.
@@ -539,10 +549,27 @@ class ArchitectureTrainer:
         use_curriculum = self.use_curriculum
         curriculum_manager = self.curriculum_manager
 
+        # Capture frame stack config
+        frame_stack_cfg = self.frame_stack_config
+        
         def make_env(rank: int, use_curr: bool, curr_mgr):
             def _init():
                 logger.info(f"[Env {rank}] Creating NppEnvironment instance...")
-                env = NppEnvironment(config=EnvironmentConfig.for_training())
+                env_config = EnvironmentConfig.for_training()
+                
+                # Apply frame stacking configuration if provided
+                if frame_stack_cfg:
+                    from nclone.gym_environment import FrameStackConfig
+                    env_config.frame_stack = FrameStackConfig(
+                        enable_visual_frame_stacking=frame_stack_cfg.get('enable_visual_frame_stacking', False),
+                        visual_stack_size=frame_stack_cfg.get('visual_stack_size', 4),
+                        enable_state_stacking=frame_stack_cfg.get('enable_state_stacking', False),
+                        state_stack_size=frame_stack_cfg.get('state_stack_size', 4),
+                        padding_type=frame_stack_cfg.get('padding_type', 'zero'),
+                    )
+                    logger.info(f"[Env {rank}] Frame stacking enabled: visual={frame_stack_cfg.get('enable_visual_frame_stacking')}, state={frame_stack_cfg.get('enable_state_stacking')}")
+                
+                env = NppEnvironment(config=env_config)
                 logger.info(f"[Env {rank}] ✓ NppEnvironment created")
 
                 # Wrap with curriculum if enabled
@@ -592,7 +619,18 @@ class ArchitectureTrainer:
         logger.info("Creating evaluation environment...")
 
         def make_eval_env():
-            return NppEnvironment(config=EnvironmentConfig.for_training())
+            env_config = EnvironmentConfig.for_training()
+            # Apply frame stacking configuration if provided
+            if frame_stack_cfg:
+                from nclone.gym_environment import FrameStackConfig
+                env_config.frame_stack = FrameStackConfig(
+                    enable_visual_frame_stacking=frame_stack_cfg.get('enable_visual_frame_stacking', False),
+                    visual_stack_size=frame_stack_cfg.get('visual_stack_size', 4),
+                    enable_state_stacking=frame_stack_cfg.get('enable_state_stacking', False),
+                    state_stack_size=frame_stack_cfg.get('state_stack_size', 4),
+                    padding_type=frame_stack_cfg.get('padding_type', 'zero'),
+                )
+            return NppEnvironment(config=env_config)
 
         self.eval_env = DummyVecEnv([make_eval_env])
 
