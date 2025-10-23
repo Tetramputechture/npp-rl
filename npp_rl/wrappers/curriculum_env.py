@@ -41,7 +41,7 @@ class CurriculumEnv(gym.Wrapper):
         self.episode_count = 0
         self.current_level_stage = None
         self.current_level_data = None
-        
+
         # For subprocess sync: track what stage we're sampling from
         self._last_known_stage = curriculum_manager.get_current_stage()
 
@@ -50,18 +50,18 @@ class CurriculumEnv(gym.Wrapper):
 
     def set_curriculum_stage(self, stage: str):
         """Update the curriculum stage for this environment.
-        
+
         This is used by VecEnvWrapper to sync stage changes to subprocesses.
-        
+
         Args:
             stage: New curriculum stage to sample from
         """
         self._last_known_stage = stage
         # Force curriculum_manager to use this stage
-        if hasattr(self.curriculum_manager, 'current_stage_idx'):
+        if hasattr(self.curriculum_manager, "current_stage_idx"):
             # Find stage index
             try:
-                stage_idx = self.curriculum_manager.curriculum_order.index(stage)
+                stage_idx = self.curriculum_manager.CURRICULUM_ORDER.index(stage)
                 self.curriculum_manager.current_stage_idx = stage_idx
                 logger.info(f"Curriculum stage updated to: {stage}")
             except ValueError:
@@ -211,10 +211,12 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
         self.total_episodes = 0
 
         logger.info(f"Curriculum VecEnv wrapper initialized for {self.num_envs} envs")
-        
+
         # Sync initial curriculum stage to all environments
         initial_stage = curriculum_manager.get_current_stage()
-        logger.info(f"Syncing initial curriculum stage '{initial_stage}' to all environments")
+        logger.info(
+            f"Syncing initial curriculum stage '{initial_stage}' to all environments"
+        )
         self._sync_curriculum_stage(initial_stage)
 
     def step_wait(self):
@@ -242,27 +244,31 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                     if advanced:
                         new_stage = self.curriculum_manager.get_current_stage()
                         logger.info(f"Curriculum advanced to: {new_stage}")
-                        
+
                         # Sync stage to all subprocess environments
                         # This ensures they sample from the new stage
                         self._sync_curriculum_stage(new_stage)
 
         return obs, rewards, dones, infos
-    
+
     def _sync_curriculum_stage(self, stage: str):
         """Synchronize curriculum stage to all subprocess environments.
-        
+
         Args:
             stage: New curriculum stage to set
         """
         try:
             # Use env_method to call set_curriculum_stage on all envs
             # This works for both SubprocVecEnv and DummyVecEnv
-            if hasattr(self.venv, 'env_method'):
-                self.venv.env_method('set_curriculum_stage', stage)
-                logger.debug(f"Synced curriculum stage '{stage}' to all {self.num_envs} environments")
+            if hasattr(self.venv, "env_method"):
+                self.venv.env_method("set_curriculum_stage", stage)
+                logger.debug(
+                    f"Synced curriculum stage '{stage}' to all {self.num_envs} environments"
+                )
             else:
-                logger.warning("VecEnv does not support env_method, cannot sync curriculum stage")
+                logger.warning(
+                    "VecEnv does not support env_method, cannot sync curriculum stage"
+                )
         except Exception as e:
             logger.error(f"Failed to sync curriculum stage: {e}")
 
