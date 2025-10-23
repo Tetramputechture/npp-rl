@@ -6,7 +6,7 @@ Trains policy networks using behavioral cloning from expert demonstrations
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 import time
 
 import torch
@@ -14,6 +14,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for server environments
+import matplotlib.pyplot as plt
 
 from npp_rl.training.architecture_configs import ArchitectureConfig
 from npp_rl.training.bc_dataset import BCReplayDataset
@@ -167,15 +171,239 @@ class BCTrainer:
         # Compute cross-entropy loss (negative log-likelihood)
         loss = F.cross_entropy(logits, actions)
         
-        # Compute accuracy
+        # Compute accuracy and other metrics
         with torch.no_grad():
             pred_actions = torch.argmax(logits, dim=1)
             accuracy = (pred_actions == actions).float().mean()
+            
+            # Compute per-action accuracy for detailed analysis
+            action_accuracies = {}
+            for action_idx in range(6):  # N++ has 6 actions
+                mask = actions == action_idx
+                if mask.sum() > 0:
+                    action_acc = (pred_actions[mask] == actions[mask]).float().mean()
+                    action_accuracies[f'action_{action_idx}_acc'] = action_acc
         
         return {
             'loss': loss,
             'accuracy': accuracy,
+            **action_accuracies,
         }
+    
+    def _log_sample_images(
+        self, dataloader: DataLoader, epoch: int, max_samples: int = 10
+    ) -> None:
+        """Log sample images from player_frame and global_view to TensorBoard.
+        
+        Args:
+            dataloader: Data loader to sample from
+            epoch: Current epoch number
+            max_samples: Maximum number of samples to log
+        """
+        if self.tensorboard_writer is None:
+            return
+        
+        self.policy.eval()
+        samples_logged = 0
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                observations, actions = self._prepare_batch(batch)
+                batch_size = actions.shape[0]
+                
+                # Log player_frame images if available
+                if 'player_frame' in observations:
+                    frames = observations['player_frame'][:max_samples]
+                    # Normalize to [0, 1] for visualization
+                    frames_norm = (frames - frames.min()) / (frames.max() - frames.min() + 1e-8)
+                    
+                    # Create grid of images
+                    for i in range(min(len(frames), max_samples - samples_logged)):
+                        img = frames_norm[i]
+                        # Handle different channel formats (H, W, C) or (C, H, W)
+                        if img.shape[-1] == 1:  # (H, W, 1)
+                            img = img.squeeze(-1).unsqueeze(0)  # (1, H, W)
+                        elif img.shape[0] != 1 and img.shape[0] != 3:  # (H, W, C)
+                            img = img.permute(2, 0, 1)  # (C, H, W)
+                        
+                        self.tensorboard_writer.add_image(
+                            f'bc_samples/player_frame_{samples_logged}',
+                            img,
+                            epoch
+                        )
+                
+                # Log global_view images if available
+                if 'global_view' in observations:
+                    global_views = observations['global_view'][:max_samples]
+                    # Normalize to [0, 1] for visualization
+                    views_norm = (global_views - global_views.min()) / (global_views.max() - global_views.min() + 1e-8)
+                    
+                    for i in range(min(len(global_views), max_samples - samples_logged)):
+                        img = views_norm[i]
+                        # Handle different channel formats
+                        if img.shape[-1] == 1:  # (H, W, 1)
+                            img = img.squeeze(-1).unsqueeze(0)  # (1, H, W)
+                        elif img.shape[0] != 1 and img.shape[0] != 3:  # (H, W, C)
+                            img = img.permute(2, 0, 1)  # (C, H, W)
+                        
+                        self.tensorboard_writer.add_image(
+                            f'bc_samples/global_view_{samples_logged}',
+                            img,
+                            epoch
+                        )
+                
+                samples_logged += batch_size
+                if samples_logged >= max_samples:
+                    break
+        
+        self.policy.train()
+    
+    def _log_action_distributions(
+        self, dataloader: DataLoader, epoch: int, dataset_name: str = "train"
+    ) -> None:
+        """Log action distribution histograms to TensorBoard.
+        
+        Args:
+            dataloader: Data loader to compute distributions from
+            epoch: Current epoch number
+            dataset_name: Name of the dataset (train/val)
+        """
+        if self.tensorboard_writer is None:
+            return
+        
+        self.policy.eval()
+        expert_actions = []
+        predicted_actions = []
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                observations, actions = self._prepare_batch(batch)
+                
+                # Get predictions
+                logits = self.policy(observations)
+                pred_actions = torch.argmax(logits, dim=1)
+                
+                expert_actions.append(actions.cpu().numpy())
+                predicted_actions.append(pred_actions.cpu().numpy())
+        
+        expert_actions = np.concatenate(expert_actions)
+        predicted_actions = np.concatenate(predicted_actions)
+        
+        # Log histograms
+        self.tensorboard_writer.add_histogram(
+            f'bc_actions/{dataset_name}_expert',
+            expert_actions,
+            epoch
+        )
+        self.tensorboard_writer.add_histogram(
+            f'bc_actions/{dataset_name}_predicted',
+            predicted_actions,
+            epoch
+        )
+        
+        # Create action distribution comparison plot
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        
+        action_names = ['NOOP', 'LEFT', 'RIGHT', 'JUMP', 'LEFT+JUMP', 'RIGHT+JUMP']
+        expert_counts = np.bincount(expert_actions, minlength=6)
+        pred_counts = np.bincount(predicted_actions, minlength=6)
+        
+        ax1.bar(action_names, expert_counts)
+        ax1.set_title('Expert Action Distribution')
+        ax1.set_ylabel('Count')
+        ax1.tick_params(axis='x', rotation=45)
+        
+        ax2.bar(action_names, pred_counts)
+        ax2.set_title('Predicted Action Distribution')
+        ax2.set_ylabel('Count')
+        ax2.tick_params(axis='x', rotation=45)
+        
+        plt.tight_layout()
+        
+        # Convert plot to image and log to tensorboard
+        fig.canvas.draw()
+        img_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        img_array = np.transpose(img_array, (2, 0, 1))  # HWC to CHW
+        
+        self.tensorboard_writer.add_image(
+            f'bc_distributions/{dataset_name}_comparison',
+            img_array,
+            epoch
+        )
+        
+        plt.close(fig)
+        self.policy.train()
+    
+    def _log_observation_statistics(
+        self, dataloader: DataLoader, epoch: int
+    ) -> None:
+        """Log observation statistics to TensorBoard.
+        
+        Args:
+            dataloader: Data loader to compute statistics from
+            epoch: Current epoch number
+        """
+        if self.tensorboard_writer is None:
+            return
+        
+        # Collect observations
+        obs_dict = {}
+        for batch in dataloader:
+            observations, _ = self._prepare_batch(batch)
+            for key, value in observations.items():
+                if key not in obs_dict:
+                    obs_dict[key] = []
+                obs_dict[key].append(value.cpu())
+            break  # Just use first batch for efficiency
+        
+        # Log statistics for each observation component
+        for key, values in obs_dict.items():
+            values_tensor = torch.cat(values, dim=0)
+            values_flat = values_tensor.flatten()
+            
+            # Log histogram
+            self.tensorboard_writer.add_histogram(
+                f'bc_observations/{key}',
+                values_flat,
+                epoch
+            )
+            
+            # Log statistics
+            self.tensorboard_writer.add_scalar(
+                f'bc_obs_stats/{key}_mean',
+                values_flat.mean().item(),
+                epoch
+            )
+            self.tensorboard_writer.add_scalar(
+                f'bc_obs_stats/{key}_std',
+                values_flat.std().item(),
+                epoch
+            )
+    
+    def _log_per_action_metrics(
+        self, metrics: Dict[str, float], epoch: int, prefix: str = "train"
+    ) -> None:
+        """Log per-action accuracy metrics to TensorBoard.
+        
+        Args:
+            metrics: Dictionary containing per-action metrics
+            epoch: Current epoch number
+            prefix: Prefix for metric names (train/val)
+        """
+        if self.tensorboard_writer is None:
+            return
+        
+        # Log per-action accuracies
+        action_names = ['NOOP', 'LEFT', 'RIGHT', 'JUMP', 'LEFT+JUMP', 'RIGHT+JUMP']
+        for action_idx in range(6):
+            key = f'action_{action_idx}_acc'
+            if key in metrics:
+                self.tensorboard_writer.add_scalar(
+                    f'bc_per_action/{prefix}_{action_names[action_idx]}',
+                    metrics[key],
+                    epoch
+                )
     
     def train_epoch(
         self, epoch: int, dataloader: DataLoader
@@ -333,6 +561,56 @@ class BCTrainer:
             pin_memory=(self.device == "cuda"),
         )
         
+        # Log dataset statistics to TensorBoard
+        if self.tensorboard_writer is not None:
+            # Log dataset sizes
+            self.tensorboard_writer.add_scalar(
+                'bc_dataset/train_size',
+                len(self.train_dataset),
+                0
+            )
+            self.tensorboard_writer.add_scalar(
+                'bc_dataset/val_size',
+                len(self.val_dataset),
+                0
+            )
+            
+            # Log action distribution from the full dataset if available
+            if hasattr(self.train_dataset, 'dataset') and hasattr(self.train_dataset.dataset, 'get_action_distribution'):
+                action_dist = self.train_dataset.dataset.get_action_distribution()
+                total_samples = sum(action_dist.values())
+                action_names = ['NOOP', 'LEFT', 'RIGHT', 'JUMP', 'LEFT+JUMP', 'RIGHT+JUMP']
+                
+                for action_idx, name in enumerate(action_names):
+                    if action_idx in action_dist:
+                        count = action_dist[action_idx]
+                        percentage = (count / total_samples) * 100
+                        self.tensorboard_writer.add_scalar(
+                            f'bc_dataset/action_{name}_percentage',
+                            percentage,
+                            0
+                        )
+            
+            # Log normalization statistics if available
+            if hasattr(self.train_dataset, 'dataset') and hasattr(self.train_dataset.dataset, 'normalizer'):
+                normalizer = self.train_dataset.dataset.normalizer
+                if normalizer.stats:
+                    for key, stats in normalizer.stats.items():
+                        mean = stats['mean']
+                        std = stats['std']
+                        # Log mean values (average across all dimensions)
+                        if isinstance(mean, np.ndarray):
+                            self.tensorboard_writer.add_scalar(
+                                f'bc_normalization/{key}_mean_avg',
+                                float(mean.mean()),
+                                0
+                            )
+                            self.tensorboard_writer.add_scalar(
+                                f'bc_normalization/{key}_std_avg',
+                                float(std.mean()),
+                                0
+                            )
+        
         # Create optimizer
         self.optimizer = torch.optim.AdamW(
             self.policy.parameters(),
@@ -377,6 +655,7 @@ class BCTrainer:
             
             # TensorBoard logging
             if self.tensorboard_writer is not None:
+                # Basic metrics
                 self.tensorboard_writer.add_scalar(
                     'bc_epoch/train_loss', train_metrics['loss'], epoch
                 )
@@ -392,6 +671,24 @@ class BCTrainer:
                 self.tensorboard_writer.add_scalar(
                     'bc_epoch/learning_rate', self.optimizer.param_groups[0]['lr'], epoch
                 )
+                
+                # Per-action metrics
+                self._log_per_action_metrics(train_metrics, epoch, prefix="train")
+                self._log_per_action_metrics(val_metrics, epoch, prefix="val")
+                
+                # Log additional visualizations every 5 epochs or on first epoch
+                if epoch == 1 or epoch % 5 == 0:
+                    logger.info("  Logging visualizations to TensorBoard...")
+                    
+                    # Sample images
+                    self._log_sample_images(val_loader, epoch, max_samples=10)
+                    
+                    # Action distributions
+                    self._log_action_distributions(train_loader, epoch, dataset_name="train")
+                    self._log_action_distributions(val_loader, epoch, dataset_name="val")
+                    
+                    # Observation statistics
+                    self._log_observation_statistics(train_loader, epoch)
             
             # Update learning rate
             scheduler.step(val_metrics['loss'])

@@ -93,13 +93,14 @@ class PretrainingPipeline:
         logger.info(f"Found {len(replay_files)} replay files")
 
         try:
-            # Create BC dataset
+            # Create BC dataset with architecture config for filtering observations
             dataset = BCReplayDataset(
                 replay_dir=str(self.replay_data_dir),
                 cache_dir=str(self.output_dir / "cache"),
                 use_cache=use_cache,
                 filter_successful_only=filter_successful_only,
                 max_replays=max_replays,
+                architecture_config=self.architecture_config,
             )
 
             if len(dataset) == 0:
@@ -110,7 +111,7 @@ class PretrainingPipeline:
             return dataset
 
         except Exception as e:
-            logger.error(f"Failed to create BC dataset: {e}")
+            logger.error(f"Failed to create BC dataset: {e}", exc_info=True)
             return None
 
     def run_pretraining(

@@ -371,6 +371,65 @@ npp-rl/
 └── bc_replays/            # Human replay data (optional)
 ```
 
+## Behavioral Cloning Pretraining
+
+### Overview
+Train policies using expert demonstrations from `.replay` files before RL fine-tuning. The BC pipeline includes:
+- **Observation normalization** (z-score, cached for consistency)
+- **Architecture-aware filtering** (only uses observations the model can access)
+- **Comprehensive TensorBoard logging** (images, distributions, per-action metrics)
+- **Quality validation** (only successful replays)
+
+### Quick Start
+```python
+from npp_rl.training.pretraining_pipeline import run_bc_pretraining_if_available
+from npp_rl.training.architecture_configs import get_architecture_config
+
+# Automatic pretraining if replays exist
+checkpoint = run_bc_pretraining_if_available(
+    replay_data_dir="bc_replays/",
+    architecture_config=get_architecture_config("vision_free"),
+    output_dir=Path("./bc_output"),
+    epochs=10,
+)
+```
+
+### TensorBoard Monitoring
+```bash
+tensorboard --logdir=bc_output/runs --port=6006
+```
+
+**Logged Metrics:**
+- **Every epoch**: Loss, accuracy, per-action metrics, learning rate
+- **Every 5 epochs**: Sample images (player view + global view), action distributions, observation statistics
+- **At start**: Dataset composition, normalization stats
+
+**Key visualizations:**
+- `bc_samples/*` - Visual observation samples (10 images)
+- `bc_distributions/*` - Expert vs predicted action distributions
+- `bc_per_action/*` - Per-action accuracy tracking
+- `bc_observations/*` - Observation value distributions
+
+### Replay Format
+Place `.replay` files (CompactReplay format) in `bc_replays/` directory. Only winning replays are used.
+
+### Advanced Configuration
+```python
+from npp_rl.training.bc_dataset import BCReplayDataset
+
+dataset = BCReplayDataset(
+    replay_dir="bc_replays/",
+    architecture_config=arch_config,
+    normalize_observations=True,  # Enabled by default
+    use_cache=True,                # Cache processed replays
+)
+
+# Check dataset statistics
+action_dist = dataset.get_action_distribution()
+print(f"Total samples: {len(dataset)}")
+print(f"Action distribution: {action_dist}")
+```
+
 ## Development
 
 ### Running Tests

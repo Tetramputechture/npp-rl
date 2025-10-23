@@ -6,7 +6,7 @@ and generating training data for behavioral cloning pretraining.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -16,6 +16,124 @@ from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 
 logger = logging.getLogger(__name__)
+
+
+class ObservationNormalizer:
+    """Computes and applies normalization statistics for observations.
+    
+    Tracks running mean and standard deviation for each observation component
+    to normalize inputs to zero mean and unit variance, which improves
+    neural network training stability and convergence.
+    """
+    
+    def __init__(self):
+        """Initialize normalizer with empty statistics."""
+        self.stats = {}
+        self.enabled = True
+    
+    def compute_stats(self, samples: List[Tuple[Dict, int]]) -> None:
+        """Compute normalization statistics from samples.
+        
+        Args:
+            samples: List of (observation, action) tuples
+        """
+        if not samples:
+            logger.warning("No samples provided for normalization statistics")
+            return
+        
+        # Collect all observations by key
+        obs_by_key = {}
+        for obs, _ in samples:
+            for key, value in obs.items():
+                if isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.floating):
+                    if key not in obs_by_key:
+                        obs_by_key[key] = []
+                    obs_by_key[key].append(value)
+        
+        # Compute mean and std for each key
+        for key, values in obs_by_key.items():
+            values_array = np.array(values)
+            mean = np.mean(values_array, axis=0)
+            std = np.std(values_array, axis=0)
+            # Avoid division by zero: use std of 1.0 where std is very small
+            std = np.where(std < 1e-6, 1.0, std)
+            
+            self.stats[key] = {'mean': mean, 'std': std}
+        
+        logger.info(f"Computed normalization statistics for {len(self.stats)} observation keys")
+    
+    def normalize(self, obs: Dict) -> Dict:
+        """Normalize an observation using computed statistics.
+        
+        Args:
+            obs: Raw observation dictionary
+            
+        Returns:
+            Normalized observation dictionary
+        """
+        if not self.enabled or not self.stats:
+            return obs
+        
+        normalized = {}
+        for key, value in obs.items():
+            if key in self.stats:
+                mean = self.stats[key]['mean']
+                std = self.stats[key]['std']
+                normalized[key] = (value - mean) / std
+            else:
+                normalized[key] = value
+        
+        return normalized
+    
+    def save_stats(self, path: Path) -> None:
+        """Save normalization statistics to file.
+        
+        Args:
+            path: Path to save statistics
+        """
+        if not self.stats:
+            return
+        
+        try:
+            np.savez_compressed(path, **{f'{k}_{stat}': v 
+                                         for k, stats_dict in self.stats.items() 
+                                         for stat, v in stats_dict.items()})
+            logger.debug(f"Saved normalization statistics to {path}")
+        except Exception as e:
+            logger.warning(f"Failed to save normalization statistics: {e}")
+    
+    def load_stats(self, path: Path) -> bool:
+        """Load normalization statistics from file.
+        
+        Args:
+            path: Path to load statistics from
+            
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        if not path.exists():
+            return False
+        
+        try:
+            data = np.load(path, allow_pickle=False)
+            self.stats = {}
+            
+            # Reconstruct stats dictionary
+            keys = set(k.rsplit('_', 1)[0] for k in data.keys())
+            for key in keys:
+                mean_key = f'{key}_mean'
+                std_key = f'{key}_std'
+                if mean_key in data and std_key in data:
+                    self.stats[key] = {
+                        'mean': data[mean_key],
+                        'std': data[std_key]
+                    }
+            
+            logger.debug(f"Loaded normalization statistics from {path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load normalization statistics: {e}")
+            return False
 
 
 class BCReplayDataset(Dataset):
@@ -39,6 +157,8 @@ class BCReplayDataset(Dataset):
         use_cache: bool = True,
         filter_successful_only: bool = True,
         max_replays: Optional[int] = None,
+        architecture_config: Optional[Any] = None,
+        normalize_observations: bool = True,
     ):
         """Initialize BC replay dataset.
         
@@ -48,17 +168,25 @@ class BCReplayDataset(Dataset):
             use_cache: Whether to use cached processed data
             filter_successful_only: Only include successful replays
             max_replays: Maximum number of replays to load (None for all)
+            architecture_config: Optional architecture config to filter observations
+            normalize_observations: Whether to normalize observations (recommended)
         """
         self.replay_dir = Path(replay_dir)
         self.cache_dir = Path(cache_dir) if cache_dir else self.replay_dir / "cache"
         self.use_cache = use_cache
         self.filter_successful_only = filter_successful_only
+        self.architecture_config = architecture_config
+        self.normalize_observations = normalize_observations
         
         # Create cache directory
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Storage for processed data
         self.samples: List[Tuple[Dict, int]] = []
+        
+        # Initialize normalizer
+        self.normalizer = ObservationNormalizer()
+        self.normalizer.enabled = normalize_observations
         
         # Load replay files
         replay_files = self._load_replay_files(max_replays)
@@ -68,6 +196,22 @@ class BCReplayDataset(Dataset):
         self._process_replays(replay_files)
         
         logger.info(f"Loaded {len(self.samples)} training samples")
+        
+        # Compute normalization statistics if enabled
+        if self.normalize_observations and len(self.samples) > 0:
+            norm_stats_path = self.cache_dir / "normalization_stats.npz"
+            if self.use_cache and norm_stats_path.exists():
+                logger.info("Loading cached normalization statistics")
+                self.normalizer.load_stats(norm_stats_path)
+            else:
+                logger.info("Computing normalization statistics from data")
+                self.normalizer.compute_stats(self.samples)
+                if self.use_cache:
+                    self.normalizer.save_stats(norm_stats_path)
+        
+        # Log dataset statistics
+        if len(self.samples) > 0:
+            self._log_dataset_statistics()
     
     def _load_replay_files(self, max_replays: Optional[int]) -> List[Path]:
         """Load list of replay files from directory.
@@ -174,25 +318,30 @@ class BCReplayDataset(Dataset):
             # Execute replay to get observations
             observations = executor.execute_replay(replay.map_data, replay.input_sequence)
             
-            # Validate success: check if player_won is True in the final observation
+            # Validate success by checking final observation
             if self.filter_successful_only and observations:
-                last_obs = observations[-1]['observation']
-                # The observation is already processed, so we need to check the raw observation
-                # The executor should have included player_won in the observation
-                # For now, we trust the replay.success flag, but log if there's a mismatch
-                
-                # Try to get the raw observation to check player_won
+                # Check the raw observation from the executor after full replay
                 try:
                     raw_obs = executor._get_raw_observation()
-                    if 'player_won' in raw_obs and not raw_obs['player_won']:
-                        logger.warning(
-                            f"Replay marked as success but player_won=False at final frame. "
-                            f"Episode: {replay.episode_id}"
-                        )
+                    if 'player_won' in raw_obs:
+                        if not raw_obs['player_won']:
+                            logger.debug(
+                                f"Skipping replay - player_won=False at final frame. "
+                                f"Episode: {replay.episode_id}"
+                            )
+                            executor.close()
+                            return []
+                    elif not replay.success:
+                        # Fall back to replay's success flag if player_won not available
+                        logger.debug(f"Skipping replay - success flag is False. Episode: {replay.episode_id}")
                         executor.close()
                         return []
-                except Exception as e:
-                    logger.debug(f"Could not validate player_won from raw observation: {e}")
+                except AttributeError:
+                    # If _get_raw_observation doesn't exist, rely on replay.success
+                    if not replay.success:
+                        logger.debug(f"Skipping replay - success flag is False. Episode: {replay.episode_id}")
+                        executor.close()
+                        return []
             
             executor.close()
             
@@ -204,12 +353,12 @@ class BCReplayDataset(Dataset):
                 samples.append((self._process_observation(observation), int(action)))
             
         except Exception as e:
-            logger.warning(f"Failed to simulate replay: {e}")
+            logger.warning(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
             # Try fallback method using environment directly
             try:
                 samples = self._simulate_replay_with_env(replay)
             except Exception as e2:
-                logger.warning(f"Fallback simulation also failed: {e2}")
+                logger.warning(f"Fallback simulation also failed for {replay.episode_id}: {e2}")
                 return []
         
         return samples
@@ -288,22 +437,47 @@ class BCReplayDataset(Dataset):
         # Handle both full environment observations and ReplayExecutor observations
         processed = {}
         
-        # Core features that should always be present
-        core_keys = ['game_state', 'global_view', 'reachability_features', 'player_frame']
-        for key in core_keys:
-            if key in obs:
-                processed[key] = obs[key].copy()
+        # Define all possible observation keys
+        all_keys = {
+            'player_frame': 'player_frame',
+            'global_view': 'global_view',
+            'game_state': 'game_state',
+            'reachability_features': 'reachability_features',
+            'entity_positions': 'entity_positions',
+            'graph_node_feats': 'graph_node_feats',
+            'graph_edge_index': 'graph_edge_index',
+            'graph_edge_feats': 'graph_edge_feats',
+            'graph_node_mask': 'graph_node_mask',
+            'graph_edge_mask': 'graph_edge_mask',
+            'graph_node_types': 'graph_node_types',
+            'graph_edge_types': 'graph_edge_types',
+        }
         
-        # Optional entity positions (from ReplayExecutor)
-        if 'entity_positions' in obs:
-            processed['entity_positions'] = obs['entity_positions'].copy()
+        # Filter based on architecture config if provided
+        if self.architecture_config is not None and hasattr(self.architecture_config, 'modalities'):
+            modalities = self.architecture_config.modalities
+            
+            # Only include observations required by the architecture
+            required_keys = []
+            if modalities.use_player_frame:
+                required_keys.append('player_frame')
+            if modalities.use_global_view:
+                required_keys.append('global_view')
+            if modalities.use_game_state:
+                required_keys.append('game_state')
+            if modalities.use_reachability:
+                required_keys.append('reachability_features')
+            if modalities.use_graph:
+                required_keys.extend([
+                    'graph_node_feats', 'graph_edge_index', 'graph_edge_feats',
+                    'graph_node_mask', 'graph_edge_mask', 'graph_node_types', 'graph_edge_types'
+                ])
+        else:
+            # Include all available keys if no architecture config provided
+            required_keys = list(all_keys.keys())
         
-        # Optional graph features (from full environment)
-        graph_keys = [
-            'graph_node_feats', 'graph_edge_index', 'graph_edge_feats',
-            'graph_node_mask', 'graph_edge_mask', 'graph_node_types', 'graph_edge_types'
-        ]
-        for key in graph_keys:
+        # Copy only required keys that are present in observation
+        for key in required_keys:
             if key in obs:
                 processed[key] = obs[key].copy()
         
@@ -358,9 +532,9 @@ class BCReplayDataset(Dataset):
                 # Reconstruct observation
                 obs = {}
                 for key in ['game_state', 'global_view', 'reachability_features',
-                           'player_frame', 'graph_node_feats', 'graph_edge_index',
-                           'graph_edge_feats', 'graph_node_mask', 'graph_edge_mask',
-                           'graph_node_types', 'graph_edge_types']:
+                           'player_frame', 'entity_positions', 'graph_node_feats', 
+                           'graph_edge_index', 'graph_edge_feats', 'graph_node_mask', 
+                           'graph_edge_mask', 'graph_node_types', 'graph_edge_types']:
                     cache_key = f'obs_{i}_{key}'
                     if cache_key in data:
                         obs[key] = data[cache_key]
@@ -377,6 +551,50 @@ class BCReplayDataset(Dataset):
             logger.warning(f"Failed to load cache from {cache_path}: {e}")
             return []
     
+    def _log_dataset_statistics(self) -> None:
+        """Log statistics about the dataset for debugging and validation."""
+        # Count action distribution
+        action_counts = {}
+        for _, action in self.samples:
+            action_counts[action] = action_counts.get(action, 0) + 1
+        
+        # Action names for readability
+        action_names = {0: "NOOP", 1: "LEFT", 2: "RIGHT", 3: "JUMP", 4: "LEFT+JUMP", 5: "RIGHT+JUMP"}
+        
+        logger.info("=" * 60)
+        logger.info("BC Dataset Statistics:")
+        logger.info(f"  Total samples: {len(self.samples)}")
+        logger.info("  Action distribution:")
+        for action_id in sorted(action_counts.keys()):
+            count = action_counts[action_id]
+            percentage = 100.0 * count / len(self.samples)
+            action_name = action_names.get(action_id, f"UNKNOWN_{action_id}")
+            logger.info(f"    {action_name:12s}: {count:6d} ({percentage:5.2f}%)")
+        
+        # Check for observation keys in first sample
+        if len(self.samples) > 0:
+            first_obs, _ = self.samples[0]
+            logger.info(f"  Observation keys: {sorted(first_obs.keys())}")
+            
+            # Log shapes of observation components
+            logger.info("  Observation shapes:")
+            for key, value in first_obs.items():
+                if isinstance(value, np.ndarray):
+                    logger.info(f"    {key:25s}: {value.shape}")
+        
+        logger.info("=" * 60)
+    
+    def get_action_distribution(self) -> Dict[int, int]:
+        """Get distribution of actions in the dataset.
+        
+        Returns:
+            Dictionary mapping action indices to counts
+        """
+        action_counts = {}
+        for _, action in self.samples:
+            action_counts[action] = action_counts.get(action, 0) + 1
+        return action_counts
+    
     def __len__(self) -> int:
         """Return number of samples in dataset."""
         return len(self.samples)
@@ -392,13 +610,17 @@ class BCReplayDataset(Dataset):
         """
         obs, action = self.samples[idx]
         
+        # Apply normalization if enabled
+        if self.normalize_observations:
+            obs = self.normalizer.normalize(obs)
+        
         # Convert observation to tensors
         obs_tensors = {}
         for key, value in obs.items():
             if isinstance(value, np.ndarray):
-                obs_tensors[key] = torch.from_numpy(value)
+                obs_tensors[key] = torch.from_numpy(value.astype(np.float32))
             else:
-                obs_tensors[key] = torch.tensor(value)
+                obs_tensors[key] = torch.tensor(value, dtype=torch.float32)
         
         # Convert action to tensor
         action_tensor = torch.tensor(action, dtype=torch.long)
