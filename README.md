@@ -212,6 +212,48 @@ python scripts/train_and_compare.py \
     --output-dir experiments/
 ```
 
+### Frame Stacking
+
+Frame stacking provides temporal information by concatenating consecutive observations. This technique, from DQN (Mnih et al., 2015), enables the policy to infer velocity and motion dynamics.
+
+**Enable in training:**
+
+```python
+from nclone.gym_environment import EnvironmentConfig, FrameStackConfig
+
+# Configure frame stacking
+config = EnvironmentConfig.for_training()
+config.frame_stack = FrameStackConfig(
+    enable_visual_frame_stacking=True,
+    visual_stack_size=4,  # 4 frames for visual observations
+    enable_state_stacking=True,
+    state_stack_size=4,  # 4 frames for game state
+    padding_type="zero"
+)
+
+env = create_training_env(config)
+```
+
+**Feature extractors automatically adapt** to stacked observations:
+- CNNs handle `(batch, stack_size, H, W, C)` inputs by treating stack_size as additional input channels
+- MLPs flatten `(batch, stack_size, state_dim)` to `(batch, stack_size * state_dim)`
+- Augmentation is applied consistently across all frames in the stack
+
+**TensorBoard visualization:**
+```python
+from npp_rl.utils import log_stacked_observations, log_frame_stack_config
+
+# Log configuration
+log_frame_stack_config(writer, config.to_dict(), global_step)
+
+# Log frame visualizations during training
+log_stacked_observations(writer, observations, global_step)
+```
+
+**References:**
+- Mnih et al. (2015). "Human-level control through deep reinforcement learning." Nature 518, 529-533.
+- Machado et al. (2018). "Revisiting the Arcade Learning Environment." IJCAI 61, 523-562.
+
 ### Architecture Comparison
 
 Compare multiple architectures systematically:

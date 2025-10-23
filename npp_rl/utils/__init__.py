@@ -27,6 +27,13 @@ from .video_recorder import (
     create_video_recorder
 )
 
+from .frame_stack_logging import (
+    log_frame_stack_config,
+    visualize_stacked_frames,
+    log_stacked_observations,
+    log_state_stack_statistics
+)
+
 __all__ = [
     'PerformanceMonitor',
     'TimingContext', 
@@ -42,5 +49,9 @@ __all__ = [
     'create_experiment_summary',
     'setup_comparison_logging',
     'VideoRecorder',
-    'create_video_recorder'
+    'create_video_recorder',
+    'log_frame_stack_config',
+    'visualize_stacked_frames',
+    'log_stacked_observations',
+    'log_state_stack_statistics'
 ]
