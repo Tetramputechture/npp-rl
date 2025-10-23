@@ -54,12 +54,10 @@ def log_frame_stack_config(
             global_step,
         )
 
-    if "frame_stack_padding_type" in config:
+    if "padding_type" in config:
         # Log padding type as text
         writer.add_text(
-            "config/frame_stack/padding_type",
-            config["frame_stack_padding_type"],
-            global_step,
+            "config/frame_stack/padding_type", config["padding_type"], global_step
         )
 
     # Create a configuration summary text
@@ -78,9 +76,7 @@ def log_frame_stack_config(
     else:
         frame_stack_summary.append("State Stacking: Disabled")
 
-    frame_stack_summary.append(
-        f"Padding Type: {config.get('frame_stack_padding_type', 'N/A')}"
-    )
+    frame_stack_summary.append(f"Padding Type: {config.get('padding_type', 'N/A')}")
 
     writer.add_text(
         "config/frame_stack/summary", "\n".join(frame_stack_summary), global_step

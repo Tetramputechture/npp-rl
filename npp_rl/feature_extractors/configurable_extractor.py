@@ -68,6 +68,9 @@ class PlayerFrameCNN(nn.Module):
             nn.BatchNorm2d(self.visual_config.player_frame_channels[2]),
             nn.ReLU(inplace=True),
         )
+        # Fully connected layers
+        # After conv layers (kernel 8 stride 4, kernel 4 stride 2, kernel 3 stride 1),
+        # 84x84 input is reduced to 7x7 spatial dimensions
         self.fc = nn.Sequential(
             nn.Flatten(),
             nn.Linear(
@@ -146,8 +149,10 @@ class GlobalViewCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.global_channels[2]),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.AdaptiveAvgPool2d((4, 4)),  # Pools to fixed 4x4 spatial size
         )
+        # Fully connected layers
+        # AdaptiveAvgPool2d ensures output is always 4x4 regardless of input size
         self.fc = nn.Sequential(
             nn.Flatten(),
             nn.Linear(
