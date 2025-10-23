@@ -110,7 +110,8 @@ class ArchitectureTrainer:
             output_dir: Output directory for checkpoints/logs
             device_id: GPU device ID
             world_size: Number of GPUs (for distributed training)
-            tensorboard_writer: Optional TensorBoard writer
+            tensorboard_writer: DEPRECATED - Not used. SB3's built-in tensorboard
+                logging is used instead. Kept for backward compatibility.
             use_mixed_precision: Enable mixed precision training
             use_hierarchical_ppo: Use hierarchical PPO instead of standard PPO
             use_curriculum: Enable curriculum learning
@@ -467,9 +468,9 @@ class ArchitectureTrainer:
             "ent_coef": 0.01,
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "tensorboard_log": str(self.output_dir / "tensorboard")
-            if self.tensorboard_writer is None
-            else None,
+            # Always use SB3's built-in tensorboard logging for reliability
+            # Custom tensorboard_writer was not being used for training metrics
+            "tensorboard_log": str(self.output_dir / "tensorboard"),
             "device": f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         }
 
@@ -1012,11 +1013,11 @@ class ArchitectureTrainer:
         Returns:
             Configured ComprehensiveEvaluator instance
         """
+        # Note: ComprehensiveEvaluator expects test_dataset_path, not model/env
+        # This method signature needs to be updated to match actual usage
         return ComprehensiveEvaluator(
-            model=self.model,
-            eval_env=self.eval_env,
-            tensorboard_writer=self.tensorboard_writer,
-            output_dir=self.output_dir,
+            test_dataset_path=str(self.test_dataset_path),
+            device=f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         )
 
     def save_training_state(self, timestep: int) -> Path:
