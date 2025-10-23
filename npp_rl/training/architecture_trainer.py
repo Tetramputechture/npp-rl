@@ -100,6 +100,7 @@ class ArchitectureTrainer:
         use_curriculum: bool = False,
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
+        frame_stack_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize architecture trainer.
 
@@ -117,6 +118,12 @@ class ArchitectureTrainer:
             use_curriculum: Enable curriculum learning
             curriculum_kwargs: Curriculum manager configuration
             use_distributed: Enable DistributedDataParallel mode for multi-GPU
+            frame_stack_config: Frame stacking configuration dict with keys:
+                - enable_visual_frame_stacking: bool
+                - visual_stack_size: int
+                - enable_state_stacking: bool
+                - state_stack_size: int
+                - padding_type: str
         """
         self.architecture_config = architecture_config
         self.train_dataset_path = Path(train_dataset_path)
@@ -130,6 +137,7 @@ class ArchitectureTrainer:
         self.use_curriculum = use_curriculum
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
+        self.frame_stack_config = frame_stack_config or {}
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -144,6 +152,8 @@ class ArchitectureTrainer:
         logger.info(f"Device: cuda:{device_id}")
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
+        if frame_stack_config:
+            logger.info(f"Frame stacking: {frame_stack_config}")
 
     def _load_bc_pretrained_weights(self, checkpoint_path: str):
         """Load BC pretrained weights into PPO policy.
@@ -178,29 +188,33 @@ class ArchitectureTrainer:
         # Detect if PPO model uses shared, separate, or hierarchical (nested) feature extractors
         # Priority: hierarchical > separate > shared (to avoid duplicate mappings)
         policy_keys = list(self.model.policy.state_dict().keys())
-        
+
         # Check for hierarchical first (HierarchicalActorCriticPolicy)
         uses_hierarchical_extractor = any(
             "mlp_extractor.features_extractor." in k for k in policy_keys
         )
-        
+
         # Check for separate extractors (share_features_extractor=False)
         uses_separate_extractors = any(
             k.startswith("pi_features_extractor.") for k in policy_keys
         ) or any(k.startswith("vf_features_extractor.") for k in policy_keys)
-        
+
         # Check for shared extractor (share_features_extractor=True, default)
         uses_shared_extractor = any(
             k.startswith("features_extractor.") for k in policy_keys
         )
 
-        if not uses_shared_extractor and not uses_separate_extractors and not uses_hierarchical_extractor:
+        if (
+            not uses_shared_extractor
+            and not uses_separate_extractors
+            and not uses_hierarchical_extractor
+        ):
             logger.warning(
                 "PPO model has no recognizable feature extractor keys! "
                 "Cannot load BC weights."
             )
             return
-        
+
         # Determine which mappings to use
         # Important: Hierarchical policies may have BOTH hierarchical and shared/separate
         # extractors in the state_dict. We need to check if they're references or separate.
@@ -210,53 +224,61 @@ class ArchitectureTrainer:
         # 2. Also check if shared/separate extractors are the SAME object as hierarchical
         # 3. If they're references (same object), mapping to hierarchical is enough
         # 4. If they're separate objects, we need to map to ALL of them
-        
+
         # Check if extractors are references or separate objects
         map_hierarchical = uses_hierarchical_extractor
         map_shared = False
         map_separate = False
-        
+
         if uses_hierarchical_extractor:
             # Hierarchical always needs mapping
             # Check if shared/separate are references or separate objects
-            if hasattr(self.model.policy, 'features_extractor') and \
-               hasattr(self.model.policy, 'mlp_extractor') and \
-               hasattr(self.model.policy.mlp_extractor, 'features_extractor'):
+            if (
+                hasattr(self.model.policy, "features_extractor")
+                and hasattr(self.model.policy, "mlp_extractor")
+                and hasattr(self.model.policy.mlp_extractor, "features_extractor")
+            ):
                 # Check if they're the same object
                 is_same_object = (
-                    self.model.policy.features_extractor is 
-                    self.model.policy.mlp_extractor.features_extractor
+                    self.model.policy.features_extractor
+                    is self.model.policy.mlp_extractor.features_extractor
                 )
                 if not is_same_object and uses_shared_extractor:
                     # They're separate objects - need to map to both
                     map_shared = True
-                    logger.info("  Note: Model has separate features_extractor and mlp_extractor.features_extractor")
-            
-            if hasattr(self.model.policy, 'pi_features_extractor') and \
-               hasattr(self.model.policy, 'mlp_extractor') and \
-               hasattr(self.model.policy.mlp_extractor, 'features_extractor'):
+                    logger.info(
+                        "  Note: Model has separate features_extractor and mlp_extractor.features_extractor"
+                    )
+
+            if (
+                hasattr(self.model.policy, "pi_features_extractor")
+                and hasattr(self.model.policy, "mlp_extractor")
+                and hasattr(self.model.policy.mlp_extractor, "features_extractor")
+            ):
                 # Check if pi_features_extractor is the same object
                 is_same_pi = (
-                    self.model.policy.pi_features_extractor is
-                    self.model.policy.mlp_extractor.features_extractor
+                    self.model.policy.pi_features_extractor
+                    is self.model.policy.mlp_extractor.features_extractor
                 )
                 if not is_same_pi and uses_separate_extractors:
                     # They're separate objects - need to map to both
                     map_separate = True
-                    logger.info("  Note: Model has separate pi/vf_features_extractor and mlp_extractor.features_extractor")
-        
+                    logger.info(
+                        "  Note: Model has separate pi/vf_features_extractor and mlp_extractor.features_extractor"
+                    )
+
         elif uses_separate_extractors:
             # No hierarchical, just separate
             map_separate = True
-        
+
         elif uses_shared_extractor:
             # No hierarchical, just shared
             map_shared = True
-        
+
         else:
             logger.warning("Cannot determine feature extractor type!")
             return
-        
+
         # Determine extractor type for logging
         extractor_types = []
         if map_hierarchical:
@@ -269,7 +291,7 @@ class ArchitectureTrainer:
 
         # Map BC feature_extractor weights to appropriate PPO structure
         # BC saves: feature_extractor.*
-        # PPO expects: 
+        # PPO expects:
         #   - features_extractor.* (shared)
         #   - pi_features_extractor.* + vf_features_extractor.* (separate)
         #   - mlp_extractor.features_extractor.* (hierarchical)
@@ -286,7 +308,7 @@ class ArchitectureTrainer:
                     hierarchical_key = f"mlp_extractor.features_extractor.{sub_key}"
                     mapped_state_dict[hierarchical_key] = value
                     logger.debug(f"Mapped {key} → {hierarchical_key}")
-                
+
                 if map_shared:
                     # Map to shared features_extractor
                     shared_key = f"features_extractor.{sub_key}"
@@ -333,21 +355,47 @@ class ArchitectureTrainer:
                     f"  Missing keys (will use random init): {len(missing_keys)}"
                 )
                 logger.info(f"    Examples: {missing_keys[:5]}")
-                
+
                 # Categorize missing keys to understand what's not loaded
-                feature_ext_missing = [k for k in missing_keys if 'features_extractor.' in k]
-                hierarchical_missing = [k for k in missing_keys if 'mlp_extractor.' in k and 'features_extractor' not in k]
-                action_value_missing = [k for k in missing_keys if 'action_net.' in k or 'value_net.' in k]
-                other_missing = [k for k in missing_keys if k not in feature_ext_missing + hierarchical_missing + action_value_missing]
-                
+                feature_ext_missing = [
+                    k for k in missing_keys if "features_extractor." in k
+                ]
+                hierarchical_missing = [
+                    k
+                    for k in missing_keys
+                    if "mlp_extractor." in k and "features_extractor" not in k
+                ]
+                action_value_missing = [
+                    k for k in missing_keys if "action_net." in k or "value_net." in k
+                ]
+                other_missing = [
+                    k
+                    for k in missing_keys
+                    if k
+                    not in feature_ext_missing
+                    + hierarchical_missing
+                    + action_value_missing
+                ]
+
                 if feature_ext_missing:
-                    logger.info(f"    Features extractor keys missing: {len(feature_ext_missing)}")
-                    if map_hierarchical and 'features_extractor.' in feature_ext_missing[0]:
-                        logger.info("      (These may be references to mlp_extractor.features_extractor - OK)")
+                    logger.info(
+                        f"    Features extractor keys missing: {len(feature_ext_missing)}"
+                    )
+                    if (
+                        map_hierarchical
+                        and "features_extractor." in feature_ext_missing[0]
+                    ):
+                        logger.info(
+                            "      (These may be references to mlp_extractor.features_extractor - OK)"
+                        )
                 if hierarchical_missing:
-                    logger.info(f"    Hierarchical policy keys missing: {len(hierarchical_missing)} (expected)")
+                    logger.info(
+                        f"    Hierarchical policy keys missing: {len(hierarchical_missing)} (expected)"
+                    )
                 if action_value_missing:
-                    logger.info(f"    Action/value head keys missing: {len(action_value_missing)} (expected)")
+                    logger.info(
+                        f"    Action/value head keys missing: {len(action_value_missing)} (expected)"
+                    )
                 if other_missing:
                     logger.info(f"    Other keys missing: {len(other_missing)}")
 
@@ -359,12 +407,18 @@ class ArchitectureTrainer:
 
             # Log what was actually loaded based on extractor type
             logger.info("  ✓ Feature extractor weights loaded successfully")
-            
+
             if "hierarchical" in extractor_type:
-                logger.info("  ✓ Using hierarchical feature extractor (nested in mlp_extractor)")
+                logger.info(
+                    "  ✓ Using hierarchical feature extractor (nested in mlp_extractor)"
+                )
                 if map_shared or map_separate:
-                    logger.info(f"  ✓ Also mapped to {extractor_type.replace('hierarchical + ', '')}")
-                logger.info("  → High-level and low-level policy heads will be trained from scratch")
+                    logger.info(
+                        f"  ✓ Also mapped to {extractor_type.replace('hierarchical + ', '')}"
+                    )
+                logger.info(
+                    "  → High-level and low-level policy heads will be trained from scratch"
+                )
             elif extractor_type == "shared":
                 logger.info("  ✓ Using shared feature extractor for policy and value")
                 logger.info("  → Policy and value heads will be trained from scratch")
@@ -539,10 +593,34 @@ class ArchitectureTrainer:
         use_curriculum = self.use_curriculum
         curriculum_manager = self.curriculum_manager
 
+        # Capture frame stack config
+        frame_stack_cfg = self.frame_stack_config
+
         def make_env(rank: int, use_curr: bool, curr_mgr):
             def _init():
                 logger.info(f"[Env {rank}] Creating NppEnvironment instance...")
-                env = NppEnvironment(config=EnvironmentConfig.for_training())
+                env_config = EnvironmentConfig.for_training()
+
+                # Apply frame stacking configuration if provided
+                if frame_stack_cfg:
+                    from nclone.gym_environment import FrameStackConfig
+
+                    env_config.frame_stack = FrameStackConfig(
+                        enable_visual_frame_stacking=frame_stack_cfg.get(
+                            "enable_visual_frame_stacking", False
+                        ),
+                        visual_stack_size=frame_stack_cfg.get("visual_stack_size", 4),
+                        enable_state_stacking=frame_stack_cfg.get(
+                            "enable_state_stacking", False
+                        ),
+                        state_stack_size=frame_stack_cfg.get("state_stack_size", 4),
+                        padding_type=frame_stack_cfg.get("padding_type", "zero"),
+                    )
+                    logger.info(
+                        f"[Env {rank}] Frame stacking enabled: visual={frame_stack_cfg.get('enable_visual_frame_stacking')}, state={frame_stack_cfg.get('enable_state_stacking')}"
+                    )
+
+                env = NppEnvironment(config=env_config)
                 logger.info(f"[Env {rank}] ✓ NppEnvironment created")
 
                 # Wrap with curriculum if enabled
@@ -592,7 +670,23 @@ class ArchitectureTrainer:
         logger.info("Creating evaluation environment...")
 
         def make_eval_env():
-            return NppEnvironment(config=EnvironmentConfig.for_training())
+            env_config = EnvironmentConfig.for_training()
+            # Apply frame stacking configuration if provided
+            if frame_stack_cfg:
+                from nclone.gym_environment import FrameStackConfig
+
+                env_config.frame_stack = FrameStackConfig(
+                    enable_visual_frame_stacking=frame_stack_cfg.get(
+                        "enable_visual_frame_stacking", False
+                    ),
+                    visual_stack_size=frame_stack_cfg.get("visual_stack_size", 4),
+                    enable_state_stacking=frame_stack_cfg.get(
+                        "enable_state_stacking", False
+                    ),
+                    state_stack_size=frame_stack_cfg.get("state_stack_size", 4),
+                    padding_type=frame_stack_cfg.get("padding_type", "zero"),
+                )
+            return NppEnvironment(config=env_config)
 
         self.eval_env = DummyVecEnv([make_eval_env])
 
@@ -602,31 +696,45 @@ class ArchitectureTrainer:
         # Now create the model with the correct environment
         if self.model is None and hasattr(self, "policy_kwargs"):
             logger.info("=" * 60)
-            
+
             if self.use_hierarchical_ppo:
                 # Use HierarchicalPPO wrapper
                 from npp_rl.agents.hierarchical_ppo import HierarchicalPPO
-                
-                logger.info("Creating HierarchicalPPO model with training environment...")
+
+                logger.info(
+                    "Creating HierarchicalPPO model with training environment..."
+                )
                 logger.info(f"Policy class: {self.policy_class}")
                 logger.info(f"Device: {self.hyperparams.get('device')}")
                 logger.info("Feature extractor: ConfigurableMultimodalExtractor")
-                logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
-                logger.info(f"High-level update frequency: {self.policy_kwargs.get('high_level_update_frequency')}")
-                logger.info(f"Max steps per subtask: {self.policy_kwargs.get('max_steps_per_subtask')}")
+                logger.info(
+                    f"Network architecture: {self.policy_kwargs.get('net_arch')}"
+                )
+                logger.info(
+                    f"High-level update frequency: {self.policy_kwargs.get('high_level_update_frequency')}"
+                )
+                logger.info(
+                    f"Max steps per subtask: {self.policy_kwargs.get('max_steps_per_subtask')}"
+                )
                 logger.info(f"Using ICM: {self.policy_kwargs.get('use_icm')}")
-                logger.info("Initializing hierarchical policy networks and moving to device...")
-                
+                logger.info(
+                    "Initializing hierarchical policy networks and moving to device..."
+                )
+
                 # Create HierarchicalPPO wrapper
                 hierarchical_ppo = HierarchicalPPO(
                     policy_class=self.policy_class,
-                    high_level_update_frequency=self.policy_kwargs.get('high_level_update_frequency', 50),
-                    max_steps_per_subtask=self.policy_kwargs.get('max_steps_per_subtask', 500),
-                    use_icm=self.policy_kwargs.get('use_icm', True),
+                    high_level_update_frequency=self.policy_kwargs.get(
+                        "high_level_update_frequency", 50
+                    ),
+                    max_steps_per_subtask=self.policy_kwargs.get(
+                        "max_steps_per_subtask", 500
+                    ),
+                    use_icm=self.policy_kwargs.get("use_icm", True),
                     policy_kwargs=self.policy_kwargs,
                     **self.hyperparams,
                 )
-                
+
                 # Create the model with environment
                 self.model = hierarchical_ppo.create_model(env=self.env)
                 logger.info("✓ HierarchicalPPO model created successfully")
@@ -636,7 +744,9 @@ class ArchitectureTrainer:
                 logger.info(f"Policy class: {self.policy_class}")
                 logger.info(f"Device: {self.hyperparams.get('device')}")
                 logger.info("Feature extractor: ConfigurableMultimodalExtractor")
-                logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
+                logger.info(
+                    f"Network architecture: {self.policy_kwargs.get('net_arch')}"
+                )
                 logger.info("Initializing policy networks and moving to device...")
 
                 self.model = PPO(
