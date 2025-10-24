@@ -269,6 +269,31 @@ def parse_args():
         help="Resume from existing experiment directory",
     )
 
+    # Visualization options
+    parser.add_argument(
+        "--visualize-training",
+        action="store_true",
+        help="Enable real-time visualization of training",
+    )
+    parser.add_argument(
+        "--vis-render-freq",
+        type=int,
+        default=100,
+        help="Visualization render frequency (in timesteps)",
+    )
+    parser.add_argument(
+        "--vis-env-idx",
+        type=int,
+        default=0,
+        help="Which environment to visualize (from vectorized environments)",
+    )
+    parser.add_argument(
+        "--vis-fps",
+        type=int,
+        default=60,
+        help="Target FPS for visualization (0 = unlimited)",
+    )
+
     # Debugging
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
@@ -404,14 +429,36 @@ def train_architecture(
 
         # Setup environments (use per-GPU environment count)
         trainer.setup_environments(
-            num_envs=envs_per_gpu, total_timesteps=args.total_timesteps
+            num_envs=envs_per_gpu,
+            total_timesteps=args.total_timesteps,
+            enable_visualization=args.visualize_training,
+            vis_env_idx=args.vis_env_idx,
         )
+
+        # Create visualization callback if enabled
+        vis_callback = None
+        if args.visualize_training:
+            from npp_rl.callbacks import TrainingVisualizationCallback
+
+            vis_callback = TrainingVisualizationCallback(
+                render_freq=args.vis_render_freq,
+                render_mode="timesteps",
+                env_idx=args.vis_env_idx,
+                target_fps=args.vis_fps,
+                window_title=f"NPP-RL Training: {architecture_name}",
+                verbose=1 if args.debug else 0,
+            )
+            logger.info(
+                f"Visualization enabled: rendering env {args.vis_env_idx} "
+                f"every {args.vis_render_freq} timesteps at {args.vis_fps} FPS"
+            )
 
         # Train
         training_results = trainer.train(
             total_timesteps=args.total_timesteps,
             eval_freq=args.eval_freq,
             save_freq=args.save_freq,
+            callback_fn=vis_callback,
         )
 
         # Evaluate (skip if requested, or only run on rank 0 for multi-GPU)

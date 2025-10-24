@@ -19,6 +19,7 @@ from .hierarchical_callbacks import (
     CurriculumProgressionCallback,
     create_hierarchical_callbacks,
 )
+from .visualization_callback import TrainingVisualizationCallback
 
 __all__ = [
     "PBRSLoggingCallback",
@@ -31,4 +32,5 @@ __all__ = [
     "AdaptiveLearningRateCallback",
     "CurriculumProgressionCallback",
     "create_hierarchical_callbacks",
+    "TrainingVisualizationCallback",
 ]
