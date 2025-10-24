@@ -34,7 +34,8 @@ class CurriculumManager:
 
     # Curriculum progression order
     CURRICULUM_ORDER = [
-        "very_simple",
+        "simplest",
+        "simpler",
         "simple",
         "medium",
         "complex",
@@ -45,7 +46,7 @@ class CurriculumManager:
     def __init__(
         self,
         dataset_path: str,
-        starting_stage: str = "very_simple",
+        starting_stage: str = "simplest",
         advancement_threshold: float = 0.7,
         min_episodes_per_stage: int = 100,
         performance_window: int = 50,
@@ -56,7 +57,7 @@ class CurriculumManager:
 
         Args:
             dataset_path: Path to dataset containing level categories
-            starting_stage: Initial curriculum stage (default: 'very_simple')
+            starting_stage: Initial curriculum stage (default: 'simplest')
             advancement_threshold: Success rate needed to advance (default: 0.7)
             min_episodes_per_stage: Minimum episodes before advancing
             performance_window: Window size for performance tracking
@@ -336,7 +337,7 @@ class CurriculumManager:
 
 def create_curriculum_manager(
     dataset_path: str,
-    starting_stage: str = "very_simple",
+    starting_stage: str = "simplest",
     advancement_threshold: float = 0.7,
     **kwargs,
 ) -> CurriculumManager:
@@ -344,7 +345,7 @@ def create_curriculum_manager(
 
     Args:
         dataset_path: Path to dataset
-        starting_stage: Initial stage (default: 'very_simple')
+        starting_stage: Initial stage (default: 'simplest')
         advancement_threshold: Success rate needed to advance
         **kwargs: Additional curriculum manager arguments
 
