@@ -807,6 +807,33 @@ def main():
 
     logger.info("=" * 70)
 
+    # Validate configuration for BC pretraining with MLP baseline
+    if 'mlp_baseline' in args.architectures and args.replay_data_dir:
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("Configuration Validation for MLP Baseline")
+        logger.info("=" * 70)
+        
+        # Check 1: Warn if hierarchical PPO is enabled
+        if args.use_hierarchical_ppo:
+            logger.warning("⚠️  WARNING: Hierarchical PPO enabled for MLP baseline")
+            logger.warning("   This adds 46 random parameters and may cause incomplete weight loading")
+            logger.warning("   Recommendation: Remove --use-hierarchical-ppo flag")
+        
+        # Check 2: Warn if frame stacking is enabled
+        if args.enable_visual_frame_stacking or args.enable_state_stacking:
+            logger.warning("⚠️  WARNING: Frame stacking enabled for MLP baseline")
+            logger.warning("   This adds 4x computational overhead with no spatial reasoning benefit")
+            logger.warning("   Recommendation: Remove frame stacking flags")
+        
+        # Check 3: Validate environment count
+        if args.num_envs and args.num_envs < 64:
+            logger.warning(f"⚠️  WARNING: Only {args.num_envs} environments specified")
+            logger.warning("   Recommendation: Use --num-envs 128 or higher for better data diversity")
+        
+        logger.info("=" * 70)
+        logger.info("")
+
     # Save configuration
     config = vars(args)
     config["experiment_dir"] = str(exp_dir)

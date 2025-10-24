@@ -213,8 +213,9 @@ def auto_detect_profile() -> Optional[HardwareProfile]:
             return A100_1X_80GB
 
     # Default: create a conservative profile based on available memory
-    # Use heuristics: 1GB per environment for graph-based models
-    envs_per_gpu = max(8, min(256, int(gpu_memory_gb / 6)))  # 6GB per environment
+    # Use heuristics: 1.5GB per environment (conservative for MLP/GNN models)
+    # Note: Graph models may use up to 6GB, but MLP models use ~1.5GB
+    envs_per_gpu = max(8, min(256, int(gpu_memory_gb / 1.5)))  # 1.5GB per environment
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4

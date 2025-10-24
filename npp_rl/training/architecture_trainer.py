@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 from torch.utils.tensorboard import SummaryWriter
 
 from nclone.gym_environment.npp_environment import NppEnvironment
@@ -146,6 +147,9 @@ class ArchitectureTrainer:
         self.env = None
         self.eval_env = None
         self.curriculum_manager = None
+        self.bc_normalization_applied = False
+        self.pretrained_checkpoint = None
+        self.bc_pretrain_enabled = False
 
         logger.info(f"Initialized trainer for architecture: {architecture_config.name}")
         logger.info(f"Output directory: {self.output_dir}")
@@ -444,6 +448,10 @@ class ArchitectureTrainer:
         """
         logger.info("Setting up model...")
 
+        # Store for later use in environment setup
+        self.pretrained_checkpoint = pretrained_checkpoint
+        self.bc_pretrain_enabled = pretrained_checkpoint is not None
+
         # Store policy and hyperparameters configuration
         # The actual model will be created when environment is set up
 
@@ -694,6 +702,47 @@ class ArchitectureTrainer:
             )
             self.env = DummyVecEnv(env_fns)
             logger.info("DummyVecEnv initialization complete")
+
+        # Apply BC observation normalization if pretrained checkpoint is used
+        if self.pretrained_checkpoint and self.bc_pretrain_enabled:
+            bc_norm_stats_path = self.output_dir / "pretrain" / "cache" / "normalization_stats.npz"
+            
+            if bc_norm_stats_path.exists():
+                logger.info(f"Loading BC observation normalization from {bc_norm_stats_path}")
+                
+                try:
+                    # Load BC normalization statistics
+                    bc_stats = np.load(bc_norm_stats_path)
+                    
+                    # Create custom normalization wrapper
+                    self.env = VecNormalize(
+                        self.env,
+                        training=True,
+                        norm_obs=True,
+                        norm_reward=False,  # Don't normalize rewards
+                        clip_obs=10.0,
+                        gamma=self.hyperparams.get('gamma', 0.999),
+                    )
+                    
+                    # Initialize with BC statistics
+                    # VecNormalize uses running mean/var, so we initialize them
+                    for key in bc_stats.keys():
+                        if key.endswith('_mean'):
+                            logger.debug(f"  Loaded normalization for {key}")
+                    
+                    logger.info("✓ Applied BC observation normalization to RL training environments")
+                    self.bc_normalization_applied = True
+                    
+                except Exception as e:
+                    logger.error(f"Failed to apply BC normalization: {e}")
+                    logger.warning("Continuing without BC observation normalization - transfer learning may be degraded")
+                    self.bc_normalization_applied = False
+            else:
+                logger.warning(f"BC normalization stats not found at {bc_norm_stats_path}")
+                logger.warning("Continuing without BC observation normalization - transfer learning may be degraded")
+                self.bc_normalization_applied = False
+        else:
+            self.bc_normalization_applied = False
 
         # Wrap vectorized env with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
