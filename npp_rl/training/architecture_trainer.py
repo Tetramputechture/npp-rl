@@ -550,13 +550,19 @@ class ArchitectureTrainer:
         return None  # Model will be created in setup_environments
 
     def setup_environments(
-        self, num_envs: int = 64, total_timesteps: int = None
+        self,
+        num_envs: int = 64,
+        total_timesteps: int = None,
+        enable_visualization: bool = False,
+        vis_env_idx: int = 0,
     ) -> None:
         """Create vectorized training and eval environments.
 
         Args:
             num_envs: Number of parallel environments
             total_timesteps: Total training timesteps (used to adjust n_steps for small runs)
+            enable_visualization: If True, create one environment with human rendering
+            vis_env_idx: Index of environment to enable visualization for
         """
         logger.info(f"Setting up {num_envs} training environments...")
 
@@ -596,10 +602,15 @@ class ArchitectureTrainer:
         # Capture frame stack config
         frame_stack_cfg = self.frame_stack_config
 
-        def make_env(rank: int, use_curr: bool, curr_mgr):
+        def make_env(rank: int, use_curr: bool, curr_mgr, visualize: bool = False):
             def _init():
                 logger.info(f"[Env {rank}] Creating NppEnvironment instance...")
                 env_config = EnvironmentConfig.for_training()
+
+                # Enable human rendering for visualization
+                if visualize:
+                    env_config.render.render_mode = "human"
+                    logger.info(f"[Env {rank}] Rendering enabled for visualization")
 
                 # Apply frame stacking configuration if provided
                 if frame_stack_cfg:
@@ -635,10 +646,29 @@ class ArchitectureTrainer:
 
         # Create vectorized training environment
         # For small numbers of envs, use DummyVecEnv to avoid multiprocessing overhead
+        # IMPORTANT: Force DummyVecEnv when visualization is enabled, as pygame
+        # doesn't work across processes in SubprocVecEnv
+        use_subproc = num_envs > 4 and not enable_visualization
+
         if num_envs > 4:
+            if enable_visualization:
+                logger.warning(
+                    "Visualization enabled with >4 environments. "
+                    "Forcing DummyVecEnv (single-process) for reliable pygame rendering. "
+                    "This may be slower than SubprocVecEnv. "
+                    "Consider using --num-envs 4 or less for best performance."
+                )
+
+        if use_subproc:
             logger.info(f"Creating {num_envs} environment factory functions...")
             env_fns = [
-                make_env(i, use_curriculum, curriculum_manager) for i in range(num_envs)
+                make_env(
+                    i,
+                    use_curriculum,
+                    curriculum_manager,
+                    visualize=(enable_visualization and i == vis_env_idx),
+                )
+                for i in range(num_envs)
             ]
             logger.info(
                 f"Initializing SubprocVecEnv with {num_envs} worker processes..."
@@ -651,7 +681,13 @@ class ArchitectureTrainer:
         else:
             logger.info(f"Creating {num_envs} environment factory functions...")
             env_fns = [
-                make_env(i, use_curriculum, curriculum_manager) for i in range(num_envs)
+                make_env(
+                    i,
+                    use_curriculum,
+                    curriculum_manager,
+                    visualize=(enable_visualization and i == vis_env_idx),
+                )
+                for i in range(num_envs)
             ]
             logger.info(
                 f"Initializing DummyVecEnv with {num_envs} environments (single process)..."

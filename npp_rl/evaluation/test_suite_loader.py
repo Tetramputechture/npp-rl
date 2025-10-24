@@ -16,7 +16,8 @@ class TestSuiteLoader:
     """Loads N++ test suite levels for evaluation."""
 
     CATEGORIES = [
-        "very_simple",
+        "simplest",
+        "simpler",
         "simple",
         "medium",
         "complex",

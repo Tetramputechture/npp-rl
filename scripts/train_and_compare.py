@@ -176,9 +176,10 @@ def parse_args():
     parser.add_argument(
         "--curriculum-start-stage",
         type=str,
-        default="very_simple",
+        default="simplest",
         choices=[
-            "very_simple",
+            "simplest",
+            "simpler",
             "simple",
             "medium",
             "complex",
@@ -266,6 +267,31 @@ def parse_args():
         type=str,
         default=None,
         help="Resume from existing experiment directory",
+    )
+
+    # Visualization options
+    parser.add_argument(
+        "--visualize-training",
+        action="store_true",
+        help="Enable real-time visualization of training",
+    )
+    parser.add_argument(
+        "--vis-render-freq",
+        type=int,
+        default=100,
+        help="Visualization render frequency (in timesteps)",
+    )
+    parser.add_argument(
+        "--vis-env-idx",
+        type=int,
+        default=0,
+        help="Which environment to visualize (from vectorized environments)",
+    )
+    parser.add_argument(
+        "--vis-fps",
+        type=int,
+        default=60,
+        help="Target FPS for visualization (0 = unlimited)",
     )
 
     # Debugging
@@ -360,14 +386,14 @@ def train_architecture(
         frame_stack_config = None
         if args.enable_visual_frame_stacking or args.enable_state_stacking:
             frame_stack_config = {
-                'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
-                'visual_stack_size': args.visual_stack_size,
-                'enable_state_stacking': args.enable_state_stacking,
-                'state_stack_size': args.state_stack_size,
-                'padding_type': args.frame_stack_padding,
+                "enable_visual_frame_stacking": args.enable_visual_frame_stacking,
+                "visual_stack_size": args.visual_stack_size,
+                "enable_state_stacking": args.enable_state_stacking,
+                "state_stack_size": args.state_stack_size,
+                "padding_type": args.frame_stack_padding,
             }
             logger.info(f"Frame stacking configuration: {frame_stack_config}")
-        
+
         # Create trainer
         trainer = ArchitectureTrainer(
             architecture_config=architecture_config,
@@ -403,14 +429,36 @@ def train_architecture(
 
         # Setup environments (use per-GPU environment count)
         trainer.setup_environments(
-            num_envs=envs_per_gpu, total_timesteps=args.total_timesteps
+            num_envs=envs_per_gpu,
+            total_timesteps=args.total_timesteps,
+            enable_visualization=args.visualize_training,
+            vis_env_idx=args.vis_env_idx,
         )
+
+        # Create visualization callback if enabled
+        vis_callback = None
+        if args.visualize_training:
+            from npp_rl.callbacks import TrainingVisualizationCallback
+
+            vis_callback = TrainingVisualizationCallback(
+                render_freq=args.vis_render_freq,
+                render_mode="timesteps",
+                env_idx=args.vis_env_idx,
+                target_fps=args.vis_fps,
+                window_title=f"NPP-RL Training: {architecture_name}",
+                verbose=1 if args.debug else 0,
+            )
+            logger.info(
+                f"Visualization enabled: rendering env {args.vis_env_idx} "
+                f"every {args.vis_render_freq} timesteps at {args.vis_fps} FPS"
+            )
 
         # Train
         training_results = trainer.train(
             total_timesteps=args.total_timesteps,
             eval_freq=args.eval_freq,
             save_freq=args.save_freq,
+            callback_fn=vis_callback,
         )
 
         # Evaluate (skip if requested, or only run on rank 0 for multi-GPU)
@@ -546,11 +594,11 @@ def train_worker(
             bc_frame_stack_config = None
             if args.enable_visual_frame_stacking or args.enable_state_stacking:
                 bc_frame_stack_config = {
-                    'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
-                    'visual_stack_size': args.visual_stack_size,
-                    'enable_state_stacking': args.enable_state_stacking,
-                    'state_stack_size': args.state_stack_size,
-                    'padding_type': args.frame_stack_padding,
+                    "enable_visual_frame_stacking": args.enable_visual_frame_stacking,
+                    "visual_stack_size": args.visual_stack_size,
+                    "enable_state_stacking": args.enable_state_stacking,
+                    "state_stack_size": args.state_stack_size,
+                    "padding_type": args.frame_stack_padding,
                 }
 
             # Determine pretraining conditions (only on rank 0 to avoid conflicts)
@@ -565,6 +613,9 @@ def train_worker(
                         epochs=args.bc_epochs,
                         batch_size=args.bc_batch_size,
                         frame_stack_config=bc_frame_stack_config,
+                        tensorboard_writer=TensorBoardManager(
+                            exp_dir / arch_name / "pretrain" / "tensorboard"
+                        ),
                     )
                     conditions = [
                         ("no_pretrain", None),
@@ -578,6 +629,9 @@ def train_worker(
                         epochs=args.bc_epochs,
                         batch_size=args.bc_batch_size,
                         frame_stack_config=bc_frame_stack_config,
+                        tensorboard_writer=TensorBoardManager(
+                            exp_dir / arch_name / "pretrain" / "tensorboard"
+                        ),
                     )
                     if pretrained_ckpt:
                         conditions = [("with_pretrain", pretrained_ckpt)]
@@ -834,11 +888,11 @@ def main():
         bc_frame_stack_config = None
         if args.enable_visual_frame_stacking or args.enable_state_stacking:
             bc_frame_stack_config = {
-                'enable_visual_frame_stacking': args.enable_visual_frame_stacking,
-                'visual_stack_size': args.visual_stack_size,
-                'enable_state_stacking': args.enable_state_stacking,
-                'state_stack_size': args.state_stack_size,
-                'padding_type': args.frame_stack_padding,
+                "enable_visual_frame_stacking": args.enable_visual_frame_stacking,
+                "visual_stack_size": args.visual_stack_size,
+                "enable_state_stacking": args.enable_state_stacking,
+                "state_stack_size": args.state_stack_size,
+                "padding_type": args.frame_stack_padding,
             }
 
         # Determine pretraining conditions
