@@ -6,10 +6,15 @@ from .performance_monitor import (
     time_function
 )
 
-from .s3_uploader import (
-    S3Uploader,
-    create_s3_uploader
-)
+try:
+    from .s3_uploader import (
+        S3Uploader,
+        create_s3_uploader
+    )
+except ImportError:
+    # boto3 not installed - S3 functionality unavailable
+    S3Uploader = None
+    create_s3_uploader = None
 
 from .logging_utils import (
     setup_experiment_logging,
@@ -22,10 +27,15 @@ from .logging_utils import (
     setup_comparison_logging
 )
 
-from .video_recorder import (
-    VideoRecorder,
-    create_video_recorder
-)
+try:
+    from .video_recorder import (
+        VideoRecorder,
+        create_video_recorder
+    )
+except ImportError:
+    # imageio not installed - video recording unavailable
+    VideoRecorder = None
+    create_video_recorder = None
 
 from .frame_stack_logging import (
     log_frame_stack_config,

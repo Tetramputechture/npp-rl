@@ -18,7 +18,10 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
-from npp_rl.utils.video_recorder import create_video_recorder
+try:
+    from npp_rl.utils.video_recorder import create_video_recorder
+except ImportError:
+    create_video_recorder = None
 from npp_rl.training.distributed_utils import unwrap_policy_for_inference
 
 logger = logging.getLogger(__name__)

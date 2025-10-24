@@ -97,6 +97,14 @@ class CurriculumEnv(gym.Wrapper):
                     f"from stage: {self.current_level_stage}"
                 )
                 base_env.nplay_headless.load_map_from_map_data(level_data["map_data"])
+                
+                # Pass skip_map_load=True to prevent overwriting curriculum map
+                # Merge with existing options if provided
+                reset_options = kwargs.get("options", {})
+                if reset_options is None:
+                    reset_options = {}
+                reset_options["skip_map_load"] = True
+                kwargs["options"] = reset_options
             else:
                 logger.warning(
                     "Environment does not have nplay_headless attribute, "
@@ -109,6 +117,7 @@ class CurriculumEnv(gym.Wrapper):
             )
 
         # Reset environment after loading the map
+        # Note: skip_map_load=True option prevents env.reset() from loading a new map
         obs, info = self.env.reset(**kwargs)
 
         # Add curriculum info
