@@ -184,7 +184,7 @@ def save_policy_checkpoint(
     
     # Log frame stacking info if present
     if frame_stack_config:
-        logger.info(f"  Frame stacking config saved in checkpoint:")
+        logger.info("  Frame stacking config saved in checkpoint:")
         logger.info(f"    Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
                    f"(size: {frame_stack_config.get('visual_stack_size', 1)})")
         logger.info(f"    State: {frame_stack_config.get('enable_state_stacking', False)} "

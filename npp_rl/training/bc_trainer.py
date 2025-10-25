@@ -6,7 +6,7 @@ Trains policy networks using behavioral cloning from expert demonstrations
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple
 import time
 
 import torch

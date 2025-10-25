@@ -196,7 +196,7 @@ class BCReplayDataset(Dataset):
         
         # Log frame stacking configuration
         if self.enable_visual_stacking or self.enable_state_stacking:
-            logger.info(f"Frame stacking enabled in BC dataset:")
+            logger.info("Frame stacking enabled in BC dataset:")
             if self.enable_visual_stacking:
                 logger.info(f"  Visual: {self.visual_stack_size} frames (padding: {self.padding_type})")
             if self.enable_state_stacking:

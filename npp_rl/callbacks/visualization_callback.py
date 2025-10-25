@@ -6,7 +6,6 @@ allowing visualization of agent behavior during training.
 
 import logging
 import time
-from typing import Optional
 
 import pygame
 from stable_baselines3.common.callbacks import BaseCallback

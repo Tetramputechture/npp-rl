@@ -72,7 +72,7 @@ class PretrainingPipeline:
         
         # Log frame stacking configuration
         if frame_stack_config:
-            logger.info(f"Frame stacking configuration:")
+            logger.info("Frame stacking configuration:")
             logger.info(f"  Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
                        f"(size: {frame_stack_config.get('visual_stack_size', 4)})")
             logger.info(f"  State: {frame_stack_config.get('enable_state_stacking', False)} "
