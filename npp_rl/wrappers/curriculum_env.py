@@ -21,23 +21,35 @@ class CurriculumEnv(gym.Wrapper):
     1. Sample levels from appropriate difficulty stage
     2. Track episode success for curriculum advancement
     3. Automatically progress through difficulty levels
+    
+    Note: When used with vectorized environments (n_envs > 1), curriculum progression
+    should be managed by CurriculumVecEnvWrapper in the main process, not by individual
+    environment instances. Set enable_local_tracking=False in this case.
     """
 
     def __init__(
-        self, env: gym.Env, curriculum_manager, check_advancement_freq: int = 10
+        self,
+        env: gym.Env,
+        curriculum_manager,
+        check_advancement_freq: int = 10,
+        enable_local_tracking: bool = True,
     ):
         """Initialize curriculum environment wrapper.
 
         Args:
             env: Base N++ environment
-            curriculum_manager: CurriculumManager instance
+            curriculum_manager: CurriculumManager instance (shared reference)
             check_advancement_freq: Check for advancement every N episodes
+            enable_local_tracking: If False, disables local episode recording and
+                advancement checking. Use False when wrapped by CurriculumVecEnvWrapper
+                to avoid duplicate tracking in subprocess environments.
         """
         super().__init__(env)
         self.curriculum_manager = curriculum_manager
         self.check_advancement_freq = check_advancement_freq
+        self.enable_local_tracking = enable_local_tracking
 
-        # Episode tracking
+        # Episode tracking (only used if enable_local_tracking=True)
         self.episode_count = 0
         self.current_level_stage = None
         self.current_level_data = None
@@ -47,6 +59,7 @@ class CurriculumEnv(gym.Wrapper):
 
         logger.info("Curriculum environment initialized")
         logger.info(f"Starting stage: {self._last_known_stage}")
+        logger.info(f"Local tracking: {'enabled' if enable_local_tracking else 'disabled (managed by VecEnvWrapper)'}")
 
     def set_curriculum_stage(self, stage: str):
         """Update the curriculum stage for this environment.
@@ -152,6 +165,10 @@ class CurriculumEnv(gym.Wrapper):
         Args:
             info: Episode info dict
         """
+        # Only track locally if enabled (disabled when used with VecEnvWrapper)
+        if not self.enable_local_tracking:
+            return
+            
         self.episode_count += 1
 
         # Record episode result in curriculum
@@ -181,7 +198,10 @@ class CurriculumEnv(gym.Wrapper):
 
 
 def make_curriculum_env(
-    base_env_fn, curriculum_manager, check_advancement_freq: int = 10
+    base_env_fn,
+    curriculum_manager,
+    check_advancement_freq: int = 10,
+    enable_local_tracking: bool = True,
 ):
     """Create curriculum environment from base environment function.
 
@@ -189,97 +209,150 @@ def make_curriculum_env(
         base_env_fn: Function that creates base environment
         curriculum_manager: CurriculumManager instance
         check_advancement_freq: Advancement check frequency
+        enable_local_tracking: If False, disables local tracking (for use with VecEnv)
 
     Returns:
         Wrapped curriculum environment
     """
     base_env = base_env_fn()
-    return CurriculumEnv(base_env, curriculum_manager, check_advancement_freq)
+    return CurriculumEnv(
+        base_env, curriculum_manager, check_advancement_freq, enable_local_tracking
+    )
 
 
 class CurriculumVecEnvWrapper(VecEnvWrapper):
     """Wrapper for vectorized environments with curriculum learning.
 
     This wraps a VecEnv to add curriculum tracking across all parallel environments.
+    
+    IMPORTANT: This wrapper is the single source of truth for curriculum progression
+    when using multiple environments (n_envs > 1). It:
+    1. Tracks all episode completions across all environments globally
+    2. Records performance in the shared curriculum manager
+    3. Checks for curriculum advancement centrally
+    4. Synchronizes stage changes to all subprocess environments
+    
+    Individual CurriculumEnv wrappers in subprocesses should have local tracking
+    disabled to avoid duplicate tracking.
     """
 
     def __init__(self, venv, curriculum_manager, check_advancement_freq: int = 10):
         """Initialize vectorized curriculum wrapper.
 
         Args:
-            venv: Vectorized environment
-            curriculum_manager: CurriculumManager instance
-            check_advancement_freq: Check advancement every N episodes
+            venv: Vectorized environment (SubprocVecEnv or DummyVecEnv)
+            curriculum_manager: CurriculumManager instance (shared in main process)
+            check_advancement_freq: Check advancement every N total episodes across all envs
         """
         super().__init__(venv)
         self.curriculum_manager = curriculum_manager
         self.check_advancement_freq = check_advancement_freq
 
-        # Track episodes per environment
+        # Track episodes per environment and globally
         self.env_episode_counts = np.zeros(self.num_envs, dtype=int)
         self.total_episodes = 0
+        
+        # Track last advancement check to avoid redundant checks
+        self.last_advancement_check = 0
 
         logger.info(f"Curriculum VecEnv wrapper initialized for {self.num_envs} envs")
+        logger.info(f"Global episode tracking enabled - checking advancement every {check_advancement_freq} episodes")
 
         # Sync initial curriculum stage to all environments
         initial_stage = curriculum_manager.get_current_stage()
         logger.info(
-            f"Syncing initial curriculum stage '{initial_stage}' to all environments"
+            f"Syncing initial curriculum stage '{initial_stage}' to all {self.num_envs} environments"
         )
         self._sync_curriculum_stage(initial_stage)
 
     def step_wait(self):
-        """Wait for step to complete and track curriculum progress."""
+        """Wait for step to complete and track curriculum progress globally.
+        
+        This method is the central point for curriculum tracking across all environments.
+        It records all episodes and checks for advancement in the main process.
+        """
         obs, rewards, dones, infos = self.venv.step_wait()
 
-        # Track episode completions
+        # Track episode completions across all environments
+        episodes_completed_this_step = 0
         for i, (done, info) in enumerate(zip(dones, infos)):
             if done:
                 self.env_episode_counts[i] += 1
                 self.total_episodes += 1
+                episodes_completed_this_step += 1
 
-                # Record in curriculum
+                # Record episode result in curriculum manager (main process tracking)
                 # NppEnvironment returns "is_success", but we check both for compatibility
                 success = info.get("is_success", info.get("success", False))
                 stage = info.get("curriculum_stage", "unknown")
 
                 if stage != "unknown":
                     self.curriculum_manager.record_episode(stage, success)
+                    logger.debug(
+                        f"[VecEnv] Env {i} completed episode {self.env_episode_counts[i]}: "
+                        f"stage={stage}, success={success}, total_episodes={self.total_episodes}"
+                    )
+                else:
+                    logger.warning(
+                        f"[VecEnv] Env {i} completed episode without curriculum stage info"
+                    )
 
-                # Check advancement
-                if self.total_episodes % self.check_advancement_freq == 0:
-                    advanced = self.curriculum_manager.check_advancement()
+        # Check for advancement after processing all completed episodes
+        # Only check if we've reached the check frequency
+        if (
+            episodes_completed_this_step > 0
+            and self.total_episodes >= self.last_advancement_check + self.check_advancement_freq
+        ):
+            self.last_advancement_check = self.total_episodes
+            
+            current_stage = self.curriculum_manager.get_current_stage()
+            stage_perf = self.curriculum_manager.get_stage_performance(current_stage)
+            
+            logger.info(
+                f"[VecEnv] Advancement check at {self.total_episodes} episodes: "
+                f"stage={current_stage}, success_rate={stage_perf['success_rate']:.2%}, "
+                f"episodes={stage_perf['episodes']}, can_advance={stage_perf['can_advance']}"
+            )
+            
+            advanced = self.curriculum_manager.check_advancement()
 
-                    if advanced:
-                        new_stage = self.curriculum_manager.get_current_stage()
-                        logger.info(f"Curriculum advanced to: {new_stage}")
+            if advanced:
+                new_stage = self.curriculum_manager.get_current_stage()
+                logger.info(
+                    f"[VecEnv] ✨ Curriculum advanced to: {new_stage} "
+                    f"(syncing to all {self.num_envs} environments)"
+                )
 
-                        # Sync stage to all subprocess environments
-                        # This ensures they sample from the new stage
-                        self._sync_curriculum_stage(new_stage)
+                # Sync stage to all subprocess environments
+                # This ensures ALL environments sample from the new stage
+                self._sync_curriculum_stage(new_stage)
 
         return obs, rewards, dones, infos
 
     def _sync_curriculum_stage(self, stage: str):
         """Synchronize curriculum stage to all subprocess environments.
+        
+        This is critical for ensuring all environments sample from the same stage
+        after advancement. Works with both SubprocVecEnv and DummyVecEnv.
 
         Args:
-            stage: New curriculum stage to set
+            stage: New curriculum stage to set across all environments
         """
         try:
             # Use env_method to call set_curriculum_stage on all envs
             # This works for both SubprocVecEnv and DummyVecEnv
             if hasattr(self.venv, "env_method"):
                 self.venv.env_method("set_curriculum_stage", stage)
-                logger.debug(
-                    f"Synced curriculum stage '{stage}' to all {self.num_envs} environments"
+                logger.info(
+                    f"[VecEnv] Successfully synced stage '{stage}' to all {self.num_envs} environments"
                 )
             else:
                 logger.warning(
-                    "VecEnv does not support env_method, cannot sync curriculum stage"
+                    "[VecEnv] VecEnv does not support env_method, cannot sync curriculum stage. "
+                    "Stage advancement may not work correctly!"
                 )
         except Exception as e:
-            logger.error(f"Failed to sync curriculum stage: {e}")
+            logger.error(f"[VecEnv] Failed to sync curriculum stage: {e}", exc_info=True)
 
     def reset(self):
         """Reset all environments."""

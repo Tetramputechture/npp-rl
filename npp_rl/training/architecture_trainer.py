@@ -643,9 +643,16 @@ class ArchitectureTrainer:
                 logger.info(f"[Env {rank}] ✓ NppEnvironment created")
 
                 # Wrap with curriculum if enabled
+                # IMPORTANT: Disable local tracking when used with VecEnv
+                # The VecEnvWrapper will handle all tracking globally
                 if use_curr and curr_mgr:
                     logger.info(f"[Env {rank}] Wrapping with CurriculumEnv...")
-                    env = CurriculumEnv(env, curr_mgr, check_advancement_freq=10)
+                    env = CurriculumEnv(
+                        env,
+                        curr_mgr,
+                        check_advancement_freq=10,
+                        enable_local_tracking=False,  # Disabled for VecEnv - tracked globally
+                    )
 
                 logger.info(f"[Env {rank}] ✓ Environment ready")
                 return env
@@ -745,8 +752,13 @@ class ArchitectureTrainer:
             self.bc_normalization_applied = False
 
         # Wrap vectorized env with curriculum tracking if enabled
+        # This wrapper becomes the single source of truth for curriculum progression
+        # across all environments, tracking episodes globally and syncing stage changes
         if self.use_curriculum and self.curriculum_manager:
-            logger.info("Wrapping environments with curriculum tracking...")
+            logger.info("Wrapping environments with global curriculum tracking...")
+            logger.info(
+                f"CurriculumVecEnvWrapper will track progression across all {num_envs} environments"
+            )
             self.env = CurriculumVecEnvWrapper(
                 self.env, self.curriculum_manager, check_advancement_freq=10
             )
