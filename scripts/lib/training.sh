@@ -27,7 +27,7 @@ generate_datasets() {
     log INFO "This may take 5-15 minutes..."
     
     # Generate datasets
-    ssh_cmd "cd ${REMOTE_NCLONE_DIR} && python -m nclone.map_generation.generate_test_suite_maps --mode both --output_dir ~/datasets --map_count 10000" 2>&1 | tee -a "${LOCAL_LOG_DIR}/dataset_generation.log"
+    ssh_cmd "cd ${REMOTE_NCLONE_DIR} && python -m nclone.map_generation.generate_test_suite_maps --mode both --output_dir ~/datasets --map_count 2000" 2>&1 | tee -a "${LOCAL_LOG_DIR}/dataset_generation.log"
     
     if ssh_cmd "test -d ~/datasets/train && test -d ~/datasets/test"; then
         log SUCCESS "Datasets generated successfully"
@@ -92,9 +92,6 @@ train_single_architecture() {
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
             --use-curriculum \
-            --use-hierarchical-ppo \
-            --enable-visual-frame-stacking \
-            --enable-state-stacking \
             --replay-data-dir ../nclone/bc_replays \
             --bc-epochs 50 \
             --bc-batch-size 128 \

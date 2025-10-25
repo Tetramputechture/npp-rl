@@ -176,6 +176,7 @@ class CurriculumManager:
             logger.warning(f"Unknown stage '{stage}', ignoring episode")
             return
 
+        print(f"Recording episode for stage: {stage}, success: {success}")
         self.stage_performance[stage].append(1 if success else 0)
         self.stage_episode_counts[stage] += 1
 
@@ -200,6 +201,15 @@ class CurriculumManager:
             success_rate >= self.advancement_threshold
             and episodes >= self.min_episodes_per_stage
         )
+
+        print(
+            f"Stage: {stage}, Success Rate: {success_rate}, Episodes: {episodes}, Can Advance: {can_advance}"
+        )
+        print(f"Advancement Threshold: {self.advancement_threshold}")
+        print(f"Min Episodes per Stage: {self.min_episodes_per_stage}")
+        print(f"Performance Window: {self.performance_window}")
+        print(f"Allow Stage Mixing: {self.allow_stage_mixing}")
+        print(f"Mixing Ratio: {self.mixing_ratio}")
 
         return {
             "success_rate": success_rate,
