@@ -207,16 +207,28 @@ class CurriculumManager:
     def _get_adaptive_mixing_ratio(self, stage: str) -> float:
         """Get adaptive mixing ratio for a stage based on current performance.
         
+        In multi-environment setups with SubprocVecEnv:
+        - Main process: Calculates ratio from current performance data
+        - Subprocesses: Use cached ratio synced from main process (to avoid stale data)
+        
         Args:
             stage: Stage name
             
         Returns:
             Adaptive mixing ratio (0.0 to 1.0)
         """
-        if not self.enable_adaptive_mixing or stage not in self.stage_mixing_ratios:
+        if not self.enable_adaptive_mixing:
             return self.base_mixing_ratio
         
-        # Get current performance
+        # If we have a cached ratio and no/minimal performance data,
+        # we're likely in a subprocess - use the synced cached value
+        # This prevents using stale performance data in subprocess copies
+        stage_perf_count = len(self.stage_performance.get(stage, []))
+        if stage in self.stage_mixing_ratios and stage_perf_count < 5:
+            # Use cached ratio (synced from main process)
+            return self.stage_mixing_ratios[stage]
+        
+        # Calculate fresh ratio from current performance (main process path)
         success_rate = self.get_stage_success_rate(stage)
         
         # Adaptive mixing based on performance:
@@ -234,7 +246,7 @@ class CurriculumManager:
         else:
             adaptive_ratio = 0.05  # Minimal support, almost ready to advance
         
-        # Update tracked ratio
+        # Cache for future calls and subprocess syncing
         self.stage_mixing_ratios[stage] = adaptive_ratio
         
         return adaptive_ratio

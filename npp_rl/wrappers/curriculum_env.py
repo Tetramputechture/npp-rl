@@ -82,6 +82,21 @@ class CurriculumEnv(gym.Wrapper):
             except ValueError:
                 logger.warning(f"Unknown curriculum stage: {stage}")
 
+    def set_adaptive_mixing_ratio(self, stage: str, ratio: float):
+        """Set the adaptive mixing ratio for a stage.
+
+        This is used by VecEnvWrapper to sync mixing ratios from main process
+        to subprocesses. Subprocesses use the synced ratio instead of calculating
+        from stale performance data.
+
+        Args:
+            stage: Stage name
+            ratio: Mixing ratio (0.0 to 1.0)
+        """
+        if hasattr(self.curriculum_manager, 'stage_mixing_ratios'):
+            self.curriculum_manager.stage_mixing_ratios[stage] = ratio
+            logger.debug(f"Mixing ratio for stage '{stage}' set to {ratio:.1%}")
+
     def reset(self, **kwargs):
         """Reset environment with level from curriculum.
 
@@ -358,6 +373,11 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                     # Sync stage to all subprocess environments
                     # This ensures ALL environments sample from the new stage
                     self._sync_curriculum_stage(new_stage)
+                else:
+                    # Even if no advancement, periodically sync mixing ratios
+                    # Mixing ratios adapt as performance changes within a stage
+                    if self.total_episodes % 50 == 0:
+                        self._sync_mixing_ratios()
             except Exception as e:
                 logger.error(
                     f"[VecEnv] Error during advancement check at episode {self.total_episodes}: {e}",
@@ -367,10 +387,13 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
         return obs, rewards, dones, infos
 
     def _sync_curriculum_stage(self, stage: str):
-        """Synchronize curriculum stage to all subprocess environments.
+        """Synchronize curriculum stage and adaptive mixing ratio to all subprocess environments.
         
         This is critical for ensuring all environments sample from the same stage
-        after advancement. Works with both SubprocVecEnv and DummyVecEnv.
+        after advancement. Also syncs the adaptive mixing ratio to ensure subprocesses
+        use correct mixing based on current performance (not stale data).
+        
+        Works with both SubprocVecEnv and DummyVecEnv.
 
         Args:
             stage: New curriculum stage to set across all environments
@@ -380,16 +403,48 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
             # This works for both SubprocVecEnv and DummyVecEnv
             if hasattr(self.venv, "env_method"):
                 self.venv.env_method("set_curriculum_stage", stage)
-                logger.info(
-                    f"[VecEnv] Successfully synced stage '{stage}' to all {self.num_envs} environments"
-                )
+                
+                # Also sync adaptive mixing ratio from main process
+                # This ensures subprocesses use up-to-date mixing based on current performance
+                if self.curriculum_manager.enable_adaptive_mixing:
+                    mixing_ratio = self.curriculum_manager._get_adaptive_mixing_ratio(stage)
+                    self.venv.env_method("set_adaptive_mixing_ratio", stage, mixing_ratio)
+                    logger.info(
+                        f"[VecEnv] Synced stage '{stage}' (mixing: {mixing_ratio:.1%}) "
+                        f"to all {self.num_envs} environments"
+                    )
+                else:
+                    logger.info(
+                        f"[VecEnv] Synced stage '{stage}' to all {self.num_envs} environments"
+                    )
             else:
                 logger.warning(
                     "[VecEnv] VecEnv does not support env_method, cannot sync curriculum stage. "
                     "Stage advancement may not work correctly!"
                 )
         except Exception as e:
-            logger.error(f"[VecEnv] Failed to sync curriculum stage: {e}", exc_info=True)
+            logger.error(f"[VecEnv] Failed to sync curriculum: {e}", exc_info=True)
+    
+    def _sync_mixing_ratios(self):
+        """Sync current adaptive mixing ratios to all subprocesses.
+        
+        This should be called periodically during training (not just at stage changes)
+        to ensure subprocesses have current adaptive ratios as performance changes.
+        """
+        if not self.curriculum_manager.enable_adaptive_mixing:
+            return
+        
+        current_stage = self.curriculum_manager.get_current_stage()
+        
+        try:
+            mixing_ratio = self.curriculum_manager._get_adaptive_mixing_ratio(current_stage)
+            if hasattr(self.venv, "env_method"):
+                self.venv.env_method("set_adaptive_mixing_ratio", current_stage, mixing_ratio)
+                logger.debug(
+                    f"[VecEnv] Synced mixing ratio for '{current_stage}': {mixing_ratio:.1%}"
+                )
+        except Exception as e:
+            logger.error(f"[VecEnv] Failed to sync mixing ratios: {e}", exc_info=True)
 
     def reset(self):
         """Reset all environments."""
