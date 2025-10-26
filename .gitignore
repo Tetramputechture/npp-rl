@@ -69,3 +69,5 @@ tune_logs/
 experiments/
 
 logs/
+
+*.txt
