@@ -71,12 +71,14 @@ class CurriculumEnv(gym.Wrapper):
         """
         self._last_known_stage = stage
         # Force curriculum_manager to use this stage
+        # CRITICAL: Must update BOTH current_stage and current_stage_idx for consistency
         if hasattr(self.curriculum_manager, "current_stage_idx"):
             # Find stage index
             try:
                 stage_idx = self.curriculum_manager.CURRICULUM_ORDER.index(stage)
                 self.curriculum_manager.current_stage_idx = stage_idx
-                logger.info(f"Curriculum stage updated to: {stage}")
+                self.curriculum_manager.current_stage = stage  # CRITICAL: Also update current_stage
+                logger.info(f"Curriculum stage updated to: {stage} (index: {stage_idx})")
             except ValueError:
                 logger.warning(f"Unknown curriculum stage: {stage}")
 
@@ -96,9 +98,18 @@ class CurriculumEnv(gym.Wrapper):
 
         # Store current level info
         self.current_level_data = level_data
-        self.current_level_stage = level_data.get(
-            "category", level_data.get("metadata", {}).get("category", "unknown")
-        )
+        
+        # Defensive: safely extract stage from level data
+        # Try multiple possible locations for category/stage info
+        if "category" in level_data:
+            self.current_level_stage = level_data["category"]
+        elif "metadata" in level_data and isinstance(level_data["metadata"], dict):
+            self.current_level_stage = level_data["metadata"].get("category", "unknown")
+        else:
+            self.current_level_stage = "unknown"
+            logger.warning(
+                f"Could not determine stage for level: {level_data.get('level_id', 'unknown')}"
+            )
 
         # Load the specific map from level data
         if "map_data" in level_data:
@@ -150,8 +161,12 @@ class CurriculumEnv(gym.Wrapper):
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        # Add curriculum info
-        info["curriculum_stage"] = self.current_level_stage
+        # Add curriculum info (defensive: ensure current_level_stage is set)
+        if hasattr(self, 'current_level_stage') and self.current_level_stage:
+            info["curriculum_stage"] = self.current_level_stage
+        else:
+            info["curriculum_stage"] = "unknown"
+            logger.warning("current_level_stage not set, using 'unknown'")
 
         # Track episode completion
         if terminated or truncated:
@@ -175,8 +190,12 @@ class CurriculumEnv(gym.Wrapper):
         # NppEnvironment returns "is_success", but we check both for compatibility
         success = info.get("is_success", info.get("success", False))
 
-        if self.current_level_stage:
-            self.curriculum_manager.record_episode(self.current_level_stage, success)
+        # Defensive: ensure we have a valid stage before recording
+        stage = getattr(self, 'current_level_stage', None)
+        if stage and stage != "unknown":
+            self.curriculum_manager.record_episode(stage, success)
+        else:
+            logger.debug("Skipping episode recording - no valid curriculum stage")
 
         # Periodically check for curriculum advancement
         if self.episode_count % self.check_advancement_freq == 0:
@@ -286,12 +305,19 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                 success = info.get("is_success", info.get("success", False))
                 stage = info.get("curriculum_stage", "unknown")
 
-                if stage != "unknown":
-                    self.curriculum_manager.record_episode(stage, success)
-                    logger.debug(
-                        f"[VecEnv] Env {i} completed episode {self.env_episode_counts[i]}: "
-                        f"stage={stage}, success={success}, total_episodes={self.total_episodes}"
-                    )
+                # Defensive: only record if we have a valid stage
+                if stage and stage != "unknown":
+                    try:
+                        self.curriculum_manager.record_episode(stage, success)
+                        logger.debug(
+                            f"[VecEnv] Env {i} completed episode {self.env_episode_counts[i]}: "
+                            f"stage={stage}, success={success}, total_episodes={self.total_episodes}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[VecEnv] Error recording episode for env {i}: {e}",
+                            exc_info=True
+                        )
                 else:
                     logger.warning(
                         f"[VecEnv] Env {i} completed episode without curriculum stage info"
@@ -305,27 +331,38 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
         ):
             self.last_advancement_check = self.total_episodes
             
-            current_stage = self.curriculum_manager.get_current_stage()
-            stage_perf = self.curriculum_manager.get_stage_performance(current_stage)
-            
-            logger.info(
-                f"[VecEnv] Advancement check at {self.total_episodes} episodes: "
-                f"stage={current_stage}, success_rate={stage_perf['success_rate']:.2%}, "
-                f"episodes={stage_perf['episodes']}, can_advance={stage_perf['can_advance']}"
-            )
-            
-            advanced = self.curriculum_manager.check_advancement()
-
-            if advanced:
-                new_stage = self.curriculum_manager.get_current_stage()
+            try:
+                current_stage = self.curriculum_manager.get_current_stage()
+                stage_perf = self.curriculum_manager.get_stage_performance(current_stage)
+                
+                # Defensive: ensure all required keys exist in stage_perf
+                success_rate = stage_perf.get('success_rate', 0.0)
+                episodes = stage_perf.get('episodes', 0)
+                can_advance = stage_perf.get('can_advance', False)
+                
                 logger.info(
-                    f"[VecEnv] ✨ Curriculum advanced to: {new_stage} "
-                    f"(syncing to all {self.num_envs} environments)"
+                    f"[VecEnv] Advancement check at {self.total_episodes} episodes: "
+                    f"stage={current_stage}, success_rate={success_rate:.2%}, "
+                    f"episodes={episodes}, can_advance={can_advance}"
                 )
+                
+                advanced = self.curriculum_manager.check_advancement()
 
-                # Sync stage to all subprocess environments
-                # This ensures ALL environments sample from the new stage
-                self._sync_curriculum_stage(new_stage)
+                if advanced:
+                    new_stage = self.curriculum_manager.get_current_stage()
+                    logger.info(
+                        f"[VecEnv] ✨ Curriculum advanced to: {new_stage} "
+                        f"(syncing to all {self.num_envs} environments)"
+                    )
+
+                    # Sync stage to all subprocess environments
+                    # This ensures ALL environments sample from the new stage
+                    self._sync_curriculum_stage(new_stage)
+            except Exception as e:
+                logger.error(
+                    f"[VecEnv] Error during advancement check at episode {self.total_episodes}: {e}",
+                    exc_info=True
+                )
 
         return obs, rewards, dones, infos
 

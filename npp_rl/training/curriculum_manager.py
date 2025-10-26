@@ -178,6 +178,12 @@ class CurriculumManager:
 
         print(f"Recording episode for stage: {stage}, success: {success}")
         self.stage_performance[stage].append(1 if success else 0)
+        
+        # Defensive: ensure stage exists in episode counts
+        if stage not in self.stage_episode_counts:
+            logger.warning(f"Stage '{stage}' not in episode counts, initializing to 0")
+            self.stage_episode_counts[stage] = 0
+        
         self.stage_episode_counts[stage] += 1
 
     def get_stage_performance(self, stage: str) -> Dict[str, float]:
@@ -187,15 +193,20 @@ class CurriculumManager:
             stage: Stage name
 
         Returns:
-            Dictionary with performance metrics
+            Dictionary with performance metrics (always includes all keys)
         """
         results = self.stage_performance.get(stage, deque())
 
         if not results:
-            return {"success_rate": 0.0, "episodes": 0, "can_advance": False}
+            return {
+                "success_rate": 0.0,
+                "episodes": 0,
+                "can_advance": False,
+                "advancement_threshold": self.advancement_threshold,
+            }
 
         success_rate = np.mean(results)
-        episodes = self.stage_episode_counts[stage]
+        episodes = self.stage_episode_counts.get(stage, 0)
 
         can_advance = (
             success_rate >= self.advancement_threshold
