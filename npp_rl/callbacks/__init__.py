@@ -20,6 +20,8 @@ from .hierarchical_callbacks import (
     create_hierarchical_callbacks,
 )
 from .visualization_callback import TrainingVisualizationCallback
+from .enhanced_tensorboard_callback import EnhancedTensorBoardCallback
+from .route_visualization_callback import RouteVisualizationCallback
 
 __all__ = [
     "PBRSLoggingCallback",
@@ -33,4 +35,6 @@ __all__ = [
     "CurriculumProgressionCallback",
     "create_hierarchical_callbacks",
     "TrainingVisualizationCallback",
+    "EnhancedTensorBoardCallback",
+    "RouteVisualizationCallback",
 ]

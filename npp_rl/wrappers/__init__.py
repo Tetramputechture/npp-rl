@@ -10,6 +10,7 @@ from .curriculum_env import (
     CurriculumVecEnvWrapper,
     make_curriculum_env
 )
+from .position_tracking_wrapper import PositionTrackingWrapper
 
 __all__ = [
     "HierarchicalRewardWrapper",
@@ -17,5 +18,6 @@ __all__ = [
     "IntrinsicRewardWrapper",
     "CurriculumEnv",
     "CurriculumVecEnvWrapper",
-    "make_curriculum_env"
+    "make_curriculum_env",
+    "PositionTrackingWrapper",
 ]

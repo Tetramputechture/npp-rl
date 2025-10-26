@@ -642,6 +642,11 @@ class ArchitectureTrainer:
                 env = NppEnvironment(config=env_config)
                 logger.info(f"[Env {rank}] ✓ NppEnvironment created")
 
+                # Wrap with position tracking for route visualization
+                from npp_rl.wrappers import PositionTrackingWrapper
+                env = PositionTrackingWrapper(env)
+                logger.info(f"[Env {rank}] ✓ Position tracking enabled")
+
                 # Wrap with curriculum if enabled
                 # IMPORTANT: Disable local tracking when used with VecEnv
                 # The VecEnvWrapper will handle all tracking globally
@@ -977,6 +982,35 @@ class ArchitectureTrainer:
             callbacks = [verbose_callback]
             if callback_fn is not None:
                 callbacks.append(callback_fn)
+
+            # Add enhanced TensorBoard metrics callback
+            from npp_rl.callbacks import EnhancedTensorBoardCallback
+            
+            enhanced_tb_callback = EnhancedTensorBoardCallback(
+                log_freq=100,  # Log scalars every 100 steps
+                histogram_freq=1000,  # Log histograms every 1000 steps
+                verbose=1,
+                log_gradients=True,
+                log_weights=False,  # Disable weight logging by default (expensive)
+            )
+            callbacks.append(enhanced_tb_callback)
+            logger.info("Added enhanced TensorBoard callback for detailed metrics")
+
+            # Add route visualization callback
+            from npp_rl.callbacks import RouteVisualizationCallback
+            
+            routes_dir = self.output_dir / "route_visualizations"
+            route_callback = RouteVisualizationCallback(
+                save_dir=str(routes_dir),
+                max_routes_per_checkpoint=10,  # Save up to 10 routes per checkpoint
+                visualization_freq=50000,  # Save visualizations every 50K steps
+                max_stored_routes=100,  # Keep up to 100 route images
+                async_save=True,  # Save asynchronously to avoid blocking
+                image_size=(800, 600),
+                verbose=1,
+            )
+            callbacks.append(route_callback)
+            logger.info(f"Added route visualization callback (saving to {routes_dir})")
 
             # Add curriculum progression callback if curriculum learning is enabled
             if self.use_curriculum and self.curriculum_manager is not None:
