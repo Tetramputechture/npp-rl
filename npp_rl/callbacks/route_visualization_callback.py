@@ -102,7 +102,19 @@ class RouteVisualizationCallback(BaseCallback):
         if not self._matplotlib_imported:
             try:
                 import matplotlib
-                matplotlib.use('Agg')  # Non-interactive backend
+                # Only set backend if not already set or if it's incompatible with headless mode
+                # This prevents issues in multi-process environments or when matplotlib is already imported
+                try:
+                    current_backend = matplotlib.get_backend()
+                    if current_backend not in ['Agg', 'Cairo', 'PDF', 'PS', 'SVG']:
+                        matplotlib.use('Agg', force=True)
+                except Exception:
+                    # If we can't check or set the backend, try anyway but don't fail
+                    try:
+                        matplotlib.use('Agg')
+                    except Exception:
+                        logger.warning("Could not set matplotlib backend to Agg - visualization may fail in headless mode")
+                
                 import matplotlib.pyplot as plt
                 self.plt = plt
                 self._matplotlib_imported = True
@@ -120,8 +132,11 @@ class RouteVisualizationCallback(BaseCallback):
                 self.tb_writer = output_format.writer
                 break
         
+        # Add warning about position tracking requirement
         logger.info(f"Route visualization callback initialized (saving to {self.save_dir})")
         logger.info(f"Will visualize up to {self.max_routes_per_checkpoint} routes every {self.visualization_freq} steps")
+        logger.info("⚠️  Route visualization requires PositionTrackingWrapper to be applied to environments")
+        logger.info("   If routes are not being captured, ensure the wrapper is in the environment pipeline")
     
     def _on_step(self) -> bool:
         """Called after each environment step.

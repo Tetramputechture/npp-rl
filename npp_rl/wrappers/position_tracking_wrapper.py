@@ -5,7 +5,7 @@ position data to the info dictionary for use by visualization callbacks.
 """
 
 import logging
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -29,6 +29,7 @@ class PositionTrackingWrapper(gym.Wrapper):
         """
         super().__init__(env)
         self.current_route = []
+        self._warned_about_position = False  # Only warn once about position unavailability
         
     def step(self, action):
         """Execute action and track position.
@@ -78,7 +79,7 @@ class PositionTrackingWrapper(gym.Wrapper):
         
         return obs, info
     
-    def _get_position(self) -> Tuple[float, float]:
+    def _get_position(self) -> Optional[Tuple[float, float]]:
         """Get current player position from environment.
         
         Returns:
@@ -102,6 +103,10 @@ class PositionTrackingWrapper(gym.Wrapper):
                 pass
             
         except Exception as e:
+            if not self._warned_about_position:
+                logger.warning(f"Could not get player position: {e}")
+                logger.warning("Route visualization may not work correctly")
+                self._warned_about_position = True
             logger.debug(f"Could not get position: {e}")
         
         return None

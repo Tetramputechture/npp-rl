@@ -129,16 +129,21 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 self.action_counts[action_idx] += 1
                 self.total_actions += 1
         
-        # Track value estimates
-        if hasattr(self.model.policy, 'predict_values') and 'obs_tensor' in self.locals:
+        # Track value estimates from rollout buffer (more reliable than trying to access obs_tensor)
+        # Note: This captures values after they've been computed during rollout collection
+        if hasattr(self.model, 'rollout_buffer'):
             try:
-                with torch.no_grad():
-                    obs_tensor = self.locals.get('obs_tensor')
-                    if obs_tensor is not None:
-                        values = self.model.policy.predict_values(obs_tensor)
-                        self.value_estimates.extend(values.cpu().numpy().flatten().tolist())
+                # Only access if buffer has data
+                if hasattr(self.model.rollout_buffer, 'values') and hasattr(self.model.rollout_buffer, 'pos'):
+                    buffer_pos = self.model.rollout_buffer.pos
+                    if buffer_pos > 0:  # Buffer has new data
+                        # Get recently added values (last position)
+                        recent_idx = max(0, buffer_pos - 1)
+                        values = self.model.rollout_buffer.values[recent_idx]
+                        if values is not None and len(values) > 0:
+                            self.value_estimates.extend(values.flatten().tolist())
             except Exception as e:
-                logger.debug(f"Could not track value estimates: {e}")
+                logger.debug(f"Could not track value estimates from rollout buffer: {e}")
         
         # Log scalar metrics at regular intervals
         if self.num_timesteps - self.last_log_step >= self.log_freq:
@@ -212,7 +217,9 @@ class EnhancedTensorBoardCallback(BaseCallback):
                                          action_freq, step)
             
             # Action entropy (measure of policy exploration)
-            action_probs = np.array([self.action_counts.get(i, 0) for i in range(6)]) / max(self.total_actions, 1)
+            # Get action space size dynamically
+            n_actions = self.model.action_space.n if hasattr(self.model.action_space, 'n') else 6
+            action_probs = np.array([self.action_counts.get(i, 0) for i in range(n_actions)]) / max(self.total_actions, 1)
             action_probs = action_probs + 1e-10  # Avoid log(0)
             action_entropy = -np.sum(action_probs * np.log(action_probs))
             self.tb_writer.add_scalar('actions/entropy', action_entropy, step)
