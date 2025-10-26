@@ -71,6 +71,20 @@ class EnhancedTensorBoardCallback(BaseCallback):
         self.action_counts = defaultdict(int)
         self.total_actions = 0
         
+        # Action name mapping for N++ (indices must match environment action space)
+        self.action_names = {
+            0: "NOOP",
+            1: "Left",
+            2: "Right", 
+            3: "Jump",
+            4: "Jump+Left",
+            5: "Jump+Right"
+        }
+        
+        # Action transition tracking (for behavior analysis)
+        self.last_actions = None  # Track previous actions per environment
+        self.action_transitions = defaultdict(lambda: defaultdict(int))  # [prev_action][next_action] = count
+        
         # Value function tracking
         self.value_estimates = deque(maxlen=1000)
         self.advantages = deque(maxlen=1000)
@@ -124,10 +138,21 @@ class EnhancedTensorBoardCallback(BaseCallback):
         # Track actions taken
         if 'actions' in self.locals:
             actions = self.locals['actions']
-            for action in actions:
+            
+            # Initialize last_actions on first step
+            if self.last_actions is None:
+                self.last_actions = np.zeros(len(actions), dtype=int)
+            
+            # Track action counts and transitions
+            for env_idx, action in enumerate(actions):
                 action_idx = int(action) if isinstance(action, (int, np.integer)) else int(action.item())
                 self.action_counts[action_idx] += 1
                 self.total_actions += 1
+                
+                # Track action transitions
+                prev_action = int(self.last_actions[env_idx])
+                self.action_transitions[prev_action][action_idx] += 1
+                self.last_actions[env_idx] = action_idx
         
         # Track value estimates from rollout buffer (more reliable than trying to access obs_tensor)
         # Note: This captures values after they've been computed during rollout collection
@@ -209,20 +234,59 @@ class EnhancedTensorBoardCallback(BaseCallback):
             self.tb_writer.add_scalar('episode/completion_time_mean', 
                                      np.mean(self.episode_completion_times), step)
         
-        # Action distribution
+        # Action distribution with descriptive names
         if self.total_actions > 0:
-            for action_idx, count in self.action_counts.items():
-                action_freq = count / self.total_actions
-                self.tb_writer.add_scalar(f'actions/frequency_action_{action_idx}', 
-                                         action_freq, step)
-            
-            # Action entropy (measure of policy exploration)
             # Get action space size dynamically
             n_actions = self.model.action_space.n if hasattr(self.model.action_space, 'n') else 6
+            
+            # Log individual action frequencies with descriptive names
+            for action_idx in range(n_actions):
+                count = self.action_counts.get(action_idx, 0)
+                action_freq = count / self.total_actions
+                action_name = self.action_names.get(action_idx, f"Action{action_idx}")
+                self.tb_writer.add_scalar(f'actions/frequency/{action_name}', 
+                                         action_freq, step)
+            
+            # Calculate action probabilities for entropy and analysis
             action_probs = np.array([self.action_counts.get(i, 0) for i in range(n_actions)]) / max(self.total_actions, 1)
             action_probs = action_probs + 1e-10  # Avoid log(0)
             action_entropy = -np.sum(action_probs * np.log(action_probs))
             self.tb_writer.add_scalar('actions/entropy', action_entropy, step)
+            
+            # Movement-specific metrics
+            # Horizontal movement: Left (1) + Right (2) + Jump+Left (4) + Jump+Right (5)
+            left_actions = self.action_counts.get(1, 0) + self.action_counts.get(4, 0)
+            right_actions = self.action_counts.get(2, 0) + self.action_counts.get(5, 0)
+            horizontal_movement = left_actions + right_actions
+            
+            if horizontal_movement > 0:
+                left_bias = left_actions / horizontal_movement
+                right_bias = right_actions / horizontal_movement
+                self.tb_writer.add_scalar('actions/movement/left_bias', left_bias, step)
+                self.tb_writer.add_scalar('actions/movement/right_bias', right_bias, step)
+            
+            # Calculate movement vs stationary time
+            noop_freq = action_probs[0]
+            movement_freq = 1.0 - noop_freq
+            self.tb_writer.add_scalar('actions/movement/stationary_pct', noop_freq, step)
+            self.tb_writer.add_scalar('actions/movement/active_pct', movement_freq, step)
+            
+            # Jump analysis
+            # Jump actions: Jump (3) + Jump+Left (4) + Jump+Right (5)
+            jump_only = self.action_counts.get(3, 0)
+            jump_left = self.action_counts.get(4, 0)
+            jump_right = self.action_counts.get(5, 0)
+            total_jumps = jump_only + jump_left + jump_right
+            
+            if total_jumps > 0:
+                # How often jumps are combined with directional movement
+                directional_jump_pct = (jump_left + jump_right) / total_jumps
+                self.tb_writer.add_scalar('actions/jump/directional_pct', directional_jump_pct, step)
+                self.tb_writer.add_scalar('actions/jump/vertical_only_pct', jump_only / total_jumps, step)
+            
+            # Overall jump frequency (useful for understanding agent behavior)
+            jump_freq = total_jumps / self.total_actions
+            self.tb_writer.add_scalar('actions/jump/frequency', jump_freq, step)
         
         # Value function statistics
         if self.value_estimates:
@@ -322,8 +386,33 @@ class EnhancedTensorBoardCallback(BaseCallback):
         
         # Action distribution histogram
         if self.total_actions > 0:
-            action_dist = np.array([self.action_counts.get(i, 0) for i in range(6)])
+            n_actions = self.model.action_space.n if hasattr(self.model.action_space, 'n') else 6
+            action_dist = np.array([self.action_counts.get(i, 0) for i in range(n_actions)])
             self.tb_writer.add_histogram('actions/distribution', action_dist, step)
+            
+            # Action transition matrix visualization
+            # This shows patterns like "after moving left, what action is most common?"
+            if self.action_transitions:
+                # Create transition matrix
+                transition_matrix = np.zeros((n_actions, n_actions))
+                for prev_action in range(n_actions):
+                    total_from_prev = sum(self.action_transitions[prev_action].values())
+                    if total_from_prev > 0:
+                        for next_action in range(n_actions):
+                            count = self.action_transitions[prev_action][next_action]
+                            transition_matrix[prev_action, next_action] = count / total_from_prev
+                
+                # Log most common transitions as scalars (easier to track)
+                for prev_action in range(n_actions):
+                    for next_action in range(n_actions):
+                        prob = transition_matrix[prev_action, next_action]
+                        if prob > 0.01:  # Only log significant transitions
+                            prev_name = self.action_names.get(prev_action, f"A{prev_action}")
+                            next_name = self.action_names.get(next_action, f"A{next_action}")
+                            self.tb_writer.add_scalar(
+                                f'actions/transitions/{prev_name}_to_{next_name}',
+                                prob, step
+                            )
         
         # Gradient norms (if enabled)
         if self.log_gradients and hasattr(self.model, 'policy'):
