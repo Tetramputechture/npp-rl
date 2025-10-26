@@ -294,7 +294,7 @@ class CurriculumManager:
             logger.warning(f"Unknown stage '{stage}', ignoring episode")
             return
 
-        print(f"Recording episode for stage: {stage}, success: {success}")
+        logger.debug(f"Recording episode for stage: {stage}, success: {success}")
         self.stage_performance[stage].append(1 if success else 0)
         
         # Defensive: ensure stage exists in episode counts
@@ -378,11 +378,7 @@ class CurriculumManager:
         can_early_advance = False
         if self.enable_early_advancement and episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES:
             can_early_advance = success_rate >= self.EARLY_ADVANCEMENT_THRESHOLD
-            if can_early_advance:
-                logger.info(
-                    f"[Early Advancement] Stage '{stage}': {success_rate:.1%} success "
-                    f"after only {episodes} episodes (threshold: {self.EARLY_ADVANCEMENT_THRESHOLD:.1%})"
-                )
+            # Note: Logging moved to check_advancement() to avoid duplicate logs
         
         # Trend-based advancement: if showing strong improvement, can advance slightly earlier
         trend_bonus = False
@@ -390,10 +386,7 @@ class CurriculumManager:
             # Strong positive trend + 80% of required episodes
             if success_rate >= stage_threshold - 0.05:  # Within 5% of threshold
                 trend_bonus = True
-                logger.info(
-                    f"[Trend Bonus] Stage '{stage}': Strong improvement trend ({trend:+.2f}) "
-                    f"with {success_rate:.1%} success, allowing advancement"
-                )
+                # Note: Logging moved to check_advancement() to avoid duplicate logs
 
         return {
             "success_rate": success_rate,
@@ -445,11 +438,23 @@ class CurriculumManager:
             prev_stage = self.current_stage
             prev_stage_idx = self.current_stage_idx
             
+            # Log advancement criteria that were met (before advancing)
+            if perf.get("can_early_advance", False):
+                logger.info(
+                    f"[Early Advancement] Stage '{prev_stage}': {perf['success_rate']:.1%} success "
+                    f"after only {perf['episodes']} episodes (threshold: {self.EARLY_ADVANCEMENT_THRESHOLD:.1%})"
+                )
+            if perf.get("trend_bonus", False):
+                logger.info(
+                    f"[Trend Bonus] Stage '{prev_stage}': Strong improvement trend ({perf['trend']:+.2f}) "
+                    f"with {perf['success_rate']:.1%} success, allowing advancement"
+                )
+            
             # Advance to next stage
             self.current_stage_idx += 1
             self.current_stage = self.CURRICULUM_ORDER[self.current_stage_idx]
 
-            # Determine advancement reason
+            # Determine advancement reason for summary
             advancement_reason = []
             if perf.get("can_early_advance", False):
                 advancement_reason.append("Early Advancement (High Performance)")
