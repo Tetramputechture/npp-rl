@@ -1009,6 +1009,13 @@ class ArchitectureTrainer:
             callbacks.append(enhanced_tb_callback)
             logger.info("Added enhanced TensorBoard callback for detailed metrics")
 
+            # Add PBRS logging callback to track reward components
+            from npp_rl.callbacks import PBRSLoggingCallback
+
+            pbrs_callback = PBRSLoggingCallback(verbose=1)
+            callbacks.append(pbrs_callback)
+            logger.info("Added PBRS logging callback for reward component tracking")
+
             # Add route visualization callback
             from npp_rl.callbacks import RouteVisualizationCallback
 
@@ -1024,6 +1031,33 @@ class ArchitectureTrainer:
             )
             callbacks.append(route_callback)
             logger.info(f"Added route visualization callback (saving to {routes_dir})")
+
+            # Add hierarchical PPO callbacks if using hierarchical training
+            if self.use_hierarchical_ppo:
+                from npp_rl.callbacks.hierarchical_callbacks import (
+                    HierarchicalStabilityCallback,
+                    SubtaskTransitionCallback,
+                )
+
+                # Add stability monitoring
+                stability_callback = HierarchicalStabilityCallback(
+                    instability_window=1000,
+                    stagnation_window=10000,
+                    gradient_norm_threshold=10.0,
+                    value_loss_threshold=5.0,
+                    log_freq=100,
+                    verbose=1,
+                )
+                callbacks.append(stability_callback)
+                logger.info("Added hierarchical stability callback for training monitoring")
+
+                # Add subtask transition tracking
+                subtask_callback = SubtaskTransitionCallback(
+                    log_freq=100,
+                    verbose=1,
+                )
+                callbacks.append(subtask_callback)
+                logger.info("Added subtask transition callback for HRL metrics")
 
             # Add curriculum progression callback if curriculum learning is enabled
             if self.use_curriculum and self.curriculum_manager is not None:

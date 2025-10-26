@@ -279,13 +279,16 @@ class IntrinsicRewardWrapper(gym.Wrapper):
 
     def _log_episode_stats(self, info: Dict[str, Any]):
         """Log episode statistics."""
-        # Add episode stats to info
+        # Add episode stats to info (with both old and new key names for compatibility)
         info.update(
             {
                 "episode_r_ext_sum": self.episode_stats["r_ext_sum"],
                 "episode_r_int_sum": self.episode_stats["r_int_sum"],
                 "episode_r_total_sum": self.episode_stats["r_total_sum"],
                 "episode_length": self.episode_stats["step_count"],
+                # Add keys that EnhancedTensorBoardCallback expects
+                "r_ext_episode": self.episode_stats["r_ext_sum"],
+                "r_int_episode": self.episode_stats["r_int_sum"],
             }
         )
 

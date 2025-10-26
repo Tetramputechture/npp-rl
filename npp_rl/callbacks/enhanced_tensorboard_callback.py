@@ -67,6 +67,11 @@ class EnhancedTensorBoardCallback(BaseCallback):
         self.episode_successes = deque(maxlen=100)
         self.episode_completion_times = deque(maxlen=100)
         
+        # Reward component tracking (for intrinsic/hierarchical rewards)
+        self.episode_intrinsic_rewards = deque(maxlen=100)
+        self.episode_extrinsic_rewards = deque(maxlen=100)
+        self.episode_hierarchical_rewards = deque(maxlen=100)
+        
         # Action tracking
         self.action_counts = defaultdict(int)
         self.total_actions = 0
@@ -194,6 +199,16 @@ class EnhancedTensorBoardCallback(BaseCallback):
             self.episode_rewards.append(episode_info['r'])
             self.episode_lengths.append(episode_info['l'])
         
+        # Intrinsic reward tracking (from IntrinsicRewardWrapper)
+        if 'r_int_episode' in info:
+            self.episode_intrinsic_rewards.append(info['r_int_episode'])
+        if 'r_ext_episode' in info:
+            self.episode_extrinsic_rewards.append(info['r_ext_episode'])
+        
+        # Hierarchical reward tracking (from HierarchicalRewardWrapper)
+        if 'hierarchical_reward_episode' in info:
+            self.episode_hierarchical_rewards.append(info['hierarchical_reward_episode'])
+        
         # Success/failure tracking
         if 'success' in info:
             self.episode_successes.append(float(info['success']))
@@ -233,6 +248,37 @@ class EnhancedTensorBoardCallback(BaseCallback):
         if self.episode_completion_times:
             self.tb_writer.add_scalar('episode/completion_time_mean', 
                                      np.mean(self.episode_completion_times), step)
+        
+        # Reward component statistics
+        if self.episode_intrinsic_rewards:
+            self.tb_writer.add_scalar('rewards/intrinsic_mean', 
+                                     np.mean(self.episode_intrinsic_rewards), step)
+            self.tb_writer.add_scalar('rewards/intrinsic_std', 
+                                     np.std(self.episode_intrinsic_rewards), step)
+        
+        if self.episode_extrinsic_rewards:
+            self.tb_writer.add_scalar('rewards/extrinsic_mean', 
+                                     np.mean(self.episode_extrinsic_rewards), step)
+            self.tb_writer.add_scalar('rewards/extrinsic_std', 
+                                     np.std(self.episode_extrinsic_rewards), step)
+        
+        if self.episode_hierarchical_rewards:
+            self.tb_writer.add_scalar('rewards/hierarchical_mean', 
+                                     np.mean(self.episode_hierarchical_rewards), step)
+            self.tb_writer.add_scalar('rewards/hierarchical_std', 
+                                     np.std(self.episode_hierarchical_rewards), step)
+        
+        # Reward component ratios for analysis
+        if self.episode_intrinsic_rewards and self.episode_extrinsic_rewards:
+            int_rewards = np.array(self.episode_intrinsic_rewards)
+            ext_rewards = np.array(self.episode_extrinsic_rewards)
+            # Calculate ratio safely avoiding division by zero
+            total_abs = np.abs(int_rewards) + np.abs(ext_rewards)
+            valid_indices = total_abs > 1e-6
+            if valid_indices.any():
+                ratio = np.abs(int_rewards[valid_indices]) / total_abs[valid_indices]
+                self.tb_writer.add_scalar('rewards/intrinsic_ratio', 
+                                         np.mean(ratio), step)
         
         # Action distribution with descriptive names
         if self.total_actions > 0:

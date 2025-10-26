@@ -178,6 +178,8 @@ class HierarchicalRewardWrapper(gym.Wrapper):
                 "avg_base_reward": self.episode_base_reward / max(1, self.episode_length),
                 "avg_subtask_reward": self.episode_subtask_reward / max(1, self.episode_length),
             }
+            # Add key that EnhancedTensorBoardCallback expects
+            info["hierarchical_reward_episode"] = self.episode_subtask_reward
             
             # Calculate reward statistics
             if len(self.reward_component_history["base_rewards"]) > 0:
