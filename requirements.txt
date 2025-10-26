@@ -13,6 +13,7 @@ torch_geometric>=2.3.0
 # Computer vision and image processing
 opencv-python>=4.8.0
 pillow>=10.0.0
+matplotlib>=3.5.0
 gymnasium>=1.1.1
 sb3-contrib>=2.4.0
 stable-baselines3>=2.7.0
