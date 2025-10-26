@@ -72,6 +72,18 @@ class EnhancedTensorBoardCallback(BaseCallback):
         self.episode_extrinsic_rewards = deque(maxlen=100)
         self.episode_hierarchical_rewards = deque(maxlen=100)
         
+        # PBRS reward component tracking (step-level)
+        self.pbrs_navigation_rewards = deque(maxlen=1000)
+        self.pbrs_exploration_rewards = deque(maxlen=1000)
+        self.pbrs_shaping_rewards = deque(maxlen=1000)
+        self.pbrs_total_rewards = deque(maxlen=1000)
+        
+        # PBRS potential tracking
+        self.pbrs_objective_potentials = deque(maxlen=1000)
+        self.pbrs_hazard_potentials = deque(maxlen=1000)
+        self.pbrs_impact_potentials = deque(maxlen=1000)
+        self.pbrs_exploration_potentials = deque(maxlen=1000)
+        
         # Action tracking
         self.action_counts = defaultdict(int)
         self.total_actions = 0
@@ -131,12 +143,16 @@ class EnhancedTensorBoardCallback(BaseCallback):
         if self.tb_writer is None:
             return True
             
-        # Track episode completions
+        # Track episode completions and step-level PBRS components
         if 'dones' in self.locals:
             dones = self.locals['dones']
             if 'infos' in self.locals:
                 infos = self.locals['infos']
                 for i, (done, info) in enumerate(zip(dones, infos)):
+                    # Track PBRS components at every step
+                    self._track_pbrs_components(info)
+                    
+                    # Process episode end metrics
                     if done:
                         self._process_episode_end(info)
         
@@ -186,6 +202,40 @@ class EnhancedTensorBoardCallback(BaseCallback):
             self.last_histogram_step = self.num_timesteps
             
         return True
+    
+    def _track_pbrs_components(self, info: Dict[str, Any]) -> None:
+        """Track PBRS reward components from step info.
+        
+        Args:
+            info: Step info dictionary that may contain PBRS components
+        """
+        if 'pbrs_components' not in info:
+            return
+            
+        pbrs_data = info['pbrs_components']
+        
+        # Track reward components
+        if 'navigation_reward' in pbrs_data:
+            self.pbrs_navigation_rewards.append(float(pbrs_data['navigation_reward']))
+        if 'exploration_reward' in pbrs_data:
+            self.pbrs_exploration_rewards.append(float(pbrs_data['exploration_reward']))
+        if 'pbrs_reward' in pbrs_data:
+            self.pbrs_shaping_rewards.append(float(pbrs_data['pbrs_reward']))
+        if 'total_reward' in pbrs_data:
+            self.pbrs_total_rewards.append(float(pbrs_data['total_reward']))
+        
+        # Track potential components
+        if 'pbrs_components' in pbrs_data:
+            potentials = pbrs_data['pbrs_components']
+            if isinstance(potentials, dict):
+                if 'objective' in potentials:
+                    self.pbrs_objective_potentials.append(float(potentials['objective']))
+                if 'hazard' in potentials:
+                    self.pbrs_hazard_potentials.append(float(potentials['hazard']))
+                if 'impact' in potentials:
+                    self.pbrs_impact_potentials.append(float(potentials['impact']))
+                if 'exploration' in potentials:
+                    self.pbrs_exploration_potentials.append(float(potentials['exploration']))
     
     def _process_episode_end(self, info: Dict[str, Any]) -> None:
         """Process episode completion and extract metrics.
@@ -279,6 +329,68 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 ratio = np.abs(int_rewards[valid_indices]) / total_abs[valid_indices]
                 self.tb_writer.add_scalar('rewards/intrinsic_ratio', 
                                          np.mean(ratio), step)
+        
+        # PBRS reward component statistics (step-level aggregation)
+        if self.pbrs_navigation_rewards:
+            self.tb_writer.add_scalar('pbrs_rewards/navigation_mean', 
+                                     np.mean(self.pbrs_navigation_rewards), step)
+            self.tb_writer.add_scalar('pbrs_rewards/navigation_std', 
+                                     np.std(self.pbrs_navigation_rewards), step)
+        
+        if self.pbrs_exploration_rewards:
+            self.tb_writer.add_scalar('pbrs_rewards/exploration_mean', 
+                                     np.mean(self.pbrs_exploration_rewards), step)
+            self.tb_writer.add_scalar('pbrs_rewards/exploration_std', 
+                                     np.std(self.pbrs_exploration_rewards), step)
+        
+        if self.pbrs_shaping_rewards:
+            self.tb_writer.add_scalar('pbrs_rewards/pbrs_mean', 
+                                     np.mean(self.pbrs_shaping_rewards), step)
+            self.tb_writer.add_scalar('pbrs_rewards/pbrs_std', 
+                                     np.std(self.pbrs_shaping_rewards), step)
+            # Log min/max for debugging
+            self.tb_writer.add_scalar('pbrs_rewards/pbrs_min', 
+                                     np.min(self.pbrs_shaping_rewards), step)
+            self.tb_writer.add_scalar('pbrs_rewards/pbrs_max', 
+                                     np.max(self.pbrs_shaping_rewards), step)
+        
+        if self.pbrs_total_rewards:
+            self.tb_writer.add_scalar('pbrs_rewards/total_mean', 
+                                     np.mean(self.pbrs_total_rewards), step)
+            self.tb_writer.add_scalar('pbrs_rewards/total_std', 
+                                     np.std(self.pbrs_total_rewards), step)
+        
+        # PBRS potential statistics
+        if self.pbrs_objective_potentials:
+            self.tb_writer.add_scalar('pbrs_potentials/objective_mean', 
+                                     np.mean(self.pbrs_objective_potentials), step)
+            self.tb_writer.add_scalar('pbrs_potentials/objective_std', 
+                                     np.std(self.pbrs_objective_potentials), step)
+        
+        if self.pbrs_hazard_potentials:
+            self.tb_writer.add_scalar('pbrs_potentials/hazard_mean', 
+                                     np.mean(self.pbrs_hazard_potentials), step)
+        
+        if self.pbrs_impact_potentials:
+            self.tb_writer.add_scalar('pbrs_potentials/impact_mean', 
+                                     np.mean(self.pbrs_impact_potentials), step)
+        
+        if self.pbrs_exploration_potentials:
+            self.tb_writer.add_scalar('pbrs_potentials/exploration_mean', 
+                                     np.mean(self.pbrs_exploration_potentials), step)
+        
+        # PBRS contribution analysis
+        if self.pbrs_shaping_rewards and self.pbrs_total_rewards:
+            pbrs_vals = np.array(self.pbrs_shaping_rewards)
+            total_vals = np.array(self.pbrs_total_rewards)
+            # Calculate PBRS contribution ratio
+            if len(pbrs_vals) == len(total_vals):
+                # Safe division avoiding division by zero
+                valid_indices = np.abs(total_vals) > 1e-6
+                if valid_indices.any():
+                    contribution = np.abs(pbrs_vals[valid_indices]) / np.abs(total_vals[valid_indices])
+                    self.tb_writer.add_scalar('pbrs_summary/pbrs_contribution_ratio', 
+                                             np.mean(contribution), step)
         
         # Action distribution with descriptive names
         if self.total_actions > 0:
