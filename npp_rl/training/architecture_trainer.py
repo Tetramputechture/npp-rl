@@ -644,6 +644,7 @@ class ArchitectureTrainer:
 
                 # Wrap with position tracking for route visualization
                 from npp_rl.wrappers import PositionTrackingWrapper
+
                 env = PositionTrackingWrapper(env)
                 logger.info(f"[Env {rank}] ✓ Position tracking enabled")
 
@@ -717,15 +718,19 @@ class ArchitectureTrainer:
 
         # Apply BC observation normalization if pretrained checkpoint is used
         if self.pretrained_checkpoint and self.bc_pretrain_enabled:
-            bc_norm_stats_path = self.output_dir / "pretrain" / "cache" / "normalization_stats.npz"
-            
+            bc_norm_stats_path = (
+                self.output_dir / "pretrain" / "cache" / "normalization_stats.npz"
+            )
+
             if bc_norm_stats_path.exists():
-                logger.info(f"Loading BC observation normalization from {bc_norm_stats_path}")
-                
+                logger.info(
+                    f"Loading BC observation normalization from {bc_norm_stats_path}"
+                )
+
                 try:
                     # Load BC normalization statistics
                     bc_stats = np.load(bc_norm_stats_path)
-                    
+
                     # Create custom normalization wrapper
                     self.env = VecNormalize(
                         self.env,
@@ -733,25 +738,33 @@ class ArchitectureTrainer:
                         norm_obs=True,
                         norm_reward=False,  # Don't normalize rewards
                         clip_obs=10.0,
-                        gamma=self.hyperparams.get('gamma', 0.999),
+                        gamma=self.hyperparams.get("gamma", 0.999),
                     )
-                    
+
                     # Initialize with BC statistics
                     # VecNormalize uses running mean/var, so we initialize them
                     for key in bc_stats.keys():
-                        if key.endswith('_mean'):
+                        if key.endswith("_mean"):
                             logger.debug(f"  Loaded normalization for {key}")
-                    
-                    logger.info("✓ Applied BC observation normalization to RL training environments")
+
+                    logger.info(
+                        "✓ Applied BC observation normalization to RL training environments"
+                    )
                     self.bc_normalization_applied = True
-                    
+
                 except Exception as e:
                     logger.error(f"Failed to apply BC normalization: {e}")
-                    logger.warning("Continuing without BC observation normalization - transfer learning may be degraded")
+                    logger.warning(
+                        "Continuing without BC observation normalization - transfer learning may be degraded"
+                    )
                     self.bc_normalization_applied = False
             else:
-                logger.warning(f"BC normalization stats not found at {bc_norm_stats_path}")
-                logger.warning("Continuing without BC observation normalization - transfer learning may be degraded")
+                logger.warning(
+                    f"BC normalization stats not found at {bc_norm_stats_path}"
+                )
+                logger.warning(
+                    "Continuing without BC observation normalization - transfer learning may be degraded"
+                )
                 self.bc_normalization_applied = False
         else:
             self.bc_normalization_applied = False
@@ -985,7 +998,7 @@ class ArchitectureTrainer:
 
             # Add enhanced TensorBoard metrics callback
             from npp_rl.callbacks import EnhancedTensorBoardCallback
-            
+
             enhanced_tb_callback = EnhancedTensorBoardCallback(
                 log_freq=100,  # Log scalars every 100 steps
                 histogram_freq=1000,  # Log histograms every 1000 steps
@@ -998,7 +1011,7 @@ class ArchitectureTrainer:
 
             # Add route visualization callback
             from npp_rl.callbacks import RouteVisualizationCallback
-            
+
             routes_dir = self.output_dir / "route_visualizations"
             route_callback = RouteVisualizationCallback(
                 save_dir=str(routes_dir),
