@@ -232,12 +232,27 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
+        # Try to get exit switch position from environment
+        exit_switch_pos = None
+        try:
+            # Access the base environment
+            env = self.training_env.envs[env_idx]
+            while hasattr(env, 'env'):
+                env = env.env
+            
+            # Get exit switch position from nplay_headless
+            if hasattr(env, 'nplay_headless') and hasattr(env.nplay_headless, 'exit_switch_position'):
+                exit_switch_pos = env.nplay_headless.exit_switch_position()
+        except Exception as e:
+            logger.debug(f"Could not get exit switch position: {e}")
+        
         route_data = {
             'positions': list(self.env_routes[env_idx]['positions']),
             'level_id': info.get('level_id', f'env_{env_idx}'),
             'timestep': self.num_timesteps,
             'episode_reward': info.get('episode', {}).get('r', 0),
             'episode_length': info.get('episode', {}).get('l', len(self.env_routes[env_idx]['positions'])),
+            'exit_switch_pos': exit_switch_pos,
         }
         
         self.save_queue.append(route_data)
@@ -296,30 +311,44 @@ class RouteVisualizationCallback(BaseCallback):
         # Create figure
         fig, ax = self.plt.subplots(figsize=(self.image_size[0]/100, self.image_size[1]/100), dpi=100)
         
-        # Plot route with color gradient (blue=start, red=end)
+        # Plot route with color gradient (blue=start, green=end)
         num_points = len(positions)
-        colors = self.plt.cm.coolwarm(np.linspace(0, 1, num_points))
+        colors = self.plt.cm.viridis(np.linspace(0, 1, num_points))
         
         # Plot positions as a scatter plot with gradient
         for i in range(num_points - 1):
             ax.plot(positions[i:i+2, 0], positions[i:i+2, 1], 
                    color=colors[i], linewidth=2, alpha=0.7)
         
-        # Mark start and end
+        # Mark start position
         ax.scatter(positions[0, 0], positions[0, 1], 
-                  c='blue', s=100, marker='o', label='Start', zorder=5)
+                  c='blue', s=150, marker='o', label='Start', zorder=5, 
+                  edgecolors='white', linewidths=2)
+        
+        # Mark agent's final position (where they triggered the exit)
         ax.scatter(positions[-1, 0], positions[-1, 1], 
-                  c='red', s=100, marker='*', label='Exit', zorder=5)
+                  c='green', s=150, marker='o', label='Agent End', zorder=5,
+                  edgecolors='white', linewidths=2)
+        
+        # Mark exit switch position (if available)
+        if route_data.get('exit_switch_pos') is not None:
+            exit_x, exit_y = route_data['exit_switch_pos']
+            ax.scatter(exit_x, exit_y, 
+                      c='red', s=200, marker='*', label='Exit Switch', zorder=6,
+                      edgecolors='yellow', linewidths=2)
         
         # Add labels and title
         ax.set_xlabel('X Position')
-        ax.set_ylabel('Y Position')
+        ax.set_ylabel('Y Position (0 = Top)')
         ax.set_title(f"Successful Route - Step {route_data['timestep']}\n"
                     f"Level: {route_data['level_id']} | "
                     f"Length: {route_data['episode_length']} | "
                     f"Reward: {route_data['episode_reward']:.2f}")
-        ax.legend()
+        ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
+        
+        # IMPORTANT: Invert Y-axis so Y=0 is at top (matches level coordinate system)
+        ax.invert_yaxis()
         
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect('equal')
