@@ -201,6 +201,37 @@ def parse_args():
         help="Minimum episodes per curriculum stage",
     )
 
+    # Reward shaping options
+    parser.add_argument(
+        "--enable-pbrs",
+        action="store_true",
+        help="Enable Potential-Based Reward Shaping for dense rewards",
+    )
+    parser.add_argument(
+        "--pbrs-gamma",
+        type=float,
+        default=0.99,
+        help="Discount factor for PBRS (default: 0.99)",
+    )
+    parser.add_argument(
+        "--enable-mine-avoidance-reward",
+        action="store_true",
+        default=True,
+        help="Enable mine avoidance component in PBRS (default: True)",
+    )
+
+    # Curriculum safety options
+    parser.add_argument(
+        "--disable-trend-advancement",
+        action="store_true",
+        help="Disable trend-based curriculum advancement for more conservative progression",
+    )
+    parser.add_argument(
+        "--disable-early-advancement",
+        action="store_true",
+        help="Disable early advancement even with high performance",
+    )
+
     # S3 options
     parser.add_argument(
         "--s3-bucket", type=str, default=None, help="S3 bucket for artifact upload"
@@ -371,6 +402,8 @@ def train_architecture(
                 "starting_stage": args.curriculum_start_stage,
                 "advancement_threshold": args.curriculum_threshold,
                 "min_episodes_per_stage": args.curriculum_min_episodes,
+                "enable_trend_analysis": not args.disable_trend_advancement,
+                "enable_early_advancement": not args.disable_early_advancement,
             }
 
         # Calculate environments per GPU
@@ -409,6 +442,9 @@ def train_architecture(
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
             frame_stack_config=frame_stack_config,
+            enable_pbrs=args.enable_pbrs,
+            pbrs_gamma=args.pbrs_gamma,
+            enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
         )
 
         # Build PPO hyperparameters from hardware profile

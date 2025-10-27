@@ -70,4 +70,4 @@ experiments/
 
 logs/
 
-*.txt
+*.txtevents.out.tfevents.*
