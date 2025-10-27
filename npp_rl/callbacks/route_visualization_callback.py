@@ -146,14 +146,16 @@ class RouteVisualizationCallback(BaseCallback):
                 break
 
         # Add warning about position tracking requirement
-        print(f"Route visualization callback initialized (saving to {self.save_dir})")
-        print(
+        logger.info(
+            f"Route visualization callback initialized (saving to {self.save_dir})"
+        )
+        logger.info(
             f"Will visualize up to {self.max_routes_per_checkpoint} routes every {self.visualization_freq} steps"
         )
-        print(
+        logger.info(
             "⚠️  Route visualization requires PositionTrackingWrapper to be applied to environments"
         )
-        print(
+        logger.info(
             "   If routes are not being captured, ensure the wrapper is in the environment pipeline"
         )
 
@@ -211,7 +213,7 @@ class RouteVisualizationCallback(BaseCallback):
                     pos_x, pos_y = float(pos[0]), float(pos[1])
                     self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
         except Exception as e:
-            print(f"Could not track position for env {env_idx}: {e}")
+            logger.info(f"Could not track position for env {env_idx}: {e}")
 
     def _handle_episode_end(self, env_idx: int, info: Dict[str, Any]) -> None:
         """Handle episode completion and potentially save route.
@@ -220,14 +222,6 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
-        # DEBUG: Log all keys in info dict to understand what data is available
-        print(self.verbose)
-        if self.verbose >= 2:
-            print(f"Episode end info keys for env {env_idx}: {list(info.keys())}")
-            if "episode" in info:
-                print(f"  episode dict keys: {list(info['episode'].keys())}")
-                print(f"  episode dict: {info['episode']}")
-
         # Check if episode was successful
         is_success = info["is_success"]
 
@@ -289,7 +283,7 @@ class RouteVisualizationCallback(BaseCallback):
         self.save_queue.append(route_data)
 
         if self.verbose >= 1:
-            print(
+            logger.info(
                 f"Queued route visualization for env {env_idx} - "
                 f"Stage: {curriculum_stage}, Level: {level_id}, "
             )
@@ -413,8 +407,8 @@ class RouteVisualizationCallback(BaseCallback):
                 exit_x,
                 exit_y,
                 c="red",
-                s=200,
-                marker="*",
+                s=100,
+                marker="D",
                 label="Exit Switch",
                 zorder=6,
                 edgecolors="orange",
@@ -443,7 +437,7 @@ class RouteVisualizationCallback(BaseCallback):
                 door_y,
                 c="purple",
                 s=200,
-                marker="D",
+                marker="*",
                 label="Exit Door",
                 zorder=6,
                 edgecolors="white",
@@ -548,13 +542,13 @@ class RouteVisualizationCallback(BaseCallback):
                         route_data["timestep"],
                     )
             except Exception as e:
-                print(f"Could not log route to TensorBoard: {e}")
+                logger.info(f"Could not log route to TensorBoard: {e}")
 
         # Cleanup old files if we exceed limit
         self._cleanup_old_files()
 
         if self.verbose >= 1:
-            print(
+            logger.info(
                 f"Saved route visualization: {filename} "
                 f"(total saved: {self.total_routes_saved})"
             )
@@ -567,7 +561,7 @@ class RouteVisualizationCallback(BaseCallback):
                 if old_file.exists():
                     old_file.unlink()
                     if self.verbose >= 2:
-                        print(f"Removed old route visualization: {old_file.name}")
+                        logger.info(f"Removed old route visualization: {old_file.name}")
             except Exception as e:
                 logger.warning(f"Could not remove old file {old_file}: {e}")
 
@@ -580,6 +574,6 @@ class RouteVisualizationCallback(BaseCallback):
         if self.save_thread is not None and self.save_thread.is_alive():
             self.save_thread.join(timeout=10)
 
-        print(
+        logger.info(
             f"Route visualization completed. Total routes saved: {self.total_routes_saved}"
         )
