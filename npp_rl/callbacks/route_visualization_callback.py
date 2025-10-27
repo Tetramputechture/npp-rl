@@ -258,13 +258,21 @@ class RouteVisualizationCallback(BaseCallback):
         except Exception as e:
             logger.debug(f"Could not get exit switch/door positions: {e}")
         
+        # Try to get episode reward from various possible locations
+        episode_reward = 0.0
+        if 'episode' in info:
+            # Standard Monitor wrapper format
+            episode_reward = info['episode'].get('r', info['episode'].get('return', 0.0))
+        elif 'episode_return' in info:
+            episode_reward = info['episode_return']
+        elif 'return' in info:
+            episode_reward = info['return']
+        
         route_data = {
             'positions': list(self.env_routes[env_idx]['positions']),
             'level_id': info.get('level_id', f'env_{env_idx}'),
             'timestep': self.num_timesteps,
-            # Episode reward: cumulative reward for the entire episode
-            # This is set by SB3's Monitor/VecNormalize wrappers in info['episode']['r']
-            'episode_reward': info.get('episode', {}).get('r', 0),
+            'episode_reward': float(episode_reward),
             'episode_length': info.get('episode', {}).get('l', len(self.env_routes[env_idx]['positions'])),
             'exit_switch_pos': exit_switch_pos,
             'exit_door_pos': exit_door_pos,
@@ -340,15 +348,8 @@ class RouteVisualizationCallback(BaseCallback):
                   c='blue', s=150, marker='o', label='Start', zorder=5, 
                   edgecolors='white', linewidths=2)
         
-        # Mark agent's final position (where they triggered the exit)
-        # For successful episodes, use the exit door position as the agent end
-        # since that's where the ninja must be to complete the level
-        agent_end_pos = positions[-1]
-        if route_data.get('exit_door_pos') is not None:
-            # Use door position for successful completions
-            agent_end_pos = route_data['exit_door_pos']
-        
-        ax.scatter(agent_end_pos[0], agent_end_pos[1], 
+        # Mark agent's final position (where they actually ended)
+        ax.scatter(positions[-1, 0], positions[-1, 1], 
                   c='green', s=150, marker='o', label='Agent End', zorder=5,
                   edgecolors='white', linewidths=2)
         
