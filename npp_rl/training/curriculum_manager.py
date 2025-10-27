@@ -151,7 +151,7 @@ class CurriculumManager:
         logger.info("Curriculum Manager Initialized (Granular Progression)")
         logger.info("="*60)
         logger.info(f"Starting stage: {self.current_stage}")
-        logger.info(f"Adaptive features:")
+        logger.info("Adaptive features:")
         logger.info(f"  - Stage-specific thresholds: {not bool(advancement_threshold)}")
         logger.info(f"  - Stage-specific min episodes: {not bool(min_episodes_per_stage)}")
         logger.info(f"  - Adaptive mixing: {enable_adaptive_mixing}")
@@ -472,7 +472,7 @@ class CurriculumManager:
             logger.info(f"New stage: {self.current_stage}")
             logger.info(f"Reason: {reason_str}")
             logger.info("")
-            logger.info(f"Performance Summary:")
+            logger.info("Performance Summary:")
             logger.info(f"  Success rate: {perf['success_rate']:.1%}")
             logger.info(f"  Episodes completed: {perf['episodes']}")
             logger.info(f"  Threshold: {perf['advancement_threshold']:.1%}")
@@ -497,7 +497,7 @@ class CurriculumManager:
             "## Curriculum Learning Progress (Granular Progression)\n",
             f"**Current Stage**: {self.current_stage} "
             f"({self.current_stage_idx + 1}/{len(self.CURRICULUM_ORDER)})\n",
-            f"**Adaptive Features**: ",
+            "**Adaptive Features**: ",
         ]
         
         features = []

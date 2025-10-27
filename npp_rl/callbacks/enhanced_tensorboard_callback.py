@@ -11,10 +11,9 @@ This callback provides detailed logging of training metrics, including:
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import numpy as np
-import torch
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import TensorBoardOutputFormat
 
