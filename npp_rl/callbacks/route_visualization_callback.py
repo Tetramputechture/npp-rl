@@ -209,6 +209,13 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
+        # DEBUG: Log all keys in info dict to understand what data is available
+        if self.verbose >= 2:
+            logger.debug(f"Episode end info keys for env {env_idx}: {list(info.keys())}")
+            if 'episode' in info:
+                logger.debug(f"  episode dict keys: {list(info['episode'].keys())}")
+                logger.debug(f"  episode dict: {info['episode']}")
+        
         # Check if episode was successful
         is_success = False
         if 'success' in info:
@@ -221,10 +228,19 @@ class RouteVisualizationCallback(BaseCallback):
         
         # Get route from PositionTrackingWrapper if available (more reliable than step-by-step tracking)
         route_positions = None
+        route_source = "none"
+        
         if 'episode_route' in info:
             route_positions = info['episode_route']
+            route_source = f"episode_route ({len(route_positions)} positions)"
         elif self.env_routes[env_idx]['positions']:
             route_positions = self.env_routes[env_idx]['positions']
+            route_source = f"step-by-step tracking ({len(route_positions)} positions)"
+        
+        if self.verbose >= 1:
+            logger.info(f"Episode end env {env_idx}: success={is_success}, "
+                       f"route_source={route_source}, "
+                       f"step_tracked_positions={len(self.env_routes[env_idx]['positions'])}")
         
         # Only save routes for successful completions with valid position data
         if is_success and route_positions and len(route_positions) > 0:
@@ -268,7 +284,14 @@ class RouteVisualizationCallback(BaseCallback):
         
         # Try to get episode reward from various possible locations
         episode_reward = 0.0
-        reward_source = "unknown"
+        reward_source = "not_found"
+        
+        # DEBUG: Log what's in the info dict for reward debugging
+        if self.verbose >= 2:
+            logger.debug(f"Reward debugging for env {env_idx}:")
+            if 'episode' in info:
+                logger.debug(f"  info['episode'] = {info['episode']}")
+            logger.debug(f"  Other info keys: {[k for k in info.keys() if 'reward' in k.lower() or 'return' in k.lower()]}")
         
         if 'episode' in info:
             episode_dict = info['episode']
@@ -280,8 +303,8 @@ class RouteVisualizationCallback(BaseCallback):
                 episode_reward = float(episode_dict['return'])
                 reward_source = "info['episode']['return']"
         
-        # Try alternative locations if not found in episode dict
-        if episode_reward == 0.0:
+        # Try alternative locations if not found in episode dict  
+        if episode_reward == 0.0 and reward_source == "not_found":
             if 'episode_return' in info:
                 episode_reward = float(info['episode_return'])
                 reward_source = "info['episode_return']"
