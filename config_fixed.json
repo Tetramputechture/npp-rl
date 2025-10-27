@@ -1,0 +1,199 @@
+{
+  "_comment": "FIXED Configuration - Addresses Critical Training Issues",
+  "_changes": [
+    "Increased num_envs from 14 to 32 (better sample diversity)",
+    "Increased batch_size from 256 to 512 (more stable updates)",
+    "Increased n_steps from 1024 to 2048 (longer rollouts)",
+    "Added value clipping (prevents value collapse)",
+    "Added VecNormalize settings (return normalization)",
+    "Added entropy coefficient annealing",
+    "Added learning rate scheduling",
+    "Adjusted curriculum thresholds (more realistic)",
+    "Enabled PBRS with recommended weights",
+    "Increased eval frequency for better monitoring"
+  ],
+  "_see_also": "COMPREHENSIVE_TRAINING_ANALYSIS.md for full details",
+  
+  "experiment_name": "mlp-baseline-fixed",
+  "architectures": [
+    "mlp_baseline"
+  ],
+  "train_dataset": "/home/ubuntu/datasets/train",
+  "test_dataset": "/home/ubuntu/datasets/test",
+  "output_dir": "/home/ubuntu/experiments",
+  
+  "_pretraining_section": "Behavioral Cloning Configuration",
+  "test_pretraining": false,
+  "no_pretraining": false,
+  "replay_data_dir": "../nclone/bc_replays",
+  "bc_epochs": 50,
+  "bc_batch_size": 128,
+  
+  "_training_section": "RL Training Configuration",
+  "total_timesteps": 2000000,
+  "num_envs": 32,
+  "eval_freq": 50000,
+  "save_freq": 100000,
+  "num_eval_episodes": 20,
+  "skip_final_eval": false,
+  
+  "_hardware_section": "Hardware and Performance",
+  "hardware_profile": "auto",
+  "num_gpus": 1,
+  "distributed_backend": "nccl",
+  "mixed_precision": true,
+  
+  "_ppo_hyperparams_section": "PPO Hyperparameters (FIXED)",
+  "ppo_hyperparameters": {
+    "learning_rate": {
+      "type": "linear_schedule",
+      "initial": 0.0003,
+      "final": 0.00003,
+      "comment": "Decay learning rate 10x over training"
+    },
+    "batch_size": 512,
+    "n_steps": 2048,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "ent_coef": {
+      "type": "linear_schedule",
+      "initial": 0.02,
+      "final": 0.005,
+      "comment": "Start with high exploration, decay to exploitation"
+    },
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "clip_range": 0.2,
+    "clip_range_vf": 10.0,
+    "comment": "Added value clipping to prevent collapse"
+  },
+  
+  "_value_function_fixes_section": "Critical Value Function Fixes",
+  "use_vec_normalize": true,
+  "vec_normalize_settings": {
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99,
+    "epsilon": 1e-8,
+    "comment": "Normalize returns to prevent value collapse"
+  },
+  
+  "_policy_architecture_section": "Policy and Value Network Architecture",
+  "policy_kwargs": {
+    "net_arch": {
+      "pi": [512, 512, 512],
+      "vf": [1024, 1024, 512, 256]
+    },
+    "comment": "Larger value network for better value estimation"
+  },
+  
+  "_curriculum_section": "Curriculum Learning (FIXED)",
+  "use_curriculum": true,
+  "curriculum_start_stage": "simplest",
+  "curriculum_config": {
+    "enable_regression": true,
+    "min_episodes_for_advancement": 100,
+    "min_episodes_for_regression": 200,
+    "mixed_training_probability": 0.2,
+    "advancement_thresholds": {
+      "simplest": 0.80,
+      "simpler": 0.70,
+      "simple": 0.60,
+      "medium": 0.55,
+      "complex": 0.50,
+      "mine_heavy": 0.45,
+      "exploration": 0.40
+    },
+    "regression_thresholds": {
+      "simpler": 0.30,
+      "simple": 0.30,
+      "medium": 0.25,
+      "complex": 0.20,
+      "mine_heavy": 0.15,
+      "exploration": 0.15
+    },
+    "comment": "Adaptive thresholds and regression capability"
+  },
+  
+  "_reward_section": "Reward Configuration (CRITICAL FIXES APPLIED)",
+  "reward_config": {
+    "level_completion_reward": 10.0,
+    "death_penalty": -0.5,
+    "switch_activation_reward": 1.0,
+    "time_penalty_per_step": -0.0001,
+    "comment": "Increased rewards 10x, reduced time penalty 100x"
+  },
+  
+  "_pbrs_section": "Potential-Based Reward Shaping (ENABLED)",
+  "enable_pbrs": true,
+  "pbrs_weights": {
+    "objective_weight": 1.0,
+    "hazard_weight": 0.1,
+    "impact_weight": 0.0,
+    "exploration_weight": 0.2,
+    "comment": "Enable objective and exploration shaping"
+  },
+  "pbrs_scales": {
+    "switch_distance_scale": 0.5,
+    "exit_distance_scale": 0.5,
+    "navigation_improvement_scale": 0.001,
+    "comment": "Increased shaping 10x for better learning signal"
+  },
+  
+  "_exploration_section": "Exploration Rewards (ENABLED)",
+  "enable_exploration_rewards": true,
+  "exploration_scales": {
+    "cell_reward": 0.01,
+    "area_4x4_reward": 0.01,
+    "area_8x8_reward": 0.01,
+    "area_16x16_reward": 0.01,
+    "comment": "Increased exploration rewards 10x"
+  },
+  
+  "_hierarchical_section": "Hierarchical RL (Disabled for baseline)",
+  "use_hierarchical_ppo": false,
+  "high_level_update_freq": 50,
+  
+  "_frame_stacking_section": "Frame Stacking (Disabled for MLP baseline)",
+  "enable_visual_frame_stacking": false,
+  "visual_stack_size": 4,
+  "enable_state_stacking": false,
+  "state_stack_size": 4,
+  "frame_stack_padding": "zero",
+  
+  "_video_section": "Video Recording",
+  "record_eval_videos": true,
+  "max_videos_per_category": 5,
+  "video_fps": 30,
+  
+  "_resume_section": "Resume Training",
+  "resume_from": null,
+  
+  "_visualization_section": "Live Training Visualization",
+  "visualize_training": false,
+  "vis_render_freq": 100,
+  "vis_env_idx": 0,
+  "vis_fps": 60,
+  
+  "_debug_section": "Debug Mode",
+  "debug": true,
+  
+  "_s3_section": "S3 Backup (Optional)",
+  "s3_bucket": "npp-rl-training-artifacts",
+  "s3_prefix": "experiments/",
+  "s3_sync_freq": 100000,
+  
+  "_metadata_section": "Metadata",
+  "config_version": "2.0-fixed",
+  "created_by": "comprehensive_analysis",
+  "based_on": "mlp-baseline-1026",
+  "fixes_applied": [
+    "reward_scaling",
+    "value_function_stability",
+    "curriculum_regression",
+    "dense_reward_shaping",
+    "hyperparameter_tuning"
+  ]
+}
