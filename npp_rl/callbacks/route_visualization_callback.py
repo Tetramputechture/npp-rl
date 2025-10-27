@@ -341,7 +341,14 @@ class RouteVisualizationCallback(BaseCallback):
                   edgecolors='white', linewidths=2)
         
         # Mark agent's final position (where they triggered the exit)
-        ax.scatter(positions[-1, 0], positions[-1, 1], 
+        # For successful episodes, use the exit door position as the agent end
+        # since that's where the ninja must be to complete the level
+        agent_end_pos = positions[-1]
+        if route_data.get('exit_door_pos') is not None:
+            # Use door position for successful completions
+            agent_end_pos = route_data['exit_door_pos']
+        
+        ax.scatter(agent_end_pos[0], agent_end_pos[1], 
                   c='green', s=150, marker='o', label='Agent End', zorder=5,
                   edgecolors='white', linewidths=2)
         
