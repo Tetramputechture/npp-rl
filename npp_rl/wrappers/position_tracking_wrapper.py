@@ -103,7 +103,9 @@ class PositionTrackingWrapper(gym.Wrapper):
                 env = env.env
 
             pos = env.nplay_headless.ninja_position()
-            return (float(pos[0]) - 24, float(pos[1]))
+            # Return position without any offset to match coordinate system
+            # used by exit_switch_position() and exit_door_position()
+            return (float(pos[0]), float(pos[1]))
 
         except Exception as e:
             if not self._warned_about_position:
