@@ -286,23 +286,28 @@ class RouteVisualizationCallback(BaseCallback):
             info: Episode info dictionary
             route_positions: List of (x, y) position tuples for the route
         """
-        # Try to get exit switch and door positions from environment
-        exit_switch_pos = None
-        exit_door_pos = None
-        try:
-            # Access the base environment
-            env = self.training_env.envs[env_idx]
-            while hasattr(env, "env"):
-                env = env.env
+        # Try to get exit switch and door positions from info dict first (preferred)
+        # The PositionTrackingWrapper captures these at episode start and includes them
+        # at episode end, ensuring they're from the CORRECT level (not after auto-reset)
+        exit_switch_pos = info.get('exit_switch_pos', None)
+        exit_door_pos = info.get('exit_door_pos', None)
+        
+        # Fallback: try to get from environment (may be wrong level after auto-reset)
+        if exit_switch_pos is None or exit_door_pos is None:
+            try:
+                # Access the base environment
+                env = self.training_env.envs[env_idx]
+                while hasattr(env, "env"):
+                    env = env.env
 
-            # Get exit switch and door positions from nplay_headless
-            if hasattr(env, "nplay_headless"):
-                if hasattr(env.nplay_headless, "exit_switch_position"):
-                    exit_switch_pos = env.nplay_headless.exit_switch_position()
-                if hasattr(env.nplay_headless, "exit_door_position"):
-                    exit_door_pos = env.nplay_headless.exit_door_position()
-        except Exception as e:
-            self.logger.debug(f"Could not get exit switch/door positions: {e}")
+                # Get exit switch and door positions from nplay_headless
+                if hasattr(env, "nplay_headless"):
+                    if exit_switch_pos is None and hasattr(env.nplay_headless, "exit_switch_position"):
+                        exit_switch_pos = env.nplay_headless.exit_switch_position()
+                    if exit_door_pos is None and hasattr(env.nplay_headless, "exit_door_position"):
+                        exit_door_pos = env.nplay_headless.exit_door_position()
+            except Exception as e:
+                logger.debug(f"Could not get exit switch/door positions from env: {e}")
 
         # Try to get episode reward from various possible locations
         episode_reward = 0.0

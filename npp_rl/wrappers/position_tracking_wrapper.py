@@ -31,6 +31,11 @@ class PositionTrackingWrapper(gym.Wrapper):
         self.current_route = []
         self._warned_about_position = False  # Only warn once about position unavailability
         
+        # Store exit switch/door positions for the current level
+        # These are captured at episode start and included in episode_end info
+        self.current_exit_switch_pos = None
+        self.current_exit_door_pos = None
+        
     def step(self, action):
         """Execute action and track position.
         
@@ -54,6 +59,12 @@ class PositionTrackingWrapper(gym.Wrapper):
         if done and self.current_route:
             info['episode_route'] = list(self.current_route)
             info['route_length'] = len(self.current_route)
+            
+            # Include exit switch/door positions from THIS level (before auto-reset)
+            if self.current_exit_switch_pos is not None:
+                info['exit_switch_pos'] = self.current_exit_switch_pos
+            if self.current_exit_door_pos is not None:
+                info['exit_door_pos'] = self.current_exit_door_pos
         
         return obs, reward, terminated, truncated, info
     
@@ -76,6 +87,11 @@ class PositionTrackingWrapper(gym.Wrapper):
         if position is not None:
             self.current_route.append(position)
             info['player_position'] = position
+        
+        # Capture exit switch and door positions for this NEW level
+        # Store them so we can include them at episode end (before auto-reset changes them)
+        self.current_exit_switch_pos = self._get_exit_switch_position()
+        self.current_exit_door_pos = self._get_exit_door_position()
         
         return obs, info
     
@@ -108,5 +124,45 @@ class PositionTrackingWrapper(gym.Wrapper):
                 logger.warning("Route visualization may not work correctly")
                 self._warned_about_position = True
             logger.debug(f"Could not get position: {e}")
+        
+        return None
+    
+    def _get_exit_switch_position(self) -> Optional[Tuple[float, float]]:
+        """Get exit switch position from environment.
+        
+        Returns:
+            Tuple of (x, y) position, or None if unavailable
+        """
+        try:
+            env = self.env
+            while hasattr(env, 'env') and not hasattr(env, 'nplay_headless'):
+                env = env.env
+            
+            if hasattr(env, 'nplay_headless') and hasattr(env.nplay_headless, 'exit_switch_position'):
+                pos = env.nplay_headless.exit_switch_position()
+                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                    return (float(pos[0]), float(pos[1]))
+        except Exception as e:
+            logger.debug(f"Could not get exit switch position: {e}")
+        
+        return None
+    
+    def _get_exit_door_position(self) -> Optional[Tuple[float, float]]:
+        """Get exit door position from environment.
+        
+        Returns:
+            Tuple of (x, y) position, or None if unavailable
+        """
+        try:
+            env = self.env
+            while hasattr(env, 'env') and not hasattr(env, 'nplay_headless'):
+                env = env.env
+            
+            if hasattr(env, 'nplay_headless') and hasattr(env.nplay_headless, 'exit_door_position'):
+                pos = env.nplay_headless.exit_door_position()
+                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                    return (float(pos[0]), float(pos[1]))
+        except Exception as e:
+            logger.debug(f"Could not get exit door position: {e}")
         
         return None
