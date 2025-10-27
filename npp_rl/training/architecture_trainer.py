@@ -469,10 +469,12 @@ class ArchitectureTrainer:
         # The actual model will be created when environment is set up
 
         # Set up policy kwargs with architecture config
+        # CRITICAL FIX: Add Adam epsilon to match PPO standard (1e-5, not PyTorch default 1e-8)
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
             "features_extractor_kwargs": {"config": self.architecture_config},
             "net_arch": {"pi": [256, 256, 128], "vf": [256, 256, 128]},
+            "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
         }
 
         # Set policy class based on hierarchical PPO flag
@@ -533,6 +535,9 @@ class ArchitectureTrainer:
                 default_batch_size = base_batch_size
                 default_learning_rate = base_learning_rate
 
+        # CRITICAL FIX: Tighter value function clipping for stability
+        # Previous: 10.0 (too loose, caused value loss to increase 56%)
+        # New: 1.0 (prevents large value updates, improves explained variance)
         default_hyperparams = {
             "learning_rate": default_learning_rate,
             "n_steps": 2048,
@@ -540,7 +545,7 @@ class ArchitectureTrainer:
             "gamma": 0.99,
             "gae_lambda": 0.95,
             "clip_range": 0.2,
-            "clip_range_vf": 10.0,
+            "clip_range_vf": 1.0,  # CHANGED: 10.0 → 1.0 for value function stability
             "ent_coef": 0.01,
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,

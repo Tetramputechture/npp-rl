@@ -232,6 +232,19 @@ def parse_args():
         help="Disable early advancement even with high performance",
     )
 
+    # Learning rate options
+    parser.add_argument(
+        "--enable-lr-annealing",
+        action="store_true",
+        help="Enable learning rate annealing (linear decay to 0) for better convergence",
+    )
+    parser.add_argument(
+        "--initial-lr",
+        type=float,
+        default=None,
+        help="Initial learning rate (if not using hardware profile). Default: 3e-4",
+    )
+
     # S3 options
     parser.add_argument(
         "--s3-bucket", type=str, default=None, help="S3 bucket for artifact upload"
@@ -455,10 +468,28 @@ def train_architecture(
             )
             ppo_kwargs["batch_size"] = hardware_profile.batch_size
             ppo_kwargs["n_steps"] = hardware_profile.n_steps
-            ppo_kwargs["learning_rate"] = hardware_profile.learning_rate
+            
+            # Learning rate: Apply annealing if requested
+            base_lr = hardware_profile.learning_rate
+            if args.enable_lr_annealing:
+                # Linear annealing: lr(t) = initial_lr * (1 - t/T) where t=progress, T=1
+                ppo_kwargs["learning_rate"] = lambda f: f * base_lr
+                logger.info(f"  Learning rate: {base_lr:.2e} (with linear annealing)")
+            else:
+                ppo_kwargs["learning_rate"] = base_lr
+                logger.info(f"  Learning rate: {base_lr:.2e} (constant)")
+                
             logger.info(f"  Batch size: {ppo_kwargs['batch_size']}")
             logger.info(f"  N steps: {ppo_kwargs['n_steps']}")
-            logger.info(f"  Learning rate: {ppo_kwargs['learning_rate']:.2e}")
+        elif args.initial_lr is not None:
+            # Manual learning rate provided
+            base_lr = args.initial_lr
+            if args.enable_lr_annealing:
+                ppo_kwargs["learning_rate"] = lambda f: f * base_lr
+                logger.info(f"Learning rate: {base_lr:.2e} (with linear annealing)")
+            else:
+                ppo_kwargs["learning_rate"] = base_lr
+                logger.info(f"Learning rate: {base_lr:.2e} (constant)")
 
         # Setup model
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs)
