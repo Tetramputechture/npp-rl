@@ -461,6 +461,7 @@ make format
 ## Documentation
 
 - **Quick Start**: `docs/QUICK_START_TRAINING.md`
+- **S3 Artifact Uploads**: `docs/S3_ARTIFACT_UPLOADS.md` - Automatic cloud backup
 - **Curriculum Learning**: `docs/CURRICULUM_LEARNING.md`
 - **Architecture Comparison**: `docs/ARCHITECTURE_COMPARISON_GUIDE.md`
 - **Complete System**: `docs/TRAINING_SYSTEM.md`
