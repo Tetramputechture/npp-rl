@@ -539,6 +539,25 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect("equal")
+        
+        # Ensure minimum axis ranges to prevent overly thin visualizations
+        # on vertical/horizontal corridor maps
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        x_range = xlim[1] - xlim[0]
+        y_range = ylim[1] - ylim[0]
+        
+        min_range = 100  # Minimum range in pixels
+        
+        # Expand X axis if too narrow (vertical corridors)
+        if x_range < min_range:
+            x_center = (xlim[0] + xlim[1]) / 2
+            ax.set_xlim(x_center - min_range/2, x_center + min_range/2)
+        
+        # Expand Y axis if too narrow (horizontal corridors)
+        if y_range < min_range:
+            y_center = (ylim[0] + ylim[1]) / 2
+            ax.set_ylim(y_center - min_range/2, y_center + min_range/2)
 
         # Save figure with curriculum stage in filename
         stage = route_data.get("curriculum_stage", "unknown")
