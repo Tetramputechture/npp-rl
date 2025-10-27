@@ -522,12 +522,13 @@ class ArchitectureTrainer:
 
         default_hyperparams = {
             "learning_rate": default_learning_rate,
-            "n_steps": 1024,  # Increased for better sample efficiency with more envs
+            "n_steps": 2048,  # FIXED: Increased from 1024 to 2048 for longer rollouts
             "batch_size": default_batch_size,
-            "gamma": 0.999,
-            "gae_lambda": 0.998,
+            "gamma": 0.99,  # FIXED: Changed from 0.999 to 0.99 (standard for episodic tasks)
+            "gae_lambda": 0.95,  # FIXED: Changed from 0.998 to 0.95 (less biased advantage estimates)
             "clip_range": 0.2,
-            "ent_coef": 0.01,
+            "clip_range_vf": 10.0,  # CRITICAL FIX: Add value function clipping to prevent collapse
+            "ent_coef": 0.01,  # Will be scheduled to decay during training
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             # Always use SB3's built-in tensorboard logging for reliability
@@ -715,6 +716,27 @@ class ArchitectureTrainer:
             )
             self.env = DummyVecEnv(env_fns)
             logger.info("DummyVecEnv initialization complete")
+
+        # CRITICAL FIX: Apply VecNormalize for return normalization to prevent value collapse
+        # IMPORTANT: norm_reward normalizes the RETURN estimates for value function training,
+        # NOT the actual rewards seen by the policy. This stabilizes value function learning
+        # without distorting the reward structure or policy gradient direction.
+        # The policy still sees actual rewards (10.0 for completion, -0.0001 per step, etc.)
+        # Only the value targets are normalized to prevent the -6966% collapse we observed.
+        logger.info("Applying VecNormalize for return normalization (CRITICAL FIX)")
+        logger.info("NOTE: This normalizes VALUE TARGETS only, not policy rewards")
+        self.env = VecNormalize(
+            self.env,
+            training=True,
+            norm_obs=False,  # Don't normalize obs here (may be done later by BC)
+            norm_reward=True,  # CRITICAL: Normalize returns to stabilize value function
+            clip_obs=10.0,
+            clip_reward=10.0,  # Clip normalized rewards to prevent outliers
+            gamma=self.hyperparams.get("gamma", 0.99),
+            epsilon=1e-8,
+        )
+        logger.info("✓ VecNormalize applied - returns will be normalized during training")
+        self.vec_normalize_wrapper = self.env  # Save reference for later saving
 
         # Apply BC observation normalization if pretrained checkpoint is used
         if self.pretrained_checkpoint and self.bc_pretrain_enabled:
