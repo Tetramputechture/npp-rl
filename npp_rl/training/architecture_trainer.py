@@ -1023,7 +1023,7 @@ class ArchitectureTrainer:
             route_callback = RouteVisualizationCallback(
                 save_dir=str(routes_dir),
                 max_routes_per_checkpoint=10,  # Save up to 10 routes per checkpoint
-                visualization_freq=50000,  # Save visualizations every 50K steps
+                visualization_freq=100,  # Save visualizations every 50K steps
                 max_stored_routes=100,  # Keep up to 100 route images
                 async_save=True,  # Save asynchronously to avoid blocking
                 image_size=(800, 600),
@@ -1049,7 +1049,9 @@ class ArchitectureTrainer:
                     verbose=1,
                 )
                 callbacks.append(stability_callback)
-                logger.info("Added hierarchical stability callback for training monitoring")
+                logger.info(
+                    "Added hierarchical stability callback for training monitoring"
+                )
 
                 # Add subtask transition tracking
                 subtask_callback = SubtaskTransitionCallback(
