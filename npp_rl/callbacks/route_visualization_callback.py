@@ -242,6 +242,9 @@ class RouteVisualizationCallback(BaseCallback):
                 f"Episode end env {env_idx}: success={is_success}, "
                 f"step_tracked_positions={len(route_positions)}"
             )
+            if len(route_positions) > 0:
+                print(f"  First 3 positions: {route_positions[:3]}")
+                print(f"  Last 3 positions: {route_positions[-3:]}")
 
         # Only save routes for successful completions with valid position data
         if is_success and route_positions and len(route_positions) > 0:
@@ -414,9 +417,10 @@ class RouteVisualizationCallback(BaseCallback):
         )
 
         # Mark agent's final position (where they actually ended)
+        agent_end_x, agent_end_y = positions[-1, 0], positions[-1, 1]
         ax.scatter(
-            positions[-1, 0],
-            positions[-1, 1],
+            agent_end_x,
+            agent_end_y,
             c="green",
             s=150,
             marker="o",
@@ -425,6 +429,20 @@ class RouteVisualizationCallback(BaseCallback):
             edgecolors="white",
             linewidths=2,
         )
+        
+        # Draw agent radius circle at end position to show overlap zone
+        agent_radius = 10  # N++ agent radius
+        agent_circle = self.plt.Circle(
+            (agent_end_x, agent_end_y),
+            agent_radius,
+            color="green",
+            fill=False,
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.5,
+            zorder=4,
+        )
+        ax.add_patch(agent_circle)
 
         print(f"Positions length: {len(positions)}")
         print(f"Start position: {positions[0]}")
@@ -449,6 +467,20 @@ class RouteVisualizationCallback(BaseCallback):
                 edgecolors="yellow",
                 linewidths=2,
             )
+            
+            # Draw switch radius circle to show trigger zone
+            switch_radius = 6  # N++ exit switch radius
+            switch_circle = self.plt.Circle(
+                (exit_x, exit_y),
+                switch_radius,
+                color="yellow",
+                fill=False,
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                zorder=3,
+            )
+            ax.add_patch(switch_circle)
 
         # Mark exit door position (if available)
         if route_data.get("exit_door_pos") is not None:
@@ -464,6 +496,20 @@ class RouteVisualizationCallback(BaseCallback):
                 edgecolors="white",
                 linewidths=2,
             )
+            
+            # Draw door radius circle to show exit zone
+            door_radius = 12  # N++ exit door radius
+            door_circle = self.plt.Circle(
+                (door_x, door_y),
+                door_radius,
+                color="purple",
+                fill=False,
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                zorder=3,
+            )
+            ax.add_patch(door_circle)
 
         # Add labels and title
         ax.set_xlabel("X Position")
