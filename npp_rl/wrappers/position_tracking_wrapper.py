@@ -80,9 +80,8 @@ class PositionTrackingWrapper(gym.Wrapper):
 
         # Track initial position
         position = self._get_position()
-        if position is not None:
-            self.current_route.append(position)
-            info["player_position"] = position
+        self.current_route.append(position)
+        info["player_position"] = position
 
         # Capture exit switch and door positions for this NEW level
         # Store them so we can include them at episode end (before auto-reset changes them)
@@ -103,18 +102,8 @@ class PositionTrackingWrapper(gym.Wrapper):
             while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
                 env = env.env
 
-            if hasattr(env, "nplay_headless") and hasattr(
-                env.nplay_headless, "ninja_position"
-            ):
-                pos = env.nplay_headless.ninja_position()
-                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
-                    return (float(pos[0]), float(pos[1]))
-
-            # Method 2: Try to extract from game state if available
-            if hasattr(env, "game_state"):
-                # Assuming game_state has position info
-                # This is environment-specific and may need adjustment
-                pass
+            pos = env.nplay_headless.ninja_position()
+            return (float(pos[0]) - 24, float(pos[1]))
 
         except Exception as e:
             if not self._warned_about_position:

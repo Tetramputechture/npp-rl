@@ -205,8 +205,6 @@ class RouteVisualizationCallback(BaseCallback):
             elif "position" in info:
                 pos = info["position"]
 
-            print("Positions length: ", len(self.env_routes[env_idx]["positions"]))
-
             # If we got a position, store it
             if pos is not None:
                 if isinstance(pos, (tuple, list)) and len(pos) >= 2:
@@ -383,48 +381,6 @@ class RouteVisualizationCallback(BaseCallback):
         if len(positions) == 0:
             return
 
-        # IMPORTANT: If we have very few tracked positions but episode length is much longer,
-        # the position tracking failed during gameplay. Construct a reasonable approximation
-        # of the path: start -> exit_switch -> exit_door
-        episode_length = route_data.get("episode_length", len(positions))
-        if (
-            len(positions) < episode_length / 2
-            and route_data.get("exit_switch_pos") is not None
-            and route_data.get("exit_door_pos") is not None
-        ):
-            if self.verbose >= 1:
-                logger.warning(
-                    f"Only {len(positions)} positions tracked for episode of length {episode_length}. "
-                    f"Constructing approximate path using start -> switch -> door."
-                )
-
-            # Build approximate path: start -> switch -> door
-            start_pos = positions[0] if len(positions) > 0 else (0, 0)
-            end_pos = positions[-1] if len(positions) > 0 else start_pos
-            switch_pos = route_data["exit_switch_pos"]
-            door_pos = route_data["exit_door_pos"]
-
-            # Create interpolated path with appropriate number of points
-            # Path: start -> switch (40% of steps) -> door (40% of steps) -> end (20% of steps)
-            n_to_switch = max(int(episode_length * 0.4), 5)
-            n_to_door = max(int(episode_length * 0.4), 5)
-            n_to_end = max(episode_length - n_to_switch - n_to_door, 2)
-
-            # Interpolate start -> switch
-            path_to_switch = np.linspace(start_pos, switch_pos, n_to_switch)
-
-            # Interpolate switch -> door
-            path_to_door = np.linspace(switch_pos, door_pos, n_to_door)
-
-            # Interpolate door -> end (if different from door)
-            if np.linalg.norm(np.array(end_pos) - np.array(door_pos)) > 5:
-                path_to_end = np.linspace(door_pos, end_pos, n_to_end)
-            else:
-                path_to_end = np.array([door_pos])  # Agent ends at door
-
-            # Combine all segments
-            positions = np.vstack([path_to_switch, path_to_door[1:], path_to_end[1:]])
-
         # Create figure
         fig, ax = self.plt.subplots(
             figsize=(self.image_size[0] / 100, self.image_size[1] / 100), dpi=100
@@ -470,6 +426,15 @@ class RouteVisualizationCallback(BaseCallback):
             linewidths=2,
         )
 
+        print(f"Positions length: {len(positions)}")
+        print(f"Start position: {positions[0]}")
+        print(f"End position: {positions[-1]}")
+        print(f"Exit switch position: {route_data['exit_switch_pos']}")
+        print(f"Exit door position: {route_data['exit_door_pos']}")
+        print("Agent radius: 10")
+        print("Exit switch radius: 6")
+        print("Exit door radius: 12")
+
         # Mark exit switch position (if available)
         if route_data.get("exit_switch_pos") is not None:
             exit_x, exit_y = route_data["exit_switch_pos"]
@@ -513,9 +478,6 @@ class RouteVisualizationCallback(BaseCallback):
             and route_data["curriculum_stage"] != "unknown"
         ):
             title_parts.append(f"Stage: {route_data['curriculum_stage']}")
-
-        # Show level ID
-        title_parts.append(f"Level: {route_data['level_id']}")
 
         # Show episode stats
         title_parts.append(f"Length: {route_data['episode_length']}")
