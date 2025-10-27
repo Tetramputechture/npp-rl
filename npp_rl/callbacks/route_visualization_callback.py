@@ -219,11 +219,18 @@ class RouteVisualizationCallback(BaseCallback):
             # Infer success from reward
             is_success = info['episode']['r'] > 0.9
         
-        # Only save routes for successful completions
-        if is_success and self.env_routes[env_idx]['positions']:
+        # Get route from PositionTrackingWrapper if available (more reliable than step-by-step tracking)
+        route_positions = None
+        if 'episode_route' in info:
+            route_positions = info['episode_route']
+        elif self.env_routes[env_idx]['positions']:
+            route_positions = self.env_routes[env_idx]['positions']
+        
+        # Only save routes for successful completions with valid position data
+        if is_success and route_positions and len(route_positions) > 0:
             # Check if we should save this route
             if self.routes_saved_this_checkpoint < self.max_routes_per_checkpoint:
-                self._queue_route_save(env_idx, info)
+                self._queue_route_save(env_idx, info, route_positions)
                 self.routes_saved_this_checkpoint += 1
         
         # Clear route data for this environment
@@ -233,12 +240,13 @@ class RouteVisualizationCallback(BaseCallback):
             'start_time': self.num_timesteps
         }
     
-    def _queue_route_save(self, env_idx: int, info: Dict[str, Any]) -> None:
+    def _queue_route_save(self, env_idx: int, info: Dict[str, Any], route_positions: List[Tuple[float, float]]) -> None:
         """Queue a route for saving.
         
         Args:
             env_idx: Environment index
             info: Episode info dictionary
+            route_positions: List of (x, y) position tuples for the route
         """
         # Try to get exit switch and door positions from environment
         exit_switch_pos = None
@@ -260,29 +268,56 @@ class RouteVisualizationCallback(BaseCallback):
         
         # Try to get episode reward from various possible locations
         episode_reward = 0.0
+        reward_source = "unknown"
+        
         if 'episode' in info:
-            # Standard Monitor wrapper format
-            episode_reward = info['episode'].get('r', info['episode'].get('return', 0.0))
-        elif 'episode_return' in info:
-            episode_reward = info['episode_return']
-        elif 'return' in info:
-            episode_reward = info['return']
+            episode_dict = info['episode']
+            # Standard Monitor wrapper stores cumulative reward in 'r'
+            if 'r' in episode_dict:
+                episode_reward = float(episode_dict['r'])
+                reward_source = "info['episode']['r']"
+            elif 'return' in episode_dict:
+                episode_reward = float(episode_dict['return'])
+                reward_source = "info['episode']['return']"
+        
+        # Try alternative locations if not found in episode dict
+        if episode_reward == 0.0:
+            if 'episode_return' in info:
+                episode_reward = float(info['episode_return'])
+                reward_source = "info['episode_return']"
+            elif 'return' in info:
+                episode_reward = float(info['return'])
+                reward_source = "info['return']"
+            elif 'reward' in info:
+                episode_reward = float(info['reward'])
+                reward_source = "info['reward']"
+        
+        # Get curriculum stage (more meaningful than level ID for display)
+        curriculum_stage = info.get('curriculum_stage', 'unknown')
+        level_id = info.get('level_id', f'env_{env_idx}')
+        
+        # Get episode length
+        episode_length = len(route_positions)
+        if 'episode' in info and 'l' in info['episode']:
+            episode_length = info['episode']['l']
         
         route_data = {
-            'positions': list(self.env_routes[env_idx]['positions']),
-            'level_id': info.get('level_id', f'env_{env_idx}'),
+            'positions': list(route_positions),
+            'level_id': level_id,
+            'curriculum_stage': curriculum_stage,
             'timestep': self.num_timesteps,
-            'episode_reward': float(episode_reward),
-            'episode_length': info.get('episode', {}).get('l', len(self.env_routes[env_idx]['positions'])),
+            'episode_reward': episode_reward,
+            'episode_length': episode_length,
             'exit_switch_pos': exit_switch_pos,
             'exit_door_pos': exit_door_pos,
         }
         
         self.save_queue.append(route_data)
         
-        if self.verbose >= 2:
-            logger.debug(f"Queued route visualization for env {env_idx} "
-                        f"(level: {route_data['level_id']}, length: {route_data['episode_length']})")
+        if self.verbose >= 1:
+            logger.info(f"Queued route visualization for env {env_idx} - "
+                       f"Stage: {curriculum_stage}, Level: {level_id}, "
+                       f"Length: {episode_length}, Reward: {episode_reward:.2f} (from {reward_source})")
     
     def _process_save_queue(self) -> None:
         """Process queued routes and save visualizations."""
@@ -370,10 +405,23 @@ class RouteVisualizationCallback(BaseCallback):
         # Add labels and title
         ax.set_xlabel('X Position')
         ax.set_ylabel('Y Position (0 = Top)')
-        ax.set_title(f"Successful Route - Step {route_data['timestep']}\n"
-                    f"Level: {route_data['level_id']} | "
-                    f"Length: {route_data['episode_length']} | "
-                    f"Reward: {route_data['episode_reward']:.2f}")
+        
+        # Build title with curriculum stage prominently displayed
+        title_parts = [f"Successful Route - Step {route_data['timestep']}"]
+        
+        # Show curriculum stage if available
+        if route_data.get('curriculum_stage') and route_data['curriculum_stage'] != 'unknown':
+            title_parts.append(f"Stage: {route_data['curriculum_stage']}")
+        
+        # Show level ID
+        title_parts.append(f"Level: {route_data['level_id']}")
+        
+        # Show episode stats
+        title_parts.append(f"Length: {route_data['episode_length']}")
+        title_parts.append(f"Reward: {route_data['episode_reward']:.2f}")
+        
+        # Combine into multi-line title
+        ax.set_title(title_parts[0] + "\n" + " | ".join(title_parts[1:]))
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
         
@@ -383,8 +431,12 @@ class RouteVisualizationCallback(BaseCallback):
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect('equal')
         
-        # Save figure
-        filename = f"route_step{route_data['timestep']:09d}_{route_data['level_id']}.png"
+        # Save figure with curriculum stage in filename
+        stage = route_data.get('curriculum_stage', 'unknown')
+        level_id = route_data['level_id']
+        # Sanitize stage name for filename (replace spaces and special chars)
+        stage_clean = stage.replace(' ', '_').replace('/', '-')
+        filename = f"route_step{route_data['timestep']:09d}_{stage_clean}_{level_id}.png"
         filepath = self.save_dir / filename
         
         fig.savefig(filepath, dpi=100, bbox_inches='tight')
