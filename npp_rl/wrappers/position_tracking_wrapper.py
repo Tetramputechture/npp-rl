@@ -5,10 +5,9 @@ position data to the info dictionary for use by visualization callbacks.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import gymnasium as gym
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
