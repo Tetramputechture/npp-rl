@@ -38,6 +38,14 @@ class RouteVisualizationCallback(BaseCallback):
     - Asynchronous image saving (optional)
     - Automatic cleanup of old visualizations
     - TensorBoard integration for route images
+    
+    Visualization Elements:
+    - Agent path: Gradient-colored line from start to end
+    - Start position: Blue circle (agent's initial position)
+    - End position: Green circle (where agent reached exit)
+    - Exit switch: Red star (objective to activate)
+    - Exit door: Purple diamond (exit after switch activation)
+    - Title shows: Episode reward (cumulative), length, level ID
     """
     
     def __init__(
@@ -232,27 +240,34 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
-        # Try to get exit switch position from environment
+        # Try to get exit switch and door positions from environment
         exit_switch_pos = None
+        exit_door_pos = None
         try:
             # Access the base environment
             env = self.training_env.envs[env_idx]
             while hasattr(env, 'env'):
                 env = env.env
             
-            # Get exit switch position from nplay_headless
-            if hasattr(env, 'nplay_headless') and hasattr(env.nplay_headless, 'exit_switch_position'):
-                exit_switch_pos = env.nplay_headless.exit_switch_position()
+            # Get exit switch and door positions from nplay_headless
+            if hasattr(env, 'nplay_headless'):
+                if hasattr(env.nplay_headless, 'exit_switch_position'):
+                    exit_switch_pos = env.nplay_headless.exit_switch_position()
+                if hasattr(env.nplay_headless, 'exit_door_position'):
+                    exit_door_pos = env.nplay_headless.exit_door_position()
         except Exception as e:
-            logger.debug(f"Could not get exit switch position: {e}")
+            logger.debug(f"Could not get exit switch/door positions: {e}")
         
         route_data = {
             'positions': list(self.env_routes[env_idx]['positions']),
             'level_id': info.get('level_id', f'env_{env_idx}'),
             'timestep': self.num_timesteps,
+            # Episode reward: cumulative reward for the entire episode
+            # This is set by SB3's Monitor/VecNormalize wrappers in info['episode']['r']
             'episode_reward': info.get('episode', {}).get('r', 0),
             'episode_length': info.get('episode', {}).get('l', len(self.env_routes[env_idx]['positions'])),
             'exit_switch_pos': exit_switch_pos,
+            'exit_door_pos': exit_door_pos,
         }
         
         self.save_queue.append(route_data)
@@ -336,6 +351,13 @@ class RouteVisualizationCallback(BaseCallback):
             ax.scatter(exit_x, exit_y, 
                       c='red', s=200, marker='*', label='Exit Switch', zorder=6,
                       edgecolors='yellow', linewidths=2)
+        
+        # Mark exit door position (if available)
+        if route_data.get('exit_door_pos') is not None:
+            door_x, door_y = route_data['exit_door_pos']
+            ax.scatter(door_x, door_y, 
+                      c='purple', s=200, marker='D', label='Exit Door', zorder=6,
+                      edgecolors='white', linewidths=2)
         
         # Add labels and title
         ax.set_xlabel('X Position')
