@@ -69,6 +69,7 @@ class RouteVisualizationCallback(BaseCallback):
             verbose: Verbosity level
         """
         super().__init__(verbose)
+        self.verbose = verbose
         self.save_dir = Path(save_dir)
         self.max_routes_per_checkpoint = max_routes_per_checkpoint
         self.visualization_freq = visualization_freq
@@ -145,16 +146,14 @@ class RouteVisualizationCallback(BaseCallback):
                 break
 
         # Add warning about position tracking requirement
-        logger.info(
-            f"Route visualization callback initialized (saving to {self.save_dir})"
-        )
-        logger.info(
+        print(f"Route visualization callback initialized (saving to {self.save_dir})")
+        print(
             f"Will visualize up to {self.max_routes_per_checkpoint} routes every {self.visualization_freq} steps"
         )
-        logger.info(
+        print(
             "⚠️  Route visualization requires PositionTrackingWrapper to be applied to environments"
         )
-        logger.info(
+        print(
             "   If routes are not being captured, ensure the wrapper is in the environment pipeline"
         )
 
@@ -212,7 +211,7 @@ class RouteVisualizationCallback(BaseCallback):
                     pos_x, pos_y = float(pos[0]), float(pos[1])
                     self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
         except Exception as e:
-            logger.debug(f"Could not track position for env {env_idx}: {e}")
+            print(f"Could not track position for env {env_idx}: {e}")
 
     def _handle_episode_end(self, env_idx: int, info: Dict[str, Any]) -> None:
         """Handle episode completion and potentially save route.
@@ -221,21 +220,24 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
-        # Check if episode was successful
-        is_success = False
-        if "success" in info:
-            is_success = info["success"]
-        elif "is_success" in info:
-            is_success = info["is_success"]
-        elif "episode" in info and "r" in info["episode"]:
-            # Infer success from reward
-            is_success = info["episode"]["r"] > 0.9
+        # DEBUG: Log all keys in info dict to understand what data is available
+        print(self.verbose)
+        if self.verbose >= 2:
+            print(f"Episode end info keys for env {env_idx}: {list(info.keys())}")
+            if "episode" in info:
+                print(f"  episode dict keys: {list(info['episode'].keys())}")
+                print(f"  episode dict: {info['episode']}")
 
-        # Only save routes for successful completions
-        if is_success and self.env_routes[env_idx]["positions"]:
+        # Check if episode was successful
+        is_success = info["is_success"]
+
+        route_positions = info["episode_route"]
+
+        # Only save routes for successful completions with valid position data
+        if is_success and route_positions and len(route_positions) > 0:
             # Check if we should save this route
             if self.routes_saved_this_checkpoint < self.max_routes_per_checkpoint:
-                self._queue_route_save(env_idx, info)
+                self._queue_route_save(env_idx, info, route_positions)
                 self.routes_saved_this_checkpoint += 1
 
         # Clear route data for this environment
@@ -245,51 +247,51 @@ class RouteVisualizationCallback(BaseCallback):
             "start_time": self.num_timesteps,
         }
 
-    def _queue_route_save(self, env_idx: int, info: Dict[str, Any]) -> None:
+    def _queue_route_save(
+        self,
+        env_idx: int,
+        info: Dict[str, Any],
+        route_positions: List[Tuple[float, float]],
+    ) -> None:
         """Queue a route for saving.
 
         Args:
             env_idx: Environment index
             info: Episode info dictionary
+            route_positions: List of (x, y) position tuples for the route
         """
-        # Try to get exit switch and door positions from environment
-        exit_switch_pos = None
-        exit_door_pos = None
-        try:
-            # Access the base environment
-            env = self.training_env.envs[env_idx]
-            while hasattr(env, "env"):
-                env = env.env
+        exit_switch_pos = info.get("exit_switch_pos", None)
+        exit_door_pos = info.get("exit_door_pos", None)
 
-            # Get exit switch and door positions from nplay_headless
-            if hasattr(env, "nplay_headless"):
-                if hasattr(env.nplay_headless, "exit_switch_position"):
-                    exit_switch_pos = env.nplay_headless.exit_switch_position()
-                if hasattr(env.nplay_headless, "exit_door_position"):
-                    exit_door_pos = env.nplay_headless.exit_door_position()
-        except Exception as e:
-            logger.debug(f"Could not get exit switch/door positions: {e}")
+        # Try to get episode reward from various possible locations
+        episode_reward = 0.0
+
+        episode_reward = float(info["r"])
+
+        # Get curriculum stage (more meaningful than level ID for display)
+        curriculum_stage = info.get("curriculum_stage", "unknown")
+        level_id = info.get("level_id", f"env_{env_idx}")
+
+        # Get episode length
+        episode_length = info.get("l", len(route_positions))
 
         route_data = {
-            "positions": list(self.env_routes[env_idx]["positions"]),
-            "level_id": info.get("level_id", f"env_{env_idx}"),
+            "positions": list(route_positions),
+            "level_id": level_id,
+            "curriculum_stage": curriculum_stage,
             "timestep": self.num_timesteps,
-            # Episode reward: cumulative reward for the entire episode
-            # This is set by SB3's Monitor/VecNormalize wrappers in info['episode']['r']
-            "episode_reward": info.get("episode", {}).get("r", 0),
-            "episode_length": info.get("episode", {}).get(
-                "l", len(self.env_routes[env_idx]["positions"])
-            ),
+            "episode_reward": episode_reward,
+            "episode_length": episode_length,
             "exit_switch_pos": exit_switch_pos,
             "exit_door_pos": exit_door_pos,
         }
 
         self.save_queue.append(route_data)
 
-        if self.verbose >= 2:
-            logger.debug(
-                f"Queued route visualization for env {env_idx} "
-                f"(level: {route_data['level_id']}, length: {route_data['episode_length']})"
+        if self.verbose >= 1:
+            print(
+                f"Queued route visualization for env {env_idx} - "
+                f"Stage: {curriculum_stage}, Level: {level_id}, "
             )
 
     def _process_save_queue(self) -> None:
@@ -369,7 +371,7 @@ class RouteVisualizationCallback(BaseCallback):
             positions[0, 0],
             positions[0, 1],
             c="blue",
-            s=150,
+            s=200,
             marker="o",
             label="Start",
             zorder=5,
@@ -377,19 +379,13 @@ class RouteVisualizationCallback(BaseCallback):
             linewidths=2,
         )
 
-        # Mark agent's final position (where they triggered the exit)
-        # For successful episodes, use the exit door position as the agent end
-        # since that's where the ninja must be to complete the level
-        agent_end_pos = positions[-1]
-        if route_data.get("exit_door_pos") is not None:
-            # Use door position for successful completions
-            agent_end_pos = route_data["exit_door_pos"]
-
+        # Mark agent's final position (where they actually ended)
+        agent_end_x, agent_end_y = positions[-1, 0], positions[-1, 1]
         ax.scatter(
-            agent_end_pos[0],
-            agent_end_pos[1],
+            agent_end_x,
+            agent_end_y,
             c="green",
-            s=150,
+            s=200,
             marker="o",
             label="Agent End",
             zorder=5,
@@ -397,6 +393,19 @@ class RouteVisualizationCallback(BaseCallback):
             linewidths=2,
         )
 
+        # Draw agent radius circle at end position to show overlap zone
+        agent_radius = 10  # N++ agent radius
+        agent_circle = self.plt.Circle(
+            (agent_end_x, agent_end_y),
+            agent_radius,
+            color="green",
+            fill=False,
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.5,
+            zorder=4,
+        )
+        ax.add_patch(agent_circle)
         # Mark exit switch position (if available)
         if route_data.get("exit_switch_pos") is not None:
             exit_x, exit_y = route_data["exit_switch_pos"]
@@ -408,9 +417,23 @@ class RouteVisualizationCallback(BaseCallback):
                 marker="*",
                 label="Exit Switch",
                 zorder=6,
-                edgecolors="yellow",
+                edgecolors="orange",
                 linewidths=2,
             )
+
+            # Draw switch radius circle to show trigger zone
+            switch_radius = 6  # N++ exit switch radius
+            switch_circle = self.plt.Circle(
+                (exit_x, exit_y),
+                switch_radius,
+                color="orange",
+                fill=False,
+                linestyle=":",
+                linewidth=1,
+                alpha=0.7,
+                zorder=3,
+            )
+            ax.add_patch(switch_circle)
 
         # Mark exit door position (if available)
         if route_data.get("exit_door_pos") is not None:
@@ -427,15 +450,40 @@ class RouteVisualizationCallback(BaseCallback):
                 linewidths=2,
             )
 
+            # Draw door radius circle to show exit zone
+            door_radius = 12  # N++ exit door radius
+            door_circle = self.plt.Circle(
+                (door_x, door_y),
+                door_radius,
+                color="purple",
+                fill=False,
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                zorder=3,
+            )
+            ax.add_patch(door_circle)
+
         # Add labels and title
         ax.set_xlabel("X Position")
-        ax.set_ylabel("Y Position (0 = Top)")
-        ax.set_title(
-            f"Successful Route - Step {route_data['timestep']}\n"
-            f"Level: {route_data['level_id']} | "
-            f"Length: {route_data['episode_length']} | "
-            f"Reward: {route_data['episode_reward']:.2f}"
-        )
+        ax.set_ylabel("Y Position")
+
+        # Build title with curriculum stage prominently displayed
+        title_parts = [f"Successful Route - Step {route_data['timestep']}"]
+
+        # Show curriculum stage if available
+        if (
+            route_data.get("curriculum_stage")
+            and route_data["curriculum_stage"] != "unknown"
+        ):
+            title_parts.append(f"Stage: {route_data['curriculum_stage']}")
+
+        # Show episode stats
+        title_parts.append(f"Length: {route_data['episode_length']}")
+        title_parts.append(f"Reward: {route_data['episode_reward']:.2f}")
+
+        # Combine into multi-line title
+        ax.set_title(title_parts[0] + "\n" + " | ".join(title_parts[1:]))
         ax.legend(loc="best")
         ax.grid(True, alpha=0.3)
 
@@ -445,9 +493,32 @@ class RouteVisualizationCallback(BaseCallback):
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect("equal")
 
-        # Save figure
+        # Ensure minimum axis ranges to prevent overly thin visualizations
+        # on vertical/horizontal corridor maps
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        x_range = xlim[1] - xlim[0]
+        y_range = ylim[1] - ylim[0]
+
+        min_range = 100  # Minimum range in pixels
+
+        # Expand X axis if too narrow (vertical corridors)
+        if x_range < min_range:
+            x_center = (xlim[0] + xlim[1]) / 2
+            ax.set_xlim(x_center - min_range / 2, x_center + min_range / 2)
+
+        # Expand Y axis if too narrow (horizontal corridors)
+        if y_range < min_range:
+            y_center = (ylim[0] + ylim[1]) / 2
+            ax.set_ylim(y_center - min_range / 2, y_center + min_range / 2)
+
+        # Save figure with curriculum stage in filename
+        stage = route_data.get("curriculum_stage", "unknown")
+        level_id = route_data["level_id"]
+        # Sanitize stage name for filename (replace spaces and special chars)
+        stage_clean = stage.replace(" ", "_").replace("/", "-")
         filename = (
-            f"route_step{route_data['timestep']:09d}_{route_data['level_id']}.png"
+            f"route_step{route_data['timestep']:09d}_{stage_clean}_{level_id}.png"
         )
         filepath = self.save_dir / filename
 
@@ -477,13 +548,13 @@ class RouteVisualizationCallback(BaseCallback):
                         route_data["timestep"],
                     )
             except Exception as e:
-                logger.debug(f"Could not log route to TensorBoard: {e}")
+                print(f"Could not log route to TensorBoard: {e}")
 
         # Cleanup old files if we exceed limit
         self._cleanup_old_files()
 
         if self.verbose >= 1:
-            logger.info(
+            print(
                 f"Saved route visualization: {filename} "
                 f"(total saved: {self.total_routes_saved})"
             )
@@ -496,9 +567,7 @@ class RouteVisualizationCallback(BaseCallback):
                 if old_file.exists():
                     old_file.unlink()
                     if self.verbose >= 2:
-                        logger.debug(
-                            f"Removed old route visualization: {old_file.name}"
-                        )
+                        print(f"Removed old route visualization: {old_file.name}")
             except Exception as e:
                 logger.warning(f"Could not remove old file {old_file}: {e}")
 
@@ -511,6 +580,6 @@ class RouteVisualizationCallback(BaseCallback):
         if self.save_thread is not None and self.save_thread.is_alive():
             self.save_thread.join(timeout=10)
 
-        logger.info(
+        print(
             f"Route visualization completed. Total routes saved: {self.total_routes_saved}"
         )

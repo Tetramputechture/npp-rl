@@ -1027,7 +1027,7 @@ class ArchitectureTrainer:
                 max_stored_routes=100,  # Keep up to 100 route images
                 async_save=True,  # Save asynchronously to avoid blocking
                 image_size=(800, 600),
-                verbose=1,
+                verbose=2,
             )
             callbacks.append(route_callback)
             logger.info(f"Added route visualization callback (saving to {routes_dir})")
