@@ -51,47 +51,46 @@ class CurriculumManager:
     ]
     
     # Stage-specific advancement thresholds for granular progression
-    # FIXED: Adjusted thresholds to be more realistic based on training analysis
-    # Old problem: Agent stuck at stage 2 (simple) with only 4% success vs 70% threshold
-    # New: Progressive thresholds that allow advancement while ensuring competence
+    # Progressive thresholds that decrease with difficulty to ensure forward progress
+    # while maintaining competence requirements
     STAGE_THRESHOLDS = {
-        "simplest": 0.80,    # FIXED: 0.60→0.80 - Basic skills, ensure solid foundation
-        "simpler": 0.70,     # FIXED: 0.65→0.70 - Foundational, maintain standard
-        "simple": 0.60,      # FIXED: 0.70→0.60 - CRITICAL: Lower to allow progression
-        "medium": 0.55,      # FIXED: 0.70→0.55 - Gradual difficulty increase
-        "complex": 0.50,     # FIXED: 0.75→0.50 - Allow learning on hard levels
-        "exploration": 0.45, # FIXED: 0.80→0.45 - Very hard, lower threshold
-        "mine_heavy": 0.40,  # FIXED: 0.80→0.40 - Hardest, lower threshold
+        "simplest": 0.80,
+        "simpler": 0.70,
+        "simple": 0.60,
+        "medium": 0.55,
+        "complex": 0.50,
+        "exploration": 0.45,
+        "mine_heavy": 0.40,
     }
     
     # Stage-specific minimum episodes for adaptive progression
-    # FIXED: Adjusted episode requirements for better progression
+    # Harder stages require more episodes to ensure sufficient learning
     STAGE_MIN_EPISODES = {
-        "simplest": 100,     # FIXED: 50→100 - Ensure solid data before advancement
-        "simpler": 100,      # FIXED: 60→100 - Consistent foundation building
-        "simple": 100,       # FIXED: 80→100 - Adequate practice on standard levels
-        "medium": 150,       # FIXED: 100→150 - More practice for harder content
-        "complex": 200,      # FIXED: 120→200 - Substantial practice needed
-        "exploration": 200,  # FIXED: 150→200 - Very difficult content
-        "mine_heavy": 200,   # FIXED: 150→200 - Hardest content
+        "simplest": 100,
+        "simpler": 100,
+        "simple": 100,
+        "medium": 150,
+        "complex": 200,
+        "exploration": 200,
+        "mine_heavy": 200,
     }
     
     # Early advancement threshold - if agent excels, can advance sooner
-    EARLY_ADVANCEMENT_THRESHOLD = 0.90  # 90% success rate
-    EARLY_ADVANCEMENT_MIN_EPISODES = 30  # After just 30 episodes
+    EARLY_ADVANCEMENT_THRESHOLD = 0.90
+    EARLY_ADVANCEMENT_MIN_EPISODES = 30
     
-    # CRITICAL FIX: Add regression thresholds to prevent catastrophic forgetting
-    # If performance drops too low, regress to previous stage for retraining
+    # Regression thresholds to prevent catastrophic forgetting
+    # If performance drops too low, regress to previous stage
     REGRESSION_THRESHOLDS = {
-        "simpler": 0.30,     # If drops below 30% on simpler, back to simplest
-        "simple": 0.30,      # If drops below 30% on simple, back to simpler
-        "medium": 0.25,      # Slightly lower for harder stages
-        "complex": 0.20,     # Allow more struggle on complex
-        "exploration": 0.15, # Very hard, allow low performance
-        "mine_heavy": 0.15,  # Hardest, allow low performance
+        "simpler": 0.30,
+        "simple": 0.30,
+        "medium": 0.25,
+        "complex": 0.20,
+        "exploration": 0.15,
+        "mine_heavy": 0.15,
     }
     
-    REGRESSION_MIN_EPISODES = 200  # Need substantial evidence before regressing
+    REGRESSION_MIN_EPISODES = 200
 
     def __init__(
         self,
@@ -507,55 +506,35 @@ class CurriculumManager:
     def check_regression(self) -> bool:
         """Check if agent should regress to previous curriculum stage.
         
-        CRITICAL FIX: Prevents catastrophic forgetting by regressing when performance
-        drops too low on current stage. Allows agent to rebuild fundamentals.
+        Prevents catastrophic forgetting by regressing when performance drops
+        too low on the current stage.
         
         Returns:
             True if regressed to previous stage, False otherwise
         """
-        # Can't regress from first stage
-        if self.current_stage_idx == 0:
+        if self.current_stage_idx == 0 or not self.enable_regression:
             return False
         
-        # Check if regression is enabled
-        if not self.enable_regression:
-            return False
-        
-        # Get current stage performance
         current_stage = self.current_stage
         results = self.stage_performance.get(current_stage, deque())
         
-        # Need sufficient episodes to judge
         if len(results) < self.REGRESSION_MIN_EPISODES:
             return False
         
-        # Calculate recent success rate
         success_rate = float(np.mean(results))
-        
-        # Get regression threshold for current stage
         regression_threshold = self.REGRESSION_THRESHOLDS.get(current_stage, 0.2)
         
-        # Check if performance is catastrophically low
         if success_rate < regression_threshold:
             prev_stage_idx = self.current_stage_idx - 1
             prev_stage = self.CURRICULUM_ORDER[prev_stage_idx]
             
-            logger.warning("=" * 70)
-            logger.warning("⚠️  CURRICULUM REGRESSION ⚠️")
-            logger.warning("=" * 70)
-            logger.warning(f"Current stage: {current_stage}")
-            logger.warning(f"Success rate: {success_rate:.1%} (threshold: {regression_threshold:.1%})")
-            logger.warning(f"Episodes: {len(results)}")
-            logger.warning("")
-            logger.warning(f"Regressing to: {prev_stage}")
-            logger.warning("Agent will rebuild fundamentals before attempting harder content")
-            logger.warning("=" * 70)
+            logger.warning(
+                f"Curriculum regression: {current_stage} ({success_rate:.1%}) → {prev_stage} "
+                f"(threshold: {regression_threshold:.1%}, episodes: {len(results)})"
+            )
             
-            # Regress to previous stage
             self.current_stage_idx = prev_stage_idx
             self.current_stage = prev_stage
-            
-            # Clear current stage performance to give fresh start
             self.stage_performance[current_stage] = deque(maxlen=self.performance_window)
             
             return True

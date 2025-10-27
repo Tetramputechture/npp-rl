@@ -98,16 +98,16 @@ A100_1X_80GB = HardwareProfile(
     name="1xA100-80GB",
     num_gpus=1,
     gpu_memory_gb=80.0,
-    num_envs=128,  # FIXED: Increased parallelism for better data collection
+    num_envs=128,
     batch_size=512,
-    n_steps=2048,  # FIXED: 1024→2048 - Longer rollouts for better advantage estimation
+    n_steps=2048,
     learning_rate=3e-4,
     mixed_precision=True,
     num_workers=16,
     prefetch_factor=2,
     description=(
         "Optimized for single A100 (80 GB). Good for prototyping and "
-        "smaller-scale experiments. Updated n_steps for better rollouts."
+        "smaller-scale experiments."
     ),
 )
 

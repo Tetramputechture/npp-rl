@@ -214,21 +214,10 @@ class CurriculumEnv(gym.Wrapper):
 
         # Periodically check for curriculum advancement or regression
         if self.episode_count % self.check_advancement_freq == 0:
-            # First check for regression (higher priority - prevent catastrophic forgetting)
-            regressed = self.curriculum_manager.check_regression()
-            if regressed:
-                logger.warning(
-                    f"Curriculum regressed to: "
-                    f"{self.curriculum_manager.get_current_stage()}"
-                )
-            else:
+            # Check regression first (higher priority than advancement)
+            if not self.curriculum_manager.check_regression():
                 # If not regressed, check for advancement
-                advanced = self.curriculum_manager.check_advancement()
-                if advanced:
-                    logger.info(
-                        f"Curriculum advanced to: "
-                        f"{self.curriculum_manager.get_current_stage()}"
-                    )
+                self.curriculum_manager.check_advancement()
 
     def get_curriculum_progress(self) -> str:
         """Get curriculum progress summary.
@@ -369,34 +358,16 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                     f"episodes={episodes}, can_advance={can_advance}"
                 )
                 
-                # FIXED: Check regression first (higher priority)
-                regressed = self.curriculum_manager.check_regression()
-                if regressed:
+                if self.curriculum_manager.check_regression():
                     new_stage = self.curriculum_manager.get_current_stage()
-                    logger.warning(
-                        f"[VecEnv] ⚠️ Curriculum regressed to: {new_stage} "
-                        f"(syncing to all {self.num_envs} environments)"
-                    )
+                    logger.info(f"[VecEnv] Syncing regression to {new_stage} across {self.num_envs} environments")
                     self._sync_curriculum_stage(new_stage)
-                else:
-                    # If not regressed, check for advancement
-                    advanced = self.curriculum_manager.check_advancement()
-
-                    if advanced:
-                        new_stage = self.curriculum_manager.get_current_stage()
-                        logger.info(
-                            f"[VecEnv] ✨ Curriculum advanced to: {new_stage} "
-                            f"(syncing to all {self.num_envs} environments)"
-                        )
-
-                        # Sync stage to all subprocess environments
-                        # This ensures ALL environments sample from the new stage
-                        self._sync_curriculum_stage(new_stage)
-                    else:
-                        # Even if no advancement, periodically sync mixing ratios
-                        # Mixing ratios adapt as performance changes within a stage
-                        if self.total_episodes % 50 == 0:
-                            self._sync_mixing_ratios()
+                elif self.curriculum_manager.check_advancement():
+                    new_stage = self.curriculum_manager.get_current_stage()
+                    logger.info(f"[VecEnv] Syncing advancement to {new_stage} across {self.num_envs} environments")
+                    self._sync_curriculum_stage(new_stage)
+                elif self.total_episodes % 50 == 0:
+                    self._sync_mixing_ratios()
             except Exception as e:
                 logger.error(
                     f"[VecEnv] Error during advancement check at episode {self.total_episodes}: {e}",
