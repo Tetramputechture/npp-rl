@@ -5,6 +5,72 @@ triggers: ['machine learning', 'reinforcement learning', 'neural network', 'mode
 
 # ML/RL Development Guidelines for NPP-RL
 
+## Code Quality and Documentation Standards
+
+### Documentation Philosophy
+
+**CRITICAL: We prefer concise, in-place documentation that explains the current state, not the history of changes.**
+
+**DO:**
+- Write clean, production-ready code with minimal comments
+- Document WHY decisions were made (rationale), not WHAT the code does (if obvious from code)
+- Keep comments concise and focused on key insights
+- Update code directly when making changes
+
+**DO NOT:**
+- Create separate summary documents, reference guides, or implementation guides for code changes
+- Use "FIXED", "CRITICAL FIX", "TODO", or similar temporal markers in committed code
+- Include verbose explanations of what was changed from previous versions
+- Write comments that repeat what the code already says
+- Create multiple documentation files explaining your work
+
+**Example - BAD (overly verbose, history-focused):**
+```python
+# FIXED: Changed from 0.1 to 1.0 to fix reward scaling issue
+# Previously this was too small and caused learning instability
+# After analysis, we determined 1.0 is the correct scale
+COMPLETION_REWARD = 1.0  # Base reward for level completion
+```
+
+**Example - GOOD (concise, rationale-focused):**
+```python
+COMPLETION_REWARD = 1.0  # Scaled to match death penalty magnitude
+```
+
+### Performance and Redundancy
+
+**Avoid overly-defensive programming that impacts performance:**
+- Don't add unnecessary early returns or validation checks
+- Trust that inputs are validated at system boundaries
+- Avoid redundant logging (log once at the source, not at every call site)
+- Use efficient algorithms (O(1) lookups over O(n) searches where possible)
+
+**Example - BAD (redundant logging):**
+```python
+# In curriculum_manager.py
+def check_regression(self):
+    if regressed:
+        logger.warning(f"Regressed to {prev_stage}")
+        return True
+
+# In curriculum_env.py
+if self.curriculum_manager.check_regression():
+    logger.warning(f"Curriculum regressed to {self.curriculum_manager.get_current_stage()}")
+```
+
+**Example - GOOD (single source of truth):**
+```python
+# In curriculum_manager.py
+def check_regression(self):
+    if regressed:
+        logger.warning(f"Curriculum regression: {current_stage} → {prev_stage}")
+        return True
+
+# In curriculum_env.py
+if not self.curriculum_manager.check_regression():
+    self.curriculum_manager.check_advancement()
+```
+
 ## Neural Network Architecture Standards
 
 ### Feature Extractor Design Patterns

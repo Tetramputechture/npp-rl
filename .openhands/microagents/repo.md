@@ -237,6 +237,28 @@ tensorboard --logdir experiments/
 - **Testing focus**: Test behavior, not static values or constants
 - **Documentation**: Include research paper references for algorithmic choices
 
+### Documentation and Code Quality (CRITICAL)
+
+**We strongly prefer concise, production-ready code with in-place documentation:**
+
+**DO:**
+- Write clean code with minimal, focused comments
+- Explain WHY (rationale), not WHAT (if obvious from code)
+- Make direct updates to existing code
+- Keep production code clean and history-free
+
+**DO NOT:**
+- Create summary documents, reference guides, or implementation documentation for code changes
+- Use temporal markers like "FIXED", "CRITICAL FIX", "TODO" in committed code
+- Write verbose change histories in comments
+- Create multiple files documenting your work
+- Add overly-defensive validation or redundant logging
+
+**Performance matters. Avoid redundancy:**
+- Log once at source, not at every call site
+- Trust boundary validation, don't re-validate everywhere
+- Use efficient algorithms (O(1) over O(n) where possible)
+
 ### Physics Integration
 ```python
 # ALWAYS use nclone constants
