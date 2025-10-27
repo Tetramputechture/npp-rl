@@ -229,22 +229,9 @@ class RouteVisualizationCallback(BaseCallback):
                 print(f"  episode dict: {info['episode']}")
 
         # Check if episode was successful
-        is_success = False
-        if "success" in info:
-            is_success = info["success"]
-        elif "is_success" in info:
-            is_success = info["is_success"]
+        is_success = info["is_success"]
 
         route_positions = info["episode_route"]
-
-        if self.verbose >= 1:
-            print(
-                f"Episode end env {env_idx}: success={is_success}, "
-                f"step_tracked_positions={len(route_positions)}"
-            )
-            if len(route_positions) > 0:
-                print(f"  First 3 positions: {route_positions[:3]}")
-                print(f"  Last 3 positions: {route_positions[-3:]}")
 
         # Only save routes for successful completions with valid position data
         if is_success and route_positions and len(route_positions) > 0:
@@ -273,32 +260,8 @@ class RouteVisualizationCallback(BaseCallback):
             info: Episode info dictionary
             route_positions: List of (x, y) position tuples for the route
         """
-        # Try to get exit switch and door positions from info dict first (preferred)
-        # The PositionTrackingWrapper captures these at episode start and includes them
-        # at episode end, ensuring they're from the CORRECT level (not after auto-reset)
         exit_switch_pos = info.get("exit_switch_pos", None)
         exit_door_pos = info.get("exit_door_pos", None)
-
-        # Fallback: try to get from environment (may be wrong level after auto-reset)
-        if exit_switch_pos is None or exit_door_pos is None:
-            try:
-                # Access the base environment
-                env = self.training_env.envs[env_idx]
-                while hasattr(env, "env"):
-                    env = env.env
-
-                # Get exit switch and door positions from nplay_headless
-                if hasattr(env, "nplay_headless"):
-                    if exit_switch_pos is None and hasattr(
-                        env.nplay_headless, "exit_switch_position"
-                    ):
-                        exit_switch_pos = env.nplay_headless.exit_switch_position()
-                    if exit_door_pos is None and hasattr(
-                        env.nplay_headless, "exit_door_position"
-                    ):
-                        exit_door_pos = env.nplay_headless.exit_door_position()
-            except Exception as e:
-                logger.debug(f"Could not get exit switch/door positions from env: {e}")
 
         # Try to get episode reward from various possible locations
         episode_reward = 0.0
@@ -408,7 +371,7 @@ class RouteVisualizationCallback(BaseCallback):
             positions[0, 0],
             positions[0, 1],
             c="blue",
-            s=150,
+            s=200,
             marker="o",
             label="Start",
             zorder=5,
@@ -422,14 +385,14 @@ class RouteVisualizationCallback(BaseCallback):
             agent_end_x,
             agent_end_y,
             c="green",
-            s=150,
+            s=200,
             marker="o",
             label="Agent End",
             zorder=5,
             edgecolors="white",
             linewidths=2,
         )
-        
+
         # Draw agent radius circle at end position to show overlap zone
         agent_radius = 10  # N++ agent radius
         agent_circle = self.plt.Circle(
@@ -443,16 +406,6 @@ class RouteVisualizationCallback(BaseCallback):
             zorder=4,
         )
         ax.add_patch(agent_circle)
-
-        print(f"Positions length: {len(positions)}")
-        print(f"Start position: {positions[0]}")
-        print(f"End position: {positions[-1]}")
-        print(f"Exit switch position: {route_data['exit_switch_pos']}")
-        print(f"Exit door position: {route_data['exit_door_pos']}")
-        print("Agent radius: 10")
-        print("Exit switch radius: 6")
-        print("Exit door radius: 12")
-
         # Mark exit switch position (if available)
         if route_data.get("exit_switch_pos") is not None:
             exit_x, exit_y = route_data["exit_switch_pos"]
@@ -464,20 +417,20 @@ class RouteVisualizationCallback(BaseCallback):
                 marker="*",
                 label="Exit Switch",
                 zorder=6,
-                edgecolors="yellow",
+                edgecolors="orange",
                 linewidths=2,
             )
-            
+
             # Draw switch radius circle to show trigger zone
             switch_radius = 6  # N++ exit switch radius
             switch_circle = self.plt.Circle(
                 (exit_x, exit_y),
                 switch_radius,
-                color="yellow",
+                color="orange",
                 fill=False,
                 linestyle=":",
                 linewidth=1,
-                alpha=0.4,
+                alpha=0.7,
                 zorder=3,
             )
             ax.add_patch(switch_circle)
@@ -496,7 +449,7 @@ class RouteVisualizationCallback(BaseCallback):
                 edgecolors="white",
                 linewidths=2,
             )
-            
+
             # Draw door radius circle to show exit zone
             door_radius = 12  # N++ exit door radius
             door_circle = self.plt.Circle(
@@ -513,7 +466,7 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Add labels and title
         ax.set_xlabel("X Position")
-        ax.set_ylabel("Y Position (0 = Top)")
+        ax.set_ylabel("Y Position")
 
         # Build title with curriculum stage prominently displayed
         title_parts = [f"Successful Route - Step {route_data['timestep']}"]
@@ -539,25 +492,25 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect("equal")
-        
+
         # Ensure minimum axis ranges to prevent overly thin visualizations
         # on vertical/horizontal corridor maps
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         x_range = xlim[1] - xlim[0]
         y_range = ylim[1] - ylim[0]
-        
+
         min_range = 100  # Minimum range in pixels
-        
+
         # Expand X axis if too narrow (vertical corridors)
         if x_range < min_range:
             x_center = (xlim[0] + xlim[1]) / 2
-            ax.set_xlim(x_center - min_range/2, x_center + min_range/2)
-        
+            ax.set_xlim(x_center - min_range / 2, x_center + min_range / 2)
+
         # Expand Y axis if too narrow (horizontal corridors)
         if y_range < min_range:
             y_center = (ylim[0] + ylim[1]) / 2
-            ax.set_ylim(y_center - min_range/2, y_center + min_range/2)
+            ax.set_ylim(y_center - min_range / 2, y_center + min_range / 2)
 
         # Save figure with curriculum stage in filename
         stage = route_data.get("curriculum_stage", "unknown")

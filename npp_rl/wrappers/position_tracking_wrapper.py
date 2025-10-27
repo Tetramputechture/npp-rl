@@ -28,9 +28,6 @@ class PositionTrackingWrapper(gym.Wrapper):
         """
         super().__init__(env)
         self.current_route = []
-        self._warned_about_position = (
-            False  # Only warn once about position unavailability
-        )
 
     def step(self, action):
         """Execute action and track position.
@@ -47,7 +44,6 @@ class PositionTrackingWrapper(gym.Wrapper):
         position = self._get_position()
         if position is not None:
             self.current_route.append(position)
-            # Add current position to info
             info["player_position"] = position
 
         # Add complete route to info on episode end
@@ -83,7 +79,6 @@ class PositionTrackingWrapper(gym.Wrapper):
         self.current_route.append(position)
         info["player_position"] = position
 
-        # Capture exit switch and door positions for this NEW level
         # Store them so we can include them at episode end (before auto-reset changes them)
         self.current_exit_switch_pos = self._get_exit_switch_position()
         self.current_exit_door_pos = self._get_exit_door_position()
@@ -103,8 +98,6 @@ class PositionTrackingWrapper(gym.Wrapper):
                 env = env.env
 
             pos = env.nplay_headless.ninja_position()
-            # Return position without any offset to match coordinate system
-            # used by exit_switch_position() and exit_door_position()
             return (float(pos[0]), float(pos[1]))
 
         except Exception as e:
@@ -127,12 +120,8 @@ class PositionTrackingWrapper(gym.Wrapper):
             while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
                 env = env.env
 
-            if hasattr(env, "nplay_headless") and hasattr(
-                env.nplay_headless, "exit_switch_position"
-            ):
-                pos = env.nplay_headless.exit_switch_position()
-                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
-                    return (float(pos[0]), float(pos[1]))
+            pos = env.nplay_headless.exit_switch_position()
+            return (float(pos[0]), float(pos[1]))
         except Exception as e:
             logger.debug(f"Could not get exit switch position: {e}")
 
@@ -149,12 +138,8 @@ class PositionTrackingWrapper(gym.Wrapper):
             while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
                 env = env.env
 
-            if hasattr(env, "nplay_headless") and hasattr(
-                env.nplay_headless, "exit_door_position"
-            ):
-                pos = env.nplay_headless.exit_door_position()
-                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
-                    return (float(pos[0]), float(pos[1]))
+            pos = env.nplay_headless.exit_door_position()
+            return (float(pos[0]), float(pos[1]))
         except Exception as e:
             logger.debug(f"Could not get exit door position: {e}")
 
