@@ -147,16 +147,14 @@ class RouteVisualizationCallback(BaseCallback):
                 break
 
         # Add warning about position tracking requirement
-        logger.info(
-            f"Route visualization callback initialized (saving to {self.save_dir})"
-        )
-        logger.info(
+        print(f"Route visualization callback initialized (saving to {self.save_dir})")
+        print(
             f"Will visualize up to {self.max_routes_per_checkpoint} routes every {self.visualization_freq} steps"
         )
-        logger.info(
+        print(
             "⚠️  Route visualization requires PositionTrackingWrapper to be applied to environments"
         )
-        logger.info(
+        print(
             "   If routes are not being captured, ensure the wrapper is in the environment pipeline"
         )
 
@@ -208,13 +206,15 @@ class RouteVisualizationCallback(BaseCallback):
             elif "position" in info:
                 pos = info["position"]
 
+            print("Positions length: ", len(self.env_routes[env_idx]["positions"]))
+
             # If we got a position, store it
             if pos is not None:
                 if isinstance(pos, (tuple, list)) and len(pos) >= 2:
                     pos_x, pos_y = float(pos[0]), float(pos[1])
                     self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
         except Exception as e:
-            self.logger.debug(f"Could not track position for env {env_idx}: {e}")
+            print(f"Could not track position for env {env_idx}: {e}")
 
     def _handle_episode_end(self, env_idx: int, info: Dict[str, Any]) -> None:
         """Handle episode completion and potentially save route.
@@ -226,14 +226,10 @@ class RouteVisualizationCallback(BaseCallback):
         # DEBUG: Log all keys in info dict to understand what data is available
         print(self.verbose)
         if self.verbose >= 2:
-            self.logger.debug(
-                f"Episode end info keys for env {env_idx}: {list(info.keys())}"
-            )
+            print(f"Episode end info keys for env {env_idx}: {list(info.keys())}")
             if "episode" in info:
-                self.logger.debug(
-                    f"  episode dict keys: {list(info['episode'].keys())}"
-                )
-                self.logger.debug(f"  episode dict: {info['episode']}")
+                print(f"  episode dict keys: {list(info['episode'].keys())}")
+                print(f"  episode dict: {info['episode']}")
 
         # Check if episode was successful
         is_success = False
@@ -241,22 +237,13 @@ class RouteVisualizationCallback(BaseCallback):
             is_success = info["success"]
         elif "is_success" in info:
             is_success = info["is_success"]
-        # Get route from PositionTrackingWrapper if available (more reliable than step-by-step tracking)
-        route_positions = None
-        route_source = "none"
 
-        if "episode_route" in info:
-            route_positions = info["episode_route"]
-            route_source = f"episode_route ({len(route_positions)} positions)"
-        elif self.env_routes[env_idx]["positions"]:
-            route_positions = self.env_routes[env_idx]["positions"]
-            route_source = f"step-by-step tracking ({len(route_positions)} positions)"
+        route_positions = info["episode_route"]
 
         if self.verbose >= 1:
-            logger.info(
+            print(
                 f"Episode end env {env_idx}: success={is_success}, "
-                f"route_source={route_source}, "
-                f"step_tracked_positions={len(self.env_routes[env_idx]['positions'])}"
+                f"step_tracked_positions={len(route_positions)}"
             )
 
         # Only save routes for successful completions with valid position data
@@ -302,7 +289,7 @@ class RouteVisualizationCallback(BaseCallback):
                 if hasattr(env.nplay_headless, "exit_door_position"):
                     exit_door_pos = env.nplay_headless.exit_door_position()
         except Exception as e:
-            self.logger.debug(f"Could not get exit switch/door positions: {e}")
+            print(f"Could not get exit switch/door positions: {e}")
 
         # Try to get episode reward from various possible locations
         episode_reward = 0.0
@@ -330,7 +317,7 @@ class RouteVisualizationCallback(BaseCallback):
         self.save_queue.append(route_data)
 
         if self.verbose >= 1:
-            logger.info(
+            print(
                 f"Queued route visualization for env {env_idx} - "
                 f"Stage: {curriculum_stage}, Level: {level_id}, "
             )
@@ -531,13 +518,13 @@ class RouteVisualizationCallback(BaseCallback):
                         route_data["timestep"],
                     )
             except Exception as e:
-                self.logger.debug(f"Could not log route to TensorBoard: {e}")
+                print(f"Could not log route to TensorBoard: {e}")
 
         # Cleanup old files if we exceed limit
         self._cleanup_old_files()
 
         if self.verbose >= 1:
-            logger.info(
+            print(
                 f"Saved route visualization: {filename} "
                 f"(total saved: {self.total_routes_saved})"
             )
@@ -550,9 +537,7 @@ class RouteVisualizationCallback(BaseCallback):
                 if old_file.exists():
                     old_file.unlink()
                     if self.verbose >= 2:
-                        self.logger.debug(
-                            f"Removed old route visualization: {old_file.name}"
-                        )
+                        print(f"Removed old route visualization: {old_file.name}")
             except Exception as e:
                 logger.warning(f"Could not remove old file {old_file}: {e}")
 
@@ -565,6 +550,6 @@ class RouteVisualizationCallback(BaseCallback):
         if self.save_thread is not None and self.save_thread.is_alive():
             self.save_thread.join(timeout=10)
 
-        logger.info(
+        print(
             f"Route visualization completed. Total routes saved: {self.total_routes_saved}"
         )
