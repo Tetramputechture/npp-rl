@@ -1192,6 +1192,7 @@ class ArchitectureTrainer:
         video_output_dir: Optional[str] = None,
         max_videos_per_category: int = 10,
         video_fps: int = 30,
+        timeout_per_episode: float = 200.0,
     ) -> Dict[str, float]:
         """Evaluate model on test dataset.
 
@@ -1201,6 +1202,7 @@ class ArchitectureTrainer:
             video_output_dir: Directory to save videos (required if record_videos=True)
             max_videos_per_category: Maximum number of videos per category
             video_fps: Video framerate
+            timeout_per_episode: Timeout in seconds per episode (default: 200.0)
 
         Returns:
             Evaluation metrics dictionary
@@ -1238,10 +1240,12 @@ class ArchitectureTrainer:
                 num_episodes_per_category=num_episodes_per_category,
                 max_steps_per_episode=10000,
                 deterministic=True,
+                timeout_per_episode=timeout_per_episode,
                 record_videos=record_videos,
                 video_output_dir=video_output_dir,
                 max_videos_per_category=max_videos_per_category,
                 video_fps=video_fps,
+                frame_stack_config=self.frame_stack_config,
             )
 
             # Save results
