@@ -25,8 +25,9 @@ python scripts/train_and_compare.py \
     --high-level-update-freq 50 \
     --use-curriculum \
     --curriculum-start-stage simple \
-    --curriculum-threshold 0.7 \
-    --curriculum-min-episodes 100 \
+    --curriculum-threshold 0.5 \
+    --curriculum-min-episodes 50 \
+    --enable-pbrs \
     --eval-freq 100000 \
     --save-freq 500000
 
