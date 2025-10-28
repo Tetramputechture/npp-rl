@@ -99,9 +99,9 @@ train_single_architecture() {
             --total-timesteps 1000000 \
             --distributed-backend nccl \
             --record-eval-videos \
-            --max-videos-per-category 5 \
-            --num-eval-episodes 10 \
-            --video-fps 30 \
+            --max-videos-per-category 2 \
+            --num-eval-episodes 2 \
+            --video-fps 60 \
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
             --output-dir ~/experiments"

@@ -30,7 +30,7 @@ class CurriculumManager:
 
     The manager tracks performance and automatically advances to the next
     difficulty level when the agent achieves sufficient mastery.
-    
+
     Features granular progression with:
     - Stage-specific advancement thresholds
     - Adaptive minimum episode requirements
@@ -49,7 +49,7 @@ class CurriculumManager:
         "exploration",
         "mine_heavy",
     ]
-    
+
     # Stage-specific advancement thresholds for granular progression
     # Progressive thresholds that decrease with difficulty to ensure forward progress
     # while maintaining competence requirements
@@ -62,7 +62,7 @@ class CurriculumManager:
         "exploration": 0.45,
         "mine_heavy": 0.40,
     }
-    
+
     # Stage-specific minimum episodes for adaptive progression
     # Harder stages require more episodes to ensure sufficient learning
     # UPDATED: Increased minimums for more thorough training at each stage
@@ -75,11 +75,11 @@ class CurriculumManager:
         "exploration": 300,  # Increased from 200
         "mine_heavy": 300,   # Increased from 200
     }
-    
+
     # Early advancement threshold - if agent excels, can advance sooner
     EARLY_ADVANCEMENT_THRESHOLD = 0.90
     EARLY_ADVANCEMENT_MIN_EPISODES = 30
-    
+
     # Regression thresholds to prevent catastrophic forgetting
     # If performance drops too low, regress to previous stage
     REGRESSION_THRESHOLDS = {
@@ -90,7 +90,7 @@ class CurriculumManager:
         "exploration": 0.15,
         "mine_heavy": 0.15,
     }
-    
+
     REGRESSION_MIN_EPISODES = 200
 
     def __init__(
@@ -123,11 +123,11 @@ class CurriculumManager:
             enable_regression: If True, allow regressing to easier stages on poor performance (default: True)
         """
         self.dataset_path = Path(dataset_path)
-        
+
         # Global overrides (None = use stage-specific)
         self.global_advancement_threshold = advancement_threshold
         self.global_min_episodes = min_episodes_per_stage
-        
+
         self.performance_window = performance_window
         self.allow_stage_mixing = allow_stage_mixing
         self.base_mixing_ratio = mixing_ratio
@@ -155,7 +155,7 @@ class CurriculumManager:
         self.stage_episode_counts: Dict[str, int] = {
             stage: 0 for stage in self.CURRICULUM_ORDER
         }
-        
+
         # Track current adaptive mixing ratio per stage
         self.stage_mixing_ratios: Dict[str, float] = {
             stage: mixing_ratio for stage in self.CURRICULUM_ORDER
@@ -164,18 +164,20 @@ class CurriculumManager:
         # Load level data
         self.levels_by_stage = self._load_levels()
 
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info("Curriculum Manager Initialized (Granular Progression)")
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info(f"Starting stage: {self.current_stage}")
         logger.info("Adaptive features:")
         logger.info(f"  - Stage-specific thresholds: {not bool(advancement_threshold)}")
-        logger.info(f"  - Stage-specific min episodes: {not bool(min_episodes_per_stage)}")
+        logger.info(
+            f"  - Stage-specific min episodes: {not bool(min_episodes_per_stage)}"
+        )
         logger.info(f"  - Adaptive mixing: {enable_adaptive_mixing}")
         logger.info(f"  - Early advancement: {enable_early_advancement}")
         logger.info(f"  - Trend analysis: {enable_trend_analysis}")
         logger.info(f"Stage mixing: {'enabled' if allow_stage_mixing else 'disabled'}")
-        
+
         if not advancement_threshold:
             logger.info("\nStage-specific advancement thresholds:")
             for stage in self.CURRICULUM_ORDER:
@@ -186,7 +188,7 @@ class CurriculumManager:
         logger.info("\nLevels per stage:")
         for stage, levels in self.levels_by_stage.items():
             logger.info(f"  {stage}: {len(levels)} levels")
-        logger.info("="*60)
+        logger.info("=" * 60)
 
     def _load_levels(self) -> Dict[str, List[Dict[str, Any]]]:
         """Load levels from dataset organized by stage.
@@ -220,23 +222,23 @@ class CurriculumManager:
     def get_available_stages(self) -> List[str]:
         """Get list of all available curriculum stages up to current."""
         return self.CURRICULUM_ORDER[: self.current_stage_idx + 1]
-    
+
     def _get_adaptive_mixing_ratio(self, stage: str) -> float:
         """Get adaptive mixing ratio for a stage based on current performance.
-        
+
         In multi-environment setups with SubprocVecEnv:
         - Main process: Calculates ratio from current performance data
         - Subprocesses: Use cached ratio synced from main process (to avoid stale data)
-        
+
         Args:
             stage: Stage name
-            
+
         Returns:
             Adaptive mixing ratio (0.0 to 1.0)
         """
         if not self.enable_adaptive_mixing:
             return self.base_mixing_ratio
-        
+
         # If we have a cached ratio and no/minimal performance data,
         # we're likely in a subprocess - use the synced cached value
         # This prevents using stale performance data in subprocess copies
@@ -244,16 +246,16 @@ class CurriculumManager:
         if stage in self.stage_mixing_ratios and stage_perf_count < 5:
             # Use cached ratio (synced from main process)
             return self.stage_mixing_ratios[stage]
-        
+
         # Calculate fresh ratio from current performance (main process path)
         success_rate = self.get_stage_success_rate(stage)
-        
+
         # Adaptive mixing based on performance:
         # - Struggling (< 50%): 40% previous stage (more support)
         # - Learning (50-65%): 25% previous stage (moderate support)
         # - Competent (65-80%): 15% previous stage (less support)
         # - Mastering (> 80%): 5% previous stage (minimal support)
-        
+
         if success_rate < 0.50:
             adaptive_ratio = 0.40  # Need more support
         elif success_rate < 0.65:
@@ -262,10 +264,10 @@ class CurriculumManager:
             adaptive_ratio = 0.15  # Less support
         else:
             adaptive_ratio = 0.05  # Minimal support, almost ready to advance
-        
+
         # Cache for future calls and subprocess syncing
         self.stage_mixing_ratios[stage] = adaptive_ratio
-        
+
         return adaptive_ratio
 
     def sample_level(self) -> Optional[Dict[str, Any]]:
@@ -278,7 +280,7 @@ class CurriculumManager:
         if self.allow_stage_mixing and self.current_stage_idx > 0:
             # Get adaptive mixing ratio for current stage
             mixing_ratio = self._get_adaptive_mixing_ratio(self.current_stage)
-            
+
             # Mix current stage with previous stage using adaptive ratio
             if np.random.random() < mixing_ratio:
                 # Sample from previous stage
@@ -313,44 +315,44 @@ class CurriculumManager:
 
         logger.debug(f"Recording episode for stage: {stage}, success: {success}")
         self.stage_performance[stage].append(1 if success else 0)
-        
+
         # Defensive: ensure stage exists in episode counts
         if stage not in self.stage_episode_counts:
             logger.warning(f"Stage '{stage}' not in episode counts, initializing to 0")
             self.stage_episode_counts[stage] = 0
-        
+
         self.stage_episode_counts[stage] += 1
 
     def _calculate_performance_trend(self, stage: str) -> float:
         """Calculate performance improvement trend for a stage.
-        
+
         Compares recent performance to earlier performance to detect improvement.
-        
+
         Args:
             stage: Stage name
-            
+
         Returns:
             Trend value: positive = improving, negative = declining, 0 = stable
         """
         results = self.stage_performance.get(stage, deque())
-        
+
         if len(results) < 20:
             return 0.0  # Not enough data
-        
+
         # Split into first half and second half
         results_list = list(results)
         mid = len(results_list) // 2
         first_half = results_list[:mid]
         second_half = results_list[mid:]
-        
+
         first_avg = np.mean(first_half)
         second_avg = np.mean(second_half)
-        
+
         # Trend is the difference
         trend = second_avg - first_avg
-        
+
         return trend
-    
+
     def get_stage_performance(self, stage: str) -> Dict[str, Any]:
         """Get performance metrics for a stage with granular progression analysis.
 
@@ -361,10 +363,18 @@ class CurriculumManager:
             Dictionary with performance metrics (always includes all keys)
         """
         results = self.stage_performance.get(stage, deque())
-        
+
         # Get stage-specific thresholds or use global overrides
-        stage_threshold = self.global_advancement_threshold if self.global_advancement_threshold is not None else self.STAGE_THRESHOLDS.get(stage, 0.7)
-        stage_min_episodes = self.global_min_episodes if self.global_min_episodes is not None else self.STAGE_MIN_EPISODES.get(stage, 100)
+        stage_threshold = (
+            self.global_advancement_threshold
+            if self.global_advancement_threshold is not None
+            else self.STAGE_THRESHOLDS.get(stage, 0.7)
+        )
+        stage_min_episodes = (
+            self.global_min_episodes
+            if self.global_min_episodes is not None
+            else self.STAGE_MIN_EPISODES.get(stage, 100)
+        )
 
         if not results:
             return {
@@ -381,27 +391,35 @@ class CurriculumManager:
         success_rate = np.mean(results)
         episodes = self.stage_episode_counts.get(stage, 0)
         recent_episodes = len(results)
-        
+
         # Calculate performance trend
-        trend = self._calculate_performance_trend(stage) if self.enable_trend_analysis else 0.0
-        
-        # Standard advancement check
-        can_advance = (
-            success_rate >= stage_threshold
-            and episodes >= stage_min_episodes
+        trend = (
+            self._calculate_performance_trend(stage)
+            if self.enable_trend_analysis
+            else 0.0
         )
-        
+
+        # Standard advancement check
+        can_advance = success_rate >= stage_threshold and episodes >= stage_min_episodes
+
         # Early advancement check (high performers can advance sooner)
         can_early_advance = False
-        if self.enable_early_advancement and episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES:
+        if (
+            self.enable_early_advancement
+            and episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES
+        ):
             can_early_advance = success_rate >= self.EARLY_ADVANCEMENT_THRESHOLD
             # Note: Logging moved to check_advancement() to avoid duplicate logs
-        
+
         # Trend-based advancement: if showing strong improvement, can advance slightly earlier
         trend_bonus = False
         # SAFETY: Add hard minimum threshold to prevent premature advancement
         HARD_MINIMUM_THRESHOLD = 0.60  # Never advance below 60% success rate
-        if self.enable_trend_analysis and trend > 0.15 and episodes >= (stage_min_episodes * 0.9):
+        if (
+            self.enable_trend_analysis
+            and trend > 0.15
+            and episodes >= (stage_min_episodes * 0.9)
+        ):
             # Strong positive trend + 90% of required episodes (increased from 80% for safety)
             # Reduced from 5% to 2% margin for more conservative advancement
             if success_rate >= max(stage_threshold - 0.02, HARD_MINIMUM_THRESHOLD):
@@ -418,7 +436,9 @@ class CurriculumManager:
             "trend": trend,
             "can_early_advance": can_early_advance,
             "trend_bonus": trend_bonus,
-            "adaptive_mixing_ratio": self.stage_mixing_ratios.get(stage, self.base_mixing_ratio),
+            "adaptive_mixing_ratio": self.stage_mixing_ratios.get(
+                stage, self.base_mixing_ratio
+            ),
         }
 
     def get_stage_success_rate(self, stage: str) -> float:
@@ -437,7 +457,7 @@ class CurriculumManager:
 
     def check_advancement(self) -> bool:
         """Check if agent should advance to next curriculum stage.
-        
+
         Uses granular progression logic including:
         - Stage-specific thresholds
         - Early advancement for high performers
@@ -457,7 +477,7 @@ class CurriculumManager:
         if perf["can_advance"]:
             prev_stage = self.current_stage
             prev_stage_idx = self.current_stage_idx
-            
+
             # Log advancement criteria that were met (before advancing)
             if perf.get("can_early_advance", False):
                 logger.info(
@@ -469,7 +489,7 @@ class CurriculumManager:
                     f"[Trend Bonus] Stage '{prev_stage}': Strong improvement trend ({perf['trend']:+.2f}) "
                     f"with {perf['success_rate']:.1%} success, allowing advancement"
                 )
-            
+
             # Advance to next stage
             self.current_stage_idx += 1
             self.current_stage = self.CURRICULUM_ORDER[self.current_stage_idx]
@@ -479,10 +499,12 @@ class CurriculumManager:
             if perf.get("can_early_advance", False):
                 advancement_reason.append("Early Advancement (High Performance)")
             if perf.get("trend_bonus", False):
-                advancement_reason.append(f"Trend Bonus (Improvement: {perf['trend']:+.2f})")
+                advancement_reason.append(
+                    f"Trend Bonus (Improvement: {perf['trend']:+.2f})"
+                )
             if not advancement_reason:
                 advancement_reason.append("Standard Advancement")
-            
+
             reason_str = " + ".join(advancement_reason)
 
             logger.info("=" * 70)
@@ -500,7 +522,9 @@ class CurriculumManager:
             if self.enable_trend_analysis:
                 logger.info(f"  Performance trend: {perf['trend']:+.2f}")
             if self.enable_adaptive_mixing:
-                logger.info(f"  Final mixing ratio: {perf['adaptive_mixing_ratio']:.1%}")
+                logger.info(
+                    f"  Final mixing ratio: {perf['adaptive_mixing_ratio']:.1%}"
+                )
             logger.info("=" * 70)
 
             return True
@@ -509,40 +533,42 @@ class CurriculumManager:
 
     def check_regression(self) -> bool:
         """Check if agent should regress to previous curriculum stage.
-        
+
         Prevents catastrophic forgetting by regressing when performance drops
         too low on the current stage.
-        
+
         Returns:
             True if regressed to previous stage, False otherwise
         """
         if self.current_stage_idx == 0 or not self.enable_regression:
             return False
-        
+
         current_stage = self.current_stage
         results = self.stage_performance.get(current_stage, deque())
-        
+
         if len(results) < self.REGRESSION_MIN_EPISODES:
             return False
-        
+
         success_rate = float(np.mean(results))
         regression_threshold = self.REGRESSION_THRESHOLDS.get(current_stage, 0.2)
-        
+
         if success_rate < regression_threshold:
             prev_stage_idx = self.current_stage_idx - 1
             prev_stage = self.CURRICULUM_ORDER[prev_stage_idx]
-            
+
             logger.warning(
                 f"Curriculum regression: {current_stage} ({success_rate:.1%}) → {prev_stage} "
                 f"(threshold: {regression_threshold:.1%}, episodes: {len(results)})"
             )
-            
+
             self.current_stage_idx = prev_stage_idx
             self.current_stage = prev_stage
-            self.stage_performance[current_stage] = deque(maxlen=self.performance_window)
-            
+            self.stage_performance[current_stage] = deque(
+                maxlen=self.performance_window
+            )
+
             return True
-        
+
         return False
 
     def get_progress_summary(self) -> str:
@@ -557,7 +583,7 @@ class CurriculumManager:
             f"({self.current_stage_idx + 1}/{len(self.CURRICULUM_ORDER)})\n",
             "**Adaptive Features**: ",
         ]
-        
+
         features = []
         if self.enable_adaptive_mixing:
             features.append("Adaptive Mixing")
@@ -567,7 +593,7 @@ class CurriculumManager:
             features.append("Trend Analysis")
         lines.append(", ".join(features) if features else "None")
         lines.append("\n")
-        
+
         lines.append("\n### Performance by Stage\n")
 
         for i, stage in enumerate(self.CURRICULUM_ORDER):
@@ -590,24 +616,30 @@ class CurriculumManager:
                 if perf.get("can_early_advance", False):
                     lines.append("- ⚡ **Ready for Early Advancement!**")
                 elif perf.get("trend_bonus", False):
-                    lines.append(f"- 📈 **Trend Bonus Active** (improvement: {perf['trend']:+.2f})")
+                    lines.append(
+                        f"- 📈 **Trend Bonus Active** (improvement: {perf['trend']:+.2f})"
+                    )
                 elif perf["can_advance"]:
                     lines.append("- ✨ **Ready to Advance!**")
                 else:
-                    remaining = perf['min_episodes'] - perf["episodes"]
+                    remaining = perf["min_episodes"] - perf["episodes"]
                     if remaining > 0:
                         lines.append(f"- Episodes needed: {remaining}")
                     else:
-                        gap = perf['advancement_threshold'] - perf['success_rate']
+                        gap = perf["advancement_threshold"] - perf["success_rate"]
                         lines.append(f"- Success rate gap: {gap:.1%}")
-                
+
                 # Show adaptive metrics for current stage
                 if self.enable_adaptive_mixing and i > 0:
-                    mix_ratio = perf.get('adaptive_mixing_ratio', self.base_mixing_ratio)
-                    lines.append(f"- Adaptive Mixing: {mix_ratio:.1%} from previous stage")
-                
-                if self.enable_trend_analysis and perf['episodes'] >= 20:
-                    trend = perf.get('trend', 0.0)
+                    mix_ratio = perf.get(
+                        "adaptive_mixing_ratio", self.base_mixing_ratio
+                    )
+                    lines.append(
+                        f"- Adaptive Mixing: {mix_ratio:.1%} from previous stage"
+                    )
+
+                if self.enable_trend_analysis and perf["episodes"] >= 20:
+                    trend = perf.get("trend", 0.0)
                     trend_indicator = "📈" if trend > 0 else "📉" if trend < 0 else "➡️"
                     lines.append(f"- Performance Trend: {trend_indicator} {trend:+.2f}")
 
@@ -657,7 +689,7 @@ class CurriculumManager:
             self.stage_performance[stage] = deque(
                 perf_list, maxlen=self.performance_window
             )
-        
+
         # Restore adaptive mixing ratios if available
         if "stage_mixing_ratios" in state:
             self.stage_mixing_ratios = state["stage_mixing_ratios"]
