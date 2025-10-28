@@ -109,7 +109,7 @@ class PlayerFrameCNN(nn.Module):
 
 
 class GlobalViewCNN(nn.Module):
-    """CNN for global view processing with dynamic frame stacking support."""
+    """CNN for global view processing (single frame only, not stacked)."""
 
     def __init__(self, visual_config):
         super().__init__()
@@ -164,16 +164,19 @@ class GlobalViewCNN(nn.Module):
         )
 
     def forward(self, x):
-        """Forward pass with dynamic input channel handling."""
-        # Handle different input shapes similar to PlayerFrameCNN
+        """Forward pass for single-frame global view (not stacked).
+
+        Handles single frames only:
+        - [batch, H, W, 1] -> [batch, 1, H, W] after channel reordering
+        - [batch, H, W] -> [batch, 1, H, W]
+        """
+        # Handle single frame input
         if x.dim() == 4 and x.shape[-1] == 1:
             # [batch, H, W, 1] -> [batch, 1, H, W]
             x = x.permute(0, 3, 1, 2).contiguous()
-        elif x.dim() == 5:
-            # [batch, stack_size, H, W, C] -> [batch, stack_size*C, H, W]
-            batch_size, stack_size, H, W, C = x.shape
-            x = x.permute(0, 1, 4, 2, 3).contiguous()
-            x = x.view(batch_size, stack_size * C, H, W)
+        elif x.dim() == 3:
+            # [batch, H, W] -> [batch, 1, H, W]
+            x = x.unsqueeze(1)
 
         # Build layers on first forward pass
         if self.conv_layers is None:
@@ -336,7 +339,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         return PlayerFrameCNN(visual_config)
 
     def _create_global_cnn(self, visual_config) -> nn.Module:
-        """Create 2D CNN for global view processing with frame stacking support."""
+        """Create 2D CNN for global view processing (single frame only, not stacked)."""
         return GlobalViewCNN(visual_config)
 
     def _create_graph_encoder(self, graph_config) -> nn.Module:
@@ -470,17 +473,11 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             )
             features.append(player_frame_features)
 
-        # Process global view
+        # Process global view (single frame only, not stacked)
         if self.global_cnn is not None and "global_view" in observations:
             global_obs = observations["global_view"]
-            # Ensure correct format: [batch, channels, height, width]
-            if global_obs.dim() == 4:
-                # If [batch, H, W, C], permute to [batch, C, H, W]
-                if global_obs.shape[-1] <= 3:  # channels is last dimension
-                    global_obs = global_obs.permute(0, 3, 1, 2)
-            elif global_obs.dim() == 3:
-                # [batch, H, W] -> [batch, 1, H, W]
-                global_obs = global_obs.unsqueeze(1)
+            # Global view should always be a single frame: [batch, H, W, C] or [batch, H, W]
+            # The GlobalViewCNN will handle the channel dimension conversion
             global_features = self.global_cnn(global_obs.float() / 255.0)
             features.append(global_features)
 
