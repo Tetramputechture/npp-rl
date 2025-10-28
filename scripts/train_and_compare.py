@@ -91,14 +91,16 @@ def parse_args():
         help="Directory containing replay data for BC",
     )
     parser.add_argument(
-        "--bc-epochs", 
-        type=int, 
+        "--bc-epochs",
+        type=int,
         default=30,  # Updated from 10 - but reduced from previous 50 to avoid overfitting
-        help="Number of BC training epochs (light initialization, avoid overfitting)"
+        help="Number of BC training epochs (light initialization, avoid overfitting)",
     )
     parser.add_argument(
-        "--bc-batch-size", type=int, default=128,  # Updated from 64 for faster convergence
-        help="BC training batch size"
+        "--bc-batch-size",
+        type=int,
+        default=128,  # Updated from 64 for faster convergence
+        help="BC training batch size",
     )
 
     # Training options
@@ -195,28 +197,27 @@ def parse_args():
     parser.add_argument(
         "--curriculum-threshold",
         type=float,
-        default=0.5,  # Updated from 0.7 - previous threshold was too aggressive
+        default=0.5,
         help="Success rate threshold for curriculum advancement (lowered based on analysis)",
     )
     parser.add_argument(
         "--curriculum-min-episodes",
         type=int,
-        default=50,  # Updated from 100 - previous value never reached in training
+        default=50,
         help="Minimum episodes per curriculum stage",
     )
 
     # Reward shaping options
-    # UPDATED Oct 28, 2025: Changed default to enable PBRS (critical for learning)
     parser.add_argument(
         "--enable-pbrs",
         action="store_true",
-        default=True,  # Changed from False - PBRS is critical for effective learning
+        default=False,
         help="Enable Potential-Based Reward Shaping for dense rewards (RECOMMENDED)",
     )
     parser.add_argument(
         "--pbrs-gamma",
         type=float,
-        default=0.995,  # Updated from 0.99 to match PPO gamma
+        default=0.995,
         help="Discount factor for PBRS (must match PPO gamma for policy invariance)",
     )
     parser.add_argument(
@@ -263,11 +264,10 @@ def parse_args():
     )
 
     # Frame stacking options
-    # UPDATED Oct 28, 2025: Enable visual frame stacking by default for temporal awareness
     parser.add_argument(
         "--enable-visual-frame-stacking",
         action="store_true",
-        default=True,  # Changed from False - enables velocity/momentum perception
+        default=False,
         help="Enable frame stacking for visual observations (RECOMMENDED for temporal info)",
     )
     parser.add_argument(
@@ -292,9 +292,9 @@ def parse_args():
     parser.add_argument(
         "--frame-stack-padding",
         type=str,
-        default="replicate",  # Changed from "zero" - better than zero padding
-        choices=["zero", "repeat", "replicate"],  # Added "replicate" option
-        help="Padding type for initial frames (replicate recommended)",
+        default="zero",
+        choices=["zero", "repeat"],
+        help="Padding type for initial frames",
     )
 
     # Video recording options
@@ -476,7 +476,7 @@ def train_architecture(
             )
             ppo_kwargs["batch_size"] = hardware_profile.batch_size
             ppo_kwargs["n_steps"] = hardware_profile.n_steps
-            
+
             # Learning rate: Apply annealing if requested
             base_lr = hardware_profile.learning_rate
             if args.enable_lr_annealing:
@@ -486,7 +486,7 @@ def train_architecture(
             else:
                 ppo_kwargs["learning_rate"] = base_lr
                 logger.info(f"  Learning rate: {base_lr:.2e} (constant)")
-                
+
             logger.info(f"  Batch size: {ppo_kwargs['batch_size']}")
             logger.info(f"  N steps: {ppo_kwargs['n_steps']}")
         elif args.initial_lr is not None:
@@ -740,7 +740,11 @@ def train_worker(
                     # Upload ALL artifacts to S3 if configured
                     if s3_uploader and result.get("status") != "failed":
                         output_dir = Path(result["output_dir"])
-                        s3_prefix = f"{arch_name}/{condition_name}" if condition_name else arch_name
+                        s3_prefix = (
+                            f"{arch_name}/{condition_name}"
+                            if condition_name
+                            else arch_name
+                        )
 
                         logger.info(f"Uploading artifacts to S3 for {s3_prefix}")
 
@@ -798,7 +802,9 @@ def train_worker(
                                 f"{s3_prefix}/route_visualizations",
                                 pattern="*.png",
                             )
-                            logger.info(f"  ✓ Uploaded {count} route visualization images")
+                            logger.info(
+                                f"  ✓ Uploaded {count} route visualization images"
+                            )
 
                         # 7. Upload training config
                         training_config = output_dir / "training_config.json"
@@ -840,8 +846,10 @@ def train_worker(
                 for arch_name in args.architectures:
                     pretrain_dir = exp_dir / arch_name / "pretrain"
                     if pretrain_dir.exists() and pretrain_dir.is_dir():
-                        logger.info(f"Uploading pretraining artifacts for {arch_name}...")
-                        
+                        logger.info(
+                            f"Uploading pretraining artifacts for {arch_name}..."
+                        )
+
                         # Upload pretrain checkpoint
                         pretrain_ckpt = pretrain_dir / "bc_checkpoint.pt"
                         if pretrain_ckpt.exists():
@@ -849,7 +857,7 @@ def train_worker(
                                 str(pretrain_ckpt),
                                 f"{arch_name}/pretrain/bc_checkpoint.pt",
                             )
-                        
+
                         # Upload pretrain tensorboard logs
                         pretrain_tb = pretrain_dir / "tensorboard"
                         if pretrain_tb.exists():
@@ -857,12 +865,16 @@ def train_worker(
                                 str(pretrain_tb),
                                 f"{arch_name}/pretrain/tensorboard",
                             )
-                            logger.info(f"  ✓ Uploaded {count} pretraining TensorBoard files for {arch_name}")
+                            logger.info(
+                                f"  ✓ Uploaded {count} pretraining TensorBoard files for {arch_name}"
+                            )
 
                 # Upload final manifest
                 s3_uploader.save_manifest(str(exp_dir / "s3_manifest.json"))
                 logger.info("  ✓ Uploaded S3 manifest")
-                logger.info(f"All artifacts uploaded to s3://{s3_bucket}/{s3_prefix}/{experiment_name}")
+                logger.info(
+                    f"All artifacts uploaded to s3://{s3_bucket}/{s3_prefix}/{experiment_name}"
+                )
 
     finally:
         # CRITICAL: Clean up distributed training
