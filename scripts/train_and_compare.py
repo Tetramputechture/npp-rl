@@ -201,6 +201,50 @@ def parse_args():
         help="Minimum episodes per curriculum stage",
     )
 
+    # Reward shaping options
+    parser.add_argument(
+        "--enable-pbrs",
+        action="store_true",
+        help="Enable Potential-Based Reward Shaping for dense rewards",
+    )
+    parser.add_argument(
+        "--pbrs-gamma",
+        type=float,
+        default=0.99,
+        help="Discount factor for PBRS (default: 0.99)",
+    )
+    parser.add_argument(
+        "--enable-mine-avoidance-reward",
+        action="store_true",
+        default=True,
+        help="Enable mine avoidance component in PBRS (default: True)",
+    )
+
+    # Curriculum safety options
+    parser.add_argument(
+        "--disable-trend-advancement",
+        action="store_true",
+        help="Disable trend-based curriculum advancement for more conservative progression",
+    )
+    parser.add_argument(
+        "--disable-early-advancement",
+        action="store_true",
+        help="Disable early advancement even with high performance",
+    )
+
+    # Learning rate options
+    parser.add_argument(
+        "--enable-lr-annealing",
+        action="store_true",
+        help="Enable learning rate annealing (linear decay to 0) for better convergence",
+    )
+    parser.add_argument(
+        "--initial-lr",
+        type=float,
+        default=None,
+        help="Initial learning rate (if not using hardware profile). Default: 3e-4",
+    )
+
     # S3 options
     parser.add_argument(
         "--s3-bucket", type=str, default=None, help="S3 bucket for artifact upload"
@@ -371,6 +415,8 @@ def train_architecture(
                 "starting_stage": args.curriculum_start_stage,
                 "advancement_threshold": args.curriculum_threshold,
                 "min_episodes_per_stage": args.curriculum_min_episodes,
+                "enable_trend_analysis": not args.disable_trend_advancement,
+                "enable_early_advancement": not args.disable_early_advancement,
             }
 
         # Calculate environments per GPU
@@ -409,6 +455,9 @@ def train_architecture(
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
             frame_stack_config=frame_stack_config,
+            enable_pbrs=args.enable_pbrs,
+            pbrs_gamma=args.pbrs_gamma,
+            enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
         )
 
         # Build PPO hyperparameters from hardware profile
@@ -419,10 +468,28 @@ def train_architecture(
             )
             ppo_kwargs["batch_size"] = hardware_profile.batch_size
             ppo_kwargs["n_steps"] = hardware_profile.n_steps
-            ppo_kwargs["learning_rate"] = hardware_profile.learning_rate
+            
+            # Learning rate: Apply annealing if requested
+            base_lr = hardware_profile.learning_rate
+            if args.enable_lr_annealing:
+                # Linear annealing: lr(t) = initial_lr * (1 - t/T) where t=progress, T=1
+                ppo_kwargs["learning_rate"] = lambda f: f * base_lr
+                logger.info(f"  Learning rate: {base_lr:.2e} (with linear annealing)")
+            else:
+                ppo_kwargs["learning_rate"] = base_lr
+                logger.info(f"  Learning rate: {base_lr:.2e} (constant)")
+                
             logger.info(f"  Batch size: {ppo_kwargs['batch_size']}")
             logger.info(f"  N steps: {ppo_kwargs['n_steps']}")
-            logger.info(f"  Learning rate: {ppo_kwargs['learning_rate']:.2e}")
+        elif args.initial_lr is not None:
+            # Manual learning rate provided
+            base_lr = args.initial_lr
+            if args.enable_lr_annealing:
+                ppo_kwargs["learning_rate"] = lambda f: f * base_lr
+                logger.info(f"Learning rate: {base_lr:.2e} (with linear annealing)")
+            else:
+                ppo_kwargs["learning_rate"] = base_lr
+                logger.info(f"Learning rate: {base_lr:.2e} (constant)")
 
         # Setup model
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs)

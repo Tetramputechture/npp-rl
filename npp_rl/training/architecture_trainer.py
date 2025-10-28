@@ -102,6 +102,9 @@ class ArchitectureTrainer:
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
         frame_stack_config: Optional[Dict[str, Any]] = None,
+        enable_pbrs: bool = False,
+        pbrs_gamma: float = 0.99,
+        enable_mine_avoidance_reward: bool = True,
     ):
         """Initialize architecture trainer.
 
@@ -125,6 +128,9 @@ class ArchitectureTrainer:
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str
+            enable_pbrs: Enable Potential-Based Reward Shaping
+            pbrs_gamma: Discount factor for PBRS
+            enable_mine_avoidance_reward: Enable mine avoidance component in PBRS
         """
         self.architecture_config = architecture_config
         self.train_dataset_path = Path(train_dataset_path)
@@ -139,6 +145,9 @@ class ArchitectureTrainer:
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
         self.frame_stack_config = frame_stack_config or {}
+        self.enable_pbrs = enable_pbrs
+        self.pbrs_gamma = pbrs_gamma
+        self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -156,6 +165,10 @@ class ArchitectureTrainer:
         logger.info(f"Device: cuda:{device_id}")
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
+        logger.info(f"PBRS enabled: {enable_pbrs}")
+        if enable_pbrs:
+            logger.info(f"  PBRS gamma: {pbrs_gamma}")
+            logger.info(f"  Mine avoidance reward: {enable_mine_avoidance_reward}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
 
@@ -456,10 +469,12 @@ class ArchitectureTrainer:
         # The actual model will be created when environment is set up
 
         # Set up policy kwargs with architecture config
+        # CRITICAL FIX: Add Adam epsilon to match PPO standard (1e-5, not PyTorch default 1e-8)
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
             "features_extractor_kwargs": {"config": self.architecture_config},
             "net_arch": {"pi": [256, 256, 128], "vf": [256, 256, 128]},
+            "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
         }
 
         # Set policy class based on hierarchical PPO flag
@@ -520,6 +535,9 @@ class ArchitectureTrainer:
                 default_batch_size = base_batch_size
                 default_learning_rate = base_learning_rate
 
+        # CRITICAL FIX: Tighter value function clipping for stability
+        # Previous: 10.0 (too loose, caused value loss to increase 56%)
+        # New: 1.0 (prevents large value updates, improves explained variance)
         default_hyperparams = {
             "learning_rate": default_learning_rate,
             "n_steps": 2048,
@@ -527,7 +545,7 @@ class ArchitectureTrainer:
             "gamma": 0.99,
             "gae_lambda": 0.95,
             "clip_range": 0.2,
-            "clip_range_vf": 10.0,
+            "clip_range_vf": 1.0,  # CHANGED: 10.0 → 1.0 for value function stability
             "ent_coef": 0.01,
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
@@ -609,6 +627,11 @@ class ArchitectureTrainer:
         # Capture frame stack config
         frame_stack_cfg = self.frame_stack_config
 
+        # Capture PBRS config
+        enable_pbrs = self.enable_pbrs
+        pbrs_gamma = self.pbrs_gamma
+        enable_mine_avoidance = self.enable_mine_avoidance_reward
+
         def make_env(rank: int, use_curr: bool, curr_mgr, visualize: bool = False):
             def _init():
                 logger.info(f"[Env {rank}] Creating NppEnvironment instance...")
@@ -646,6 +669,22 @@ class ArchitectureTrainer:
 
                 env = PositionTrackingWrapper(env)
                 logger.info(f"[Env {rank}] ✓ Position tracking enabled")
+
+                # Wrap with PBRS (Potential-Based Reward Shaping) if enabled
+                # This provides dense reward signals for faster learning
+                if enable_pbrs:
+                    from npp_rl.wrappers import HierarchicalRewardWrapper
+
+                    env = HierarchicalRewardWrapper(
+                        env,
+                        enable_pbrs=True,
+                        pbrs_gamma=pbrs_gamma,
+                        enable_mine_avoidance=enable_mine_avoidance,
+                        log_reward_components=True,
+                    )
+                    logger.info(
+                        f"[Env {rank}] ✓ PBRS enabled (gamma={pbrs_gamma}, mine_avoidance={enable_mine_avoidance})"
+                    )
 
                 # Wrap with curriculum if enabled
                 # IMPORTANT: Disable local tracking when used with VecEnv

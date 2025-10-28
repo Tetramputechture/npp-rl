@@ -65,14 +65,15 @@ class CurriculumManager:
     
     # Stage-specific minimum episodes for adaptive progression
     # Harder stages require more episodes to ensure sufficient learning
+    # UPDATED: Increased minimums for more thorough training at each stage
     STAGE_MIN_EPISODES = {
-        "simplest": 100,
-        "simpler": 100,
-        "simple": 100,
-        "medium": 150,
-        "complex": 200,
-        "exploration": 200,
-        "mine_heavy": 200,
+        "simplest": 200,  # Increased from 100 - ensure strong foundation
+        "simpler": 200,   # Increased from 100
+        "simple": 200,    # Increased from 100
+        "medium": 250,    # Increased from 150
+        "complex": 300,   # Increased from 200
+        "exploration": 300,  # Increased from 200
+        "mine_heavy": 300,   # Increased from 200
     }
     
     # Early advancement threshold - if agent excels, can advance sooner
@@ -398,9 +399,12 @@ class CurriculumManager:
         
         # Trend-based advancement: if showing strong improvement, can advance slightly earlier
         trend_bonus = False
-        if self.enable_trend_analysis and trend > 0.15 and episodes >= (stage_min_episodes * 0.8):
-            # Strong positive trend + 80% of required episodes
-            if success_rate >= stage_threshold - 0.05:  # Within 5% of threshold
+        # SAFETY: Add hard minimum threshold to prevent premature advancement
+        HARD_MINIMUM_THRESHOLD = 0.60  # Never advance below 60% success rate
+        if self.enable_trend_analysis and trend > 0.15 and episodes >= (stage_min_episodes * 0.9):
+            # Strong positive trend + 90% of required episodes (increased from 80% for safety)
+            # Reduced from 5% to 2% margin for more conservative advancement
+            if success_rate >= max(stage_threshold - 0.02, HARD_MINIMUM_THRESHOLD):
                 trend_bonus = True
                 # Note: Logging moved to check_advancement() to avoid duplicate logs
 
