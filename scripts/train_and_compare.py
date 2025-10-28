@@ -91,10 +91,14 @@ def parse_args():
         help="Directory containing replay data for BC",
     )
     parser.add_argument(
-        "--bc-epochs", type=int, default=10, help="Number of BC training epochs"
+        "--bc-epochs", 
+        type=int, 
+        default=30,  # Updated from 10 - but reduced from previous 50 to avoid overfitting
+        help="Number of BC training epochs (light initialization, avoid overfitting)"
     )
     parser.add_argument(
-        "--bc-batch-size", type=int, default=64, help="BC training batch size"
+        "--bc-batch-size", type=int, default=128,  # Updated from 64 for faster convergence
+        help="BC training batch size"
     )
 
     # Training options
@@ -191,27 +195,29 @@ def parse_args():
     parser.add_argument(
         "--curriculum-threshold",
         type=float,
-        default=0.7,
-        help="Success rate threshold for curriculum advancement",
+        default=0.5,  # Updated from 0.7 - previous threshold was too aggressive
+        help="Success rate threshold for curriculum advancement (lowered based on analysis)",
     )
     parser.add_argument(
         "--curriculum-min-episodes",
         type=int,
-        default=100,
+        default=50,  # Updated from 100 - previous value never reached in training
         help="Minimum episodes per curriculum stage",
     )
 
     # Reward shaping options
+    # UPDATED Oct 28, 2025: Changed default to enable PBRS (critical for learning)
     parser.add_argument(
         "--enable-pbrs",
         action="store_true",
-        help="Enable Potential-Based Reward Shaping for dense rewards",
+        default=True,  # Changed from False - PBRS is critical for effective learning
+        help="Enable Potential-Based Reward Shaping for dense rewards (RECOMMENDED)",
     )
     parser.add_argument(
         "--pbrs-gamma",
         type=float,
-        default=0.99,
-        help="Discount factor for PBRS (default: 0.99)",
+        default=0.995,  # Updated from 0.99 to match PPO gamma
+        help="Discount factor for PBRS (must match PPO gamma for policy invariance)",
     )
     parser.add_argument(
         "--enable-mine-avoidance-reward",
@@ -257,10 +263,12 @@ def parse_args():
     )
 
     # Frame stacking options
+    # UPDATED Oct 28, 2025: Enable visual frame stacking by default for temporal awareness
     parser.add_argument(
         "--enable-visual-frame-stacking",
         action="store_true",
-        help="Enable frame stacking for visual observations (player_frame, global_view)",
+        default=True,  # Changed from False - enables velocity/momentum perception
+        help="Enable frame stacking for visual observations (RECOMMENDED for temporal info)",
     )
     parser.add_argument(
         "--visual-stack-size",
@@ -284,9 +292,9 @@ def parse_args():
     parser.add_argument(
         "--frame-stack-padding",
         type=str,
-        default="zero",
-        choices=["zero", "repeat"],
-        help="Padding type for initial frames (zero or repeat)",
+        default="replicate",  # Changed from "zero" - better than zero padding
+        choices=["zero", "repeat", "replicate"],  # Added "replicate" option
+        help="Padding type for initial frames (replicate recommended)",
     )
 
     # Video recording options
