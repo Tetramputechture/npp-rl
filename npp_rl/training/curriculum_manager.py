@@ -53,27 +53,31 @@ class CurriculumManager:
     # Stage-specific advancement thresholds for granular progression
     # Progressive thresholds that decrease with difficulty to ensure forward progress
     # while maintaining competence requirements
+    # UPDATED Oct 28, 2025: Lowered thresholds based on training analysis
+    # Previous thresholds were too aggressive, causing agent to get stuck at simple stage
     STAGE_THRESHOLDS = {
-        "simplest": 0.80,
-        "simpler": 0.70,
-        "simple": 0.60,
-        "medium": 0.55,
-        "complex": 0.50,
-        "exploration": 0.45,
-        "mine_heavy": 0.40,
+        "simplest": 0.70,  # Reduced from 0.80
+        "simpler": 0.60,   # Reduced from 0.70
+        "simple": 0.50,    # Reduced from 0.60 - CRITICAL: agent was stuck here at 14%
+        "medium": 0.45,    # Reduced from 0.55
+        "complex": 0.40,   # Reduced from 0.50
+        "exploration": 0.35,  # Reduced from 0.45
+        "mine_heavy": 0.30,   # Reduced from 0.40
     }
 
     # Stage-specific minimum episodes for adaptive progression
     # Harder stages require more episodes to ensure sufficient learning
-    # UPDATED: Increased minimums for more thorough training at each stage
+    # UPDATED Oct 28, 2025: Reduced minimums to allow faster progression
+    # Previous minimums (200-300) were never reached in 1M timesteps
+    # With 10M timesteps and better rewards, these should be achievable
     STAGE_MIN_EPISODES = {
-        "simplest": 200,  # Increased from 100 - ensure strong foundation
-        "simpler": 200,   # Increased from 100
-        "simple": 200,    # Increased from 100
-        "medium": 250,    # Increased from 150
-        "complex": 300,   # Increased from 200
-        "exploration": 300,  # Increased from 200
-        "mine_heavy": 300,   # Increased from 200
+        "simplest": 50,   # Reduced from 200 - quick validation of basics
+        "simpler": 50,    # Reduced from 200
+        "simple": 75,     # Reduced from 200 - agent got stuck here
+        "medium": 100,    # Reduced from 250
+        "complex": 150,   # Reduced from 300
+        "exploration": 150,  # Reduced from 300
+        "mine_heavy": 200,   # Reduced from 300 - hardest stage needs more
     }
 
     # Early advancement threshold - if agent excels, can advance sooner
