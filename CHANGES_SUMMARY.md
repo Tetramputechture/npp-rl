@@ -4,6 +4,8 @@
 **Branch:** `rl-training-improvements`  
 **Status:** ✅ Complete and pushed
 
+> **Note:** This document is the master reference for all changes. Redundant documentation files (ANALYSIS_SUMMARY.md, IMPROVEMENTS_README.md, improved_training_config.json) have been removed. All improvements are now embedded in the default configuration.
+
 ---
 
 ## Overview
@@ -139,29 +141,7 @@ STAGE_MIN_EPISODES = {
 
 ---
 
-### 3. New Configuration Files
-
-#### `configs/improved_training_config.json`
-**Status:** NEW FILE
-
-Ready-to-use configuration with all improvements:
-- enable_pbrs: true
-- total_timesteps: 10,000,000
-- enable_visual_frame_stacking: true
-- bc_epochs: 30
-- curriculum_threshold: 0.5
-- All optimized settings
-
-**Usage:**
-```bash
-python scripts/train_and_compare.py --config configs/improved_training_config.json
-```
-
-**Impact:** HIGH - Turnkey solution for improved training.
-
----
-
-### 4. Documentation Added
+### 3. Documentation Added
 
 #### `docs/TRAINING_ANALYSIS_2025-10-28.md`
 **Status:** NEW FILE (600+ lines, 15 sections)
@@ -185,24 +165,6 @@ Comprehensive analysis covering:
 
 **Impact:** CRITICAL - Complete diagnostic and recommendations.
 
----
-
-#### `docs/IMPROVEMENTS_README.md`
-**Status:** NEW FILE (400+ lines)
-
-Implementation guide covering:
-- Summary of issues and changes
-- Expected results by training phase
-- Usage instructions
-- Comparison to baseline metrics
-- Validation plan
-- Troubleshooting guide
-- Future improvement roadmap
-
-**Impact:** HIGH - User-facing guide for using improvements.
-
----
-
 #### `docs/training_analysis_summary.png`
 **Status:** NEW FILE (visualization)
 
@@ -221,21 +183,6 @@ Implementation guide covering:
 
 ---
 
-#### `ANALYSIS_SUMMARY.md`
-**Status:** NEW FILE (executive summary)
-
-High-level overview with:
-- Quick problem statement
-- Root causes identified
-- Solutions implemented
-- Expected results
-- Success criteria
-- Contact information
-
-**Impact:** MEDIUM - Executive-level overview.
-
----
-
 ## Configuration Tracking
 
 ### Where Training Configs Are Set
@@ -243,48 +190,41 @@ High-level overview with:
 1. **Command-line arguments** (`scripts/train_and_compare.py`)
    - Default values defined in argparse
    - Users can override any parameter
-   - ✅ NOW UPDATED with improved defaults
+   - ✅ UPDATED with improved defaults
 
-2. **JSON config files** (`configs/`)
-   - Can be loaded via `--config path/to/config.json`
-   - ✅ NEW: `configs/improved_training_config.json`
-
-3. **Hyperparameter files** (`npp_rl/agents/hyperparameters/`)
+2. **Hyperparameter files** (`npp_rl/agents/hyperparameters/`)
    - PPO-specific settings
    - ✅ UPDATED: `ppo_hyperparameters.py`
 
-4. **Curriculum manager** (`npp_rl/training/curriculum_manager.py`)
+3. **Curriculum manager** (`npp_rl/training/curriculum_manager.py`)
    - Stage thresholds and episode requirements
    - ✅ UPDATED: Lower thresholds, fewer episodes
 
-5. **Reward constants** (`nclone/nclone/gym_environment/reward_calculation/`)
+4. **Reward constants** (`nclone/nclone/gym_environment/reward_calculation/`)
    - PBRS gamma and weights
    - ✅ UPDATED: `reward_constants.py` (gamma sync)
 
-### How to Use Improved Config
+### How to Use Improved Settings
 
-**Option 1: Use improved JSON config (RECOMMENDED)**
+**Use updated defaults (RECOMMENDED)**
 ```bash
-python scripts/train_and_compare.py --config configs/improved_training_config.json
-```
-
-**Option 2: Use updated defaults (also good)**
-```bash
-# Just specify required arguments - defaults now improved
+# Just specify required arguments - defaults now include all improvements
 python scripts/train_and_compare.py \
     --experiment-name my_experiment \
     --architectures mlp_baseline \
     --train-dataset ../nclone/datasets/train \
-    --test-dataset ../nclone/datasets/test
+    --test-dataset ../nclone/datasets/test \
+    --use-curriculum
 ```
 
-**Option 3: Override specific parameters**
+**Override specific parameters if needed**
 ```bash
 python scripts/train_and_compare.py \
     --experiment-name my_experiment \
     --architectures mlp_baseline \
     --train-dataset ../nclone/datasets/train \
     --test-dataset ../nclone/datasets/test \
+    --use-curriculum \
     --total-timesteps 20000000 \
     --curriculum-threshold 0.4  # Even more permissive
 ```
@@ -327,9 +267,12 @@ cat npp_rl/training/curriculum_manager.py | grep -A10 "STAGE_THRESHOLDS"
 ### Quick Validation (2M steps)
 ```bash
 python scripts/train_and_compare.py \
-    --config configs/improved_training_config.json \
-    --total-timesteps 2000000 \
-    --experiment-name quick_validation
+    --experiment-name quick_validation \
+    --architectures mlp_baseline \
+    --train-dataset ../nclone/datasets/train \
+    --test-dataset ../nclone/datasets/test \
+    --use-curriculum \
+    --total-timesteps 2000000
 ```
 
 **Success Criteria:**
@@ -341,8 +284,12 @@ python scripts/train_and_compare.py \
 ### Full Training (10M steps)
 ```bash
 python scripts/train_and_compare.py \
-    --config configs/improved_training_config.json \
-    --experiment-name full_training
+    --experiment-name full_training_improved \
+    --architectures mlp_baseline \
+    --train-dataset ../nclone/datasets/train \
+    --test-dataset ../nclone/datasets/test \
+    --use-curriculum \
+    --total-timesteps 10000000
 ```
 
 **Success Criteria:**
