@@ -27,13 +27,19 @@ from npp_rl.models.hgt_factory import create_hgt_encoder
 
 
 class PlayerFrameCNN(nn.Module):
-    """CNN for player frame processing with dynamic frame stacking support."""
+    """CNN for player frame processing with dynamic frame stacking support.
 
-    def __init__(self, visual_config):
+    Uses eager initialization to ensure layers exist when loading pretrained weights.
+    Supports dynamic rebuilding if input channels change (e.g., frame stacking configuration).
+    """
+
+    def __init__(self, visual_config, default_in_channels: int = 1):
         super().__init__()
         self.visual_config = visual_config
-        self.conv_layers = None
-        self.fc = None
+        self.current_in_channels = default_in_channels
+
+        # Build layers immediately during initialization
+        self._build_layers(default_in_channels)
 
     def _build_layers(self, in_channels: int):
         """Build convolutional layers based on input channel count."""
@@ -80,9 +86,14 @@ class PlayerFrameCNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
         )
+        self.current_in_channels = in_channels
 
     def forward(self, x):
-        """Forward pass with dynamic input channel handling."""
+        """Forward pass with dynamic input channel handling.
+
+        Handles automatic rebuilding if input channels change (e.g., frame stacking
+        configuration differs between BC pretraining and RL training).
+        """
         # Handle different input shapes:
         # Single frame: [batch, H, W, C] or [batch, C, H, W]
         # Stacked frames: [batch, stack_size, H, W, C]
@@ -96,9 +107,16 @@ class PlayerFrameCNN(nn.Module):
             x = x.permute(0, 1, 4, 2, 3).contiguous()
             x = x.view(batch_size, stack_size * C, H, W)
 
-        # Build layers on first forward pass
-        if self.conv_layers is None:
-            in_channels = x.shape[1]
+        # Rebuild layers if input channels changed (e.g., different frame stacking)
+        in_channels = x.shape[1]
+        if in_channels != self.current_in_channels:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"PlayerFrameCNN input channels changed from {self.current_in_channels} to {in_channels}. "
+                f"Rebuilding layers (weights will be reset!)."
+            )
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
             self.fc = self.fc.to(x.device)
@@ -109,13 +127,18 @@ class PlayerFrameCNN(nn.Module):
 
 
 class GlobalViewCNN(nn.Module):
-    """CNN for global view processing (single frame only, not stacked)."""
+    """CNN for global view processing (single frame only, not stacked).
 
-    def __init__(self, visual_config):
+    Uses eager initialization to ensure layers exist when loading pretrained weights.
+    """
+
+    def __init__(self, visual_config, default_in_channels: int = 1):
         super().__init__()
         self.visual_config = visual_config
-        self.conv_layers = None
-        self.fc = None
+        self.current_in_channels = default_in_channels
+
+        # Build layers immediately during initialization
+        self._build_layers(default_in_channels)
 
     def _build_layers(self, in_channels: int):
         """Build convolutional layers based on input channel count."""
@@ -162,6 +185,7 @@ class GlobalViewCNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
         )
+        self.current_in_channels = in_channels
 
     def forward(self, x):
         """Forward pass for single-frame global view (not stacked).
@@ -178,9 +202,16 @@ class GlobalViewCNN(nn.Module):
             # [batch, H, W] -> [batch, 1, H, W]
             x = x.unsqueeze(1)
 
-        # Build layers on first forward pass
-        if self.conv_layers is None:
-            in_channels = x.shape[1]
+        # Rebuild layers if input channels changed (should be rare for global view)
+        in_channels = x.shape[1]
+        if in_channels != self.current_in_channels:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"GlobalViewCNN input channels changed from {self.current_in_channels} to {in_channels}. "
+                f"Rebuilding layers (weights will be reset!)."
+            )
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
             self.fc = self.fc.to(x.device)
@@ -191,14 +222,21 @@ class GlobalViewCNN(nn.Module):
 
 
 class StateMLP(nn.Module):
-    """MLP for game state processing with dynamic state stacking support."""
+    """MLP for game state processing with dynamic state stacking support.
+
+    Uses eager initialization to ensure layers exist when loading pretrained weights.
+    Supports dynamic rebuilding if input dimensions change (e.g., state stacking configuration).
+    """
 
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
         self.base_input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
-        self.mlp = None
+        self.current_input_dim = input_dim
+
+        # Build layers immediately during initialization
+        self._build_layers(input_dim)
 
     def _build_layers(self, actual_input_dim: int):
         """Build MLP layers based on actual input dimension (may be stacked)."""
@@ -209,6 +247,7 @@ class StateMLP(nn.Module):
             nn.Linear(self.hidden_dim, self.output_dim),
             nn.ReLU(),
         )
+        self.current_input_dim = actual_input_dim
 
     def forward(self, x):
         """Forward pass with dynamic input dimension handling.
@@ -222,9 +261,16 @@ class StateMLP(nn.Module):
             batch_size, stack_size, state_dim = x.shape
             x = x.view(batch_size, stack_size * state_dim)
 
-        # Build layers on first forward pass
-        if self.mlp is None:
-            actual_input_dim = x.shape[-1]
+        # Rebuild layers if input dimension changed (e.g., different state stacking)
+        actual_input_dim = x.shape[-1]
+        if actual_input_dim != self.current_input_dim:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"StateMLP input dimension changed from {self.current_input_dim} to {actual_input_dim}. "
+                f"Rebuilding layers (weights will be reset!)."
+            )
             self._build_layers(actual_input_dim)
             self.mlp = self.mlp.to(x.device)
 

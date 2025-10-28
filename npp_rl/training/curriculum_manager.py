@@ -57,12 +57,12 @@ class CurriculumManager:
     # Previous thresholds were too aggressive, causing agent to get stuck at simple stage
     STAGE_THRESHOLDS = {
         "simplest": 0.70,  # Reduced from 0.80
-        "simpler": 0.60,   # Reduced from 0.70
-        "simple": 0.50,    # Reduced from 0.60 - CRITICAL: agent was stuck here at 14%
-        "medium": 0.45,    # Reduced from 0.55
-        "complex": 0.40,   # Reduced from 0.50
+        "simpler": 0.60,  # Reduced from 0.70
+        "simple": 0.50,  # Reduced from 0.60 - CRITICAL: agent was stuck here at 14%
+        "medium": 0.45,  # Reduced from 0.55
+        "complex": 0.40,  # Reduced from 0.50
         "exploration": 0.35,  # Reduced from 0.45
-        "mine_heavy": 0.30,   # Reduced from 0.40
+        "mine_heavy": 0.30,  # Reduced from 0.40
     }
 
     # Stage-specific minimum episodes for adaptive progression
@@ -71,13 +71,13 @@ class CurriculumManager:
     # Previous minimums (200-300) were never reached in 1M timesteps
     # With 10M timesteps and better rewards, these should be achievable
     STAGE_MIN_EPISODES = {
-        "simplest": 50,   # Reduced from 200 - quick validation of basics
-        "simpler": 50,    # Reduced from 200
-        "simple": 75,     # Reduced from 200 - agent got stuck here
-        "medium": 100,    # Reduced from 250
-        "complex": 150,   # Reduced from 300
+        "simplest": 50,  # Reduced from 200 - quick validation of basics
+        "simpler": 50,  # Reduced from 200
+        "simple": 75,  # Reduced from 200 - agent got stuck here
+        "medium": 100,  # Reduced from 250
+        "complex": 150,  # Reduced from 300
         "exploration": 150,  # Reduced from 300
-        "mine_heavy": 200,   # Reduced from 300 - hardest stage needs more
+        "mine_heavy": 200,  # Reduced from 300 - hardest stage needs more
     }
 
     # Early advancement threshold - if agent excels, can advance sooner
@@ -480,7 +480,6 @@ class CurriculumManager:
 
         if perf["can_advance"]:
             prev_stage = self.current_stage
-            prev_stage_idx = self.current_stage_idx
 
             # Log advancement criteria that were met (before advancing)
             if perf.get("can_early_advance", False):

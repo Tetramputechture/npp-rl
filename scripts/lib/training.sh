@@ -108,6 +108,9 @@ train_single_architecture() {
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
             --debug"
+
+    echo $train_cmd
+    return 0
     
     # Execute training
     if ssh_cmd "$train_cmd" 2>&1 | tee "$arch_log"; then
