@@ -546,7 +546,7 @@ class ArchitectureTrainer:
             "gae_lambda": 0.95,
             "clip_range": 0.2,
             "clip_range_vf": 1.0,  # CHANGED: 10.0 → 1.0 for value function stability
-            "ent_coef": 0.01,
+            "ent_coef": 0.001,  # CHANGED: 0.01 → 0.001 for faster convergence in sparse rewards
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "tensorboard_log": str(self.output_dir / "tensorboard"),

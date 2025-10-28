@@ -54,9 +54,10 @@ EFFICIENCY_BONUS = 0.2
   → 20% of exit reward for fast completion
   → Encourages optimal paths without overwhelming sparse signal
   
-EXPLORATION_REWARD = 0.01
-  → Small constant for new tile visitation
-  → Prevents aimless wandering while encouraging coverage
+EXPLORATION_REWARD = 0.0 (DISABLED for efficiency)
+  → CHANGED from 0.01 to 0.0
+  → Rationale: Conflicts with efficiency goal by encouraging wandering
+  → Should ONLY be enabled for exploration curriculum stages
   
 DISCOVERY_BONUS = 0.05
   → 50% of switch bonus for finding new objectives
@@ -70,13 +71,15 @@ TIMEOUT_PENALTY_MAJOR = -0.1
   → Negative but smaller than death penalty
   → Prevents infinite subtask loops
   
-MINE_PROXIMITY_PENALTY = -0.02
-  → Small penalty discourages risky paths
-  → Doesn't dominate optimal route selection
+MINE_PROXIMITY_PENALTY = -0.01 (REDUCED for efficiency)
+  → CHANGED from -0.02 to -0.01
+  → Rationale: Previous penalty too harsh, causing overly conservative detours
+  → Still discourages risky paths without dominating route selection
   
-SAFE_NAVIGATION_BONUS = 0.01
-  → Matches exploration reward magnitude
-  → Reinforces mine-aware behavior
+SAFE_NAVIGATION_BONUS = 0.0 (DISABLED for efficiency)
+  → CHANGED from 0.01 to 0.0
+  → Rationale: Conflicts with efficiency by rewarding MORE steps (longer paths)
+  → Mine avoidance already handled by proximity penalty
 """
 
 from typing import Dict, Any, Optional
@@ -101,7 +104,10 @@ class SubtaskRewardCalculator:
     ACTIVATION_BONUS_LOCKED = 0.05  # Locked door switch activation
     DOOR_OPENING_BONUS = 0.03  # When locked door opens
     EFFICIENCY_BONUS = 0.2  # Quick completion after switch activation
-    EXPLORATION_REWARD = 0.01  # New area discovery
+    # CRITICAL FIX: DISABLED EXPLORATION_REWARD (was 0.01)
+    # Rationale: Encourages wandering instead of direct/efficient paths
+    # Should ONLY be enabled for exploration curriculum stages
+    EXPLORATION_REWARD = 0.0  # DISABLED: was 0.01, now 0.0 (efficiency prioritization)
     DISCOVERY_BONUS = 0.05  # Finding unknown objectives
     CONNECTIVITY_BONUS = 0.02  # Improving reachability
     
@@ -120,8 +126,11 @@ class SubtaskRewardCalculator:
     EFFICIENT_EXIT_TIME = 150  # Steps from switch to exit
     
     # Mine avoidance parameters
-    MINE_PROXIMITY_PENALTY = -0.02  # When too close to toggled mine
-    SAFE_NAVIGATION_BONUS = 0.01  # Maintaining safe distance
+    # CRITICAL FIX: Reduced penalty to avoid overly conservative detours
+    MINE_PROXIMITY_PENALTY = -0.01  # CHANGED: -0.02 → -0.01 (less harsh, more efficient paths)
+    # CRITICAL FIX: REMOVED SAFE_NAVIGATION_BONUS (was 0.01)
+    # Rationale: Conflicts with efficiency goal by rewarding MORE steps (longer paths)
+    SAFE_NAVIGATION_BONUS = 0.0  # DISABLED: was 0.01, now 0.0 (efficiency prioritization)
     MINE_STATE_AWARENESS_BONUS = 0.005  # Correct mine state identification
     MINE_DANGER_DISTANCE = 1.5  # Tiles
     MINE_SAFE_DISTANCE = 3.0  # Tiles
