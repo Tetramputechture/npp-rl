@@ -18,6 +18,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
+
 try:
     from npp_rl.utils.video_recorder import create_video_recorder
 except ImportError:
@@ -222,38 +223,45 @@ class ComprehensiveEvaluator:
             # Initialize environment and video recorder for proper cleanup
             env = None
             video_recorder = None
-            
+
             try:
                 # Create environment factory function to avoid closure issues
                 def make_env(lvl_data=level_data):
                     logger.debug(f"Creating environment for level: {level_id}")
                     # CRITICAL FIX: Use for_evaluation() instead of for_training()
-                    config = EnvironmentConfig.for_evaluation()
-                    
+                    config = EnvironmentConfig.for_evaluation(
+                        test_dataset_path=str(self.test_dataset_path)
+                    )
+
                     # Apply frame stacking configuration if provided (matches training config)
                     if frame_stack_config:
                         from nclone.gym_environment import FrameStackConfig
+
                         config.frame_stack = FrameStackConfig(
                             enable_visual_frame_stacking=frame_stack_config.get(
                                 "enable_visual_frame_stacking", False
                             ),
-                            visual_stack_size=frame_stack_config.get("visual_stack_size", 4),
+                            visual_stack_size=frame_stack_config.get(
+                                "visual_stack_size", 4
+                            ),
                             enable_state_stacking=frame_stack_config.get(
                                 "enable_state_stacking", False
                             ),
-                            state_stack_size=frame_stack_config.get("state_stack_size", 4),
+                            state_stack_size=frame_stack_config.get(
+                                "state_stack_size", 4
+                            ),
                             padding_type=frame_stack_config.get("padding_type", "zero"),
                         )
                         logger.debug(
                             f"Applied frame stacking: visual={frame_stack_config.get('enable_visual_frame_stacking')}, "
                             f"state={frame_stack_config.get('enable_state_stacking')}"
                         )
-                    
+
                     # Override render mode for video recording (RGB instead of grayscale)
                     if should_record:
                         config.render.render_mode = "rgb_array"
                         logger.debug("Set render_mode=rgb_array for video recording")
-                    
+
                     env = NppEnvironment(config=config)
                     # Load the specific map from level_data
                     if "map_data" in lvl_data:
@@ -297,10 +305,12 @@ class ComprehensiveEvaluator:
                             if isinstance(frame, (list, tuple)):
                                 frame = frame[0]
                             # Handle both grayscale (H,W,1) and RGB (H,W,3)
-                            if hasattr(frame, 'ndim') and frame.ndim == 3:
+                            if hasattr(frame, "ndim") and frame.ndim == 3:
                                 video_recorder.record_frame(frame)
                             else:
-                                logger.warning(f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping")
+                                logger.warning(
+                                    f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
+                                )
 
                 logger.debug(f"Starting episode loop for level: {level_id}")
                 while not done and steps < max_steps:
@@ -336,10 +346,12 @@ class ComprehensiveEvaluator:
                             if isinstance(frame, (list, tuple)):
                                 frame = frame[0]
                             # Handle both grayscale (H,W,1) and RGB (H,W,3)
-                            if hasattr(frame, 'ndim') and frame.ndim == 3:
+                            if hasattr(frame, "ndim") and frame.ndim == 3:
                                 video_recorder.record_frame(frame)
                             else:
-                                logger.warning(f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping")
+                                logger.warning(
+                                    f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
+                                )
 
                     episode_reward += reward
                     steps += 1
@@ -385,7 +397,7 @@ class ComprehensiveEvaluator:
             except Exception as e:
                 logger.error(
                     f"Failed to evaluate level {level_data.get('level_id', 'unknown')}: {e}",
-                    exc_info=True  # Add stack trace for debugging
+                    exc_info=True,  # Add stack trace for debugging
                 )
                 successes.append(0)
                 episode_steps.append(max_steps)
@@ -397,12 +409,16 @@ class ComprehensiveEvaluator:
                         video_recorder.stop_recording(save=False)  # Discard on error
                         logger.debug("Cleaned up video recorder after error")
                     except Exception as cleanup_error:
-                        logger.warning(f"Error cleaning up video recorder: {cleanup_error}")
-                
+                        logger.warning(
+                            f"Error cleaning up video recorder: {cleanup_error}"
+                        )
+
                 if env is not None:
                     try:
                         env.close()
-                        logger.debug(f"Ensured environment closed for level: {level_id}")
+                        logger.debug(
+                            f"Ensured environment closed for level: {level_id}"
+                        )
                     except Exception as cleanup_error:
                         logger.warning(f"Error closing environment: {cleanup_error}")
 
