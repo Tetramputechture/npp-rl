@@ -69,14 +69,18 @@ class PretrainingPipeline:
         logger.info(f"Initialized pretraining pipeline for {architecture_config.name}")
         logger.info(f"Replay data: {self.replay_data_dir}")
         logger.info(f"Output directory: {self.output_dir}")
-        
+
         # Log frame stacking configuration
         if frame_stack_config:
             logger.info("Frame stacking configuration:")
-            logger.info(f"  Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
-                       f"(size: {frame_stack_config.get('visual_stack_size', 4)})")
-            logger.info(f"  State: {frame_stack_config.get('enable_state_stacking', False)} "
-                       f"(size: {frame_stack_config.get('state_stack_size', 4)})")
+            logger.info(
+                f"  Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
+                f"(size: {frame_stack_config.get('visual_stack_size', 4)})"
+            )
+            logger.info(
+                f"  State: {frame_stack_config.get('enable_state_stacking', False)} "
+                f"(size: {frame_stack_config.get('state_stack_size', 4)})"
+            )
             logger.info(f"  Padding: {frame_stack_config.get('padding_type', 'zero')}")
 
     def prepare_bc_data(
@@ -216,7 +220,9 @@ class PretrainingPipeline:
 
         try:
             # Try to load checkpoint
-            checkpoint = torch.load(checkpoint_path, map_location="cpu")
+            checkpoint = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=False
+            )
 
             # Check for expected keys
             required_keys = ["policy_state_dict"]
