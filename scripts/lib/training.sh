@@ -92,6 +92,8 @@ train_single_architecture() {
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
             --use-curriculum \
+            --enable-pbrs \
+            --enable-visual-frame-stacking \
             --replay-data-dir ../nclone/bc_replays \
             --bc-epochs 50 \
             --bc-batch-size 128 \
