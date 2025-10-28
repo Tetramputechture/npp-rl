@@ -1,0 +1,17 @@
+{
+  "experiment_name": "mlp-baseline-1027-v2_20251027_202133",
+  "bucket": "npp-rl-training-artifacts",
+  "base_prefix": "experiments/mlp-baseline-1027-v2_20251027_202133",
+  "dry_run": false,
+  "uploaded_files": [
+    {
+      "local_path": "/home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/config.json",
+      "s3_key": "experiments/mlp-baseline-1027-v2_20251027_202133/config.json",
+      "timestamp": "2025-10-28T02:24:10.873878",
+      "size_bytes": 1957
+    }
+  ],
+  "total_files": 1,
+  "total_size_bytes": 1957,
+  "created_at": "2025-10-28T10:19:18.173656"
+}

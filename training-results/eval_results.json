@@ -1,0 +1,125 @@
+{
+  "overall": {
+    "success_rate": 0.0,
+    "avg_steps": 1003.7142857142857,
+    "std_steps": 92.02672637525981,
+    "efficiency": 0.0,
+    "total_episodes": 14
+  },
+  "by_category": {
+    "simplest": {
+      "success_rate": 0.0,
+      "avg_steps": 1060.5,
+      "std_steps": 35.5,
+      "avg_reward": -4.4620290625607595,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1025,
+        1096
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "simpler": {
+      "success_rate": 0.0,
+      "avg_steps": 1027.5,
+      "std_steps": 14.5,
+      "avg_reward": -3.7276972240651958,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1013,
+        1042
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "simple": {
+      "success_rate": 0.0,
+      "avg_steps": 1043.5,
+      "std_steps": 8.5,
+      "avg_reward": -2.8774269097191336,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1052,
+        1035
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "medium": {
+      "success_rate": 0.0,
+      "avg_steps": 877.5,
+      "std_steps": 99.5,
+      "avg_reward": -3.1437075045921574,
+      "efficiency": 0.0,
+      "episode_steps": [
+        778,
+        977
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "complex": {
+      "success_rate": 0.0,
+      "avg_steps": 938.0,
+      "std_steps": 136.0,
+      "avg_reward": -4.324029344134033,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1074,
+        802
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "exploration": {
+      "success_rate": 0.0,
+      "avg_steps": 1043.5,
+      "std_steps": 32.5,
+      "avg_reward": -4.290683665196411,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1076,
+        1011
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    },
+    "mine_heavy": {
+      "success_rate": 0.0,
+      "avg_steps": 1035.5,
+      "std_steps": 8.5,
+      "avg_reward": -3.432896570746152,
+      "efficiency": 0.0,
+      "episode_steps": [
+        1027,
+        1044
+      ],
+      "successes": [
+        0,
+        0
+      ],
+      "n_episodes": 2
+    }
+  },
+  "by_difficulty_tier": {},
+  "failure_modes": []
+}

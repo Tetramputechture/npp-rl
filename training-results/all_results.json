@@ -1,0 +1,18 @@
+[
+  {
+    "architecture": "mlp_baseline",
+    "condition": "",
+    "training": {
+      "status": "completed",
+      "total_timesteps": 1000000
+    },
+    "evaluation": {
+      "success_rate": 0.0,
+      "avg_steps": 1003.7142857142857,
+      "std_steps": 92.02672637525981,
+      "efficiency": 0.0,
+      "total_episodes": 14
+    },
+    "output_dir": "/home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline"
+  }
+]

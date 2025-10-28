@@ -1,0 +1,1170 @@
+2025-10-28 02:24:10 [INFO] npp_rl.training: Logging initialized: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp-baseline-1027-v2_20251027_202133.log
+2025-10-28 02:24:10 [INFO] npp_rl.training: Experiment: mlp-baseline-1027-v2_20251027_202133
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: NPP-RL Training and Comparison Experiment
+2025-10-28 02:24:10 [INFO] npp_rl.training: Experiment: mlp-baseline-1027-v2_20251027_202133
+2025-10-28 02:24:10 [INFO] npp_rl.training: Output directory: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: Auto-detecting hardware profile...
+2025-10-28 02:24:10 [INFO] npp_rl.training: 
+Applying hardware profile: Auto-1xGPU-42GB
+2025-10-28 02:24:10 [INFO] npp_rl.training: Description: Auto-detected profile for 1x NVIDIA A100-SXM4-40GB (42GB). Conservative settings for safety.
+2025-10-28 02:24:10 [INFO] npp_rl.training: Profile settings applied:
+2025-10-28 02:24:10 [INFO] npp_rl.training:   GPUs: 1
+2025-10-28 02:24:10 [INFO] npp_rl.training:   Environments: 21
+2025-10-28 02:24:10 [INFO] npp_rl.training:   Batch size: 256
+2025-10-28 02:24:10 [INFO] npp_rl.training:   Learning rate: 3.00e-04
+2025-10-28 02:24:10 [INFO] npp_rl.training:   Mixed precision: True
+2025-10-28 02:24:10 [INFO] npp_rl.training: 
+======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: CUDA/GPU Diagnostics
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: PyTorch version: 2.9.0+cu128
+2025-10-28 02:24:10 [INFO] npp_rl.training: CUDA available: True
+2025-10-28 02:24:10 [INFO] npp_rl.training: CUDA version: 12.8
+2025-10-28 02:24:10 [INFO] npp_rl.training: cuDNN version: 90800
+2025-10-28 02:24:10 [INFO] npp_rl.training: GPU count: 1
+2025-10-28 02:24:10 [INFO] npp_rl.training:   GPU 0: NVIDIA A100-SXM4-40GB (42.4 GB)
+2025-10-28 02:24:10 [INFO] npp_rl.training:     Compute capability: 8.0
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: 
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: Configuration Validation for MLP Baseline
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [WARNING] npp_rl.training: ⚠️  WARNING: Only 21 environments specified
+2025-10-28 02:24:10 [WARNING] npp_rl.training:    Recommendation: Use --num-envs 128 or higher for better data diversity
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: 
+2025-10-28 02:24:10 [INFO] npp_rl.training: Single GPU/CPU training - no distributed coordination needed
+2025-10-28 02:24:10 [INFO] npp_rl.training: 
+======================================================================
+2025-10-28 02:24:10 [INFO] npp_rl.training: Processing architecture: mlp_baseline
+2025-10-28 02:24:10 [INFO] npp_rl.training: ======================================================================
+
+2025-10-28 02:24:10 [INFO] npp_rl.training.pretraining_pipeline: Initialized pretraining pipeline for mlp_baseline
+2025-10-28 02:24:10 [INFO] npp_rl.training.pretraining_pipeline: Replay data: ../nclone/bc_replays
+2025-10-28 02:24:10 [INFO] npp_rl.training.pretraining_pipeline: Output directory: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain
+2025-10-28 02:24:10 [INFO] npp_rl.training.pretraining_pipeline: Found 130 replay files
+2025-10-28 02:24:10 [INFO] npp_rl.training.bc_dataset: Found 130 replay files in ../nclone/bc_replays
+2025-10-28 02:24:12 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_142001_train_very_simple_100001.npz
+2025-10-28 02:24:28 [DEBUG] npp_rl.training.bc_dataset: Cached 334 samples to 20251022_142003_train_mine_heavy_100002.npz
+2025-10-28 02:24:29 [DEBUG] npp_rl.training.bc_dataset: Cached 46 samples to 20251022_142009_train_very_simple_100003.npz
+2025-10-28 02:24:30 [DEBUG] npp_rl.training.bc_dataset: Cached 21 samples to 20251022_142011_train_very_simple_100004.npz
+2025-10-28 02:24:36 [DEBUG] npp_rl.training.bc_dataset: Cached 184 samples to 20251022_142012_train_simple_100005.npz
+2025-10-28 02:25:02 [DEBUG] npp_rl.training.bc_dataset: Cached 769 samples to 20251022_142016_train_complex_100006.npz
+2025-10-28 02:25:13 [DEBUG] npp_rl.training.bc_dataset: Cached 250 samples to 20251022_142030_train_complex_100007.npz
+2025-10-28 02:25:18 [DEBUG] npp_rl.training.bc_dataset: Cached 144 samples to 20251022_142035_train_simple_100008.npz
+2025-10-28 02:25:21 [DEBUG] npp_rl.training.bc_dataset: Cached 103 samples to 20251022_142048_train_simple_100011.npz
+2025-10-28 02:25:31 [DEBUG] npp_rl.training.bc_dataset: Cached 316 samples to 20251022_142059_train_medium_100022.npz
+2025-10-28 02:25:33 [DEBUG] npp_rl.training.bc_dataset: Cached 40 samples to 20251022_142123_train_very_simple_100031.npz
+2025-10-28 02:25:37 [DEBUG] npp_rl.training.bc_dataset: Cached 132 samples to 20251022_142125_train_simple_100032.npz
+2025-10-28 02:25:49 [DEBUG] npp_rl.training.bc_dataset: Cached 362 samples to 20251022_142128_train_medium_100033.npz
+2025-10-28 02:25:56 [DEBUG] npp_rl.training.bc_dataset: Cached 208 samples to 20251022_142150_train_medium_100044.npz
+2025-10-28 02:25:57 [DEBUG] npp_rl.training.bc_dataset: Cached 33 samples to 20251022_142157_train_very_simple_100048.npz
+2025-10-28 02:25:58 [DEBUG] npp_rl.training.bc_dataset: Cached 23 samples to 20251022_142158_train_very_simple_100049.npz
+2025-10-28 02:26:05 [DEBUG] npp_rl.training.bc_dataset: Cached 155 samples to 20251022_142159_train_medium_100050.npz
+2025-10-28 02:26:18 [DEBUG] npp_rl.training.bc_dataset: Cached 405 samples to 20251022_142216_train_medium_100057.npz
+2025-10-28 02:26:25 [DEBUG] npp_rl.training.bc_dataset: Cached 220 samples to 20251022_142227_train_medium_100059.npz
+2025-10-28 02:26:46 [DEBUG] npp_rl.training.bc_dataset: Cached 622 samples to 20251022_142237_train_exploration_100065.npz
+2025-10-28 02:26:47 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_142259_train_very_simple_100081.npz
+2025-10-28 02:26:56 [DEBUG] npp_rl.training.bc_dataset: Cached 248 samples to 20251022_142302_train_medium_100083.npz
+2025-10-28 02:27:09 [DEBUG] npp_rl.training.bc_dataset: Cached 398 samples to 20251022_142318_train_exploration_100108.npz
+2025-10-28 02:27:19 [DEBUG] npp_rl.training.bc_dataset: Cached 312 samples to 20251022_142341_train_medium_100126.npz
+2025-10-28 02:27:28 [DEBUG] npp_rl.training.bc_dataset: Cached 223 samples to 20251022_142350_train_medium_100128.npz
+2025-10-28 02:27:29 [DEBUG] npp_rl.training.bc_dataset: Cached 40 samples to 20251022_142410_train_very_simple_100144.npz
+2025-10-28 02:27:30 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_142412_train_very_simple_100146.npz
+2025-10-28 02:27:41 [DEBUG] npp_rl.training.bc_dataset: Cached 321 samples to 20251022_142413_train_complex_100147.npz
+2025-10-28 02:27:53 [DEBUG] npp_rl.training.bc_dataset: Cached 358 samples to 20251022_142444_train_complex_100178.npz
+2025-10-28 02:28:12 [DEBUG] npp_rl.training.bc_dataset: Cached 566 samples to 20251022_142504_train_exploration_100198.npz
+2025-10-28 02:28:22 [DEBUG] npp_rl.training.bc_dataset: Cached 195 samples to 20251022_142515_train_mine_heavy_100199.npz
+2025-10-28 02:28:31 [DEBUG] npp_rl.training.bc_dataset: Cached 212 samples to 20251022_145020_train_medium_100055.npz
+2025-10-28 02:28:32 [DEBUG] npp_rl.training.bc_dataset: Cached 27 samples to 20251022_145024_train_very_simple_100056.npz
+2025-10-28 02:28:39 [DEBUG] npp_rl.training.bc_dataset: Cached 211 samples to 20251022_145025_train_simple_100057.npz
+2025-10-28 02:28:40 [DEBUG] npp_rl.training.bc_dataset: Cached 33 samples to 20251022_145029_train_very_simple_100058.npz
+2025-10-28 02:28:45 [DEBUG] npp_rl.training.bc_dataset: Cached 121 samples to 20251022_145031_train_simple_100059.npz
+2025-10-28 02:28:55 [DEBUG] npp_rl.training.bc_dataset: Cached 206 samples to 20251022_145036_train_medium_100061.npz
+2025-10-28 02:29:00 [DEBUG] npp_rl.training.bc_dataset: Cached 158 samples to 20251022_145040_train_simple_100062.npz
+2025-10-28 02:29:01 [DEBUG] npp_rl.training.bc_dataset: Cached 34 samples to 20251022_145044_train_very_simple_100063.npz
+2025-10-28 02:29:02 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_145045_train_very_simple_100064.npz
+2025-10-28 02:29:30 [DEBUG] npp_rl.training.bc_dataset: Cached 915 samples to 20251022_145203_train_exploration_100001.npz
+2025-10-28 02:29:38 [DEBUG] npp_rl.training.bc_dataset: Cached 153 samples to 20251022_145219_train_simple_100002.npz
+2025-10-28 02:29:44 [DEBUG] npp_rl.training.bc_dataset: Cached 140 samples to 20251022_145222_train_simple_100003.npz
+2025-10-28 02:29:53 [DEBUG] npp_rl.training.bc_dataset: Cached 275 samples to 20251022_145225_train_complex_100004.npz
+2025-10-28 02:30:02 [DEBUG] npp_rl.training.bc_dataset: Cached 217 samples to 20251022_145231_train_medium_100006.npz
+2025-10-28 02:30:11 [DEBUG] npp_rl.training.bc_dataset: Cached 275 samples to 20251022_145236_train_medium_100007.npz
+2025-10-28 02:30:22 [DEBUG] npp_rl.training.bc_dataset: Cached 246 samples to 20251022_145303_train_mine_heavy_100032.npz
+2025-10-28 02:30:23 [DEBUG] npp_rl.training.bc_dataset: Cached 25 samples to 20251022_145309_train_very_simple_100034.npz
+2025-10-28 02:30:32 [DEBUG] npp_rl.training.bc_dataset: Cached 185 samples to 20251022_145330_train_mine_heavy_100066.npz
+2025-10-28 02:30:40 [DEBUG] npp_rl.training.bc_dataset: Cached 219 samples to 20251022_145345_train_medium_100079.npz
+2025-10-28 02:30:46 [DEBUG] npp_rl.training.bc_dataset: Skipping replay - player_won=False at final frame. Episode: unknown
+2025-10-28 02:30:59 [DEBUG] npp_rl.training.bc_dataset: Cached 342 samples to 20251022_151336_train_medium_100002.npz
+2025-10-28 02:31:07 [DEBUG] npp_rl.training.bc_dataset: Cached 259 samples to 20251022_151342_train_medium_100003.npz
+2025-10-28 02:31:14 [DEBUG] npp_rl.training.bc_dataset: Cached 212 samples to 20251022_151347_train_simple_100004.npz
+2025-10-28 02:31:29 [DEBUG] npp_rl.training.bc_dataset: Cached 448 samples to 20251022_151351_train_medium_100005.npz
+2025-10-28 02:31:53 [DEBUG] npp_rl.training.bc_dataset: Cached 754 samples to 20251022_151359_train_complex_100006.npz
+2025-10-28 02:31:58 [DEBUG] npp_rl.training.bc_dataset: Cached 129 samples to 20251022_151412_train_simple_100007.npz
+2025-10-28 02:32:07 [DEBUG] npp_rl.training.bc_dataset: Cached 278 samples to 20251022_151417_train_simple_100009.npz
+2025-10-28 02:32:08 [DEBUG] npp_rl.training.bc_dataset: Cached 22 samples to 20251022_151422_train_very_simple_100010.npz
+2025-10-28 02:32:46 [DEBUG] npp_rl.training.bc_dataset: Cached 1173 samples to 20251022_152236_train_complex_100003.npz
+2025-10-28 02:32:47 [DEBUG] npp_rl.training.bc_dataset: Cached 21 samples to 20251022_152255_train_very_simple_100004.npz
+2025-10-28 02:33:35 [DEBUG] npp_rl.training.bc_dataset: Cached 1448 samples to 20251022_152259_train_exploration_100006.npz
+2025-10-28 02:33:39 [DEBUG] npp_rl.training.bc_dataset: Cached 127 samples to 20251022_152324_train_simple_100007.npz
+2025-10-28 02:33:40 [DEBUG] npp_rl.training.bc_dataset: Cached 38 samples to 20251022_152327_train_very_simple_100008.npz
+2025-10-28 02:33:44 [DEBUG] npp_rl.training.bc_dataset: Cached 125 samples to 20251022_152328_train_simple_100009.npz
+2025-10-28 02:33:52 [DEBUG] npp_rl.training.bc_dataset: Cached 188 samples to 20251022_152331_train_medium_100010.npz
+2025-10-28 02:33:59 [DEBUG] npp_rl.training.bc_dataset: Cached 152 samples to 20251022_152335_train_simple_100011.npz
+2025-10-28 02:34:06 [DEBUG] npp_rl.training.bc_dataset: Cached 235 samples to 20251022_152339_train_simple_100013.npz
+2025-10-28 02:34:07 [DEBUG] npp_rl.training.bc_dataset: Cached 39 samples to 20251022_152346_train_very_simple_100015.npz
+2025-10-28 02:34:12 [DEBUG] npp_rl.training.bc_dataset: Cached 129 samples to 20251022_152350_train_simple_100020.npz
+2025-10-28 02:34:12 [DEBUG] npp_rl.training.bc_dataset: Cached 22 samples to 20251022_152405_train_very_simple_100025.npz
+2025-10-28 02:34:21 [DEBUG] npp_rl.training.bc_dataset: Cached 274 samples to 20251022_160501_train_simple_100001.npz
+2025-10-28 02:34:22 [DEBUG] npp_rl.training.bc_dataset: Cached 33 samples to 20251022_160506_train_very_simple_100002.npz
+2025-10-28 02:34:26 [DEBUG] npp_rl.training.bc_dataset: Cached 134 samples to 20251022_160508_train_simple_100003.npz
+2025-10-28 02:34:29 [DEBUG] npp_rl.training.bc_dataset: Cached 75 samples to 20251022_160510_train_simple_100004.npz
+2025-10-28 02:34:35 [DEBUG] npp_rl.training.bc_dataset: Cached 182 samples to 20251022_160513_train_simple_100005.npz
+2025-10-28 02:34:42 [DEBUG] npp_rl.training.bc_dataset: Cached 195 samples to 20251022_160516_train_medium_100006.npz
+2025-10-28 02:34:43 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_160520_train_very_simple_100007.npz
+2025-10-28 02:34:44 [DEBUG] npp_rl.training.bc_dataset: Cached 35 samples to 20251022_160521_train_very_simple_100008.npz
+2025-10-28 02:35:15 [DEBUG] npp_rl.training.bc_dataset: Cached 911 samples to 20251022_160523_train_exploration_100009.npz
+2025-10-28 02:35:21 [DEBUG] npp_rl.training.bc_dataset: Cached 184 samples to 20251022_160538_train_simple_100010.npz
+2025-10-28 02:35:22 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251022_160542_train_very_simple_100011.npz
+2025-10-28 02:35:23 [DEBUG] npp_rl.training.bc_dataset: Cached 38 samples to 20251022_160543_train_very_simple_100012.npz
+2025-10-28 02:35:24 [DEBUG] npp_rl.training.bc_dataset: Cached 31 samples to 20251022_160544_train_very_simple_100013.npz
+2025-10-28 02:35:36 [DEBUG] npp_rl.training.bc_dataset: Cached 274 samples to 20251022_160546_train_complex_100014.npz
+2025-10-28 02:35:37 [DEBUG] npp_rl.training.bc_dataset: Cached 27 samples to 20251022_160601_train_very_simple_100020.npz
+2025-10-28 02:35:49 [DEBUG] npp_rl.training.bc_dataset: Cached 255 samples to 20251022_160604_train_medium_100023.npz
+2025-10-28 02:35:58 [DEBUG] npp_rl.training.bc_dataset: Cached 249 samples to 20251022_162706_train_medium_100001.npz
+2025-10-28 02:35:59 [DEBUG] npp_rl.training.bc_dataset: Cached 35 samples to 20251022_162716_train_very_simple_100003.npz
+2025-10-28 02:36:04 [DEBUG] npp_rl.training.bc_dataset: Cached 150 samples to 20251022_162718_train_simple_100005.npz
+2025-10-28 02:36:09 [DEBUG] npp_rl.training.bc_dataset: Cached 146 samples to 20251022_162722_train_simple_100006.npz
+2025-10-28 02:36:14 [DEBUG] npp_rl.training.bc_dataset: Cached 162 samples to 20251022_162725_train_medium_100007.npz
+2025-10-28 02:36:26 [DEBUG] npp_rl.training.bc_dataset: Cached 330 samples to 20251022_162729_train_mine_heavy_100008.npz
+2025-10-28 02:36:26 [DEBUG] npp_rl.training.bc_dataset: Cached 26 samples to 20251022_162735_train_very_simple_100009.npz
+2025-10-28 02:36:34 [DEBUG] npp_rl.training.bc_dataset: Cached 188 samples to 20251022_162736_train_medium_100010.npz
+2025-10-28 02:36:43 [DEBUG] npp_rl.training.bc_dataset: Cached 210 samples to 20251022_162740_train_mine_heavy_100011.npz
+2025-10-28 02:36:48 [DEBUG] npp_rl.training.bc_dataset: Cached 149 samples to 20251022_162744_train_simple_100012.npz
+2025-10-28 02:36:54 [DEBUG] npp_rl.training.bc_dataset: Cached 193 samples to 20251022_162747_train_simple_100013.npz
+2025-10-28 02:37:09 [DEBUG] npp_rl.training.bc_dataset: Cached 510 samples to 20251023_093546_train_complex_100001.npz
+2025-10-28 02:37:16 [DEBUG] npp_rl.training.bc_dataset: Cached 170 samples to 20251023_093607_train_simple_100005.npz
+2025-10-28 02:37:23 [DEBUG] npp_rl.training.bc_dataset: Cached 192 samples to 20251023_093611_train_medium_100006.npz
+2025-10-28 02:37:26 [DEBUG] npp_rl.training.bc_dataset: Cached 115 samples to 20251023_093615_train_simple_100007.npz
+2025-10-28 02:37:48 [DEBUG] npp_rl.training.bc_dataset: Cached 451 samples to 20251023_093619_train_mine_heavy_100008.npz
+2025-10-28 02:37:49 [DEBUG] npp_rl.training.bc_dataset: Cached 39 samples to 20251023_093633_train_very_simple_100012.npz
+2025-10-28 02:37:56 [DEBUG] npp_rl.training.bc_dataset: Cached 234 samples to 20251023_093635_train_simple_100013.npz
+2025-10-28 02:38:01 [DEBUG] npp_rl.training.bc_dataset: Cached 137 samples to 20251023_093640_train_simple_100014.npz
+2025-10-28 02:38:14 [DEBUG] npp_rl.training.bc_dataset: Cached 399 samples to 20251023_093653_train_medium_100024.npz
+2025-10-28 02:38:19 [DEBUG] npp_rl.training.bc_dataset: Cached 161 samples to 20251023_094818_train_simple_100001.npz
+2025-10-28 02:38:35 [DEBUG] npp_rl.training.bc_dataset: Cached 474 samples to 20251023_094823_train_complex_100002.npz
+2025-10-28 02:38:45 [DEBUG] npp_rl.training.bc_dataset: Cached 277 samples to 20251023_094831_train_medium_100003.npz
+2025-10-28 02:38:51 [DEBUG] npp_rl.training.bc_dataset: Cached 136 samples to 20251023_094838_train_mine_heavy_100004.npz
+2025-10-28 02:38:55 [DEBUG] npp_rl.training.bc_dataset: Cached 92 samples to 20251023_094841_train_simple_100005.npz
+2025-10-28 02:38:56 [DEBUG] npp_rl.training.bc_dataset: Cached 39 samples to 20251023_094844_train_very_simple_100006.npz
+2025-10-28 02:39:07 [DEBUG] npp_rl.training.bc_dataset: Cached 300 samples to 20251023_094845_train_medium_100007.npz
+2025-10-28 02:39:27 [DEBUG] npp_rl.training.bc_dataset: Cached 433 samples to 20251023_094852_train_complex_100008.npz
+2025-10-28 02:39:28 [DEBUG] npp_rl.training.bc_dataset: Cached 26 samples to 20251023_094900_train_very_simple_100009.npz
+2025-10-28 02:39:35 [DEBUG] npp_rl.training.bc_dataset: Cached 221 samples to 20251023_094901_train_simple_100010.npz
+2025-10-28 02:39:43 [DEBUG] npp_rl.training.bc_dataset: Cached 249 samples to 20251023_094906_train_medium_100011.npz
+2025-10-28 02:39:54 [DEBUG] npp_rl.training.bc_dataset: Cached 274 samples to 20251023_095301_train_complex_100001.npz
+2025-10-28 02:40:05 [DEBUG] npp_rl.training.bc_dataset: Cached 323 samples to 20251023_095316_train_complex_100004.npz
+2025-10-28 02:40:12 [DEBUG] npp_rl.training.bc_dataset: Cached 209 samples to 20251023_095322_train_medium_100005.npz
+2025-10-28 02:40:13 [DEBUG] npp_rl.training.bc_dataset: Cached 37 samples to 20251023_095326_train_very_simple_100006.npz
+2025-10-28 02:40:17 [DEBUG] npp_rl.training.bc_dataset: Cached 115 samples to 20251023_095327_train_simple_100007.npz
+2025-10-28 02:40:45 [DEBUG] npp_rl.training.bc_dataset: Cached 830 samples to 20251023_095330_train_exploration_100008.npz
+2025-10-28 02:41:07 [DEBUG] npp_rl.training.bc_dataset: Cached 540 samples to 20251023_113721_train_exploration_100002.npz
+2025-10-28 02:41:36 [DEBUG] npp_rl.training.bc_dataset: Cached 754 samples to 20251023_113733_train_simple_100004.npz
+2025-10-28 02:42:43 [DEBUG] npp_rl.training.bc_dataset: Cached 1848 samples to 20251023_113753_train_very_simple_100008.npz
+2025-10-28 02:42:45 [DEBUG] npp_rl.training.bc_dataset: Cached 79 samples to 20251023_153053_train_very_simple_100024.npz
+2025-10-28 02:42:47 [DEBUG] npp_rl.training.bc_dataset: Cached 78 samples to 20251023_153100_train_very_simple_100029.npz
+2025-10-28 02:42:48 [DEBUG] npp_rl.training.bc_dataset: Cached 54 samples to 20251023_153108_train_very_simple_100038.npz
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: Loaded 31325 training samples
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: Computing normalization statistics from data
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: Computed normalization statistics for 2 observation keys
+2025-10-28 02:42:48 [DEBUG] npp_rl.training.bc_dataset: Saved normalization statistics to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/cache/normalization_stats.npz
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: ============================================================
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: BC Dataset Statistics:
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:   Total samples: 31325
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:   Action distribution:
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     NOOP        :   6099 (19.47%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     LEFT        :   6424 (20.51%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     RIGHT       :   8791 (28.06%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     JUMP        :    940 ( 3.00%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     LEFT+JUMP   :   4043 (12.91%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     RIGHT+JUMP  :   5028 (16.05%)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:   Observation keys: ['game_state', 'global_view', 'player_frame', 'reachability_features']
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:   Observation shapes:
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     player_frame             : (84, 84, 1)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     global_view              : (176, 100, 1)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     game_state               : (26,)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset:     reachability_features    : (8,)
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_dataset: ============================================================
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: BC dataset ready with 31325 training samples
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: ============================================================
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: Starting BC pretraining for mlp_baseline
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: Architecture: mlp_baseline
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: Dataset size: 31325 samples
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: Epochs: 50, Batch size: 128
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: Learning rate: 0.0003
+2025-10-28 02:42:48 [INFO] npp_rl.training.pretraining_pipeline: ============================================================
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Using device: cuda
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Training samples: 28193
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Validation samples: 3132
+2025-10-28 02:42:48 [INFO] npp_rl.training.policy_utils: Created policy network with 512-dim features
+2025-10-28 02:42:48 [INFO] npp_rl.training.policy_utils: Policy architecture: [256, 256] -> 6 actions
+2025-10-28 02:42:48 [INFO] npp_rl.training.policy_utils: BC Policy info:
+2025-10-28 02:42:48 [INFO] npp_rl.training.policy_utils:   Total trainable parameters: 958,086
+2025-10-28 02:42:48 [INFO] npp_rl.training.policy_utils:   Model size: 3.65 MB (float32)
+2025-10-28 02:42:48 [DEBUG] npp_rl.training.policy_utils: 
+BC Policy architecture:
+2025-10-28 02:42:48 [DEBUG] npp_rl.training.policy_utils:   feature_extractor: 759,424 parameters
+2025-10-28 02:42:48 [DEBUG] npp_rl.training.policy_utils:   policy_head: 198,662 parameters
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: ============================================================
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Starting Behavioral Cloning Training
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Architecture: mlp_baseline
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: Epochs: 50, Batch size: 128, LR: 0.0003
+2025-10-28 02:42:48 [INFO] npp_rl.training.bc_trainer: ============================================================
+2025-10-28 02:42:52 [INFO] npp_rl.training.bc_trainer: 
+Epoch 1/50 (4.0s):
+2025-10-28 02:42:52 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 1.2387, Accuracy: 0.4671
+2025-10-28 02:42:52 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.8552, Accuracy: 0.6354
+2025-10-28 02:42:52 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:42:52 [INFO] npp_rl.training.policy_utils:   Epoch: 1
+2025-10-28 02:42:52 [INFO] npp_rl.training.policy_utils:   loss: 0.8552
+2025-10-28 02:42:52 [INFO] npp_rl.training.policy_utils:   accuracy: 0.6354
+2025-10-28 02:42:52 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.8552
+2025-10-28 02:42:56 [INFO] npp_rl.training.bc_trainer: 
+Epoch 2/50 (3.5s):
+2025-10-28 02:42:56 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.8662, Accuracy: 0.6375
+2025-10-28 02:42:56 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.7506, Accuracy: 0.6747
+2025-10-28 02:42:56 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:42:56 [INFO] npp_rl.training.policy_utils:   Epoch: 2
+2025-10-28 02:42:56 [INFO] npp_rl.training.policy_utils:   loss: 0.7506
+2025-10-28 02:42:56 [INFO] npp_rl.training.policy_utils:   accuracy: 0.6747
+2025-10-28 02:42:56 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.7506
+2025-10-28 02:42:59 [INFO] npp_rl.training.bc_trainer: 
+Epoch 3/50 (3.5s):
+2025-10-28 02:42:59 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.7983, Accuracy: 0.6723
+2025-10-28 02:42:59 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.7188, Accuracy: 0.7076
+2025-10-28 02:43:00 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:00 [INFO] npp_rl.training.policy_utils:   Epoch: 3
+2025-10-28 02:43:00 [INFO] npp_rl.training.policy_utils:   loss: 0.7188
+2025-10-28 02:43:00 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7076
+2025-10-28 02:43:00 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.7188
+2025-10-28 02:43:03 [INFO] npp_rl.training.bc_trainer: 
+Epoch 4/50 (3.4s):
+2025-10-28 02:43:03 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.7431, Accuracy: 0.6997
+2025-10-28 02:43:03 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.6593, Accuracy: 0.7458
+2025-10-28 02:43:03 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:03 [INFO] npp_rl.training.policy_utils:   Epoch: 4
+2025-10-28 02:43:03 [INFO] npp_rl.training.policy_utils:   loss: 0.6593
+2025-10-28 02:43:03 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7458
+2025-10-28 02:43:03 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.6593
+2025-10-28 02:43:06 [INFO] npp_rl.training.bc_trainer: 
+Epoch 5/50 (3.4s):
+2025-10-28 02:43:06 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.7039, Accuracy: 0.7124
+2025-10-28 02:43:06 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.6093, Accuracy: 0.7567
+2025-10-28 02:43:06 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_5.pth
+2025-10-28 02:43:06 [INFO] npp_rl.training.policy_utils:   Epoch: 5
+2025-10-28 02:43:06 [INFO] npp_rl.training.policy_utils:   loss: 0.6093
+2025-10-28 02:43:06 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7567
+2025-10-28 02:43:07 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:07 [INFO] npp_rl.training.policy_utils:   Epoch: 5
+2025-10-28 02:43:07 [INFO] npp_rl.training.policy_utils:   loss: 0.6093
+2025-10-28 02:43:07 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7567
+2025-10-28 02:43:07 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.6093
+2025-10-28 02:43:10 [INFO] npp_rl.training.bc_trainer: 
+Epoch 6/50 (3.4s):
+2025-10-28 02:43:10 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.6751, Accuracy: 0.7272
+2025-10-28 02:43:10 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.5804, Accuracy: 0.7711
+2025-10-28 02:43:10 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:10 [INFO] npp_rl.training.policy_utils:   Epoch: 6
+2025-10-28 02:43:10 [INFO] npp_rl.training.policy_utils:   loss: 0.5804
+2025-10-28 02:43:10 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7711
+2025-10-28 02:43:10 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.5804
+2025-10-28 02:43:13 [INFO] npp_rl.training.bc_trainer: 
+Epoch 7/50 (3.5s):
+2025-10-28 02:43:13 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.6518, Accuracy: 0.7364
+2025-10-28 02:43:13 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.5513, Accuracy: 0.7845
+2025-10-28 02:43:14 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:14 [INFO] npp_rl.training.policy_utils:   Epoch: 7
+2025-10-28 02:43:14 [INFO] npp_rl.training.policy_utils:   loss: 0.5513
+2025-10-28 02:43:14 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7845
+2025-10-28 02:43:14 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.5513
+2025-10-28 02:43:17 [INFO] npp_rl.training.bc_trainer: 
+Epoch 8/50 (3.4s):
+2025-10-28 02:43:17 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.6264, Accuracy: 0.7457
+2025-10-28 02:43:17 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.5311, Accuracy: 0.7899
+2025-10-28 02:43:17 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:17 [INFO] npp_rl.training.policy_utils:   Epoch: 8
+2025-10-28 02:43:17 [INFO] npp_rl.training.policy_utils:   loss: 0.5311
+2025-10-28 02:43:17 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7899
+2025-10-28 02:43:17 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.5311
+2025-10-28 02:43:20 [INFO] npp_rl.training.bc_trainer: 
+Epoch 9/50 (3.4s):
+2025-10-28 02:43:20 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.6075, Accuracy: 0.7545
+2025-10-28 02:43:20 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.5300, Accuracy: 0.7861
+2025-10-28 02:43:20 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:20 [INFO] npp_rl.training.policy_utils:   Epoch: 9
+2025-10-28 02:43:20 [INFO] npp_rl.training.policy_utils:   loss: 0.5300
+2025-10-28 02:43:20 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7861
+2025-10-28 02:43:20 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.5300
+2025-10-28 02:43:24 [INFO] npp_rl.training.bc_trainer: 
+Epoch 10/50 (3.5s):
+2025-10-28 02:43:24 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5870, Accuracy: 0.7635
+2025-10-28 02:43:24 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4934, Accuracy: 0.7972
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_10.pth
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   Epoch: 10
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   loss: 0.4934
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7972
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   Epoch: 10
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   loss: 0.4934
+2025-10-28 02:43:24 [INFO] npp_rl.training.policy_utils:   accuracy: 0.7972
+2025-10-28 02:43:24 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4934
+2025-10-28 02:43:28 [INFO] npp_rl.training.bc_trainer: 
+Epoch 11/50 (3.6s):
+2025-10-28 02:43:28 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5647, Accuracy: 0.7729
+2025-10-28 02:43:28 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4738, Accuracy: 0.8026
+2025-10-28 02:43:28 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:28 [INFO] npp_rl.training.policy_utils:   Epoch: 11
+2025-10-28 02:43:28 [INFO] npp_rl.training.policy_utils:   loss: 0.4738
+2025-10-28 02:43:28 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8026
+2025-10-28 02:43:28 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4738
+2025-10-28 02:43:31 [INFO] npp_rl.training.bc_trainer: 
+Epoch 12/50 (3.5s):
+2025-10-28 02:43:31 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5518, Accuracy: 0.7780
+2025-10-28 02:43:31 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4443, Accuracy: 0.8290
+2025-10-28 02:43:31 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:31 [INFO] npp_rl.training.policy_utils:   Epoch: 12
+2025-10-28 02:43:31 [INFO] npp_rl.training.policy_utils:   loss: 0.4443
+2025-10-28 02:43:31 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8290
+2025-10-28 02:43:31 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4443
+2025-10-28 02:43:35 [INFO] npp_rl.training.bc_trainer: 
+Epoch 13/50 (3.4s):
+2025-10-28 02:43:35 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5338, Accuracy: 0.7826
+2025-10-28 02:43:35 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4426, Accuracy: 0.8253
+2025-10-28 02:43:35 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:35 [INFO] npp_rl.training.policy_utils:   Epoch: 13
+2025-10-28 02:43:35 [INFO] npp_rl.training.policy_utils:   loss: 0.4426
+2025-10-28 02:43:35 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8253
+2025-10-28 02:43:35 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4426
+2025-10-28 02:43:38 [INFO] npp_rl.training.bc_trainer: 
+Epoch 14/50 (3.4s):
+2025-10-28 02:43:38 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5281, Accuracy: 0.7847
+2025-10-28 02:43:38 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4342, Accuracy: 0.8262
+2025-10-28 02:43:38 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:38 [INFO] npp_rl.training.policy_utils:   Epoch: 14
+2025-10-28 02:43:38 [INFO] npp_rl.training.policy_utils:   loss: 0.4342
+2025-10-28 02:43:38 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8262
+2025-10-28 02:43:38 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4342
+2025-10-28 02:43:42 [INFO] npp_rl.training.bc_trainer: 
+Epoch 15/50 (3.5s):
+2025-10-28 02:43:42 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.5114, Accuracy: 0.7925
+2025-10-28 02:43:42 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4245, Accuracy: 0.8281
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_15.pth
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   Epoch: 15
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   loss: 0.4245
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8281
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   Epoch: 15
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   loss: 0.4245
+2025-10-28 02:43:42 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8281
+2025-10-28 02:43:42 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4245
+2025-10-28 02:43:45 [INFO] npp_rl.training.bc_trainer: 
+Epoch 16/50 (3.5s):
+2025-10-28 02:43:45 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4981, Accuracy: 0.7970
+2025-10-28 02:43:45 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4115, Accuracy: 0.8325
+2025-10-28 02:43:45 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:45 [INFO] npp_rl.training.policy_utils:   Epoch: 16
+2025-10-28 02:43:45 [INFO] npp_rl.training.policy_utils:   loss: 0.4115
+2025-10-28 02:43:45 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8325
+2025-10-28 02:43:45 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4115
+2025-10-28 02:43:49 [INFO] npp_rl.training.bc_trainer: 
+Epoch 17/50 (3.4s):
+2025-10-28 02:43:49 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4856, Accuracy: 0.8008
+2025-10-28 02:43:49 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.4007, Accuracy: 0.8350
+2025-10-28 02:43:49 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:49 [INFO] npp_rl.training.policy_utils:   Epoch: 17
+2025-10-28 02:43:49 [INFO] npp_rl.training.policy_utils:   loss: 0.4007
+2025-10-28 02:43:49 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8350
+2025-10-28 02:43:49 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.4007
+2025-10-28 02:43:52 [INFO] npp_rl.training.bc_trainer: 
+Epoch 18/50 (3.4s):
+2025-10-28 02:43:52 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4798, Accuracy: 0.8052
+2025-10-28 02:43:52 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3872, Accuracy: 0.8419
+2025-10-28 02:43:52 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:52 [INFO] npp_rl.training.policy_utils:   Epoch: 18
+2025-10-28 02:43:52 [INFO] npp_rl.training.policy_utils:   loss: 0.3872
+2025-10-28 02:43:52 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8419
+2025-10-28 02:43:52 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3872
+2025-10-28 02:43:55 [INFO] npp_rl.training.bc_trainer: 
+Epoch 19/50 (3.4s):
+2025-10-28 02:43:55 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4653, Accuracy: 0.8111
+2025-10-28 02:43:55 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3741, Accuracy: 0.8504
+2025-10-28 02:43:56 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:56 [INFO] npp_rl.training.policy_utils:   Epoch: 19
+2025-10-28 02:43:56 [INFO] npp_rl.training.policy_utils:   loss: 0.3741
+2025-10-28 02:43:56 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8504
+2025-10-28 02:43:56 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3741
+2025-10-28 02:43:59 [INFO] npp_rl.training.bc_trainer: 
+Epoch 20/50 (3.4s):
+2025-10-28 02:43:59 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4552, Accuracy: 0.8164
+2025-10-28 02:43:59 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3602, Accuracy: 0.8532
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_20.pth
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   Epoch: 20
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   loss: 0.3602
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8532
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   Epoch: 20
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   loss: 0.3602
+2025-10-28 02:43:59 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8532
+2025-10-28 02:43:59 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3602
+2025-10-28 02:44:02 [INFO] npp_rl.training.bc_trainer: 
+Epoch 21/50 (3.4s):
+2025-10-28 02:44:02 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4421, Accuracy: 0.8185
+2025-10-28 02:44:02 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3634, Accuracy: 0.8530
+2025-10-28 02:44:06 [INFO] npp_rl.training.bc_trainer: 
+Epoch 22/50 (3.4s):
+2025-10-28 02:44:06 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4317, Accuracy: 0.8256
+2025-10-28 02:44:06 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3617, Accuracy: 0.8503
+2025-10-28 02:44:09 [INFO] npp_rl.training.bc_trainer: 
+Epoch 23/50 (3.4s):
+2025-10-28 02:44:09 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4204, Accuracy: 0.8288
+2025-10-28 02:44:09 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3436, Accuracy: 0.8617
+2025-10-28 02:44:09 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:09 [INFO] npp_rl.training.policy_utils:   Epoch: 23
+2025-10-28 02:44:09 [INFO] npp_rl.training.policy_utils:   loss: 0.3436
+2025-10-28 02:44:09 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8617
+2025-10-28 02:44:09 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3436
+2025-10-28 02:44:13 [INFO] npp_rl.training.bc_trainer: 
+Epoch 24/50 (3.4s):
+2025-10-28 02:44:13 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4103, Accuracy: 0.8338
+2025-10-28 02:44:13 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3176, Accuracy: 0.8731
+2025-10-28 02:44:13 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:13 [INFO] npp_rl.training.policy_utils:   Epoch: 24
+2025-10-28 02:44:13 [INFO] npp_rl.training.policy_utils:   loss: 0.3176
+2025-10-28 02:44:13 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8731
+2025-10-28 02:44:13 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3176
+2025-10-28 02:44:16 [INFO] npp_rl.training.bc_trainer: 
+Epoch 25/50 (3.5s):
+2025-10-28 02:44:16 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.4099, Accuracy: 0.8328
+2025-10-28 02:44:16 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3326, Accuracy: 0.8594
+2025-10-28 02:44:16 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_25.pth
+2025-10-28 02:44:16 [INFO] npp_rl.training.policy_utils:   Epoch: 25
+2025-10-28 02:44:16 [INFO] npp_rl.training.policy_utils:   loss: 0.3326
+2025-10-28 02:44:16 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8594
+2025-10-28 02:44:20 [INFO] npp_rl.training.bc_trainer: 
+Epoch 26/50 (3.5s):
+2025-10-28 02:44:20 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3978, Accuracy: 0.8368
+2025-10-28 02:44:20 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3232, Accuracy: 0.8651
+2025-10-28 02:44:23 [INFO] npp_rl.training.bc_trainer: 
+Epoch 27/50 (3.5s):
+2025-10-28 02:44:23 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3908, Accuracy: 0.8391
+2025-10-28 02:44:23 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3220, Accuracy: 0.8672
+2025-10-28 02:44:27 [INFO] npp_rl.training.bc_trainer: 
+Epoch 28/50 (3.5s):
+2025-10-28 02:44:27 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3839, Accuracy: 0.8448
+2025-10-28 02:44:27 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3096, Accuracy: 0.8754
+2025-10-28 02:44:27 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:27 [INFO] npp_rl.training.policy_utils:   Epoch: 28
+2025-10-28 02:44:27 [INFO] npp_rl.training.policy_utils:   loss: 0.3096
+2025-10-28 02:44:27 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8754
+2025-10-28 02:44:27 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3096
+2025-10-28 02:44:30 [INFO] npp_rl.training.bc_trainer: 
+Epoch 29/50 (3.4s):
+2025-10-28 02:44:30 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3800, Accuracy: 0.8464
+2025-10-28 02:44:30 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3039, Accuracy: 0.8775
+2025-10-28 02:44:30 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:30 [INFO] npp_rl.training.policy_utils:   Epoch: 29
+2025-10-28 02:44:30 [INFO] npp_rl.training.policy_utils:   loss: 0.3039
+2025-10-28 02:44:30 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8775
+2025-10-28 02:44:30 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.3039
+2025-10-28 02:44:34 [INFO] npp_rl.training.bc_trainer: 
+Epoch 30/50 (3.5s):
+2025-10-28 02:44:34 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3667, Accuracy: 0.8504
+2025-10-28 02:44:34 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3147, Accuracy: 0.8778
+2025-10-28 02:44:34 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_30.pth
+2025-10-28 02:44:34 [INFO] npp_rl.training.policy_utils:   Epoch: 30
+2025-10-28 02:44:34 [INFO] npp_rl.training.policy_utils:   loss: 0.3147
+2025-10-28 02:44:34 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8778
+2025-10-28 02:44:37 [INFO] npp_rl.training.bc_trainer: 
+Epoch 31/50 (3.5s):
+2025-10-28 02:44:37 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3587, Accuracy: 0.8538
+2025-10-28 02:44:37 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2896, Accuracy: 0.8810
+2025-10-28 02:44:37 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:37 [INFO] npp_rl.training.policy_utils:   Epoch: 31
+2025-10-28 02:44:37 [INFO] npp_rl.training.policy_utils:   loss: 0.2896
+2025-10-28 02:44:37 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8810
+2025-10-28 02:44:37 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2896
+2025-10-28 02:44:41 [INFO] npp_rl.training.bc_trainer: 
+Epoch 32/50 (3.5s):
+2025-10-28 02:44:41 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3601, Accuracy: 0.8523
+2025-10-28 02:44:41 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.3025, Accuracy: 0.8803
+2025-10-28 02:44:44 [INFO] npp_rl.training.bc_trainer: 
+Epoch 33/50 (3.4s):
+2025-10-28 02:44:44 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3551, Accuracy: 0.8560
+2025-10-28 02:44:44 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2872, Accuracy: 0.8866
+2025-10-28 02:44:44 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:44 [INFO] npp_rl.training.policy_utils:   Epoch: 33
+2025-10-28 02:44:44 [INFO] npp_rl.training.policy_utils:   loss: 0.2872
+2025-10-28 02:44:44 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8866
+2025-10-28 02:44:44 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2872
+2025-10-28 02:44:48 [INFO] npp_rl.training.bc_trainer: 
+Epoch 34/50 (3.5s):
+2025-10-28 02:44:48 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3478, Accuracy: 0.8579
+2025-10-28 02:44:48 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2819, Accuracy: 0.8882
+2025-10-28 02:44:48 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:48 [INFO] npp_rl.training.policy_utils:   Epoch: 34
+2025-10-28 02:44:48 [INFO] npp_rl.training.policy_utils:   loss: 0.2819
+2025-10-28 02:44:48 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8882
+2025-10-28 02:44:48 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2819
+2025-10-28 02:44:51 [INFO] npp_rl.training.bc_trainer: 
+Epoch 35/50 (3.6s):
+2025-10-28 02:44:51 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3477, Accuracy: 0.8580
+2025-10-28 02:44:51 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2826, Accuracy: 0.8854
+2025-10-28 02:44:51 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_35.pth
+2025-10-28 02:44:51 [INFO] npp_rl.training.policy_utils:   Epoch: 35
+2025-10-28 02:44:51 [INFO] npp_rl.training.policy_utils:   loss: 0.2826
+2025-10-28 02:44:51 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8854
+2025-10-28 02:44:55 [INFO] npp_rl.training.bc_trainer: 
+Epoch 36/50 (3.5s):
+2025-10-28 02:44:55 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3330, Accuracy: 0.8641
+2025-10-28 02:44:55 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2711, Accuracy: 0.8920
+2025-10-28 02:44:55 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:55 [INFO] npp_rl.training.policy_utils:   Epoch: 36
+2025-10-28 02:44:55 [INFO] npp_rl.training.policy_utils:   loss: 0.2711
+2025-10-28 02:44:55 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8920
+2025-10-28 02:44:55 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2711
+2025-10-28 02:44:58 [INFO] npp_rl.training.bc_trainer: 
+Epoch 37/50 (3.5s):
+2025-10-28 02:44:58 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3377, Accuracy: 0.8622
+2025-10-28 02:44:58 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2630, Accuracy: 0.9003
+2025-10-28 02:44:58 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:44:58 [INFO] npp_rl.training.policy_utils:   Epoch: 37
+2025-10-28 02:44:58 [INFO] npp_rl.training.policy_utils:   loss: 0.2630
+2025-10-28 02:44:58 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9003
+2025-10-28 02:44:58 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2630
+2025-10-28 02:45:02 [INFO] npp_rl.training.bc_trainer: 
+Epoch 38/50 (3.5s):
+2025-10-28 02:45:02 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3291, Accuracy: 0.8660
+2025-10-28 02:45:02 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2666, Accuracy: 0.8934
+2025-10-28 02:45:05 [INFO] npp_rl.training.bc_trainer: 
+Epoch 39/50 (3.4s):
+2025-10-28 02:45:05 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3237, Accuracy: 0.8686
+2025-10-28 02:45:05 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2710, Accuracy: 0.8901
+2025-10-28 02:45:09 [INFO] npp_rl.training.bc_trainer: 
+Epoch 40/50 (3.4s):
+2025-10-28 02:45:09 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3235, Accuracy: 0.8695
+2025-10-28 02:45:09 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2515, Accuracy: 0.8960
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_40.pth
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   Epoch: 40
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   loss: 0.2515
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8960
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   Epoch: 40
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   loss: 0.2515
+2025-10-28 02:45:09 [INFO] npp_rl.training.policy_utils:   accuracy: 0.8960
+2025-10-28 02:45:09 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2515
+2025-10-28 02:45:12 [INFO] npp_rl.training.bc_trainer: 
+Epoch 41/50 (3.5s):
+2025-10-28 02:45:12 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3144, Accuracy: 0.8714
+2025-10-28 02:45:12 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2788, Accuracy: 0.8866
+2025-10-28 02:45:16 [INFO] npp_rl.training.bc_trainer: 
+Epoch 42/50 (3.5s):
+2025-10-28 02:45:16 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3132, Accuracy: 0.8747
+2025-10-28 02:45:16 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2600, Accuracy: 0.8950
+2025-10-28 02:45:19 [INFO] npp_rl.training.bc_trainer: 
+Epoch 43/50 (3.4s):
+2025-10-28 02:45:19 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3088, Accuracy: 0.8741
+2025-10-28 02:45:19 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2530, Accuracy: 0.8978
+2025-10-28 02:45:23 [INFO] npp_rl.training.bc_trainer: 
+Epoch 44/50 (3.4s):
+2025-10-28 02:45:23 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.3061, Accuracy: 0.8760
+2025-10-28 02:45:23 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2624, Accuracy: 0.8915
+2025-10-28 02:45:26 [INFO] npp_rl.training.bc_trainer: 
+Epoch 45/50 (3.4s):
+2025-10-28 02:45:26 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2838, Accuracy: 0.8850
+2025-10-28 02:45:26 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2322, Accuracy: 0.9098
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_45.pth
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   Epoch: 45
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   loss: 0.2322
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9098
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   Epoch: 45
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   loss: 0.2322
+2025-10-28 02:45:26 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9098
+2025-10-28 02:45:26 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2322
+2025-10-28 02:45:30 [INFO] npp_rl.training.bc_trainer: 
+Epoch 46/50 (3.5s):
+2025-10-28 02:45:30 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2746, Accuracy: 0.8884
+2025-10-28 02:45:30 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2316, Accuracy: 0.9139
+2025-10-28 02:45:30 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:30 [INFO] npp_rl.training.policy_utils:   Epoch: 46
+2025-10-28 02:45:30 [INFO] npp_rl.training.policy_utils:   loss: 0.2316
+2025-10-28 02:45:30 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9139
+2025-10-28 02:45:30 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2316
+2025-10-28 02:45:33 [INFO] npp_rl.training.bc_trainer: 
+Epoch 47/50 (3.5s):
+2025-10-28 02:45:33 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2703, Accuracy: 0.8901
+2025-10-28 02:45:33 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2255, Accuracy: 0.9104
+2025-10-28 02:45:33 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:33 [INFO] npp_rl.training.policy_utils:   Epoch: 47
+2025-10-28 02:45:33 [INFO] npp_rl.training.policy_utils:   loss: 0.2255
+2025-10-28 02:45:33 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9104
+2025-10-28 02:45:33 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2255
+2025-10-28 02:45:37 [INFO] npp_rl.training.bc_trainer: 
+Epoch 48/50 (3.5s):
+2025-10-28 02:45:37 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2659, Accuracy: 0.8927
+2025-10-28 02:45:37 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2292, Accuracy: 0.9098
+2025-10-28 02:45:40 [INFO] npp_rl.training.bc_trainer: 
+Epoch 49/50 (3.5s):
+2025-10-28 02:45:40 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2595, Accuracy: 0.8936
+2025-10-28 02:45:40 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2236, Accuracy: 0.9151
+2025-10-28 02:45:40 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:40 [INFO] npp_rl.training.policy_utils:   Epoch: 49
+2025-10-28 02:45:40 [INFO] npp_rl.training.policy_utils:   loss: 0.2236
+2025-10-28 02:45:40 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9151
+2025-10-28 02:45:40 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2236
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: 
+Epoch 50/50 (3.5s):
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer:   Train - Loss: 0.2596, Accuracy: 0.8934
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer:   Val   - Loss: 0.2231, Accuracy: 0.9069
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint_epoch_50.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   Epoch: 50
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   loss: 0.2231
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9069
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   Epoch: 50
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   loss: 0.2231
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9069
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer:   ✓ New best model! Val loss: 0.2231
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils: Saved policy checkpoint to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   Epoch: 50
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   loss: 0.2231
+2025-10-28 02:45:44 [INFO] npp_rl.training.policy_utils:   accuracy: 0.9069
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: ============================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: BC Training Complete!
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: Total time: 2.9 minutes
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: Best validation loss: 0.2231
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: Best checkpoint: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: Final checkpoint: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_checkpoint.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.bc_trainer: ============================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training.pretraining_pipeline: BC pretraining completed: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.pretraining_pipeline: Checkpoint validated: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training.pretraining_pipeline: BC pretraining completed: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:45:44 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training: Training: mlp_baseline on GPU 0
+2025-10-28 02:45:44 [INFO] npp_rl.training: ======================================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training: GPU 0: Using 21 environments
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Initialized trainer for architecture: mlp_baseline
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Output directory: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Device: cuda:0
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Hierarchical PPO: False
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Curriculum learning: True
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: PBRS enabled: False
+2025-10-28 02:45:44 [INFO] npp_rl.training: Applying hardware profile hyperparameters: Auto-1xGPU-42GB
+2025-10-28 02:45:44 [INFO] npp_rl.training:   Learning rate: 3.00e-04 (constant)
+2025-10-28 02:45:44 [INFO] npp_rl.training:   Batch size: 256
+2025-10-28 02:45:44 [INFO] npp_rl.training:   N steps: 1024
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Setting up model...
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Using explicitly provided hyperparameters (automatic multi-GPU scaling skipped)
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Final PPO hyperparameters:
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer:   Learning rate: 3.00e-04
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer:   Batch size: 256
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer:   N steps: 1024
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer:   Gamma: 0.99
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer:   GAE lambda: 0.95
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Model configuration prepared for architecture: mlp_baseline
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Model will be instantiated when environments are set up
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Setting up 21 training environments...
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: ============================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: Curriculum Manager Initialized (Granular Progression)
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: ============================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: Starting stage: simplest
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: Adaptive features:
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   - Stage-specific thresholds: False
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   - Stage-specific min episodes: False
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   - Adaptive mixing: True
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   - Early advancement: True
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   - Trend analysis: True
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: Stage mixing: enabled
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: 
+Levels per stage:
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   simplest: 200 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   simpler: 200 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   simple: 400 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   medium: 800 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   complex: 400 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   exploration: 200 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager:   mine_heavy: 200 levels
+2025-10-28 02:45:44 [INFO] npp_rl.training.curriculum_manager: ============================================================
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Curriculum learning enabled
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Starting stage: simplest
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Creating 21 environment factory functions...
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: Initializing SubprocVecEnv with 21 worker processes...
+2025-10-28 02:45:44 [INFO] npp_rl.training.architecture_trainer: This may take time as each process spawns and initializes its environment
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: SubprocVecEnv initialization complete
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Loading BC observation normalization from /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/cache/normalization_stats.npz
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer:   Loaded normalization for game_state_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer:   Loaded normalization for reachability_features_mean
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Applied BC observation normalization to RL training environments
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Wrapping environments with global curriculum tracking...
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: CurriculumVecEnvWrapper will track progression across all 21 environments
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Creating evaluation environment...
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Environments created: 21 training, 1 eval
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Using SubprocVecEnv
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Creating PPO model with training environment...
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Policy class: MultiInputPolicy
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Device: cuda:0
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Feature extractor: ConfigurableMultimodalExtractor
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Network architecture: {'pi': [256, 256, 128], 'vf': [256, 256, 128]}
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Initializing policy networks and moving to device...
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ PPO model created successfully
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Model is on device: cuda:0
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Loading pretrained weights from /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/pretrain/bc_best.pth
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.0.weight → pi_features_extractor.player_frame_cnn.conv_layers.0.weight and vf_features_extractor.player_frame_cnn.conv_layers.0.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.0.bias → pi_features_extractor.player_frame_cnn.conv_layers.0.bias and vf_features_extractor.player_frame_cnn.conv_layers.0.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.1.weight → pi_features_extractor.player_frame_cnn.conv_layers.1.weight and vf_features_extractor.player_frame_cnn.conv_layers.1.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.1.bias → pi_features_extractor.player_frame_cnn.conv_layers.1.bias and vf_features_extractor.player_frame_cnn.conv_layers.1.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.1.running_mean → pi_features_extractor.player_frame_cnn.conv_layers.1.running_mean and vf_features_extractor.player_frame_cnn.conv_layers.1.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.1.running_var → pi_features_extractor.player_frame_cnn.conv_layers.1.running_var and vf_features_extractor.player_frame_cnn.conv_layers.1.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.1.num_batches_tracked → pi_features_extractor.player_frame_cnn.conv_layers.1.num_batches_tracked and vf_features_extractor.player_frame_cnn.conv_layers.1.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.4.weight → pi_features_extractor.player_frame_cnn.conv_layers.4.weight and vf_features_extractor.player_frame_cnn.conv_layers.4.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.4.bias → pi_features_extractor.player_frame_cnn.conv_layers.4.bias and vf_features_extractor.player_frame_cnn.conv_layers.4.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.5.weight → pi_features_extractor.player_frame_cnn.conv_layers.5.weight and vf_features_extractor.player_frame_cnn.conv_layers.5.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.5.bias → pi_features_extractor.player_frame_cnn.conv_layers.5.bias and vf_features_extractor.player_frame_cnn.conv_layers.5.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.5.running_mean → pi_features_extractor.player_frame_cnn.conv_layers.5.running_mean and vf_features_extractor.player_frame_cnn.conv_layers.5.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.5.running_var → pi_features_extractor.player_frame_cnn.conv_layers.5.running_var and vf_features_extractor.player_frame_cnn.conv_layers.5.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.5.num_batches_tracked → pi_features_extractor.player_frame_cnn.conv_layers.5.num_batches_tracked and vf_features_extractor.player_frame_cnn.conv_layers.5.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.8.weight → pi_features_extractor.player_frame_cnn.conv_layers.8.weight and vf_features_extractor.player_frame_cnn.conv_layers.8.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.8.bias → pi_features_extractor.player_frame_cnn.conv_layers.8.bias and vf_features_extractor.player_frame_cnn.conv_layers.8.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.9.weight → pi_features_extractor.player_frame_cnn.conv_layers.9.weight and vf_features_extractor.player_frame_cnn.conv_layers.9.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.9.bias → pi_features_extractor.player_frame_cnn.conv_layers.9.bias and vf_features_extractor.player_frame_cnn.conv_layers.9.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.9.running_mean → pi_features_extractor.player_frame_cnn.conv_layers.9.running_mean and vf_features_extractor.player_frame_cnn.conv_layers.9.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.9.running_var → pi_features_extractor.player_frame_cnn.conv_layers.9.running_var and vf_features_extractor.player_frame_cnn.conv_layers.9.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.conv_layers.9.num_batches_tracked → pi_features_extractor.player_frame_cnn.conv_layers.9.num_batches_tracked and vf_features_extractor.player_frame_cnn.conv_layers.9.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.fc.1.weight → pi_features_extractor.player_frame_cnn.fc.1.weight and vf_features_extractor.player_frame_cnn.fc.1.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.player_frame_cnn.fc.1.bias → pi_features_extractor.player_frame_cnn.fc.1.bias and vf_features_extractor.player_frame_cnn.fc.1.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.0.weight → pi_features_extractor.global_cnn.conv_layers.0.weight and vf_features_extractor.global_cnn.conv_layers.0.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.0.bias → pi_features_extractor.global_cnn.conv_layers.0.bias and vf_features_extractor.global_cnn.conv_layers.0.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.1.weight → pi_features_extractor.global_cnn.conv_layers.1.weight and vf_features_extractor.global_cnn.conv_layers.1.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.1.bias → pi_features_extractor.global_cnn.conv_layers.1.bias and vf_features_extractor.global_cnn.conv_layers.1.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.1.running_mean → pi_features_extractor.global_cnn.conv_layers.1.running_mean and vf_features_extractor.global_cnn.conv_layers.1.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.1.running_var → pi_features_extractor.global_cnn.conv_layers.1.running_var and vf_features_extractor.global_cnn.conv_layers.1.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.1.num_batches_tracked → pi_features_extractor.global_cnn.conv_layers.1.num_batches_tracked and vf_features_extractor.global_cnn.conv_layers.1.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.4.weight → pi_features_extractor.global_cnn.conv_layers.4.weight and vf_features_extractor.global_cnn.conv_layers.4.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.4.bias → pi_features_extractor.global_cnn.conv_layers.4.bias and vf_features_extractor.global_cnn.conv_layers.4.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.5.weight → pi_features_extractor.global_cnn.conv_layers.5.weight and vf_features_extractor.global_cnn.conv_layers.5.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.5.bias → pi_features_extractor.global_cnn.conv_layers.5.bias and vf_features_extractor.global_cnn.conv_layers.5.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.5.running_mean → pi_features_extractor.global_cnn.conv_layers.5.running_mean and vf_features_extractor.global_cnn.conv_layers.5.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.5.running_var → pi_features_extractor.global_cnn.conv_layers.5.running_var and vf_features_extractor.global_cnn.conv_layers.5.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.5.num_batches_tracked → pi_features_extractor.global_cnn.conv_layers.5.num_batches_tracked and vf_features_extractor.global_cnn.conv_layers.5.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.8.weight → pi_features_extractor.global_cnn.conv_layers.8.weight and vf_features_extractor.global_cnn.conv_layers.8.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.8.bias → pi_features_extractor.global_cnn.conv_layers.8.bias and vf_features_extractor.global_cnn.conv_layers.8.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.9.weight → pi_features_extractor.global_cnn.conv_layers.9.weight and vf_features_extractor.global_cnn.conv_layers.9.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.9.bias → pi_features_extractor.global_cnn.conv_layers.9.bias and vf_features_extractor.global_cnn.conv_layers.9.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.9.running_mean → pi_features_extractor.global_cnn.conv_layers.9.running_mean and vf_features_extractor.global_cnn.conv_layers.9.running_mean
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.9.running_var → pi_features_extractor.global_cnn.conv_layers.9.running_var and vf_features_extractor.global_cnn.conv_layers.9.running_var
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.conv_layers.9.num_batches_tracked → pi_features_extractor.global_cnn.conv_layers.9.num_batches_tracked and vf_features_extractor.global_cnn.conv_layers.9.num_batches_tracked
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.fc.1.weight → pi_features_extractor.global_cnn.fc.1.weight and vf_features_extractor.global_cnn.fc.1.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.global_cnn.fc.1.bias → pi_features_extractor.global_cnn.fc.1.bias and vf_features_extractor.global_cnn.fc.1.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.state_mlp.mlp.0.weight → pi_features_extractor.state_mlp.mlp.0.weight and vf_features_extractor.state_mlp.mlp.0.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.state_mlp.mlp.0.bias → pi_features_extractor.state_mlp.mlp.0.bias and vf_features_extractor.state_mlp.mlp.0.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.state_mlp.mlp.3.weight → pi_features_extractor.state_mlp.mlp.3.weight and vf_features_extractor.state_mlp.mlp.3.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.state_mlp.mlp.3.bias → pi_features_extractor.state_mlp.mlp.3.bias and vf_features_extractor.state_mlp.mlp.3.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.reachability_mlp.0.weight → pi_features_extractor.reachability_mlp.0.weight and vf_features_extractor.reachability_mlp.0.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.reachability_mlp.0.bias → pi_features_extractor.reachability_mlp.0.bias and vf_features_extractor.reachability_mlp.0.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.reachability_mlp.2.weight → pi_features_extractor.reachability_mlp.2.weight and vf_features_extractor.reachability_mlp.2.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.reachability_mlp.2.bias → pi_features_extractor.reachability_mlp.2.bias and vf_features_extractor.reachability_mlp.2.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.fusion.0.weight → pi_features_extractor.fusion.0.weight and vf_features_extractor.fusion.0.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.fusion.0.bias → pi_features_extractor.fusion.0.bias and vf_features_extractor.fusion.0.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.fusion.3.weight → pi_features_extractor.fusion.3.weight and vf_features_extractor.fusion.3.weight
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Mapped feature_extractor.fusion.3.bias → pi_features_extractor.fusion.3.bias and vf_features_extractor.fusion.3.bias
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.0.weight (policy head not used in PPO)
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.0.bias (policy head not used in PPO)
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.2.weight (policy head not used in PPO)
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.2.bias (policy head not used in PPO)
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.4.weight (policy head not used in PPO)
+2025-10-28 02:48:29 [DEBUG] npp_rl.training.architecture_trainer: Skipping policy_head.4.bias (policy head not used in PPO)
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Loaded BC pretrained feature extractor weights
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:   Loaded 116 weight tensors (BC → separate)
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:   Missing keys (will use random init): 24
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:     Examples: ['features_extractor.reachability_mlp.0.weight', 'features_extractor.reachability_mlp.0.bias', 'features_extractor.reachability_mlp.2.weight', 'features_extractor.reachability_mlp.2.bias', 'features_extractor.fusion.0.weight']
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:     Features extractor keys missing: 8
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:     Hierarchical policy keys missing: 12 (expected)
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:     Action/value head keys missing: 10 (expected)
+2025-10-28 02:48:29 [WARNING] npp_rl.training.architecture_trainer:   Unexpected keys in checkpoint: 100
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:     Examples: ['pi_features_extractor.player_frame_cnn.conv_layers.0.weight', 'pi_features_extractor.player_frame_cnn.conv_layers.0.bias', 'pi_features_extractor.player_frame_cnn.conv_layers.1.weight', 'pi_features_extractor.player_frame_cnn.conv_layers.1.bias', 'pi_features_extractor.player_frame_cnn.conv_layers.1.running_mean']
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:   ✓ Feature extractor weights loaded successfully
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:   ✓ Loaded into both policy and value feature extractors
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer:   → Policy and value heads will be trained from scratch
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ✓ Model fully initialized with 21 environments
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Curriculum tracking enabled across all environments
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Starting training: mlp_baseline
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Total timesteps: 1,000,000
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Eval frequency: 100,000
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Save frequency: 500,000
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Model device: cuda:0
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Number of environments: 21
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Policy architecture: MultiInputPolicy
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: PPO hyperparameters: n_steps=1024, batch_size=256, learning_rate=0.0003
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Initializing environment reset...
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Calling model.learn() - this will reset environments and start rollout collection
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: First rollout collection may take time - collecting experience from all environments
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Added enhanced TensorBoard callback for detailed metrics
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Added PBRS logging callback for reward component tracking
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Added route visualization callback (saving to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/route_visualizations)
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Added curriculum progression callback (current stage: simplest)
+2025-10-28 02:48:29 [INFO] npp_rl.training.architecture_trainer: Starting model.learn() with verbose callback...
+2025-10-28 02:48:30 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:30 [INFO] npp_rl.training.architecture_trainer: VerboseTrainingCallback: Training started
+2025-10-28 02:48:30 [INFO] npp_rl.training.architecture_trainer: Beginning first environment reset and rollout collection...
+2025-10-28 02:48:30 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 02:48:30 [INFO] npp_rl.training.architecture_trainer: [Update 0] Starting rollout collection (elapsed: 0.0s, since last: 0.0s)
+2025-10-28 02:48:43 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:48 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:53 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:56 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:48:57 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:05 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:08 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:08 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:09 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:11 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:15 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:15 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:17 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:17 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:18 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:20 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:26 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:32 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:37 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:41 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:41 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: [Early Advancement] Stage 'simplest': 100.0% success after only 31 episodes (threshold: 90.0%)
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: ✨ CURRICULUM ADVANCEMENT! ✨
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: Previous stage: simplest
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: New stage: simpler
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: Reason: Early Advancement (High Performance)
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: 
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: Performance Summary:
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Success rate: 100.0%
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Episodes completed: 31
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Threshold: 70.0%
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Min episodes: 100
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Performance trend: +0.00
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager:   Final mixing ratio: 20.0%
+2025-10-28 02:49:41 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:49:43 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:44 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:50 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:52 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:55 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:57 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:59 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:49:59 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:03 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:05 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:14 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:50:16 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:19 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:21 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:50:22 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:25 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:37 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:50:41 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:50:45 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:50:53 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:01 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:03 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:21 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:28 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:32 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:51:35 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:51:41 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:51:55 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:51:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:52:07 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:52:12 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:52:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:52:21 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:52:26 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:52:29 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:52:49 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:52:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:53:04 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 02:53:08 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:53:11 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:53:24 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:53:32 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:53:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:54:06 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:54:20 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:54:23 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 02:54:35 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:54:49 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:54:54 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:55:34 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:56:17 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:56:29 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:56:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:56:44 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:56:53 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:57:36 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 02:58:03 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:58:10 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:58:10 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: [Early Advancement] Stage 'simpler': 90.6% success after only 32 episodes (threshold: 90.0%)
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: ✨ CURRICULUM ADVANCEMENT! ✨
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: Previous stage: simpler
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: New stage: simple
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: Reason: Early Advancement (High Performance)
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: 
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: Performance Summary:
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Success rate: 90.6%
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Episodes completed: 32
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Threshold: 70.0%
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Min episodes: 100
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Performance trend: -0.19
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager:   Final mixing ratio: 20.0%
+2025-10-28 02:58:10 [INFO] npp_rl.training.curriculum_manager: ======================================================================
+2025-10-28 02:58:37 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 02:59:25 [INFO] npp_rl.training.architecture_trainer: [Update 0] Rollout complete - timesteps: 21504, starting gradient update...
+2025-10-28 02:59:41 [INFO] npp_rl.training.architecture_trainer: [Update 1] Starting rollout collection (elapsed: 670.6s, since last: 670.6s)
+2025-10-28 03:00:16 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:00:57 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:01:40 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:01:44 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:02:19 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:02:52 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:03:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:04:34 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:05:10 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 03:06:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 03:09:14 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 03:10:04 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 03:10:26 [INFO] npp_rl.training.architecture_trainer: [Update 1] Rollout complete - timesteps: 43008, starting gradient update...
+2025-10-28 03:10:41 [INFO] npp_rl.training.architecture_trainer: [Update 2] Starting rollout collection (elapsed: 1331.2s, since last: 660.6s)
+2025-10-28 03:10:44 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 03:15:12 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 03:18:46 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 03:20:17 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 03:20:54 [INFO] npp_rl.training.architecture_trainer: [Update 2] Rollout complete - timesteps: 64512, starting gradient update...
+2025-10-28 03:21:09 [INFO] npp_rl.training.architecture_trainer: [Update 3] Starting rollout collection (elapsed: 1959.1s, since last: 627.9s)
+2025-10-28 03:25:02 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simplest, success: True
+2025-10-28 03:29:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 03:31:17 [INFO] npp_rl.training.architecture_trainer: [Update 3] Rollout complete - timesteps: 86016, starting gradient update...
+2025-10-28 03:31:32 [INFO] npp_rl.training.architecture_trainer: [Update 4] Starting rollout collection (elapsed: 2581.9s, since last: 622.8s)
+2025-10-28 03:32:34 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 03:37:22 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 03:41:24 [INFO] npp_rl.training.architecture_trainer: [Update 4] Rollout complete - timesteps: 107520, starting gradient update...
+2025-10-28 03:41:39 [INFO] npp_rl.training.architecture_trainer: [Update 5] Starting rollout collection (elapsed: 3188.7s, since last: 606.8s)
+2025-10-28 03:51:25 [INFO] npp_rl.training.architecture_trainer: [Update 5] Rollout complete - timesteps: 129024, starting gradient update...
+2025-10-28 03:51:40 [INFO] npp_rl.training.architecture_trainer: [Update 6] Starting rollout collection (elapsed: 3789.6s, since last: 600.9s)
+2025-10-28 04:01:31 [INFO] npp_rl.training.architecture_trainer: [Update 6] Rollout complete - timesteps: 150528, starting gradient update...
+2025-10-28 04:01:47 [INFO] npp_rl.training.architecture_trainer: [Update 7] Starting rollout collection (elapsed: 4396.6s, since last: 607.0s)
+2025-10-28 04:03:54 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 04:04:20 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 04:05:50 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 04:06:28 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 04:08:49 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 04:11:47 [INFO] npp_rl.training.architecture_trainer: [Update 7] Rollout complete - timesteps: 172032, starting gradient update...
+2025-10-28 04:12:02 [INFO] npp_rl.training.architecture_trainer: [Update 8] Starting rollout collection (elapsed: 5011.6s, since last: 615.0s)
+2025-10-28 04:14:18 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 04:17:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 04:20:14 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 04:20:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 04:21:17 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 04:22:20 [INFO] npp_rl.training.architecture_trainer: [Update 8] Rollout complete - timesteps: 193536, starting gradient update...
+2025-10-28 04:22:35 [INFO] npp_rl.training.architecture_trainer: [Update 9] Starting rollout collection (elapsed: 5645.3s, since last: 633.7s)
+2025-10-28 04:32:44 [INFO] npp_rl.training.architecture_trainer: [Update 9] Rollout complete - timesteps: 215040, starting gradient update...
+2025-10-28 04:32:59 [INFO] npp_rl.training.architecture_trainer: [Update 10] Starting rollout collection (elapsed: 6269.1s, since last: 623.8s)
+2025-10-28 04:43:06 [INFO] npp_rl.training.architecture_trainer: [Update 10] Rollout complete - timesteps: 236544, starting gradient update...
+2025-10-28 04:43:21 [INFO] npp_rl.training.architecture_trainer: [Update 11] Starting rollout collection (elapsed: 6891.2s, since last: 622.1s)
+2025-10-28 04:53:29 [INFO] npp_rl.training.architecture_trainer: [Update 11] Rollout complete - timesteps: 258048, starting gradient update...
+2025-10-28 04:53:44 [INFO] npp_rl.training.architecture_trainer: [Update 12] Starting rollout collection (elapsed: 7514.0s, since last: 622.7s)
+2025-10-28 05:03:55 [INFO] npp_rl.training.architecture_trainer: [Update 12] Rollout complete - timesteps: 279552, starting gradient update...
+2025-10-28 05:04:10 [INFO] npp_rl.training.architecture_trainer: [Update 13] Starting rollout collection (elapsed: 8140.1s, since last: 626.2s)
+2025-10-28 05:14:22 [INFO] npp_rl.training.architecture_trainer: [Update 13] Rollout complete - timesteps: 301056, starting gradient update...
+2025-10-28 05:14:38 [INFO] npp_rl.training.architecture_trainer: [Update 14] Starting rollout collection (elapsed: 8767.6s, since last: 627.5s)
+2025-10-28 05:24:47 [INFO] npp_rl.training.architecture_trainer: [Update 14] Rollout complete - timesteps: 322560, starting gradient update...
+2025-10-28 05:25:02 [INFO] npp_rl.training.architecture_trainer: [Update 15] Starting rollout collection (elapsed: 9391.9s, since last: 624.3s)
+2025-10-28 05:33:56 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 05:34:26 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 05:35:18 [INFO] npp_rl.training.architecture_trainer: [Update 15] Rollout complete - timesteps: 344064, starting gradient update...
+2025-10-28 05:35:34 [INFO] npp_rl.training.architecture_trainer: [Update 16] Starting rollout collection (elapsed: 10023.7s, since last: 631.8s)
+2025-10-28 05:41:30 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 05:46:22 [INFO] npp_rl.training.architecture_trainer: [Update 16] Rollout complete - timesteps: 365568, starting gradient update...
+2025-10-28 05:46:37 [INFO] npp_rl.training.architecture_trainer: [Update 17] Starting rollout collection (elapsed: 10687.2s, since last: 663.5s)
+2025-10-28 05:57:10 [INFO] npp_rl.training.architecture_trainer: [Update 17] Rollout complete - timesteps: 387072, starting gradient update...
+2025-10-28 05:57:25 [INFO] npp_rl.training.architecture_trainer: [Update 18] Starting rollout collection (elapsed: 11335.0s, since last: 647.8s)
+2025-10-28 06:07:57 [INFO] npp_rl.training.architecture_trainer: [Update 18] Rollout complete - timesteps: 408576, starting gradient update...
+2025-10-28 06:08:13 [INFO] npp_rl.training.architecture_trainer: [Update 19] Starting rollout collection (elapsed: 11982.5s, since last: 647.5s)
+2025-10-28 06:15:03 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:15:04 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:15:27 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:15:52 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:16:14 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 06:16:45 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:17:20 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:17:22 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 06:17:54 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:18:18 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:18:35 [INFO] npp_rl.training.architecture_trainer: [Update 19] Rollout complete - timesteps: 430080, starting gradient update...
+2025-10-28 06:18:50 [INFO] npp_rl.training.architecture_trainer: [Update 20] Starting rollout collection (elapsed: 12619.6s, since last: 637.1s)
+2025-10-28 06:22:43 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:24:02 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 06:25:35 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:27:06 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:27:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:28:03 [INFO] npp_rl.training.architecture_trainer: [Update 20] Rollout complete - timesteps: 451584, starting gradient update...
+2025-10-28 06:28:18 [INFO] npp_rl.training.architecture_trainer: [Update 21] Starting rollout collection (elapsed: 13188.0s, since last: 568.4s)
+2025-10-28 06:36:30 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:36:46 [INFO] npp_rl.training.architecture_trainer: [Update 21] Rollout complete - timesteps: 473088, starting gradient update...
+2025-10-28 06:37:01 [INFO] npp_rl.training.architecture_trainer: [Update 22] Starting rollout collection (elapsed: 13711.0s, since last: 523.0s)
+2025-10-28 06:39:47 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:40:57 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:41:12 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 06:44:43 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:45:27 [INFO] npp_rl.training.architecture_trainer: [Update 22] Rollout complete - timesteps: 494592, starting gradient update...
+2025-10-28 06:45:42 [INFO] npp_rl.training.architecture_trainer: [Update 23] Starting rollout collection (elapsed: 14232.0s, since last: 521.0s)
+2025-10-28 06:48:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:50:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 06:51:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 06:54:03 [INFO] npp_rl.training.architecture_trainer: [Update 23] Rollout complete - timesteps: 516096, starting gradient update...
+2025-10-28 06:54:19 [INFO] npp_rl.training.architecture_trainer: [Update 24] Starting rollout collection (elapsed: 14748.7s, since last: 516.7s)
+2025-10-28 06:54:50 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 06:55:21 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:01:54 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:02:28 [INFO] npp_rl.training.architecture_trainer: [Update 24] Rollout complete - timesteps: 537600, starting gradient update...
+2025-10-28 07:02:43 [INFO] npp_rl.training.architecture_trainer: [Update 25] Starting rollout collection (elapsed: 15253.2s, since last: 504.6s)
+2025-10-28 07:05:20 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:10:51 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:10:51 [INFO] npp_rl.training.architecture_trainer: [Update 25] Rollout complete - timesteps: 559104, starting gradient update...
+2025-10-28 07:11:06 [INFO] npp_rl.training.architecture_trainer: [Update 26] Starting rollout collection (elapsed: 15756.4s, since last: 503.2s)
+2025-10-28 07:14:07 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 07:17:01 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 07:17:31 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:19:40 [INFO] npp_rl.training.architecture_trainer: [Update 26] Rollout complete - timesteps: 580608, starting gradient update...
+2025-10-28 07:19:56 [INFO] npp_rl.training.architecture_trainer: [Update 27] Starting rollout collection (elapsed: 16286.2s, since last: 529.8s)
+2025-10-28 07:20:09 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:25:02 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:28:17 [INFO] npp_rl.training.architecture_trainer: [Update 27] Rollout complete - timesteps: 602112, starting gradient update...
+2025-10-28 07:28:33 [INFO] npp_rl.training.architecture_trainer: [Update 28] Starting rollout collection (elapsed: 16802.9s, since last: 516.6s)
+2025-10-28 07:31:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 07:33:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:36:52 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 07:37:16 [INFO] npp_rl.training.architecture_trainer: [Update 28] Rollout complete - timesteps: 623616, starting gradient update...
+2025-10-28 07:37:31 [INFO] npp_rl.training.architecture_trainer: [Update 29] Starting rollout collection (elapsed: 17341.3s, since last: 538.5s)
+2025-10-28 07:39:25 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:40:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:41:23 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:41:24 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 07:41:49 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 07:44:36 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 07:45:01 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 07:45:25 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 07:46:05 [INFO] npp_rl.training.architecture_trainer: [Update 29] Rollout complete - timesteps: 645120, starting gradient update...
+2025-10-28 07:46:20 [INFO] npp_rl.training.architecture_trainer: [Update 30] Starting rollout collection (elapsed: 17870.3s, since last: 529.0s)
+2025-10-28 07:54:41 [INFO] npp_rl.training.architecture_trainer: [Update 30] Rollout complete - timesteps: 666624, starting gradient update...
+2025-10-28 07:54:56 [INFO] npp_rl.training.architecture_trainer: [Update 31] Starting rollout collection (elapsed: 18386.4s, since last: 516.1s)
+2025-10-28 08:03:20 [INFO] npp_rl.training.architecture_trainer: [Update 31] Rollout complete - timesteps: 688128, starting gradient update...
+2025-10-28 08:03:35 [INFO] npp_rl.training.architecture_trainer: [Update 32] Starting rollout collection (elapsed: 18905.2s, since last: 518.8s)
+2025-10-28 08:12:00 [INFO] npp_rl.training.architecture_trainer: [Update 32] Rollout complete - timesteps: 709632, starting gradient update...
+2025-10-28 08:12:16 [INFO] npp_rl.training.architecture_trainer: [Update 33] Starting rollout collection (elapsed: 19425.9s, since last: 520.7s)
+2025-10-28 08:20:44 [INFO] npp_rl.training.architecture_trainer: [Update 33] Rollout complete - timesteps: 731136, starting gradient update...
+2025-10-28 08:21:00 [INFO] npp_rl.training.architecture_trainer: [Update 34] Starting rollout collection (elapsed: 19949.5s, since last: 523.6s)
+2025-10-28 08:24:32 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 08:27:10 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 08:27:59 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 08:29:27 [INFO] npp_rl.training.architecture_trainer: [Update 34] Rollout complete - timesteps: 752640, starting gradient update...
+2025-10-28 08:29:42 [INFO] npp_rl.training.architecture_trainer: [Update 35] Starting rollout collection (elapsed: 20472.1s, since last: 522.6s)
+2025-10-28 08:33:08 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 08:33:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 08:38:15 [INFO] npp_rl.training.architecture_trainer: [Update 35] Rollout complete - timesteps: 774144, starting gradient update...
+2025-10-28 08:38:31 [INFO] npp_rl.training.architecture_trainer: [Update 36] Starting rollout collection (elapsed: 21000.5s, since last: 528.4s)
+2025-10-28 08:47:04 [INFO] npp_rl.training.architecture_trainer: [Update 36] Rollout complete - timesteps: 795648, starting gradient update...
+2025-10-28 08:47:19 [INFO] npp_rl.training.architecture_trainer: [Update 37] Starting rollout collection (elapsed: 21529.0s, since last: 528.5s)
+2025-10-28 08:55:53 [INFO] npp_rl.training.architecture_trainer: [Update 37] Rollout complete - timesteps: 817152, starting gradient update...
+2025-10-28 08:56:08 [INFO] npp_rl.training.architecture_trainer: [Update 38] Starting rollout collection (elapsed: 22058.0s, since last: 528.9s)
+2025-10-28 08:56:34 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 09:04:30 [INFO] npp_rl.training.architecture_trainer: [Update 38] Rollout complete - timesteps: 838656, starting gradient update...
+2025-10-28 09:04:46 [INFO] npp_rl.training.architecture_trainer: [Update 39] Starting rollout collection (elapsed: 22575.9s, since last: 517.9s)
+2025-10-28 09:06:38 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 09:07:15 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:07:40 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 09:08:05 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 09:08:10 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:09:00 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:11:01 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:11:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:12:37 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: True
+2025-10-28 09:12:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:13:11 [INFO] npp_rl.training.architecture_trainer: [Update 39] Rollout complete - timesteps: 860160, starting gradient update...
+2025-10-28 09:13:26 [INFO] npp_rl.training.architecture_trainer: [Update 40] Starting rollout collection (elapsed: 23096.0s, since last: 520.0s)
+2025-10-28 09:14:07 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:15:33 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:17:41 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:18:16 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:21:52 [INFO] npp_rl.training.architecture_trainer: [Update 40] Rollout complete - timesteps: 881664, starting gradient update...
+2025-10-28 09:22:08 [INFO] npp_rl.training.architecture_trainer: [Update 41] Starting rollout collection (elapsed: 23617.6s, since last: 521.6s)
+2025-10-28 09:23:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:29:11 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:30:20 [INFO] npp_rl.training.architecture_trainer: [Update 41] Rollout complete - timesteps: 903168, starting gradient update...
+2025-10-28 09:30:36 [INFO] npp_rl.training.architecture_trainer: [Update 42] Starting rollout collection (elapsed: 24125.6s, since last: 508.0s)
+2025-10-28 09:38:04 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 09:38:45 [INFO] npp_rl.training.architecture_trainer: [Update 42] Rollout complete - timesteps: 924672, starting gradient update...
+2025-10-28 09:39:00 [INFO] npp_rl.training.architecture_trainer: [Update 43] Starting rollout collection (elapsed: 24629.8s, since last: 504.3s)
+2025-10-28 09:43:42 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:44:16 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 09:46:57 [INFO] npp_rl.training.architecture_trainer: [Update 43] Rollout complete - timesteps: 946176, starting gradient update...
+2025-10-28 09:47:12 [INFO] npp_rl.training.architecture_trainer: [Update 44] Starting rollout collection (elapsed: 25121.8s, since last: 492.0s)
+2025-10-28 09:49:55 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 09:55:26 [INFO] npp_rl.training.architecture_trainer: [Update 44] Rollout complete - timesteps: 967680, starting gradient update...
+2025-10-28 09:55:41 [INFO] npp_rl.training.architecture_trainer: [Update 45] Starting rollout collection (elapsed: 25631.3s, since last: 509.4s)
+2025-10-28 09:59:54 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 10:01:31 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simpler, success: False
+2025-10-28 10:02:46 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 10:03:04 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 10:03:42 [INFO] npp_rl.training.architecture_trainer: [Update 45] Rollout complete - timesteps: 989184, starting gradient update...
+2025-10-28 10:03:57 [INFO] npp_rl.training.architecture_trainer: [Update 46] Starting rollout collection (elapsed: 26127.2s, since last: 495.9s)
+2025-10-28 10:05:58 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: True
+2025-10-28 10:06:13 [DEBUG] npp_rl.training.curriculum_manager: Recording episode for stage: simple, success: False
+2025-10-28 10:11:59 [INFO] npp_rl.training.architecture_trainer: [Update 46] Rollout complete - timesteps: 1010688, starting gradient update...
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: VerboseTrainingCallback: Training ended after 26624.3s
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: ============================================================
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: Training completed successfully
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: Saved final model to /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/final_model.zip
+2025-10-28 10:12:14 [INFO] npp_rl.training: Running final evaluation on primary GPU...
+2025-10-28 10:12:14 [INFO] npp_rl.training: Video recording enabled: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410/mlp_baseline/videos
+2025-10-28 10:12:14 [INFO] npp_rl.training.architecture_trainer: Evaluating model on test suite (2 episodes per category)...
+2025-10-28 10:19:17 [INFO] npp_rl.training.architecture_trainer: Evaluation complete
+2025-10-28 10:19:17 [INFO] npp_rl.training.architecture_trainer: Success rate: 0.00%
+2025-10-28 10:19:18 [INFO] npp_rl.training.architecture_trainer: Closed training environments
+2025-10-28 10:19:18 [INFO] npp_rl.training.architecture_trainer: Closed evaluation environment
+2025-10-28 10:19:18 [INFO] npp_rl.training: Uploading videos to S3 for mlp_baseline/with_pretrain
+2025-10-28 10:19:18 [INFO] npp_rl.training: 
+======================================================================
+2025-10-28 10:19:18 [INFO] npp_rl.training: Experiment complete!
+2025-10-28 10:19:18 [INFO] npp_rl.training: Results saved to: /home/ubuntu/experiments/mlp-baseline-1027-v2_20251027_202133_20251028_022410
+2025-10-28 10:19:18 [INFO] npp_rl.training: ======================================================================
