@@ -57,11 +57,12 @@ class ComprehensiveEvaluator:
         num_episodes_per_category: Optional[Dict[str, int]] = None,
         max_steps_per_episode: int = 10000,
         deterministic: bool = True,
-        timeout_per_episode: float = 30.0,
+        timeout_per_episode: float = 200.0,
         record_videos: bool = False,
         video_output_dir: Optional[str] = None,
         max_videos_per_category: int = 10,
         video_fps: int = 30,
+        frame_stack_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Run comprehensive evaluation on model.
 
@@ -70,11 +71,17 @@ class ComprehensiveEvaluator:
             num_episodes_per_category: Episodes per category (None = all)
             max_steps_per_episode: Maximum steps per episode
             deterministic: Use deterministic policy
-            timeout_per_episode: Timeout in seconds per episode (default: 30.0)
+            timeout_per_episode: Timeout in seconds per episode (default: 200.0)
+                Calculation: max_steps / steps_per_sec
+                Example: 10000 steps / 50 steps/sec = 200 seconds
+                With video recording: ~40-60 steps/sec (slower due to rendering)
             record_videos: Whether to record videos of episodes
             video_output_dir: Directory to save videos (required if record_videos=True)
             max_videos_per_category: Maximum number of videos to record per category
             video_fps: Video framerate
+            frame_stack_config: Frame stacking configuration dict matching training config
+                Should include: enable_visual_frame_stacking, visual_stack_size,
+                enable_state_stacking, state_stack_size, padding_type
 
         Returns:
             Comprehensive results dictionary
@@ -134,6 +141,7 @@ class ComprehensiveEvaluator:
                 video_output_dir=video_output_dir,
                 max_videos_per_category=max_videos_per_category,
                 video_fps=video_fps,
+                frame_stack_config=frame_stack_config,
             )
 
             results["by_category"][category] = category_results
@@ -168,11 +176,12 @@ class ComprehensiveEvaluator:
         levels: List[Dict],
         max_steps: int,
         deterministic: bool,
-        timeout: float = 30.0,
+        timeout: float = 200.0,
         record_videos: bool = False,
         video_output_dir: Optional[str] = None,
         max_videos_per_category: int = 10,
         video_fps: int = 30,
+        frame_stack_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Evaluate model on a specific category.
 
@@ -182,11 +191,12 @@ class ComprehensiveEvaluator:
             levels: List of level data
             max_steps: Max steps per episode
             deterministic: Use deterministic policy
-            timeout: Timeout in seconds per episode
+            timeout: Timeout in seconds per episode (default: 200.0)
             record_videos: Whether to record videos
             video_output_dir: Directory to save videos
             max_videos_per_category: Max videos to record
             video_fps: Video framerate
+            frame_stack_config: Frame stacking configuration to match training
 
         Returns:
             Category results dictionary
@@ -209,11 +219,41 @@ class ComprehensiveEvaluator:
                 and videos_recorded < max_videos_per_category
             )
 
+            # Initialize environment and video recorder for proper cleanup
+            env = None
+            video_recorder = None
+            
             try:
                 # Create environment factory function to avoid closure issues
                 def make_env(lvl_data=level_data):
                     logger.debug(f"Creating environment for level: {level_id}")
-                    config = EnvironmentConfig.for_training()
+                    # CRITICAL FIX: Use for_evaluation() instead of for_training()
+                    config = EnvironmentConfig.for_evaluation()
+                    
+                    # Apply frame stacking configuration if provided (matches training config)
+                    if frame_stack_config:
+                        from nclone.gym_environment import FrameStackConfig
+                        config.frame_stack = FrameStackConfig(
+                            enable_visual_frame_stacking=frame_stack_config.get(
+                                "enable_visual_frame_stacking", False
+                            ),
+                            visual_stack_size=frame_stack_config.get("visual_stack_size", 4),
+                            enable_state_stacking=frame_stack_config.get(
+                                "enable_state_stacking", False
+                            ),
+                            state_stack_size=frame_stack_config.get("state_stack_size", 4),
+                            padding_type=frame_stack_config.get("padding_type", "zero"),
+                        )
+                        logger.debug(
+                            f"Applied frame stacking: visual={frame_stack_config.get('enable_visual_frame_stacking')}, "
+                            f"state={frame_stack_config.get('enable_state_stacking')}"
+                        )
+                    
+                    # Override render mode for video recording (RGB instead of grayscale)
+                    if should_record:
+                        config.render.render_mode = "rgb_array"
+                        logger.debug("Set render_mode=rgb_array for video recording")
+                    
                     env = NppEnvironment(config=config)
                     # Load the specific map from level_data
                     if "map_data" in lvl_data:
@@ -240,7 +280,6 @@ class ComprehensiveEvaluator:
                 start_time = time.time()
 
                 # Initialize video recorder if needed
-                video_recorder = None
                 if should_record:
                     # We'll determine success/failure after episode, so use placeholder
                     video_filename = f"{category}_{level_idx:03d}_temp.mp4"
@@ -254,9 +293,14 @@ class ComprehensiveEvaluator:
                         # Record initial frame
                         frame = env.render()
                         if frame is not None:
-                            video_recorder.record_frame(
-                                frame[0] if isinstance(frame, tuple) else frame
-                            )
+                            # DummyVecEnv may return list of frames or single frame
+                            if isinstance(frame, (list, tuple)):
+                                frame = frame[0]
+                            # Handle both grayscale (H,W,1) and RGB (H,W,3)
+                            if hasattr(frame, 'ndim') and frame.ndim == 3:
+                                video_recorder.record_frame(frame)
+                            else:
+                                logger.warning(f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping")
 
                 logger.debug(f"Starting episode loop for level: {level_id}")
                 while not done and steps < max_steps:
@@ -288,9 +332,14 @@ class ComprehensiveEvaluator:
                     if video_recorder and video_recorder.is_recording:
                         frame = env.render()
                         if frame is not None:
-                            video_recorder.record_frame(
-                                frame[0] if isinstance(frame, tuple) else frame
-                            )
+                            # DummyVecEnv may return list of frames or single frame
+                            if isinstance(frame, (list, tuple)):
+                                frame = frame[0]
+                            # Handle both grayscale (H,W,1) and RGB (H,W,3)
+                            if hasattr(frame, 'ndim') and frame.ndim == 3:
+                                video_recorder.record_frame(frame)
+                            else:
+                                logger.warning(f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping")
 
                     episode_reward += reward
                     steps += 1
@@ -335,11 +384,27 @@ class ComprehensiveEvaluator:
 
             except Exception as e:
                 logger.error(
-                    f"Failed to evaluate level {level_data.get('level_id', 'unknown')}: {e}"
+                    f"Failed to evaluate level {level_data.get('level_id', 'unknown')}: {e}",
+                    exc_info=True  # Add stack trace for debugging
                 )
                 successes.append(0)
                 episode_steps.append(max_steps)
                 rewards.append(0)
+            finally:
+                # CRITICAL: Always clean up resources, even on error
+                if video_recorder is not None and video_recorder.is_recording:
+                    try:
+                        video_recorder.stop_recording(save=False)  # Discard on error
+                        logger.debug("Cleaned up video recorder after error")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Error cleaning up video recorder: {cleanup_error}")
+                
+                if env is not None:
+                    try:
+                        env.close()
+                        logger.debug(f"Ensured environment closed for level: {level_id}")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Error closing environment: {cleanup_error}")
 
         # Calculate metrics
         success_rate = np.mean(successes)
