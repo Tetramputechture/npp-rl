@@ -5,7 +5,6 @@ shared, separate, and hierarchical feature extractors.
 """
 
 import logging
-from pathlib import Path
 from typing import Dict, Any, Optional
 
 import torch

@@ -643,7 +643,11 @@ class CurriculumProgressionCallback(BaseCallback):
                 )
 
     def _log_curriculum_metrics(self):
-        """Log curriculum metrics to TensorBoard."""
+        """Log comprehensive curriculum metrics to TensorBoard.
+
+        Delegates to curriculum_manager.log_curriculum_metrics() for detailed
+        per-generator logging and sampling distribution tracking.
+        """
         if not self.logger or self.curriculum_manager is None:
             return
 
@@ -654,7 +658,7 @@ class CurriculumProgressionCallback(BaseCallback):
         # Get performance for current stage
         perf = self.curriculum_manager.get_stage_performance(current_stage)
 
-        # Log metrics
+        # Log basic metrics using stable_baselines3 logger
         self.logger.record("curriculum/current_stage_idx", current_stage_idx)
         self.logger.record("curriculum/current_stage_name", current_stage)
         self.logger.record("curriculum/success_rate", perf["success_rate"])
@@ -673,9 +677,22 @@ class CurriculumProgressionCallback(BaseCallback):
                 f"curriculum_stages/{stage_name}_success_rate",
                 stage_perf["success_rate"],
             )
-            self.logger.record(
-                f"curriculum_stages/{stage_name}_episodes", stage_perf["episodes"]
-            )
+
+        # Call comprehensive logging method for per-generator metrics
+        # This logs sampling distribution, balance variance, and success rates
+        # per generator type (e.g., maze:small, jump_required:medium, etc.)
+        if hasattr(self.curriculum_manager, "log_curriculum_metrics"):
+            # Get TensorBoard writer from model logger if available
+            writer = None
+            if hasattr(self.model, "logger") and hasattr(self.model.logger, "writer"):
+                writer = self.model.logger.writer
+            elif hasattr(self.logger, "writer"):
+                writer = self.logger.writer
+
+            if writer is not None:
+                self.curriculum_manager.log_curriculum_metrics(
+                    writer, self.step_count, current_stage_only=False
+                )
 
 
 def create_hierarchical_callbacks(

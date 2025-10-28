@@ -165,8 +165,20 @@ class CurriculumManager:
             stage: mixing_ratio for stage in self.CURRICULUM_ORDER
         }
 
-        # Load level data
-        self.levels_by_stage = self._load_levels()
+        # Load level data organized by stage and generator type
+        self.levels_by_stage_and_generator = self._load_levels()
+
+        # Track sampling counts per generator type for balanced sampling
+        self.generator_sample_counts: Dict[str, Dict[str, int]] = {}
+        for stage, generators in self.levels_by_stage_and_generator.items():
+            self.generator_sample_counts[stage] = {gen: 0 for gen in generators.keys()}
+
+        # Track performance per generator type for granular analysis
+        self.generator_performance: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for stage, generators in self.levels_by_stage_and_generator.items():
+            self.generator_performance[stage] = {
+                gen: {"successes": 0, "failures": 0} for gen in generators.keys()
+            }
 
         logger.info("=" * 60)
         logger.info("Curriculum Manager Initialized (Granular Progression)")
@@ -189,31 +201,52 @@ class CurriculumManager:
                 min_eps = self.STAGE_MIN_EPISODES.get(stage, 100)
                 logger.info(f"  {stage}: {threshold:.0%} success, {min_eps} episodes")
 
-        logger.info("\nLevels per stage:")
-        for stage, levels in self.levels_by_stage.items():
-            logger.info(f"  {stage}: {len(levels)} levels")
+        logger.info("\nLevels per stage (by generator type):")
+        for stage, generators in self.levels_by_stage_and_generator.items():
+            total_levels = sum(len(levels) for levels in generators.values())
+            logger.info(
+                f"  {stage}: {total_levels} levels across {len(generators)} generator types"
+            )
+            for gen_type, levels in generators.items():
+                logger.info(f"    - {gen_type}: {len(levels)} levels")
         logger.info("=" * 60)
 
-    def _load_levels(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Load levels from dataset organized by stage.
+    def _load_levels(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+        """Load levels from dataset organized by stage and generator type.
 
         Returns:
-            Dictionary mapping stage name to list of level data
+            Nested dictionary: {stage: {generator_type: [level_data, ...]}}
         """
         loader = TestSuiteLoader(str(self.dataset_path))
         all_levels = loader.load_all_levels()
 
-        # Map to curriculum order
-        levels_by_stage = {}
+        # Organize levels by stage and generator type
+        levels_by_stage_and_generator = {}
 
         for stage in self.CURRICULUM_ORDER:
-            if stage in all_levels:
-                levels_by_stage[stage] = all_levels[stage]
-            else:
-                logger.warning(f"No levels found for stage '{stage}'")
-                levels_by_stage[stage] = []
+            levels_by_stage_and_generator[stage] = {}
 
-        return levels_by_stage
+            if stage not in all_levels:
+                logger.warning(f"No levels found for stage '{stage}'")
+                continue
+
+            # Group levels by generator type
+            for level_data in all_levels[stage]:
+                # Extract generator type from metadata
+                generator_type = level_data.get("metadata", {}).get(
+                    "generator", "unknown"
+                )
+
+                if generator_type not in levels_by_stage_and_generator[stage]:
+                    levels_by_stage_and_generator[stage][generator_type] = []
+
+                levels_by_stage_and_generator[stage][generator_type].append(level_data)
+
+            # Log warning if any stage has no generator types
+            if not levels_by_stage_and_generator[stage]:
+                logger.warning(f"Stage '{stage}' has no levels with generator metadata")
+
+        return levels_by_stage_and_generator
 
     def get_current_stage(self) -> str:
         """Get current curriculum stage name."""
@@ -275,10 +308,13 @@ class CurriculumManager:
         return adaptive_ratio
 
     def sample_level(self) -> Optional[Dict[str, Any]]:
-        """Sample a level from current curriculum stage with adaptive mixing.
+        """Sample a level from current curriculum stage with stratified generator balancing.
+
+        Uses stratified sampling to ensure balanced exposure across all generator types
+        within each stage, promoting better generalization.
 
         Returns:
-            Level data dictionary, or None if no levels available
+            Level data dictionary with generator metadata, or None if no levels available
         """
         # Determine which stage to sample from
         if self.allow_stage_mixing and self.current_stage_idx > 0:
@@ -297,27 +333,76 @@ class CurriculumManager:
             sample_stage_idx = self.current_stage_idx
 
         sample_stage = self.CURRICULUM_ORDER[sample_stage_idx]
-        levels = self.levels_by_stage.get(sample_stage, [])
+        generators = self.levels_by_stage_and_generator.get(sample_stage, {})
 
-        if not levels:
-            logger.warning(f"No levels available for stage '{sample_stage}'")
+        if not generators:
+            logger.warning(f"No generator types available for stage '{sample_stage}'")
             return None
 
-        # Sample random level from stage
-        return np.random.choice(levels)
+        # Stratified sampling: find least-sampled generator type(s)
+        generator_counts = self.generator_sample_counts.get(sample_stage, {})
 
-    def record_episode(self, stage: str, success: bool) -> None:
-        """Record episode result for a stage.
+        if not generator_counts:
+            # Fallback: uniform sampling if no counts tracked
+            logger.warning(
+                f"No generator counts for stage '{sample_stage}', using uniform sampling"
+            )
+            all_levels = []
+            for gen_levels in generators.values():
+                all_levels.extend(gen_levels)
+            if not all_levels:
+                return None
+            return np.random.choice(all_levels)
+
+        # Find minimum sample count
+        min_count = min(generator_counts.values())
+
+        # Get all generator types with minimum count (ties are broken randomly)
+        least_sampled_generators = [
+            gen for gen, count in generator_counts.items() if count == min_count
+        ]
+
+        # Sample uniformly from least-sampled generator types
+        selected_generator = np.random.choice(least_sampled_generators)
+
+        # Get levels for selected generator
+        generator_levels = generators.get(selected_generator, [])
+
+        if not generator_levels:
+            logger.warning(
+                f"No levels for generator '{selected_generator}' in stage '{sample_stage}'"
+            )
+            return None
+
+        # Sample random level from selected generator
+        level = np.random.choice(generator_levels)
+
+        # Increment sample count for this generator
+        self.generator_sample_counts[sample_stage][selected_generator] += 1
+
+        # Add generator type to level data for tracking (non-invasive)
+        level["sampled_generator"] = selected_generator
+        level["sampled_stage"] = sample_stage
+
+        return level
+
+    def record_episode(
+        self, stage: str, success: bool, generator_type: Optional[str] = None
+    ) -> None:
+        """Record episode result for a stage and optionally for a specific generator type.
 
         Args:
             stage: Stage name
             success: Whether episode was successful (1) or not (0)
+            generator_type: Generator type that produced this level (optional)
         """
         if stage not in self.stage_performance:
             logger.warning(f"Unknown stage '{stage}', ignoring episode")
             return
 
-        logger.debug(f"Recording episode for stage: {stage}, success: {success}")
+        logger.debug(
+            f"Recording episode for stage: {stage}, generator: {generator_type}, success: {success}"
+        )
         self.stage_performance[stage].append(1 if success else 0)
 
         # Defensive: ensure stage exists in episode counts
@@ -326,6 +411,18 @@ class CurriculumManager:
             self.stage_episode_counts[stage] = 0
 
         self.stage_episode_counts[stage] += 1
+
+        # Track generator-specific performance if provided
+        if generator_type and stage in self.generator_performance:
+            if generator_type in self.generator_performance[stage]:
+                if success:
+                    self.generator_performance[stage][generator_type]["successes"] += 1
+                else:
+                    self.generator_performance[stage][generator_type]["failures"] += 1
+            else:
+                logger.debug(
+                    f"Generator type '{generator_type}' not found in stage '{stage}' performance tracking"
+                )
 
     def _calculate_performance_trend(self, stage: str) -> float:
         """Calculate performance improvement trend for a stage.
@@ -648,8 +745,146 @@ class CurriculumManager:
 
         return "\n".join(lines)
 
+    def get_generator_statistics(self, stage: Optional[str] = None) -> Dict[str, Any]:
+        """Get comprehensive statistics for generator types.
+
+        Args:
+            stage: Specific stage to get stats for, or None for all stages
+
+        Returns:
+            Dictionary with generator sampling and performance statistics
+        """
+        stats = {}
+
+        stages_to_report = [stage] if stage else self.CURRICULUM_ORDER
+
+        for st in stages_to_report:
+            if st not in self.generator_sample_counts:
+                continue
+
+            stage_stats = {"generators": {}}
+
+            for gen_type in self.generator_sample_counts[st].keys():
+                sample_count = self.generator_sample_counts[st].get(gen_type, 0)
+                perf = self.generator_performance[st].get(gen_type, {})
+                successes = perf.get("successes", 0)
+                failures = perf.get("failures", 0)
+                total_episodes = successes + failures
+
+                success_rate = successes / total_episodes if total_episodes > 0 else 0.0
+
+                stage_stats["generators"][gen_type] = {
+                    "sample_count": sample_count,
+                    "episodes": total_episodes,
+                    "successes": successes,
+                    "failures": failures,
+                    "success_rate": success_rate,
+                }
+
+            # Calculate balance variance (0 = perfect balance)
+            sample_counts = list(self.generator_sample_counts[st].values())
+            if sample_counts:
+                stage_stats["balance_variance"] = float(np.var(sample_counts))
+                stage_stats["total_samples"] = sum(sample_counts)
+            else:
+                stage_stats["balance_variance"] = 0.0
+                stage_stats["total_samples"] = 0
+
+            stats[st] = stage_stats
+
+        return stats
+
+    def log_curriculum_metrics(
+        self, writer, global_step: int, current_stage_only: bool = False
+    ) -> None:
+        """Log comprehensive curriculum metrics to TensorBoard.
+
+        Logs sampling distribution, performance per generator type, and aggregate metrics.
+
+        Args:
+            writer: TensorBoard SummaryWriter
+            global_step: Current training step
+            current_stage_only: If True, only log metrics for current stage
+        """
+        if writer is None:
+            return
+
+        # Determine which stages to log
+        stages_to_log = (
+            [self.current_stage]
+            if current_stage_only
+            else self.CURRICULUM_ORDER[: self.current_stage_idx + 1]
+        )
+
+        for stage in stages_to_log:
+            if stage not in self.generator_sample_counts:
+                continue
+
+            # Log sample distribution metrics
+            for gen_type, count in self.generator_sample_counts[stage].items():
+                # Replace colons with underscores for TensorBoard compatibility
+                safe_gen_name = gen_type.replace(":", "_")
+                writer.add_scalar(
+                    f"curriculum/sampling/{stage}/{safe_gen_name}/count",
+                    count,
+                    global_step,
+                )
+
+            # Log balance variance (0 = perfect balance)
+            sample_counts = list(self.generator_sample_counts[stage].values())
+            if sample_counts:
+                variance = float(np.var(sample_counts))
+                writer.add_scalar(
+                    f"curriculum/sampling/{stage}/balance_variance",
+                    variance,
+                    global_step,
+                )
+
+            # Log performance metrics per generator
+            for gen_type, perf in self.generator_performance[stage].items():
+                successes = perf.get("successes", 0)
+                failures = perf.get("failures", 0)
+                total = successes + failures
+
+                if total > 0:
+                    success_rate = successes / total
+                    safe_gen_name = gen_type.replace(":", "_")
+
+                    writer.add_scalar(
+                        f"curriculum/performance/{stage}/{safe_gen_name}/success_rate",
+                        success_rate,
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        f"curriculum/performance/{stage}/{safe_gen_name}/episodes",
+                        total,
+                        global_step,
+                    )
+
+            # Log overall stage success rate
+            stage_perf = self.get_stage_performance(stage)
+            writer.add_scalar(
+                f"curriculum/performance/{stage}/overall_success_rate",
+                stage_perf["success_rate"],
+                global_step,
+            )
+
+        # Log current stage indicator
+        writer.add_scalar(
+            "curriculum/current_stage_idx", self.current_stage_idx, global_step
+        )
+
+        # Log adaptive mixing ratio if enabled
+        if self.enable_adaptive_mixing and self.current_stage_idx > 0:
+            mixing_ratio = self._get_adaptive_mixing_ratio(self.current_stage)
+            writer.add_scalar(
+                f"curriculum/mixing/{self.current_stage}/ratio",
+                mixing_ratio,
+                global_step,
+            )
+
     def save_state(self, path: Path) -> None:
-        """Save curriculum state to file including adaptive features.
+        """Save curriculum state to file including adaptive features and generator tracking.
 
         Args:
             path: Path to save state JSON
@@ -662,6 +897,8 @@ class CurriculumManager:
                 stage: list(perf) for stage, perf in self.stage_performance.items()
             },
             "stage_mixing_ratios": self.stage_mixing_ratios,
+            "generator_sample_counts": self.generator_sample_counts,
+            "generator_performance": self.generator_performance,
             "adaptive_features": {
                 "enable_adaptive_mixing": self.enable_adaptive_mixing,
                 "enable_early_advancement": self.enable_early_advancement,
@@ -675,7 +912,7 @@ class CurriculumManager:
         logger.info(f"Saved curriculum state to {path}")
 
     def load_state(self, path: Path) -> None:
-        """Load curriculum state from file including adaptive features.
+        """Load curriculum state from file including adaptive features and generator tracking.
 
         Args:
             path: Path to state JSON
@@ -696,6 +933,13 @@ class CurriculumManager:
         # Restore adaptive mixing ratios if available
         if "stage_mixing_ratios" in state:
             self.stage_mixing_ratios = state["stage_mixing_ratios"]
+
+        # Restore generator tracking data if available
+        if "generator_sample_counts" in state:
+            self.generator_sample_counts = state["generator_sample_counts"]
+
+        if "generator_performance" in state:
+            self.generator_performance = state["generator_performance"]
 
         logger.info(f"Loaded curriculum state from {path}")
         logger.info(f"Resumed at stage: {self.current_stage}")
