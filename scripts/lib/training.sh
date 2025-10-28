@@ -106,7 +106,8 @@ train_single_architecture() {
             --video-fps 60 \
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
-            --output-dir ~/experiments"
+            --output-dir ~/experiments \
+            --debug"
 
     echo $train_cmd
     return 0

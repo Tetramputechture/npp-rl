@@ -224,28 +224,49 @@ def log_stacked_observations(
                         dataformats="HWC",
                     )
 
-    # Log stacked global views
+    # Log global views (single frame only, not stacked)
     if "global_view" in observations:
         global_views = observations["global_view"]
 
         if torch.is_tensor(global_views):
             global_views = global_views.detach().cpu().numpy()
 
-        if global_views.ndim == 5:
+        # Global view is always single frame: (batch, H, W, C) or (batch, H, W)
+        if global_views.ndim == 4:
             batch_size = min(global_views.shape[0], max_samples)
 
             for i in range(batch_size):
-                stacked_view = global_views[i]
-                vis_img = visualize_stacked_frames(
-                    stacked_view, title=f"Global View Stack (Sample {i})"
-                )
+                view = global_views[i]  # (H, W, C) or (H, W)
 
-                writer.add_image(
-                    f"observations/global_view_stack/sample_{i}",
-                    vis_img,
-                    global_step,
-                    dataformats="HWC",
-                )
+                # Normalize for display
+                if view.max() > 1.0:
+                    view = view / 255.0
+
+                # Log to TensorBoard
+                if view.ndim == 3 and view.shape[-1] == 1:
+                    # Grayscale: convert to (H, W)
+                    writer.add_image(
+                        f"observations/global_view/sample_{i}",
+                        view[..., 0],
+                        global_step,
+                        dataformats="HW",
+                    )
+                elif view.ndim == 3:
+                    # RGB: (H, W, C)
+                    writer.add_image(
+                        f"observations/global_view/sample_{i}",
+                        view,
+                        global_step,
+                        dataformats="HWC",
+                    )
+                elif view.ndim == 2:
+                    # Already (H, W)
+                    writer.add_image(
+                        f"observations/global_view/sample_{i}",
+                        view,
+                        global_step,
+                        dataformats="HW",
+                    )
 
 
 def log_state_stack_statistics(
