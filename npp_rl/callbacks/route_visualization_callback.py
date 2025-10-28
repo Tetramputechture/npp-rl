@@ -516,6 +516,13 @@ class RouteVisualizationCallback(BaseCallback):
         )
         filepath = self.save_dir / filename
 
+        # Invert Y-axis so that 0 is at the top and values increase downward
+        ax.invert_yaxis()
+
+        # Set x-axis ticks to appear at the top for a "top-left origin" feel
+        ax.xaxis.set_ticks_position("top")
+        ax.xaxis.set_label_position("top")
+
         fig.savefig(filepath, dpi=100, bbox_inches="tight")
         self.plt.close(fig)
 
