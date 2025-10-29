@@ -93,7 +93,7 @@ def parse_args():
     parser.add_argument(
         "--bc-epochs",
         type=int,
-        default=30,  # Updated from 10 - but reduced from previous 50 to avoid overfitting
+        default=10,  # Updated from 10 - but reduced from previous 50 to avoid overfitting
         help="Number of BC training epochs (light initialization, avoid overfitting)",
     )
     parser.add_argument(
@@ -366,6 +366,196 @@ def create_experiment_directory(base_dir: Path, experiment_name: str) -> Path:
     exp_dir = base_dir / f"{experiment_name}_{timestamp}"
     exp_dir.mkdir(parents=True, exist_ok=True)
     return exp_dir
+
+
+def upload_training_artifacts(
+    s3_uploader, output_dir: Path, s3_prefix: str, logger
+) -> None:
+    """Upload all training artifacts for a single training run to S3.
+
+    This uploads the complete set of training outputs including:
+    - checkpoints/: All model checkpoints saved during training
+    - final_model.zip: Final trained model
+    - tensorboard/: All TensorBoard event files and logs
+    - eval_results.json: Evaluation metrics and results
+    - videos/*.mp4: Recorded evaluation videos
+    - route_visualizations/*.png: Route visualization images
+    - training_config.json: Training configuration
+    - training_state_*.json: Training state snapshots
+
+    Args:
+        s3_uploader: S3Uploader instance
+        output_dir: Local output directory for this training run
+        s3_prefix: S3 prefix for this training run
+        logger: Logger instance
+    """
+    logger.info(f"Uploading artifacts to S3 for {s3_prefix}")
+
+    # 1. Upload checkpoints
+    checkpoints_dir = output_dir / "checkpoints"
+    if checkpoints_dir.exists() and checkpoints_dir.is_dir():
+        count = s3_uploader.upload_directory(
+            str(checkpoints_dir),
+            f"{s3_prefix}/checkpoints",
+        )
+        logger.info(f"  ✓ Uploaded {count} checkpoint files")
+
+    # 2. Upload final model
+    final_model = output_dir / "final_model.zip"
+    if final_model.exists():
+        s3_uploader.upload_file(
+            str(final_model),
+            f"{s3_prefix}/final_model.zip",
+        )
+        logger.info("  ✓ Uploaded final model")
+
+    # 3. Upload TensorBoard logs
+    tensorboard_dir = output_dir / "tensorboard"
+    if tensorboard_dir.exists() and tensorboard_dir.is_dir():
+        count = s3_uploader.sync_tensorboard_logs(
+            str(tensorboard_dir),
+            f"{s3_prefix}/tensorboard",
+        )
+        logger.info(f"  ✓ Uploaded {count} TensorBoard event files")
+
+    # 4. Upload evaluation results
+    eval_results = output_dir / "eval_results.json"
+    if eval_results.exists():
+        s3_uploader.upload_file(
+            str(eval_results),
+            f"{s3_prefix}/eval_results.json",
+        )
+        logger.info("  ✓ Uploaded evaluation results")
+
+    # 5. Upload videos
+    videos_dir = output_dir / "videos"
+    if videos_dir.exists() and videos_dir.is_dir():
+        count = s3_uploader.upload_directory(
+            str(videos_dir),
+            f"{s3_prefix}/videos",
+            pattern="*.mp4",
+        )
+        logger.info(f"  ✓ Uploaded {count} evaluation videos")
+
+    # 6. Upload route visualizations
+    routes_dir = output_dir / "route_visualizations"
+    if routes_dir.exists() and routes_dir.is_dir():
+        count = s3_uploader.upload_directory(
+            str(routes_dir),
+            f"{s3_prefix}/route_visualizations",
+            pattern="*.png",
+        )
+        logger.info(f"  ✓ Uploaded {count} route visualization images")
+
+    # 7. Upload training config
+    training_config = output_dir / "training_config.json"
+    if training_config.exists():
+        s3_uploader.upload_file(
+            str(training_config),
+            f"{s3_prefix}/training_config.json",
+        )
+        logger.info("  ✓ Uploaded training config")
+
+    # 8. Upload training state files
+    for state_file in output_dir.glob("training_state_*.json"):
+        s3_uploader.upload_file(
+            str(state_file),
+            f"{s3_prefix}/{state_file.name}",
+        )
+        logger.info(f"  ✓ Uploaded {state_file.name}")
+
+    logger.info(f"S3 upload complete for {s3_prefix}")
+
+
+def upload_experiment_level_artifacts(
+    s3_uploader,
+    exp_dir: Path,
+    experiment_name: str,
+    architectures: list,
+    results_file: Path,
+    logger,
+) -> None:
+    """Upload experiment-level artifacts to S3.
+
+    This uploads experiment-wide files including:
+    - all_results.json: Aggregated results from all training runs
+    - {experiment_name}.log: Main experiment log file
+    - {arch}/pretrain/bc_checkpoint.pt: BC pretraining checkpoints
+    - {arch}/pretrain/tensorboard/: Pretraining TensorBoard logs
+    - {arch}/pretrain/*.json: Pretraining configuration files
+    - {arch}/pretrain/*.log: Pretraining log files
+    - s3_manifest.json: Manifest of all uploaded files
+
+    Args:
+        s3_uploader: S3Uploader instance
+        exp_dir: Experiment directory
+        experiment_name: Experiment name
+        architectures: List of architecture names
+        results_file: Path to all_results.json
+        logger: Logger instance
+    """
+    logger.info("Uploading experiment-level artifacts to S3...")
+
+    # Upload all_results.json
+    s3_uploader.upload_file(
+        str(results_file),
+        "all_results.json",
+    )
+    logger.info("  ✓ Uploaded aggregated results")
+
+    # Upload experiment log file
+    log_file = exp_dir / f"{experiment_name}.log"
+    if log_file.exists():
+        s3_uploader.upload_file(
+            str(log_file),
+            f"{experiment_name}.log",
+        )
+        logger.info("  ✓ Uploaded experiment log file")
+
+    # Upload pretraining artifacts if they exist
+    for arch_name in architectures:
+        pretrain_dir = exp_dir / arch_name / "pretrain"
+        if pretrain_dir.exists() and pretrain_dir.is_dir():
+            logger.info(f"Uploading pretraining artifacts for {arch_name}...")
+
+            # Upload pretrain checkpoint
+            pretrain_ckpt = pretrain_dir / "bc_checkpoint.pt"
+            if pretrain_ckpt.exists():
+                s3_uploader.upload_file(
+                    str(pretrain_ckpt),
+                    f"{arch_name}/pretrain/bc_checkpoint.pt",
+                )
+                logger.info(f"  ✓ Uploaded BC checkpoint for {arch_name}")
+
+            # Upload pretrain tensorboard logs
+            pretrain_tb = pretrain_dir / "tensorboard"
+            if pretrain_tb.exists():
+                count = s3_uploader.sync_tensorboard_logs(
+                    str(pretrain_tb),
+                    f"{arch_name}/pretrain/tensorboard",
+                )
+                logger.info(
+                    f"  ✓ Uploaded {count} pretraining TensorBoard files for {arch_name}"
+                )
+
+            # Upload pretrain config/logs
+            for pretrain_file in pretrain_dir.glob("*.json"):
+                s3_uploader.upload_file(
+                    str(pretrain_file),
+                    f"{arch_name}/pretrain/{pretrain_file.name}",
+                )
+                logger.info(f"  ✓ Uploaded {pretrain_file.name} for {arch_name}")
+
+            for pretrain_log in pretrain_dir.glob("*.log"):
+                s3_uploader.upload_file(
+                    str(pretrain_log),
+                    f"{arch_name}/pretrain/{pretrain_log.name}",
+                )
+                logger.info(f"  ✓ Uploaded {pretrain_log.name} for {arch_name}")
+
+    # Upload final manifest
+    s3_uploader.save_manifest(str(exp_dir / "s3_manifest.json"))
+    logger.info("  ✓ Uploaded S3 manifest")
 
 
 def train_architecture(
@@ -745,77 +935,9 @@ def train_worker(
                             if condition_name
                             else arch_name
                         )
-
-                        logger.info(f"Uploading artifacts to S3 for {s3_prefix}")
-
-                        # 1. Upload checkpoints
-                        checkpoints_dir = output_dir / "checkpoints"
-                        if checkpoints_dir.exists() and checkpoints_dir.is_dir():
-                            count = s3_uploader.upload_directory(
-                                str(checkpoints_dir),
-                                f"{s3_prefix}/checkpoints",
-                            )
-                            logger.info(f"  ✓ Uploaded {count} checkpoint files")
-
-                        # 2. Upload final model
-                        final_model = output_dir / "final_model.zip"
-                        if final_model.exists():
-                            s3_uploader.upload_file(
-                                str(final_model),
-                                f"{s3_prefix}/final_model.zip",
-                            )
-                            logger.info("  ✓ Uploaded final model")
-
-                        # 3. Upload TensorBoard logs
-                        tensorboard_dir = output_dir / "tensorboard"
-                        if tensorboard_dir.exists() and tensorboard_dir.is_dir():
-                            count = s3_uploader.sync_tensorboard_logs(
-                                str(tensorboard_dir),
-                                f"{s3_prefix}/tensorboard",
-                            )
-                            logger.info(f"  ✓ Uploaded {count} TensorBoard event files")
-
-                        # 4. Upload evaluation results
-                        eval_results = output_dir / "eval_results.json"
-                        if eval_results.exists():
-                            s3_uploader.upload_file(
-                                str(eval_results),
-                                f"{s3_prefix}/eval_results.json",
-                            )
-                            logger.info("  ✓ Uploaded evaluation results")
-
-                        # 5. Upload videos
-                        videos_dir = output_dir / "videos"
-                        if videos_dir.exists() and videos_dir.is_dir():
-                            count = s3_uploader.upload_directory(
-                                str(videos_dir),
-                                f"{s3_prefix}/videos",
-                                pattern="*.mp4",
-                            )
-                            logger.info(f"  ✓ Uploaded {count} evaluation videos")
-
-                        # 6. Upload route visualizations
-                        routes_dir = output_dir / "route_visualizations"
-                        if routes_dir.exists() and routes_dir.is_dir():
-                            count = s3_uploader.upload_directory(
-                                str(routes_dir),
-                                f"{s3_prefix}/route_visualizations",
-                                pattern="*.png",
-                            )
-                            logger.info(
-                                f"  ✓ Uploaded {count} route visualization images"
-                            )
-
-                        # 7. Upload training config
-                        training_config = output_dir / "training_config.json"
-                        if training_config.exists():
-                            s3_uploader.upload_file(
-                                str(training_config),
-                                f"{s3_prefix}/training_config.json",
-                            )
-                            logger.info("  ✓ Uploaded training config")
-
-                        logger.info(f"S3 upload complete for {s3_prefix}")
+                        upload_training_artifacts(
+                            s3_uploader, output_dir, s3_prefix, logger
+                        )
 
                 # Synchronize after each training run
                 barrier()
@@ -833,45 +955,14 @@ def train_worker(
 
             # Upload final experiment-level artifacts
             if s3_uploader:
-                logger.info("Uploading experiment-level artifacts to S3...")
-
-                # Upload all_results.json
-                s3_uploader.upload_file(
-                    str(results_file),
-                    "all_results.json",
+                upload_experiment_level_artifacts(
+                    s3_uploader,
+                    exp_dir,
+                    experiment_name,
+                    args.architectures,
+                    results_file,
+                    logger,
                 )
-                logger.info("  ✓ Uploaded aggregated results")
-
-                # Upload pretraining artifacts if they exist
-                for arch_name in args.architectures:
-                    pretrain_dir = exp_dir / arch_name / "pretrain"
-                    if pretrain_dir.exists() and pretrain_dir.is_dir():
-                        logger.info(
-                            f"Uploading pretraining artifacts for {arch_name}..."
-                        )
-
-                        # Upload pretrain checkpoint
-                        pretrain_ckpt = pretrain_dir / "bc_checkpoint.pt"
-                        if pretrain_ckpt.exists():
-                            s3_uploader.upload_file(
-                                str(pretrain_ckpt),
-                                f"{arch_name}/pretrain/bc_checkpoint.pt",
-                            )
-
-                        # Upload pretrain tensorboard logs
-                        pretrain_tb = pretrain_dir / "tensorboard"
-                        if pretrain_tb.exists():
-                            count = s3_uploader.sync_tensorboard_logs(
-                                str(pretrain_tb),
-                                f"{arch_name}/pretrain/tensorboard",
-                            )
-                            logger.info(
-                                f"  ✓ Uploaded {count} pretraining TensorBoard files for {arch_name}"
-                            )
-
-                # Upload final manifest
-                s3_uploader.save_manifest(str(exp_dir / "s3_manifest.json"))
-                logger.info("  ✓ Uploaded S3 manifest")
                 logger.info(
                     f"All artifacts uploaded to s3://{s3_bucket}/{s3_prefix}/{experiment_name}"
                 )
@@ -1146,27 +1237,13 @@ def main():
             )
             all_results.append(result)
 
-            # Upload to S3 if configured
+            # Upload ALL artifacts to S3 if configured
             if s3_uploader and result.get("status") != "failed":
                 output_dir = Path(result["output_dir"])
-
-                # Upload checkpoints
-                s3_uploader.upload_directory(
-                    str(output_dir / "checkpoints"),
-                    f"{arch_name}/{condition_name}/checkpoints",
+                s3_prefix = (
+                    f"{arch_name}/{condition_name}" if condition_name else arch_name
                 )
-
-                # Upload videos if they exist
-                videos_dir = output_dir / "videos"
-                if videos_dir.exists() and videos_dir.is_dir():
-                    logger.info(
-                        f"Uploading videos to S3 for {arch_name}/{condition_name}"
-                    )
-                    s3_uploader.upload_directory(
-                        str(videos_dir),
-                        f"{arch_name}/{condition_name}/videos",
-                        pattern="*.mp4",
-                    )
+                upload_training_artifacts(s3_uploader, output_dir, s3_prefix, logger)
 
     # Save all results
     results_file = exp_dir / "all_results.json"
@@ -1178,9 +1255,19 @@ def main():
     logger.info(f"Results saved to: {exp_dir}")
     logger.info("=" * 70)
 
-    # Upload final manifest
+    # Upload final experiment-level artifacts
     if s3_uploader:
-        s3_uploader.save_manifest(str(exp_dir / "s3_manifest.json"))
+        upload_experiment_level_artifacts(
+            s3_uploader,
+            exp_dir,
+            args.experiment_name,
+            args.architectures,
+            results_file,
+            logger,
+        )
+        logger.info(
+            f"All artifacts uploaded to s3://{args.s3_bucket}/{args.s3_prefix}/{args.experiment_name}"
+        )
 
     return 0
 

@@ -63,7 +63,6 @@ npp-rl/
 │   │   └── curriculum_env.py             # Curriculum wrapper
 │   ├── callbacks/             # Training callbacks
 │   │   ├── hierarchical_callbacks.py     # HRL-specific callbacks
-│   │   └── pbrs_logging_callback.py      # PBRS metrics logging
 │   ├── evaluation/            # Evaluation system
 │   │   ├── comprehensive_evaluator.py    # Full evaluation pipeline
 │   │   └── test_suite_loader.py          # Test suite management

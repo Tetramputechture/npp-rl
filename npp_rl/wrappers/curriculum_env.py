@@ -121,15 +121,24 @@ class CurriculumEnv(gym.Wrapper):
         self.current_level_data = level_data
 
         # Defensive: safely extract stage from level data
-        # Try multiple possible locations for category/stage info
-        if "category" in level_data:
+        # PRIORITY 1: Check sampled_stage (set by CurriculumManager.sample_level())
+        # PRIORITY 2: Check category field (fallback for legacy data)
+        # PRIORITY 3: Check metadata.category (fallback)
+        if "sampled_stage" in level_data:
+            # PRIMARY: CurriculumManager adds this field when sampling
+            self.current_level_stage = level_data["sampled_stage"]
+        elif "category" in level_data:
+            # FALLBACK: Explicit category field in level data
             self.current_level_stage = level_data["category"]
         elif "metadata" in level_data and isinstance(level_data["metadata"], dict):
+            # FALLBACK: Category in metadata
             self.current_level_stage = level_data["metadata"].get("category", "unknown")
         else:
+            # ERROR: No stage information available
             self.current_level_stage = "unknown"
-            logger.warning(
-                f"Could not determine stage for level: {level_data.get('level_id', 'unknown')}"
+            logger.error(
+                f"NO STAGE INFO for level {level_data.get('level_id', 'unknown')}! "
+                f"This will prevent curriculum tracking. Level data keys: {list(level_data.keys())}"
             )
 
         # Extract generator type for balanced sampling tracking
@@ -200,6 +209,10 @@ class CurriculumEnv(gym.Wrapper):
         if hasattr(self, "current_generator_type"):
             info["curriculum_generator"] = self.current_generator_type
 
+        # Ensure has_won is in info dict for consistency (if player_won exists)
+        if "player_won" in info and "has_won" not in info:
+            info["has_won"] = info["player_won"]
+
         # Track episode completion
         if terminated or truncated:
             self._on_episode_end(info)
@@ -219,15 +232,21 @@ class CurriculumEnv(gym.Wrapper):
         self.episode_count += 1
 
         # Record episode result in curriculum
-        # NppEnvironment returns "is_success", but we check both for compatibility
-        success = info.get("is_success", info.get("success", False))
+        # Use authoritative has_won/player_won from environment
+        success = info.get(
+            "has_won",
+            info.get("player_won", info.get("is_success", info.get("success", False))),
+        )
 
         # Defensive: ensure we have a valid stage before recording
         stage = getattr(self, "current_level_stage", None)
         generator_type = getattr(self, "current_generator_type", None)
+        frames = info.get("l", None)  # Frame count from episode
 
         if stage and stage != "unknown":
-            self.curriculum_manager.record_episode(stage, success, generator_type)
+            self.curriculum_manager.record_episode(
+                stage, success, generator_type, frames
+            )
         else:
             logger.debug("Skipping episode recording - no valid curriculum stage")
 
@@ -334,16 +353,22 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                 episodes_completed_this_step += 1
 
                 # Record episode result in curriculum manager (main process tracking)
-                # NppEnvironment returns "is_success", but we check both for compatibility
-                success = info.get("is_success", info.get("success", False))
+                # Use authoritative has_won/player_won from environment
+                success = info.get(
+                    "has_won",
+                    info.get(
+                        "player_won", info.get("is_success", info.get("success", False))
+                    ),
+                )
                 stage = info.get("curriculum_stage", "unknown")
                 generator_type = info.get("curriculum_generator", None)
+                frames = info.get("l", None)  # Frame count from episode
 
                 # Defensive: only record if we have a valid stage
                 if stage and stage != "unknown":
                     try:
                         self.curriculum_manager.record_episode(
-                            stage, success, generator_type
+                            stage, success, generator_type, frames
                         )
                         logger.debug(
                             f"[VecEnv] Env {i} completed episode {self.env_episode_counts[i]}: "
@@ -423,7 +448,19 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
             # Use env_method to call set_curriculum_stage on all envs
             # This works for both SubprocVecEnv and DummyVecEnv
             if hasattr(self.venv, "env_method"):
-                self.venv.env_method("set_curriculum_stage", stage)
+                # Sync stage to all environments
+                stage_results = self.venv.env_method("set_curriculum_stage", stage)
+
+                # Validate sync succeeded
+                if stage_results is not None and len(stage_results) == self.num_envs:
+                    logger.info(
+                        f"[VecEnv] Successfully synced stage '{stage}' to {len(stage_results)} environments"
+                    )
+                else:
+                    logger.warning(
+                        f"[VecEnv] Stage sync may have failed - expected {self.num_envs} results, "
+                        f"got {len(stage_results) if stage_results else 0}"
+                    )
 
                 # Also sync adaptive mixing ratio from main process
                 # This ensures subprocesses use up-to-date mixing based on current performance
@@ -431,21 +468,27 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                     mixing_ratio = self.curriculum_manager._get_adaptive_mixing_ratio(
                         stage
                     )
-                    self.venv.env_method(
+                    mixing_results = self.venv.env_method(
                         "set_adaptive_mixing_ratio", stage, mixing_ratio
                     )
-                    logger.info(
-                        f"[VecEnv] Synced stage '{stage}' (mixing: {mixing_ratio:.1%}) "
-                        f"to all {self.num_envs} environments"
-                    )
-                else:
-                    logger.info(
-                        f"[VecEnv] Synced stage '{stage}' to all {self.num_envs} environments"
-                    )
+
+                    if (
+                        mixing_results is not None
+                        and len(mixing_results) == self.num_envs
+                    ):
+                        logger.info(
+                            f"[VecEnv] Successfully synced mixing ratio {mixing_ratio:.1%} "
+                            f"for stage '{stage}' to {len(mixing_results)} environments"
+                        )
+                    else:
+                        logger.warning(
+                            f"[VecEnv] Mixing ratio sync may have failed - expected {self.num_envs} results, "
+                            f"got {len(mixing_results) if mixing_results else 0}"
+                        )
             else:
-                logger.warning(
-                    "[VecEnv] VecEnv does not support env_method, cannot sync curriculum stage. "
-                    "Stage advancement may not work correctly!"
+                logger.error(
+                    "[VecEnv] VecEnv does not support env_method, cannot sync curriculum stage! "
+                    "Stage advancement will not work correctly. This is a critical error."
                 )
         except Exception as e:
             logger.error(f"[VecEnv] Failed to sync curriculum: {e}", exc_info=True)

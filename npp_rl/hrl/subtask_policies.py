@@ -19,16 +19,19 @@ import numpy as np
 from typing import Dict, Any, Optional, Tuple
 
 from npp_rl.hrl.high_level_policy import Subtask
+from nclone.gym_environment.observation_processor import (
+    compute_hazard_from_entity_states,
+)
 
 
 class SubtaskEmbedding(nn.Module):
     """
     Learned embeddings for subtasks that capture subtask-specific context.
-    
+
     This module provides rich representations for each subtask that can be
     concatenated with observation features to condition the low-level policy.
     """
-    
+
     def __init__(
         self,
         num_subtasks: int = 4,
@@ -36,72 +39,72 @@ class SubtaskEmbedding(nn.Module):
     ):
         """
         Initialize subtask embeddings.
-        
+
         Args:
             num_subtasks: Number of different subtasks
             embedding_dim: Dimension of subtask embeddings
         """
         super().__init__()
-        
+
         self.num_subtasks = num_subtasks
         self.embedding_dim = embedding_dim
-        
+
         # Learnable embeddings for each subtask
         self.embeddings = nn.Embedding(num_subtasks, embedding_dim)
-        
+
         # Initialize with Xavier initialization
         nn.init.xavier_uniform_(self.embeddings.weight)
-    
+
     def forward(self, subtask_indices: torch.Tensor) -> torch.Tensor:
         """
         Get embeddings for given subtask indices.
-        
+
         Args:
             subtask_indices: [batch_size] or [batch_size, 1] subtask indices
-            
+
         Returns:
             Subtask embeddings [batch_size, embedding_dim]
         """
         if len(subtask_indices.shape) > 1:
             subtask_indices = subtask_indices.squeeze(-1)
-        
+
         return self.embeddings(subtask_indices)
 
 
 class SubtaskContextEncoder(nn.Module):
     """
     Encodes subtask-specific context information.
-    
+
     Context includes:
     - Target position for current subtask
     - Distance to target
     - Mine proximity warnings
     - Time since subtask started
     """
-    
+
     def __init__(
         self,
         context_dim: int = 32,
     ):
         """
         Initialize context encoder.
-        
+
         Args:
             context_dim: Output dimension for encoded context
         """
         super().__init__()
-        
+
         # Input: target_pos (2) + distance (1) + mine_proximity (1) + time_in_subtask (1)
         self.input_dim = 5
         self.context_dim = context_dim
-        
+
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, 64),
             nn.ReLU(),
             nn.Linear(64, context_dim),
             nn.ReLU(),
         )
-    
+
     def forward(
         self,
         target_position: torch.Tensor,
@@ -111,44 +114,47 @@ class SubtaskContextEncoder(nn.Module):
     ) -> torch.Tensor:
         """
         Encode subtask context.
-        
+
         Args:
             target_position: [batch_size, 2] normalized target position
             distance_to_target: [batch_size, 1] normalized distance
             mine_proximity: [batch_size, 1] nearest mine distance
             time_in_subtask: [batch_size, 1] normalized time in subtask
-            
+
         Returns:
             Encoded context [batch_size, context_dim]
         """
-        context = torch.cat([
-            target_position,
-            distance_to_target,
-            mine_proximity,
-            time_in_subtask,
-        ], dim=-1)
-        
+        context = torch.cat(
+            [
+                target_position,
+                distance_to_target,
+                mine_proximity,
+                time_in_subtask,
+            ],
+            dim=-1,
+        )
+
         return self.encoder(context)
 
 
 class LowLevelPolicy(nn.Module):
     """
     Low-level policy for movement action execution.
-    
+
     This policy takes full multimodal observations, current subtask embedding,
     and subtask context to produce movement actions. It's designed to be
     trained with ICM for enhanced exploration.
-    
+
     Input Features:
     - Multimodal observations: 512D from HGTMultimodalExtractor
     - Subtask embedding: 64D learned embedding
     - Subtask context: 32D encoded context
     Total input: 608D
-    
+
     Output:
     - Logits over 6 movement actions
     """
-    
+
     def __init__(
         self,
         observation_dim: int = 512,
@@ -161,7 +167,7 @@ class LowLevelPolicy(nn.Module):
     ):
         """
         Initialize low-level policy network.
-        
+
         Args:
             observation_dim: Dimension of multimodal observations
             subtask_embedding_dim: Dimension of subtask embeddings
@@ -172,47 +178,49 @@ class LowLevelPolicy(nn.Module):
             num_actions: Number of movement actions
         """
         super().__init__()
-        
+
         self.observation_dim = observation_dim
         self.subtask_embedding_dim = subtask_embedding_dim
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
         self.num_actions = num_actions
-        
+
         # Total input dimension
         self.input_dim = observation_dim + subtask_embedding_dim + context_dim
-        
+
         # Subtask embedding module
         self.subtask_embedding = SubtaskEmbedding(
             num_subtasks=4,
             embedding_dim=subtask_embedding_dim,
         )
-        
+
         # Context encoder
         self.context_encoder = SubtaskContextEncoder(context_dim=context_dim)
-        
+
         # Main policy network
         layers = []
         prev_dim = self.input_dim
         for _ in range(num_layers):
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, hidden_dim),
+                    nn.LayerNorm(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             prev_dim = hidden_dim
-        
+
         self.policy_net = nn.Sequential(*layers)
-        
+
         # Action head
         self.action_head = nn.Linear(hidden_dim, num_actions)
-        
+
         # Optional: Add residual connection from observations
         self.use_residual = observation_dim == hidden_dim
         if self.use_residual:
             self.residual_proj = nn.Linear(observation_dim, hidden_dim)
-    
+
     def forward(
         self,
         observations: torch.Tensor,
@@ -224,7 +232,7 @@ class LowLevelPolicy(nn.Module):
     ) -> torch.Tensor:
         """
         Forward pass to compute action logits.
-        
+
         Args:
             observations: [batch_size, 512] multimodal observations
             subtask_indices: [batch_size] current subtask indices
@@ -232,13 +240,13 @@ class LowLevelPolicy(nn.Module):
             distance_to_target: [batch_size, 1] distance to target
             mine_proximity: [batch_size, 1] mine proximity
             time_in_subtask: [batch_size, 1] time in subtask
-            
+
         Returns:
             Action logits [batch_size, num_actions]
         """
         # Get subtask embedding
         subtask_embed = self.subtask_embedding(subtask_indices)
-        
+
         # Encode context
         context = self.context_encoder(
             target_position,
@@ -246,26 +254,29 @@ class LowLevelPolicy(nn.Module):
             mine_proximity,
             time_in_subtask,
         )
-        
+
         # Combine all features
-        combined = torch.cat([
-            observations,
-            subtask_embed,
-            context,
-        ], dim=-1)
-        
+        combined = torch.cat(
+            [
+                observations,
+                subtask_embed,
+                context,
+            ],
+            dim=-1,
+        )
+
         # Forward through policy network
         hidden = self.policy_net(combined)
-        
+
         # Optional residual connection
         if self.use_residual:
             hidden = hidden + self.residual_proj(observations)
-        
+
         # Compute action logits
         action_logits = self.action_head(hidden)
-        
+
         return action_logits
-    
+
     def select_action(
         self,
         observations: torch.Tensor,
@@ -278,7 +289,7 @@ class LowLevelPolicy(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Select an action given current state and subtask.
-        
+
         Args:
             observations: Multimodal observations
             subtask_indices: Current subtask
@@ -287,7 +298,7 @@ class LowLevelPolicy(nn.Module):
             mine_proximity: Mine proximity
             time_in_subtask: Time in subtask
             deterministic: If True, select argmax; otherwise sample
-            
+
         Returns:
             Tuple of (selected_action, log_probability)
         """
@@ -299,19 +310,19 @@ class LowLevelPolicy(nn.Module):
             mine_proximity,
             time_in_subtask,
         )
-        
+
         probs = F.softmax(logits, dim=-1)
-        
+
         if deterministic:
             action = torch.argmax(probs, dim=-1)
         else:
             action = torch.multinomial(probs, num_samples=1).squeeze(-1)
-        
+
         log_prob = F.log_softmax(logits, dim=-1)
         selected_log_prob = log_prob.gather(-1, action.unsqueeze(-1)).squeeze(-1)
-        
+
         return action, selected_log_prob
-    
+
     def get_action_distribution(
         self,
         observations: torch.Tensor,
@@ -323,7 +334,7 @@ class LowLevelPolicy(nn.Module):
     ) -> torch.distributions.Categorical:
         """
         Get action distribution for computing various statistics.
-        
+
         Returns:
             Categorical distribution over actions
         """
@@ -335,18 +346,18 @@ class LowLevelPolicy(nn.Module):
             mine_proximity,
             time_in_subtask,
         )
-        
+
         return torch.distributions.Categorical(logits=logits)
 
 
 class ICMIntegration(nn.Module):
     """
     Integration layer for ICM with subtask-aware curiosity modulation.
-    
+
     This module adjusts ICM curiosity rewards based on the current subtask
     and reachability information to focus exploration appropriately.
     """
-    
+
     def __init__(
         self,
         base_curiosity_weight: float = 0.01,
@@ -354,15 +365,15 @@ class ICMIntegration(nn.Module):
     ):
         """
         Initialize ICM integration.
-        
+
         Args:
             base_curiosity_weight: Base weight for curiosity rewards
             subtask_modulation_weights: Per-subtask modulation factors
         """
         super().__init__()
-        
+
         self.base_curiosity_weight = base_curiosity_weight
-        
+
         # Default modulation weights for each subtask
         if subtask_modulation_weights is None:
             subtask_modulation_weights = {
@@ -371,9 +382,9 @@ class ICMIntegration(nn.Module):
                 Subtask.NAVIGATE_TO_EXIT_DOOR: 0.3,  # Very goal-directed
                 Subtask.EXPLORE_FOR_SWITCHES: 1.5,  # High exploration
             }
-        
+
         self.subtask_modulation = subtask_modulation_weights
-    
+
     def modulate_curiosity(
         self,
         base_curiosity: torch.Tensor,
@@ -383,37 +394,37 @@ class ICMIntegration(nn.Module):
     ) -> torch.Tensor:
         """
         Modulate ICM curiosity rewards based on subtask and context.
-        
+
         Args:
             base_curiosity: [batch_size] base ICM curiosity rewards
             subtask_indices: [batch_size] current subtask indices
             mine_proximity: [batch_size] distance to nearest dangerous mine
             reachability_score: [batch_size] reachability to target
-            
+
         Returns:
             Modulated curiosity rewards [batch_size]
         """
         modulated = base_curiosity.clone()
-        
+
         # Apply subtask-specific modulation (vectorized)
         modulation_factors = torch.ones_like(base_curiosity)
         for subtask, factor in self.subtask_modulation.items():
             mask = subtask_indices == subtask.value
             modulation_factors[mask] = factor
         modulated = modulated * modulation_factors
-        
+
         # Reduce curiosity near dangerous mines (safety)
         mine_danger_threshold = 2.0
         mine_factor = torch.clamp(mine_proximity / mine_danger_threshold, 0.1, 1.0)
         modulated = modulated * mine_factor
-        
+
         # Boost curiosity when reachability is low (stuck)
         reachability_threshold = 0.3
         low_reachability_mask = reachability_score < reachability_threshold
         modulated[low_reachability_mask] *= 1.5
-        
+
         return modulated * self.base_curiosity_weight
-    
+
     def forward(
         self,
         base_curiosity: torch.Tensor,
@@ -433,12 +444,12 @@ class ICMIntegration(nn.Module):
 class SubtaskSpecificFeatures:
     """
     Helper class to extract subtask-specific features from observations.
-    
+
     This provides utility methods for computing target positions, distances,
     and other context features needed by the low-level policy from the
     N++ environment's observation structure.
     """
-    
+
     @staticmethod
     def extract_target_position(
         obs: Dict[str, Any],
@@ -446,11 +457,11 @@ class SubtaskSpecificFeatures:
     ) -> np.ndarray:
         """
         Extract target position for current subtask from N++ observations.
-        
+
         Args:
             obs: Environment observation containing position information
             subtask: Current subtask
-            
+
         Returns:
             Target position [2] (x, y in pixels)
         """
@@ -460,45 +471,47 @@ class SubtaskSpecificFeatures:
             switch_x = obs.get("switch_x", 0.0)
             switch_y = obs.get("switch_y", 0.0)
             return np.array([switch_x, switch_y], dtype=np.float32)
-        
+
         elif subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
             # Target is nearest locked door switch
             # Extract from observation dict (added in base_environment)
             locked_door_switches = obs.get("locked_door_switches", [])
-            
+
             if locked_door_switches:
                 # Find nearest locked door switch
-                ninja_pos = np.array([obs["player_x"], obs["player_y"]], dtype=np.float32)
-                min_dist = float('inf')
+                ninja_pos = np.array(
+                    [obs["player_x"], obs["player_y"]], dtype=np.float32
+                )
+                min_dist = float("inf")
                 nearest_switch = None
-                
+
                 for switch in locked_door_switches:
                     switch_pos = np.array([switch.xpos, switch.ypos], dtype=np.float32)
                     dist = np.linalg.norm(ninja_pos - switch_pos)
                     if dist < min_dist:
                         min_dist = dist
                         nearest_switch = switch_pos
-                
+
                 return nearest_switch
-            
+
             # Fallback if no locked door switches in level
             level_width = 1056  # LEVEL_WIDTH * CELL_SIZE
             level_height = 600  # LEVEL_HEIGHT * CELL_SIZE
             return np.array([level_width * 0.5, level_height * 0.5], dtype=np.float32)
-        
+
         elif subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
             # Target is the exit door
             exit_x = obs.get("exit_door_x", 0.0)
             exit_y = obs.get("exit_door_y", 0.0)
             return np.array([exit_x, exit_y], dtype=np.float32)
-        
+
         else:  # AVOID_MINE or EXPLORE_FOR_SWITCHES
             # For mine avoidance: move away from nearest mine
             # For exploration: use level center or unexplored area
             level_width = 1056
             level_height = 600
             return np.array([level_width * 0.5, level_height * 0.5], dtype=np.float32)
-    
+
     @staticmethod
     def compute_distance_to_target(
         ninja_pos: np.ndarray,
@@ -506,54 +519,45 @@ class SubtaskSpecificFeatures:
     ) -> float:
         """Compute normalized distance to target."""
         return np.linalg.norm(ninja_pos - target_pos)
-    
+
     @staticmethod
     def compute_mine_proximity(obs: Dict[str, Any]) -> float:
         """
         Compute proximity to nearest dangerous mine from N++ observations.
-        
+
         Args:
             obs: Environment observation containing game_state with hazard info
-            
+
         Returns:
             Distance to nearest dangerous mine (normalized to screen diagonal)
         """
         # Extract mine proximity from ninja_state features
         # Feature 23 (index 23) is nearest_hazard_distance (normalized to [-1, 1])
         game_state = obs.get("game_state", None)
-        
+
         if game_state is not None and len(game_state) >= 24:
             # Feature 23: nearest hazard distance (normalized to [-1, 1])
             # Convert back to [0, 1] range: (x + 1) / 2
             nearest_hazard_norm = game_state[23]
             nearest_hazard_01 = (nearest_hazard_norm + 1.0) / 2.0
             return float(nearest_hazard_01)
-        
+
         # Fallback: use entity_states if available
         entity_states = obs.get("entity_states", None)
         if entity_states is not None and len(entity_states) > 0:
             player_x = obs.get("player_x", 0.0)
             player_y = obs.get("player_y", 0.0)
-            
-            # Import helper function to compute hazard from entity states
+
             try:
-                # Avoid circular import by importing here
-                import sys
-                import os
-                nclone_path = os.path.join(os.path.dirname(__file__), '../../..', 'nclone')
-                if os.path.exists(nclone_path):
-                    sys.path.insert(0, nclone_path)
-                from nclone.gym_environment.observation_processor import compute_hazard_from_entity_states
-                
                 nearest_dist, _ = compute_hazard_from_entity_states(
                     entity_states, player_x, player_y
                 )
-                
+
                 # Normalize to screen diagonal
                 screen_diagonal = (1056**2 + 600**2) ** 0.5
                 return min(1.0, nearest_dist / screen_diagonal)
             except ImportError:
                 pass
-        
+
         # Safe fallback: assume no nearby mines
         return 1.0

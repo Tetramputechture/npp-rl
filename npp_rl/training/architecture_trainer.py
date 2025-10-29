@@ -132,7 +132,10 @@ class ArchitectureTrainer:
         # Set up policy kwargs with architecture config
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
-            "features_extractor_kwargs": {"config": self.architecture_config},
+            "features_extractor_kwargs": {
+                "config": self.architecture_config,
+                "frame_stack_config": self.frame_stack_config,
+            },
             "net_arch": {"pi": [256, 256, 128], "vf": [256, 256, 128]},
             "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
         }
@@ -244,59 +247,82 @@ class ArchitectureTrainer:
             enable_visualization: If True, create one environment with human rendering
             vis_env_idx: Index of environment to enable visualization for
         """
+        logger.info("=" * 60)
         logger.info(f"Setting up {num_envs} training environments...")
+        logger.info(f"Frame stacking config: {self.frame_stack_config}")
 
-        # Adjust n_steps if total_timesteps is very small (for CPU testing)
-        if total_timesteps is not None:
-            self._adjust_hyperparams_for_small_runs(total_timesteps, num_envs)
+        try:
+            # Adjust n_steps if total_timesteps is very small (for CPU testing)
+            if total_timesteps is not None:
+                self._adjust_hyperparams_for_small_runs(total_timesteps, num_envs)
 
-        # Set up curriculum manager if enabled
-        if self.use_curriculum:
-            self.curriculum_manager = create_curriculum_manager(
-                dataset_path=str(self.train_dataset_path), **self.curriculum_kwargs
+            # Set up curriculum manager if enabled
+            if self.use_curriculum:
+                self.curriculum_manager = create_curriculum_manager(
+                    dataset_path=str(self.train_dataset_path), **self.curriculum_kwargs
+                )
+                logger.info("Curriculum learning enabled")
+                logger.info(
+                    f"Starting stage: {self.curriculum_manager.get_current_stage()}"
+                )
+
+            # Create environment factory
+            logger.info("Creating environment factory...")
+            self.environment_factory = EnvironmentFactory(
+                use_curriculum=self.use_curriculum,
+                curriculum_manager=self.curriculum_manager,
+                frame_stack_config=self.frame_stack_config,
+                enable_pbrs=self.enable_pbrs,
+                pbrs_gamma=self.pbrs_gamma,
+                enable_mine_avoidance_reward=self.enable_mine_avoidance_reward,
+                output_dir=self.output_dir,
+                pretrained_checkpoint=self.pretrained_checkpoint,
             )
-            logger.info("Curriculum learning enabled")
-            logger.info(
-                f"Starting stage: {self.curriculum_manager.get_current_stage()}"
+
+            # Create training environment
+            logger.info(f"Creating {num_envs} training environments...")
+            self.env = self.environment_factory.create_training_env(
+                num_envs=num_envs,
+                gamma=self.hyperparams.get("gamma", 0.99),
+                enable_visualization=enable_visualization,
+                vis_env_idx=vis_env_idx,
+            )
+            logger.info(f"✓ Training environment created: {type(self.env).__name__}")
+
+            # Create evaluation environment
+            logger.info("Creating evaluation environment...")
+            self.eval_env = self.environment_factory.create_eval_env()
+            logger.info(f"✓ Eval environment created: {type(self.eval_env).__name__}")
+
+            # Create callback factory
+            logger.info("Creating callback factory...")
+            self.callback_factory = CallbackFactory(
+                output_dir=self.output_dir,
+                use_hierarchical_ppo=self.use_hierarchical_ppo,
+                use_curriculum=self.use_curriculum,
+                curriculum_manager=self.curriculum_manager,
+                use_distributed=self.use_distributed,
+                world_size=self.world_size,
             )
 
-        # Create environment factory
-        self.environment_factory = EnvironmentFactory(
-            use_curriculum=self.use_curriculum,
-            curriculum_manager=self.curriculum_manager,
-            frame_stack_config=self.frame_stack_config,
-            enable_pbrs=self.enable_pbrs,
-            pbrs_gamma=self.pbrs_gamma,
-            enable_mine_avoidance_reward=self.enable_mine_avoidance_reward,
-            output_dir=self.output_dir,
-            pretrained_checkpoint=self.pretrained_checkpoint,
-        )
+            # Create the model with the environment
+            logger.info("Creating model with environment...")
+            self._create_model()
 
-        # Create training environment
-        self.env = self.environment_factory.create_training_env(
-            num_envs=num_envs,
-            gamma=self.hyperparams.get("gamma", 0.99),
-            enable_visualization=enable_visualization,
-            vis_env_idx=vis_env_idx,
-        )
+            logger.info(f"✓ Model fully initialized with {num_envs} environments")
+            logger.info("=" * 60)
 
-        # Create evaluation environment
-        self.eval_env = self.environment_factory.create_eval_env()
-
-        # Create callback factory
-        self.callback_factory = CallbackFactory(
-            output_dir=self.output_dir,
-            use_hierarchical_ppo=self.use_hierarchical_ppo,
-            use_curriculum=self.use_curriculum,
-            curriculum_manager=self.curriculum_manager,
-            use_distributed=self.use_distributed,
-            world_size=self.world_size,
-        )
-
-        # Create the model with the environment
-        self._create_model()
-
-        logger.info(f"✓ Model fully initialized with {num_envs} environments")
+        except Exception as e:
+            logger.error("!" * 60)
+            logger.error("CRITICAL: Environment setup failed!")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"Num envs: {num_envs}")
+            logger.error(f"Frame stack config: {self.frame_stack_config}")
+            logger.error(f"PBRS enabled: {self.enable_pbrs}")
+            logger.error("Full traceback:", exc_info=True)
+            logger.error("!" * 60)
+            raise
 
     def _adjust_hyperparams_for_small_runs(
         self, total_timesteps: int, num_envs: int
@@ -323,22 +349,36 @@ class ArchitectureTrainer:
     def _create_model(self) -> None:
         """Create PPO or HierarchicalPPO model instance."""
         logger.info("=" * 60)
+        logger.info("Creating model...")
 
-        if self.use_hierarchical_ppo:
-            self._create_hierarchical_model()
-        else:
-            self._create_standard_model()
+        try:
+            if self.use_hierarchical_ppo:
+                self._create_hierarchical_model()
+            else:
+                self._create_standard_model()
 
-        logger.info(f"✓ Model is on device: {self.model.device}")
-        logger.info("=" * 60)
+            logger.info(f"✓ Model is on device: {self.model.device}")
+            logger.info("=" * 60)
 
-        # Load pretrained weights if provided
-        if self.pretrained_checkpoint:
-            self._load_pretrained_weights()
+            # Load pretrained weights if provided
+            if self.pretrained_checkpoint:
+                self._load_pretrained_weights()
 
-        # Wrap policy with DistributedDataParallel if using multi-GPU
-        if self.use_distributed and self.world_size > 1:
-            self._wrap_model_ddp()
+            # Wrap policy with DistributedDataParallel if using multi-GPU
+            if self.use_distributed and self.world_size > 1:
+                self._wrap_model_ddp()
+
+        except Exception as e:
+            logger.error("!" * 60)
+            logger.error("CRITICAL: Model creation failed!")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"Architecture: {self.architecture_config.name}")
+            logger.error(f"Policy class: {self.policy_class}")
+            logger.error(f"Device: {self.hyperparams.get('device', 'unknown')}")
+            logger.error("Full traceback:", exc_info=True)
+            logger.error("!" * 60)
+            raise
 
     def _create_hierarchical_model(self) -> None:
         """Create HierarchicalPPO model."""
@@ -391,7 +431,12 @@ class ArchitectureTrainer:
 
     def _load_pretrained_weights(self) -> None:
         """Load BC pretrained weights into model."""
+        logger.info("=" * 60)
         logger.info(f"Loading pretrained weights from {self.pretrained_checkpoint}")
+        logger.info(f"Architecture: {self.architecture_config.name}")
+        if self.frame_stack_config:
+            logger.info(f"Frame stacking config: {self.frame_stack_config}")
+
         try:
             weight_loader = BCWeightLoader(
                 model=self.model,
@@ -399,9 +444,22 @@ class ArchitectureTrainer:
                 frame_stack_config=self.frame_stack_config,
             )
             weight_loader.load_weights(self.pretrained_checkpoint)
+            logger.info("=" * 60)
         except Exception as e:
-            logger.error(f"Failed to load pretrained weights: {e}")
-            logger.warning("Continuing with random initialization")
+            logger.error("!" * 60)
+            logger.error("CRITICAL: Failed to load pretrained weights!")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"Checkpoint path: {self.pretrained_checkpoint}")
+            logger.error(f"Architecture: {self.architecture_config.name}")
+            logger.error(f"Frame stack config: {self.frame_stack_config}")
+            logger.error("Full traceback:", exc_info=True)
+            logger.error("!" * 60)
+            logger.warning(
+                "⚠️  Continuing with RANDOM INITIALIZATION - training will start from scratch!"
+            )
+            logger.warning("⚠️  BC pretraining benefits will be LOST!")
+            logger.error("!" * 60)
 
     def _wrap_model_ddp(self) -> None:
         """Wrap model policy with DistributedDataParallel."""
@@ -479,8 +537,20 @@ class ArchitectureTrainer:
             return {"status": "completed", "total_timesteps": total_timesteps}
 
         except Exception as e:
-            logger.error(f"Training failed: {e}")
-            return {"status": "failed", "error": str(e)}
+            logger.error(f"Training failed: {e}", exc_info=True)
+            logger.error("=" * 60)
+            logger.error("TRAINING FAILURE DETAILS:")
+            logger.error(f"  Error type: {type(e).__name__}")
+            logger.error(f"  Error message: {str(e)}")
+            logger.error(f"  Total timesteps attempted: {total_timesteps}")
+            logger.error(
+                f"  Model device: {self.model.device if self.model else 'N/A'}"
+            )
+            logger.error(
+                f"  Num environments: {self.env.num_envs if self.env else 'N/A'}"
+            )
+            logger.error("=" * 60)
+            return {"status": "failed", "error": str(e), "error_type": type(e).__name__}
 
     def _log_training_start(
         self, total_timesteps: int, eval_freq: int, save_freq: int

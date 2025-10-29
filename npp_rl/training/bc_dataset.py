@@ -42,10 +42,18 @@ class ObservationNormalizer:
             logger.warning("No samples provided for normalization statistics")
             return
 
+        # Visual observations (player_frame, global_view) are normalized by the feature
+        # extractor (division by 255.0), so we skip them here to avoid double normalization
+        visual_keys = {"player_frame", "global_view"}
+
         # Collect all observations by key
         obs_by_key = {}
         for obs, _ in samples:
             for key, value in obs.items():
+                # Skip visual observations - they're normalized by feature extractor
+                if key in visual_keys:
+                    continue
+
                 if isinstance(value, np.ndarray) and np.issubdtype(
                     value.dtype, np.floating
                 ):
