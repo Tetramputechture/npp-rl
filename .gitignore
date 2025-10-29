@@ -73,3 +73,5 @@ logs/
 *.txtevents.out.tfevents.*
 
 *.log
+
+*.txt
