@@ -112,22 +112,28 @@ class EnvironmentFactory:
             env = DummyVecEnv(env_fns)
             logger.info("DummyVecEnv initialization complete")
 
-        # Apply VecNormalize for return normalization
+        # Apply VecNormalize for reward normalization only
+        # Observation normalization handled separately via BC stats
+        logger.info("Applying VecNormalize wrapper for reward normalization...")
         env = VecNormalize(
             env,
             training=True,
-            norm_obs=False,  # Observation normalization handled by BC if enabled
-            norm_reward=True,  # Normalize returns for stable value learning
+            norm_obs=False,  # Keep False - BC handles this
+            norm_reward=True,
             clip_obs=10.0,
             clip_reward=10.0,
             gamma=gamma,
             epsilon=1e-8,
         )
         self.vec_normalize_wrapper = env
+        logger.info("✓ VecNormalize wrapper applied (reward normalization only)")
 
         # Apply BC observation normalization if pretrained checkpoint is used
         if self.pretrained_checkpoint and self.output_dir:
-            env = self._apply_bc_normalization(env, gamma)
+            logger.info("Attempting to apply BC observation normalization...")
+            self._apply_bc_normalization(env, gamma)
+        else:
+            logger.info("No BC checkpoint - skipping BC observation normalization")
 
         # Wrap with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
@@ -154,24 +160,31 @@ class EnvironmentFactory:
 
         def make_eval_env():
             env_config = EnvironmentConfig.for_training()
-            # Apply frame stacking configuration if provided
-            if self.frame_stack_config:
-                from nclone.gym_environment import FrameStackConfig
+            env = NppEnvironment(config=env_config)
 
-                env_config.frame_stack = FrameStackConfig(
-                    enable_visual_frame_stacking=self.frame_stack_config.get(
-                        "enable_visual_frame_stacking", False
-                    ),
+            # Apply FrameStackWrapper if frame stacking is enabled
+            if self.frame_stack_config and (
+                self.frame_stack_config.get("enable_visual_frame_stacking", False)
+                or self.frame_stack_config.get("enable_state_stacking", False)
+            ):
+                from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+
+                env = FrameStackWrapper(
+                    env,
                     visual_stack_size=self.frame_stack_config.get(
                         "visual_stack_size", 4
+                    ),
+                    state_stack_size=self.frame_stack_config.get("state_stack_size", 4),
+                    enable_visual_stacking=self.frame_stack_config.get(
+                        "enable_visual_frame_stacking", False
                     ),
                     enable_state_stacking=self.frame_stack_config.get(
                         "enable_state_stacking", False
                     ),
-                    state_stack_size=self.frame_stack_config.get("state_stack_size", 4),
                     padding_type=self.frame_stack_config.get("padding_type", "zero"),
                 )
-            return NppEnvironment(config=env_config)
+
+            return env
 
         return DummyVecEnv([make_eval_env])
 
@@ -201,25 +214,31 @@ class EnvironmentFactory:
                 env_config.render.render_mode = "human"
                 logger.info(f"[Env {rank}] Rendering enabled for visualization")
 
-            # Apply frame stacking configuration if provided
-            if self.frame_stack_config:
-                from nclone.gym_environment import FrameStackConfig
+            env = NppEnvironment(config=env_config)
 
-                env_config.frame_stack = FrameStackConfig(
-                    enable_visual_frame_stacking=self.frame_stack_config.get(
-                        "enable_visual_frame_stacking", False
-                    ),
+            # Apply FrameStackWrapper if frame stacking is enabled
+            if self.frame_stack_config and (
+                self.frame_stack_config.get("enable_visual_frame_stacking", False)
+                or self.frame_stack_config.get("enable_state_stacking", False)
+            ):
+                from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+
+                env = FrameStackWrapper(
+                    env,
                     visual_stack_size=self.frame_stack_config.get(
                         "visual_stack_size", 4
+                    ),
+                    state_stack_size=self.frame_stack_config.get("state_stack_size", 4),
+                    enable_visual_stacking=self.frame_stack_config.get(
+                        "enable_visual_frame_stacking", False
                     ),
                     enable_state_stacking=self.frame_stack_config.get(
                         "enable_state_stacking", False
                     ),
-                    state_stack_size=self.frame_stack_config.get("state_stack_size", 4),
                     padding_type=self.frame_stack_config.get("padding_type", "zero"),
                 )
-
-            env = NppEnvironment(config=env_config)
+                if rank == 0:
+                    logger.info("✓ FrameStackWrapper applied to environment")
 
             # Wrap with position tracking for route visualization
             from npp_rl.wrappers import PositionTrackingWrapper
@@ -257,15 +276,12 @@ class EnvironmentFactory:
 
         return _init
 
-    def _apply_bc_normalization(self, env: VecNormalize, gamma: float) -> VecNormalize:
-        """Apply BC observation normalization to environment.
+    def _apply_bc_normalization(self, env: VecNormalize, gamma: float) -> None:
+        """Apply BC observation normalization to existing VecNormalize wrapper.
 
         Args:
-            env: VecNormalize environment
+            env: VecNormalize environment to modify
             gamma: Discount factor
-
-        Returns:
-            VecNormalize environment with BC normalization applied
         """
         bc_norm_stats_path = (
             self.output_dir / "pretrain" / "cache" / "normalization_stats.npz"
@@ -277,7 +293,7 @@ class EnvironmentFactory:
                 "Continuing without BC observation normalization - transfer learning may be degraded"
             )
             self.bc_normalization_applied = False
-            return env
+            return
 
         logger.info("Loading BC observation normalization...")
 
@@ -285,17 +301,7 @@ class EnvironmentFactory:
             # Load BC normalization statistics
             bc_stats = np.load(bc_norm_stats_path)
 
-            # Create VecNormalize wrapper
-            env = VecNormalize(
-                env,
-                training=True,
-                norm_obs=True,
-                norm_reward=False,  # Don't normalize rewards
-                clip_obs=10.0,
-                gamma=gamma,
-            )
-
-            # Initialize VecNormalize.obs_rms with BC statistics
+            # Initialize obs_rms with BC statistics
             from stable_baselines3.common.running_mean_std import RunningMeanStd
 
             # Extract unique observation keys from BC stats
@@ -305,7 +311,11 @@ class EnvironmentFactory:
                 if "_mean" in k or "_std" in k
             )
 
+            if not hasattr(env, "obs_rms"):
+                env.obs_rms = {}
+
             initialized_count = 0
+            initialized_keys = []
             for key in keys:
                 mean_key = f"{key}_mean"
                 std_key = f"{key}_std"
@@ -315,20 +325,27 @@ class EnvironmentFactory:
                     std = bc_stats[std_key]
 
                     # Initialize RunningMeanStd for this observation key
-                    if not hasattr(env, "obs_rms"):
-                        env.obs_rms = {}
-
                     rms = RunningMeanStd(shape=mean.shape)
                     rms.mean = mean.copy()
                     rms.var = (std**2).copy()
                     rms.count = 1e6  # High count = stable statistics
 
                     env.obs_rms[key] = rms
+                    initialized_keys.append(key)
                     initialized_count += 1
                     logger.info(
                         f"  ✓ Initialized normalization for '{key}': "
                         f"mean={mean.mean():.3f}, std={std.mean():.3f}"
                     )
+
+            # Set norm_obs_keys BEFORE enabling norm_obs
+            # VecNormalize requires this to be set when norm_obs=True
+            if initialized_count > 0:
+                env.norm_obs_keys = initialized_keys
+                env.norm_obs = True
+                logger.info(
+                    f"  ✓ Enabled observation normalization for keys: {initialized_keys}"
+                )
 
             if initialized_count == 0:
                 logger.warning(
@@ -338,7 +355,7 @@ class EnvironmentFactory:
                 self.bc_normalization_applied = False
             else:
                 logger.info(
-                    f"✓ Applied BC observation normalization to RL environments "
+                    f"✓ BC observation normalization applied "
                     f"({initialized_count} observation keys)"
                 )
                 self.bc_normalization_applied = True
@@ -346,10 +363,14 @@ class EnvironmentFactory:
             logger.info("=" * 60)
 
         except Exception as e:
-            logger.error(f"Failed to apply BC normalization: {e}", exc_info=True)
+            logger.error("!" * 60)
+            logger.error("Failed to apply BC observation normalization!")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"BC stats path: {bc_norm_stats_path}")
+            logger.error("Full traceback:", exc_info=True)
+            logger.error("!" * 60)
             logger.warning(
-                "Continuing without BC observation normalization - transfer learning may be degraded"
+                "⚠️  Continuing without BC observation normalization - transfer learning may be degraded"
             )
             self.bc_normalization_applied = False
-
-        return env

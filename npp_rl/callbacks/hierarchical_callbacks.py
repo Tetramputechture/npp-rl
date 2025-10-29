@@ -20,12 +20,15 @@ Task 2.4 Requirements:
 - Curriculum progression tracking
 """
 
+import logging
 import numpy as np
 import torch
 from collections import deque, defaultdict
 from typing import List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 import warnings
+
+logger = logging.getLogger(__name__)
 
 
 class HierarchicalStabilityCallback(BaseCallback):
@@ -555,6 +558,7 @@ class CurriculumProgressionCallback(BaseCallback):
         self.log_freq = log_freq
         self.step_count = 0
         self.last_stage_idx = -1
+        self.use_vec_wrapper = False  # Will be set in _init_callback()
 
         # Validate curriculum manager if provided
         if curriculum_manager is not None:
@@ -565,20 +569,57 @@ class CurriculumProgressionCallback(BaseCallback):
                     f"curriculum_manager should be CurriculumManager instance, got {type(curriculum_manager)}"
                 )
 
+    def _init_callback(self) -> None:
+        """Initialize callback after training environment is set.
+
+        This is called by BaseCallback after the training_env is available.
+        We use it to detect if CurriculumVecEnvWrapper is in use.
+        """
+        super()._init_callback()
+
+        # Check if training environment is wrapped with CurriculumVecEnvWrapper
+        # If so, disable duplicate episode recording (VecWrapper handles it)
+        if self.training_env is not None:
+            from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
+
+            # Walk through wrapper chain to find CurriculumVecEnvWrapper
+            env = self.training_env
+            while env is not None:
+                if isinstance(env, CurriculumVecEnvWrapper):
+                    self.use_vec_wrapper = True
+                    if self.verbose > 0:
+                        logger.info(
+                            "[CurriculumCallback] CurriculumVecEnvWrapper detected - "
+                            "episode recording handled by wrapper, callback will skip recording"
+                        )
+                    break
+                # Try to get wrapped env
+                env = getattr(env, "venv", None) or getattr(env, "env", None)
+
     def _on_step(self) -> bool:
         """Called at each training step."""
         self.step_count += 1
 
         # Record episode outcomes if curriculum manager available
+        # (skipped if VecEnvWrapper handles it)
         if self.curriculum_manager is not None:
             self._record_episodes()
 
         # Check for advancement periodically
+        # Skip if VecEnvWrapper handles it (avoids race conditions)
         if self.step_count % self.check_freq == 0:
-            if self.curriculum_manager is not None:
+            if self.curriculum_manager is not None and not self.use_vec_wrapper:
                 advanced = self.curriculum_manager.check_advancement()
                 if advanced:
                     self._handle_advancement()
+            elif self.use_vec_wrapper and self.step_count % (self.check_freq * 10) == 0:
+                # Log curriculum status less frequently when VecWrapper manages it
+                if self.verbose > 0:
+                    current_stage = self.curriculum_manager.get_current_stage()
+                    logger.info(
+                        f"[CurriculumCallback] Curriculum status: {current_stage} "
+                        f"(managed by VecEnvWrapper)"
+                    )
 
         # Log metrics periodically
         if self.step_count % self.log_freq == 0:
@@ -587,7 +628,15 @@ class CurriculumProgressionCallback(BaseCallback):
         return True
 
     def _record_episodes(self):
-        """Record episode outcomes to curriculum manager."""
+        """Record episode outcomes to curriculum manager.
+
+        Note: If CurriculumVecEnvWrapper is in use, skip recording here since
+        the wrapper already handles all episode recording with full stage/generator info.
+        """
+        # Skip recording if VecEnvWrapper handles it
+        if self.use_vec_wrapper:
+            return  # VecEnvWrapper records episodes with full context
+
         # Extract episode outcomes from training data
         if hasattr(self.locals, "dones"):
             dones = self.locals.get("dones", [])
@@ -602,8 +651,23 @@ class CurriculumProgressionCallback(BaseCallback):
                         or info.get("success", False)
                     )
 
-                    # Record to curriculum manager
-                    self.curriculum_manager.record_episode(success)
+                    # Extract stage and generator info if available
+                    stage = info.get("curriculum_stage", None)
+                    generator_type = info.get("curriculum_generator", None)
+                    frames = info.get("l", None)  # Frame count from episode
+
+                    # Record to curriculum manager with full context
+                    if stage and stage != "unknown":
+                        self.curriculum_manager.record_episode(
+                            stage, success, generator_type, frames
+                        )
+                    else:
+                        # Fallback: record without stage (legacy behavior)
+                        # This path shouldn't be reached if curriculum is properly configured
+                        logger.warning(
+                            "[CurriculumCallback] Recording episode without stage info - "
+                            "this may indicate a configuration issue"
+                        )
 
     def _handle_advancement(self):
         """Handle curriculum stage advancement."""

@@ -165,19 +165,18 @@ class BCWeightLoader:
         logger.info("✓ Frame stacking configuration validated")
 
     def _warn_missing_frame_stacking(self) -> None:
-        """Warn if BC checkpoint has no frame stacking config."""
-        logger.warning(
-            "BC checkpoint has no frame_stacking config. "
-            "Assuming single frame (no stacking) for BC pretraining."
-        )
+        """Error if BC checkpoint has no frame stacking config but RL uses it."""
         if self.frame_stack_config and (
             self.frame_stack_config.get("enable_visual_frame_stacking", False)
             or self.frame_stack_config.get("enable_state_stacking", False)
         ):
-            logger.warning(
-                "WARNING: RL uses frame stacking but BC checkpoint has none. "
-                "Weight loading may fail due to dimension mismatch."
+            raise ValueError(
+                "Frame stacking mismatch: RL uses frame stacking but BC checkpoint "
+                "has no frame_stacking config. This will cause input dimension mismatch "
+                "and weight loading will fail. BC and RL must use identical frame stacking."
             )
+
+        logger.info("BC checkpoint has no frame stacking (single frame mode)")
 
     def _detect_extractor_structure(self) -> Dict[str, bool]:
         """Detect PPO model's feature extractor structure.

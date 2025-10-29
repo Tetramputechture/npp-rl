@@ -18,25 +18,12 @@ import argparse
 import json
 import logging
 import numpy as np
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
 
-# Add project root to path for imports
-project_root = Path(__file__).parent.parent
-nclone_path = project_root.parent / "nclone"
-sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(nclone_path))
-
-# Import nclone modules after path setup
-try:
-    from nclone.gym_environment.npp_environment import NppEnvironment
-except ImportError as e:
-    print(f"Error importing nclone modules: {e}")
-    print("Make sure nclone is in the correct location relative to npp-rl")
-    sys.exit(1)
+from nclone.gym_environment.npp_environment import NppEnvironment
 
 logger = logging.getLogger(__name__)
 

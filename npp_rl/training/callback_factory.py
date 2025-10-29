@@ -64,24 +64,20 @@ class CallbackFactory:
             logger.info("Added user-provided callback")
 
         # Add enhanced TensorBoard metrics callback
+        # Note: PBRS logging integrated into this callback to avoid duplication
         from npp_rl.callbacks import EnhancedTensorBoardCallback
 
         enhanced_tb_callback = EnhancedTensorBoardCallback(
-            log_freq=100,  # Log scalars every 100 steps
-            histogram_freq=1000,  # Log histograms every 1000 steps
+            log_freq=200,  # Log scalars every 200 steps (reduced overhead)
+            histogram_freq=5000,  # Log histograms every 5000 steps (expensive operation)
             verbose=1,
-            log_gradients=True,
-            log_weights=False,  # Disable weight logging by default (expensive)
+            log_gradients=False,  # Gradient logging disabled by default
+            log_weights=False,  # Weight logging disabled by default (expensive)
         )
         callbacks.append(enhanced_tb_callback)
-        logger.info("Added enhanced TensorBoard callback for detailed metrics")
-
-        # Add PBRS logging callback to track reward components
-        from npp_rl.callbacks import PBRSLoggingCallback
-
-        pbrs_callback = PBRSLoggingCallback(verbose=1)
-        callbacks.append(pbrs_callback)
-        logger.info("Added PBRS logging callback for reward component tracking")
+        logger.info(
+            "Added enhanced TensorBoard callback (includes PBRS and curriculum metrics)"
+        )
 
         # Add route visualization callback
         from npp_rl.callbacks import RouteVisualizationCallback
@@ -90,7 +86,7 @@ class CallbackFactory:
         route_callback = RouteVisualizationCallback(
             save_dir=str(routes_dir),
             max_routes_per_checkpoint=10,
-            visualization_freq=10000,
+            visualization_freq=100,
             max_stored_routes=100,
             async_save=True,
             image_size=(800, 600),
@@ -176,4 +172,3 @@ class CallbackFactory:
         distributed_callback = DistributedProgressCallback(log_freq=1000, verbose=1)
         callbacks.append(distributed_callback)
         logger.info("Added distributed progress callback for multi-GPU coordination")
-

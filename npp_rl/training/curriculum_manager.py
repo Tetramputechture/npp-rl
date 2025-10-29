@@ -240,6 +240,10 @@ class CurriculumManager:
                 if generator_type not in levels_by_stage_and_generator[stage]:
                     levels_by_stage_and_generator[stage][generator_type] = []
 
+                # Add explicit category field for fallback in CurriculumEnv
+                # This ensures backward compatibility if sampled_stage is missing
+                level_data["category"] = stage
+
                 levels_by_stage_and_generator[stage][generator_type].append(level_data)
 
             # Log warning if any stage has no generator types
@@ -387,7 +391,11 @@ class CurriculumManager:
         return level
 
     def record_episode(
-        self, stage: str, success: bool, generator_type: Optional[str] = None
+        self,
+        stage: str,
+        success: bool,
+        generator_type: Optional[str] = None,
+        frames: Optional[int] = None,
     ) -> None:
         """Record episode result for a stage and optionally for a specific generator type.
 
@@ -395,13 +403,15 @@ class CurriculumManager:
             stage: Stage name
             success: Whether episode was successful (1) or not (0)
             generator_type: Generator type that produced this level (optional)
+            frames: Number of frames elapsed during the episode (optional)
         """
         if stage not in self.stage_performance:
             logger.warning(f"Unknown stage '{stage}', ignoring episode")
             return
 
         logger.debug(
-            f"Recording episode for stage: {stage}, generator: {generator_type}, success: {success}"
+            f"Recording episode for stage: {stage}, generator: {generator_type}, "
+            f"success: {success}, frames: {frames}"
         )
         self.stage_performance[stage].append(1 if success else 0)
 
@@ -830,15 +840,7 @@ class CurriculumManager:
                     global_step,
                 )
 
-            # Log balance variance (0 = perfect balance)
-            sample_counts = list(self.generator_sample_counts[stage].values())
-            if sample_counts:
-                variance = float(np.var(sample_counts))
-                writer.add_scalar(
-                    f"curriculum/sampling/{stage}/balance_variance",
-                    variance,
-                    global_step,
-                )
+            # Removed balance_variance - not actionable, sample counts are sufficient
 
             # Log performance metrics per generator
             for gen_type, perf in self.generator_performance[stage].items():

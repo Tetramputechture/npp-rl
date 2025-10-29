@@ -10,6 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import gymnasium as gym
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -19,13 +20,22 @@ from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
 
-try:
-    from npp_rl.utils.video_recorder import create_video_recorder
-except ImportError:
-    create_video_recorder = None
+from npp_rl.utils.video_recorder import create_video_recorder
 from npp_rl.training.distributed_utils import unwrap_policy_for_inference
 
 logger = logging.getLogger(__name__)
+
+
+# Create a wrapper that will skip map loading on reset since map is already loaded
+class SkipMapLoadWrapper(gym.Wrapper):
+    """Wrapper that passes skip_map_load=True to reset."""
+
+    def reset(self, **kwargs):
+        # Always skip map load since we loaded it externally
+        if "options" not in kwargs:
+            kwargs["options"] = {}
+        kwargs["options"]["skip_map_load"] = True
+        return self.env.reset(**kwargs)
 
 
 class ComprehensiveEvaluator:
@@ -267,7 +277,8 @@ class ComprehensiveEvaluator:
                     if "map_data" in lvl_data:
                         logger.debug(f"Loading map data for level: {level_id}")
                         env.nplay_headless.load_map_from_map_data(lvl_data["map_data"])
-                    return env
+
+                    return SkipMapLoadWrapper(env)
 
                 # Wrap in DummyVecEnv to match the format expected by the model
                 # Models trained with vectorized environments expect vectorized observations
@@ -277,6 +288,8 @@ class ComprehensiveEvaluator:
                 env = DummyVecEnv([make_env])
 
                 logger.debug(f"Resetting environment for level: {level_id}")
+                # Note: Map already loaded in make_env, no options needed
+                # DummyVecEnv.reset() doesn't accept options parameter (VecEnv API)
                 obs = env.reset()
                 logger.debug(
                     f"Environment reset complete for level: {level_id}, obs keys: {obs.keys() if isinstance(obs, dict) else type(obs)}"

@@ -23,24 +23,47 @@ logger = logging.getLogger(__name__)
 
 def create_observation_space_from_config(
     architecture_config: ArchitectureConfig,
+    frame_stack_config: Optional[Dict] = None,
 ) -> spaces.Dict:
     """Create observation space based on architecture configuration.
-    
+
     Args:
         architecture_config: Architecture configuration
-        
+        frame_stack_config: Frame stacking configuration (must match training)
+
     Returns:
         Gymnasium Dict observation space
     """
     from nclone.gym_environment.npp_environment import NppEnvironment
     from nclone.gym_environment.config import EnvironmentConfig
-    
-    # Create temporary environment to get observation space
+
+    # Create environment
     config = EnvironmentConfig.for_training()
     env = NppEnvironment(config=config)
+
+    # Apply FrameStackWrapper if frame stacking is enabled
+    if frame_stack_config and (
+        frame_stack_config.get("enable_visual_frame_stacking", False)
+        or frame_stack_config.get("enable_state_stacking", False)
+    ):
+        from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+
+        env = FrameStackWrapper(
+            env,
+            visual_stack_size=frame_stack_config.get("visual_stack_size", 4),
+            state_stack_size=frame_stack_config.get("state_stack_size", 4),
+            enable_visual_stacking=frame_stack_config.get(
+                "enable_visual_frame_stacking", False
+            ),
+            enable_state_stacking=frame_stack_config.get(
+                "enable_state_stacking", False
+            ),
+            padding_type=frame_stack_config.get("padding_type", "zero"),
+        )
+
     obs_space = env.observation_space
     env.close()
-    
+
     return obs_space
 
 
@@ -50,90 +73,100 @@ def create_policy_network(
     architecture_config: ArchitectureConfig,
     features_dim: int = 512,
     net_arch: Optional[list] = None,
+    frame_stack_config: Optional[Dict] = None,
 ) -> nn.Module:
     """Create a policy network from architecture configuration.
-    
+
     This creates a standalone policy network that can be used for behavioral
     cloning or other pretraining tasks, without requiring a full PPO model.
-    
+
     Args:
         observation_space: Observation space
         action_space: Action space
         architecture_config: Architecture configuration
-        features_dim: DEPRECATED - ignored, features_dim is now taken from 
+        features_dim: DEPRECATED - ignored, features_dim is now taken from
             architecture_config.features_dim
         net_arch: Network architecture for policy head (default: [256, 256])
-        
+        frame_stack_config: Frame stacking configuration dict with keys:
+            - enable_visual_frame_stacking: bool
+            - visual_stack_size: int
+            - enable_state_stacking: bool
+            - state_stack_size: int
+            - padding_type: str ('zero' or 'repeat')
+
     Returns:
         Policy network module
     """
     if net_arch is None:
         net_arch = [256, 256]
-    
-    # Create feature extractor
+
+    # Create feature extractor with frame stacking configuration
     feature_extractor = ConfigurableMultimodalExtractor(
         observation_space=observation_space,
         config=architecture_config,
+        frame_stack_config=frame_stack_config,
     )
-    
+
     # Get features_dim from the feature extractor (set in config)
     actual_features_dim = architecture_config.features_dim
-    
+
     # Create policy head (MLP that outputs action logits)
     policy_layers = []
     in_dim = actual_features_dim
-    
+
     for hidden_dim in net_arch:
-        policy_layers.extend([
-            nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
-        ])
+        policy_layers.extend(
+            [
+                nn.Linear(in_dim, hidden_dim),
+                nn.ReLU(),
+            ]
+        )
         in_dim = hidden_dim
-    
+
     # Final layer outputs action logits
     policy_layers.append(nn.Linear(in_dim, action_space.n))
-    
+
     policy_head = nn.Sequential(*policy_layers)
-    
+
     # Combine into full policy network
     class PolicyNetwork(nn.Module):
         """Combined feature extractor and policy head."""
-        
+
         def __init__(self, feature_extractor, policy_head, features_dim):
             super().__init__()
             self.feature_extractor = feature_extractor
             self.policy_head = policy_head
             self.features_dim = features_dim
-        
+
         def forward(self, observations):
             """Forward pass through policy network.
-            
+
             Args:
                 observations: Dictionary of observations
-                
+
             Returns:
                 Action logits
             """
             features = self.feature_extractor(observations)
             logits = self.policy_head(features)
             return logits
-        
+
         def get_features(self, observations):
             """Extract features without policy head.
-            
+
             Args:
                 observations: Dictionary of observations
-                
+
             Returns:
                 Feature vector
             """
             return self.feature_extractor(observations)
-    
+
     policy_network = PolicyNetwork(feature_extractor, policy_head, actual_features_dim)
-    
+
     logger.info(f"Created policy network with {actual_features_dim}-dim features")
     logger.info(f"Policy architecture: {net_arch} -> {action_space.n} actions")
-    
+
     return policy_network
 
 
@@ -146,10 +179,10 @@ def save_policy_checkpoint(
     frame_stack_config: Optional[Dict] = None,
 ) -> None:
     """Save policy network checkpoint in format compatible with RL training.
-    
+
     Saves checkpoint with 'policy_state_dict' key as expected by
     architecture_trainer.py for loading pretrained weights.
-    
+
     Args:
         policy_network: Policy network to save
         path: Path to save checkpoint
@@ -159,37 +192,41 @@ def save_policy_checkpoint(
         frame_stack_config: Frame stacking configuration (optional)
     """
     checkpoint = {
-        'policy_state_dict': policy_network.state_dict(),
+        "policy_state_dict": policy_network.state_dict(),
     }
-    
+
     # Add optional metadata
     if epoch is not None:
-        checkpoint['epoch'] = epoch
-    
+        checkpoint["epoch"] = epoch
+
     if metrics is not None:
-        checkpoint['metrics'] = metrics
-    
+        checkpoint["metrics"] = metrics
+
     if architecture_config is not None:
-        checkpoint['architecture'] = architecture_config.name
-    
+        checkpoint["architecture"] = architecture_config.name
+
     if frame_stack_config is not None:
-        checkpoint['frame_stacking'] = frame_stack_config
-    
+        checkpoint["frame_stacking"] = frame_stack_config
+
     # Save checkpoint
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     torch.save(checkpoint, path)
     logger.info(f"Saved policy checkpoint to {path}")
-    
+
     # Log frame stacking info if present
     if frame_stack_config:
         logger.info("  Frame stacking config saved in checkpoint:")
-        logger.info(f"    Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
-                   f"(size: {frame_stack_config.get('visual_stack_size', 1)})")
-        logger.info(f"    State: {frame_stack_config.get('enable_state_stacking', False)} "
-                   f"(size: {frame_stack_config.get('state_stack_size', 1)})")
-    
+        logger.info(
+            f"    Visual: {frame_stack_config.get('enable_visual_frame_stacking', False)} "
+            f"(size: {frame_stack_config.get('visual_stack_size', 1)})"
+        )
+        logger.info(
+            f"    State: {frame_stack_config.get('enable_state_stacking', False)} "
+            f"(size: {frame_stack_config.get('state_stack_size', 1)})"
+        )
+
     # Log checkpoint info
     if epoch is not None:
         logger.info(f"  Epoch: {epoch}")
@@ -204,52 +241,52 @@ def load_policy_checkpoint(
     device: str = "cpu",
 ) -> Dict[str, Any]:
     """Load policy network checkpoint.
-    
+
     Args:
         policy_network: Policy network to load weights into
         path: Path to checkpoint file
         device: Device to load checkpoint on
-        
+
     Returns:
         Dictionary containing checkpoint metadata
     """
     checkpoint = torch.load(path, map_location=device)
-    
-    if 'policy_state_dict' not in checkpoint:
+
+    if "policy_state_dict" not in checkpoint:
         raise ValueError(
             f"Checkpoint does not contain 'policy_state_dict'. "
             f"Found keys: {list(checkpoint.keys())}"
         )
-    
+
     # Load state dict
-    policy_network.load_state_dict(checkpoint['policy_state_dict'])
-    
+    policy_network.load_state_dict(checkpoint["policy_state_dict"])
+
     logger.info(f"Loaded policy checkpoint from {path}")
-    
+
     # Extract and log metadata
     metadata = {}
-    if 'epoch' in checkpoint:
-        metadata['epoch'] = checkpoint['epoch']
+    if "epoch" in checkpoint:
+        metadata["epoch"] = checkpoint["epoch"]
         logger.info(f"  Epoch: {checkpoint['epoch']}")
-    
-    if 'metrics' in checkpoint:
-        metadata['metrics'] = checkpoint['metrics']
-        for key, value in checkpoint['metrics'].items():
+
+    if "metrics" in checkpoint:
+        metadata["metrics"] = checkpoint["metrics"]
+        for key, value in checkpoint["metrics"].items():
             logger.info(f"  {key}: {value:.4f}")
-    
-    if 'architecture' in checkpoint:
-        metadata['architecture'] = checkpoint['architecture']
+
+    if "architecture" in checkpoint:
+        metadata["architecture"] = checkpoint["architecture"]
         logger.info(f"  Architecture: {checkpoint['architecture']}")
-    
+
     return metadata
 
 
 def count_parameters(model: nn.Module) -> int:
     """Count trainable parameters in a model.
-    
+
     Args:
         model: PyTorch model
-        
+
     Returns:
         Number of trainable parameters
     """
@@ -258,7 +295,7 @@ def count_parameters(model: nn.Module) -> int:
 
 def log_model_info(model: nn.Module, name: str = "Model") -> None:
     """Log information about a model.
-    
+
     Args:
         model: PyTorch model
         name: Model name for logging
@@ -267,7 +304,7 @@ def log_model_info(model: nn.Module, name: str = "Model") -> None:
     logger.info(f"{name} info:")
     logger.info(f"  Total trainable parameters: {num_params:,}")
     logger.info(f"  Model size: {num_params * 4 / 1024 / 1024:.2f} MB (float32)")
-    
+
     # Log parameter breakdown by layer if verbose
     logger.debug(f"\n{name} architecture:")
     for name, module in model.named_children():

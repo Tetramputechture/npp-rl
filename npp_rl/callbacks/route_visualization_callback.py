@@ -82,7 +82,13 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Route tracking per environment
         self.env_routes = defaultdict(
-            lambda: {"positions": [], "level_id": None, "start_time": 0}
+            lambda: {
+                "positions": [],
+                "level_id": None,
+                "start_time": 0,
+                "tiles": None,
+                "mines": None,
+            }
         )
 
         # Statistics
@@ -211,6 +217,12 @@ class RouteVisualizationCallback(BaseCallback):
             if pos is not None:
                 if isinstance(pos, (tuple, list)) and len(pos) >= 2:
                     pos_x, pos_y = float(pos[0]), float(pos[1])
+
+                    # If this is the first position of a new episode, capture level data
+                    if len(self.env_routes[env_idx]["positions"]) == 0:
+                        self.env_routes[env_idx]["tiles"] = self._get_tile_data()
+                        self.env_routes[env_idx]["mines"] = self._get_mine_data()
+
                     self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
         except Exception as e:
             logger.info(f"Could not track position for env {env_idx}: {e}")
@@ -239,6 +251,8 @@ class RouteVisualizationCallback(BaseCallback):
             "positions": [],
             "level_id": info.get("level_id", None),
             "start_time": self.num_timesteps,
+            "tiles": None,
+            "mines": None,
         }
 
     def _queue_route_save(
@@ -262,22 +276,31 @@ class RouteVisualizationCallback(BaseCallback):
 
         episode_reward = float(info["r"])
 
-        # Get curriculum stage (more meaningful than level ID for display)
+        # Get curriculum stage and generator type (more meaningful than level ID for display)
         curriculum_stage = info.get("curriculum_stage", "unknown")
+        curriculum_generator = info.get("curriculum_generator", "unknown")
         level_id = info.get("level_id", f"env_{env_idx}")
 
         # Get episode length
         episode_length = info.get("l", len(route_positions))
 
+        # Use stored tile and mine data (captured at episode start, not end)
+        # This ensures we get the correct level data before auto-reset
+        tiles = self.env_routes[env_idx].get("tiles", {})
+        mines = self.env_routes[env_idx].get("mines", [])
+
         route_data = {
             "positions": list(route_positions),
             "level_id": level_id,
             "curriculum_stage": curriculum_stage,
+            "curriculum_generator": curriculum_generator,
             "timestep": self.num_timesteps,
             "episode_reward": episode_reward,
             "episode_length": episode_length,
             "exit_switch_pos": exit_switch_pos,
             "exit_door_pos": exit_door_pos,
+            "tiles": tiles,
+            "mines": mines,
         }
 
         self.save_queue.append(route_data)
@@ -346,6 +369,83 @@ class RouteVisualizationCallback(BaseCallback):
             figsize=(self.image_size[0] / 100, self.image_size[1] / 100), dpi=100
         )
 
+        # Set aspect ratio to equal for proper level visualization
+        ax.set_aspect("equal")
+
+        # Calculate bounds from route positions with padding
+        x_coords = positions[:, 0]
+        y_coords = positions[:, 1]
+
+        # Add padding around the route (in pixels)
+        padding = 100  # 100 pixels padding on each side
+        x_min = np.min(x_coords) - padding
+        x_max = np.max(x_coords) + padding
+        y_min = np.min(y_coords) - padding
+        y_max = np.max(y_coords) + padding
+
+        # Include exit switch and door in bounds if available
+        if route_data.get("exit_switch_pos"):
+            switch_x, switch_y = route_data["exit_switch_pos"]
+            x_min = min(x_min, switch_x - padding)
+            x_max = max(x_max, switch_x + padding)
+            y_min = min(y_min, switch_y - padding)
+            y_max = max(y_max, switch_y + padding)
+
+        if route_data.get("exit_door_pos"):
+            door_x, door_y = route_data["exit_door_pos"]
+            x_min = min(x_min, door_x - padding)
+            x_max = max(x_max, door_x + padding)
+            y_min = min(y_min, door_y - padding)
+            y_max = max(y_max, door_y + padding)
+
+        # Render tiles if available (must be before route so tiles are behind)
+        # Only render tiles within the visible bounds for performance
+        if route_data.get("tiles"):
+            try:
+                from npp_rl.rendering import render_tiles_to_axis
+
+                # Filter tiles to only those in visible area
+                # Tile coordinates are in grid units, convert bounds to grid units
+                tile_x_min = int((x_min / 24.0) - 1)
+                tile_x_max = int((x_max / 24.0) + 2)
+                tile_y_min = int((y_min / 24.0) - 1)
+                tile_y_max = int((y_max / 24.0) + 2)
+
+                visible_tiles = {
+                    coords: tile_type
+                    for coords, tile_type in route_data["tiles"].items()
+                    if tile_x_min <= coords[0] <= tile_x_max
+                    and tile_y_min <= coords[1] <= tile_y_max
+                }
+
+                render_tiles_to_axis(
+                    ax,
+                    visible_tiles,
+                    tile_size=24.0,
+                    tile_color="#606060",  # Dark gray for tiles
+                    alpha=1.0,  # Solid fill
+                )
+            except Exception as e:
+                if self.verbose >= 2:
+                    logger.debug(f"Could not render tiles: {e}")
+
+        # Render mines if available (after tiles, before route)
+        # Mines already have visibility culling in the render function
+        if route_data.get("mines"):
+            try:
+                from npp_rl.rendering import render_mines_to_axis
+
+                render_mines_to_axis(
+                    ax,
+                    route_data["mines"],
+                    tile_color="#FF4444",  # Red for dangerous mines
+                    safe_color="#44FFFF",  # Cyan for safe mines
+                    alpha=0.8,
+                )
+            except Exception as e:
+                if self.verbose >= 2:
+                    logger.debug(f"Could not render mines: {e}")
+
         # Plot route with color gradient (blue=start, green=end)
         num_points = len(positions)
         colors = self.plt.cm.viridis(np.linspace(0, 1, num_points))
@@ -358,6 +458,7 @@ class RouteVisualizationCallback(BaseCallback):
                 color=colors[i],
                 linewidth=2,
                 alpha=0.7,
+                zorder=2,  # Above tiles (1) but below mines (3) and markers (5+)
             )
 
         # Mark start position
@@ -462,7 +563,7 @@ class RouteVisualizationCallback(BaseCallback):
         ax.set_xlabel("X Position")
         ax.set_ylabel("Y Position")
 
-        # Build title with curriculum stage prominently displayed
+        # Build title with curriculum stage and generator prominently displayed
         title_parts = [f"Successful Route - Step {route_data['timestep']}"]
 
         # Show curriculum stage if available
@@ -471,6 +572,13 @@ class RouteVisualizationCallback(BaseCallback):
             and route_data["curriculum_stage"] != "unknown"
         ):
             title_parts.append(f"Stage: {route_data['curriculum_stage']}")
+
+        # Show generator type if available
+        if (
+            route_data.get("curriculum_generator")
+            and route_data["curriculum_generator"] != "unknown"
+        ):
+            title_parts.append(f"Gen: {route_data['curriculum_generator']}")
 
         # Show episode stats
         title_parts.append(f"Length: {route_data['episode_length']}")
@@ -481,30 +589,27 @@ class RouteVisualizationCallback(BaseCallback):
         ax.legend(loc="best")
         ax.grid(True, alpha=0.3)
 
-        # IMPORTANT: Invert Y-axis so Y=0 is at top (matches level coordinate system)
-        ax.invert_yaxis()
-
-        # Set aspect ratio to equal for proper level visualization
-        ax.set_aspect("equal")
-
-        # Ensure minimum axis ranges to prevent overly thin visualizations
-        # on vertical/horizontal corridor maps
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        x_range = xlim[1] - xlim[0]
-        y_range = ylim[1] - ylim[0]
-
+        # Set axis limits to the calculated bounds (zoomed to route area)
+        # Ensure minimum range to prevent overly thin visualizations
         min_range = 100  # Minimum range in pixels
+        x_range = x_max - x_min
+        y_range = y_max - y_min
 
-        # Expand X axis if too narrow (vertical corridors)
+        # Expand bounds if too narrow (vertical/horizontal corridors)
         if x_range < min_range:
-            x_center = (xlim[0] + xlim[1]) / 2
-            ax.set_xlim(x_center - min_range / 2, x_center + min_range / 2)
+            x_center = (x_min + x_max) / 2
+            x_min = x_center - min_range / 2
+            x_max = x_center + min_range / 2
 
-        # Expand Y axis if too narrow (horizontal corridors)
         if y_range < min_range:
-            y_center = (ylim[0] + ylim[1]) / 2
-            ax.set_ylim(y_center - min_range / 2, y_center + min_range / 2)
+            y_center = (y_min + y_max) / 2
+            y_min = y_center - min_range / 2
+            y_max = y_center + min_range / 2
+
+        # Apply the calculated limits
+        # Y-axis inverted: set_ylim(y_max, y_min) ensures Y=0 at top (N++ coords)
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_max, y_min)  # Inverted for N++ coordinate system
 
         # Save figure with curriculum stage in filename
         stage = route_data.get("curriculum_stage", "unknown")
@@ -568,6 +673,95 @@ class RouteVisualizationCallback(BaseCallback):
                         logger.info(f"Removed old route visualization: {old_file.name}")
             except Exception as e:
                 logger.warning(f"Could not remove old file {old_file}: {e}")
+
+    def _get_tile_data(self) -> Dict[Tuple[int, int], int]:
+        """Extract tile data from the environment.
+
+        Returns:
+            Dictionary mapping (x, y) grid coordinates to tile type values,
+            or empty dict if tiles are not accessible
+        """
+        try:
+            # Unwrap environment to access nplay_headless
+            env = (
+                self.training_env.envs[0]
+                if hasattr(self.training_env, "envs")
+                else self.training_env
+            )
+
+            # Unwrap to base environment
+            while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
+                env = env.env
+
+            if hasattr(env, "nplay_headless"):
+                tile_dic = env.nplay_headless.get_tile_data()
+                return dict(tile_dic)  # Make a copy
+            else:
+                if self.verbose >= 2:
+                    logger.debug("Environment does not have nplay_headless attribute")
+                return {}
+        except Exception as e:
+            if self.verbose >= 2:
+                logger.debug(f"Could not extract tile data: {e}")
+            return {}
+
+    def _get_mine_data(self) -> List[Dict[str, Any]]:
+        """Extract mine data from the environment.
+
+        Returns:
+            List of mine dictionaries with keys: x, y, state, radius
+            Returns empty list if mines are not accessible
+        """
+        try:
+            # Unwrap environment to access nplay_headless
+            env = (
+                self.training_env.envs[0]
+                if hasattr(self.training_env, "envs")
+                else self.training_env
+            )
+
+            # Unwrap to base environment
+            while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
+                env = env.env
+
+            if hasattr(env, "nplay_headless"):
+                # Access toggle mines (entity type 1)
+                mines = []
+                entity_dic = env.nplay_headless.sim.entity_dic
+
+                if 1 in entity_dic:
+                    toggle_mines = entity_dic[1]
+
+                    # Import mine radius constants
+                    try:
+                        from nclone.constants import TOGGLE_MINE_RADII
+                    except ImportError:
+                        # Fallback to default values if import fails
+                        TOGGLE_MINE_RADII = {0: 4.0, 1: 3.5, 2: 4.5}
+
+                    for mine in toggle_mines:
+                        if hasattr(mine, "xpos") and hasattr(mine, "ypos"):
+                            state = getattr(mine, "state", 1)
+                            radius = TOGGLE_MINE_RADII.get(state, 4.0)
+
+                            mines.append(
+                                {
+                                    "x": float(mine.xpos),
+                                    "y": float(mine.ypos),
+                                    "state": int(state),
+                                    "radius": float(radius),
+                                }
+                            )
+
+                return mines
+            else:
+                if self.verbose >= 2:
+                    logger.debug("Environment does not have nplay_headless attribute")
+                return []
+        except Exception as e:
+            if self.verbose >= 2:
+                logger.debug(f"Could not extract mine data: {e}")
+            return []
 
     def _on_training_end(self) -> None:
         """Called at the end of training."""

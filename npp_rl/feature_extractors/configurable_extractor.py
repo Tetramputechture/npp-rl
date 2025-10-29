@@ -8,9 +8,10 @@ for effective N++ learning.
 
 import torch
 import torch.nn as nn
-from typing import Dict
+from typing import Dict, Optional, Any
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
+import logging
 
 # Import nclone constants for graph dimensions
 from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM
@@ -24,6 +25,16 @@ from npp_rl.models.gcn import GCNEncoder
 from npp_rl.models.gat import GATEncoder
 from npp_rl.models.simplified_hgt import SimplifiedHGTEncoder
 from npp_rl.models.hgt_factory import create_hgt_encoder
+
+
+logger = logging.getLogger(__name__)
+
+
+# Constants for CNN architecture
+PLAYER_FRAME_SPATIAL_SIZE = 7  # Spatial dimensions after conv layers (84x84 -> 7x7)
+GLOBAL_VIEW_SPATIAL_SIZE = 4  # Spatial dimensions after adaptive pooling
+CNN_DROPOUT = 0.1  # Dropout rate for convolutional layers
+MLP_DROPOUT = 0.2  # Dropout rate for fully connected layers
 
 
 class PlayerFrameCNN(nn.Module):
@@ -41,6 +52,12 @@ class PlayerFrameCNN(nn.Module):
         # Build layers immediately during initialization
         self._build_layers(default_in_channels)
 
+        # Log initialization for debugging frame stacking
+        if default_in_channels > 1:
+            logger.info(
+                f"PlayerFrameCNN initialized with {default_in_channels} input channels (frame stacking enabled)"
+            )
+
     def _build_layers(self, in_channels: int):
         """Build convolutional layers based on input channel count."""
         self.conv_layers = nn.Sequential(
@@ -53,7 +70,7 @@ class PlayerFrameCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.player_frame_channels[0]),
             nn.ReLU(inplace=True),
-            nn.Dropout2d(self.visual_config.cnn_dropout),
+            nn.Dropout2d(CNN_DROPOUT),
             nn.Conv2d(
                 self.visual_config.player_frame_channels[0],
                 self.visual_config.player_frame_channels[1],
@@ -63,7 +80,7 @@ class PlayerFrameCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.player_frame_channels[1]),
             nn.ReLU(inplace=True),
-            nn.Dropout2d(self.visual_config.cnn_dropout),
+            nn.Dropout2d(CNN_DROPOUT),
             nn.Conv2d(
                 self.visual_config.player_frame_channels[1],
                 self.visual_config.player_frame_channels[2],
@@ -76,46 +93,75 @@ class PlayerFrameCNN(nn.Module):
         )
         # Fully connected layers
         # After conv layers (kernel 8 stride 4, kernel 4 stride 2, kernel 3 stride 1),
-        # 84x84 input is reduced to 7x7 spatial dimensions
+        # 84x84 input is reduced to PLAYER_FRAME_SPATIAL_SIZE x PLAYER_FRAME_SPATIAL_SIZE
         self.fc = nn.Sequential(
             nn.Flatten(),
             nn.Linear(
-                self.visual_config.player_frame_channels[2] * 7 * 7,
+                self.visual_config.player_frame_channels[2]
+                * PLAYER_FRAME_SPATIAL_SIZE
+                * PLAYER_FRAME_SPATIAL_SIZE,
                 self.visual_config.player_frame_output_dim,
             ),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(MLP_DROPOUT),
         )
         self.current_in_channels = in_channels
 
     def forward(self, x):
         """Forward pass with dynamic input channel handling.
 
-        Handles automatic rebuilding if input channels change (e.g., frame stacking
-        configuration differs between BC pretraining and RL training).
-        """
-        # Handle different input shapes:
-        # Single frame: [batch, H, W, C] or [batch, C, H, W]
-        # Stacked frames: [batch, stack_size, H, W, C]
+        Handles both single frames and stacked frames with automatic channel reordering.
+        Input is expected to be in [0, 1] range (normalized by caller).
 
-        if x.dim() == 4 and x.shape[-1] == 1:
-            # [batch, H, W, 1] -> [batch, 1, H, W]
-            x = x.permute(0, 3, 1, 2).contiguous()
+        Supported input shapes:
+        - Single frame: [batch, H, W, 1] (NHWC format from environment)
+        - Stacked frames: [batch, stack_size, H, W, 1] (environment frame stack format)
+
+        Internal conversion to PyTorch NCHW format:
+        - Single: [batch, H, W, 1] -> [batch, 1, H, W]
+        - Stacked: [batch, stack_size, H, W, 1] -> [batch, stack_size, H, W]
+
+        Args:
+            x: Input tensor in [0, 1] range
+
+        Returns:
+            Extracted features [batch, player_frame_output_dim]
+        """
+        # Handle different input shapes from environment
+        if x.dim() == 4:
+            # Single frame: [batch, H, W, 1] -> [batch, 1, H, W]
+            if x.shape[-1] == 1:
+                x = x.permute(0, 3, 1, 2).contiguous()
+            # else: Already in NCHW format [batch, C, H, W]
         elif x.dim() == 5:
-            # [batch, stack_size, H, W, C] -> [batch, stack_size*C, H, W]
+            # Stacked frames: [batch, stack_size, H, W, C] -> [batch, stack_size*C, H, W]
+            # Treat stack dimension as additional input channels for temporal learning
             batch_size, stack_size, H, W, C = x.shape
             x = x.permute(0, 1, 4, 2, 3).contiguous()
             x = x.view(batch_size, stack_size * C, H, W)
 
-        # Rebuild layers if input channels changed (e.g., different frame stacking)
+        # Validate input channels match expected (strict mode for pretrained weights)
         in_channels = x.shape[1]
         if in_channels != self.current_in_channels:
-            import logging
+            # Check if this layer has been trained (non-default weights)
+            has_trained_weights = any(
+                p.requires_grad and not torch.all(p == 0).item()
+                for p in self.parameters()
+                if p.numel() > 0
+            )
 
-            logger = logging.getLogger(__name__)
+            if has_trained_weights:
+                raise ValueError(
+                    f"Input channel mismatch detected! "
+                    f"Expected {self.current_in_channels} channels but got {in_channels}. "
+                    f"This indicates a frame stacking configuration mismatch between "
+                    f"BC pretraining and RL training. All pretrained weights would be lost. "
+                    f"Fix: Ensure frame_stack_config matches between BC and RL training."
+                )
+
+            # Only rebuild if no trained weights exist (random initialization)
             logger.warning(
-                f"PlayerFrameCNN input channels changed from {self.current_in_channels} to {in_channels}. "
-                f"Rebuilding layers (weights will be reset!)."
+                f"PlayerFrameCNN: Rebuilding for {in_channels} channels (was {self.current_in_channels})"
             )
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
@@ -152,7 +198,7 @@ class GlobalViewCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.global_channels[0]),
             nn.ReLU(inplace=True),
-            nn.Dropout2d(self.visual_config.cnn_dropout),
+            nn.Dropout2d(CNN_DROPOUT),
             nn.Conv2d(
                 self.visual_config.global_channels[0],
                 self.visual_config.global_channels[1],
@@ -162,7 +208,7 @@ class GlobalViewCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.global_channels[1]),
             nn.ReLU(inplace=True),
-            nn.Dropout2d(self.visual_config.cnn_dropout),
+            nn.Dropout2d(CNN_DROPOUT),
             nn.Conv2d(
                 self.visual_config.global_channels[1],
                 self.visual_config.global_channels[2],
@@ -172,29 +218,44 @@ class GlobalViewCNN(nn.Module):
             ),
             nn.BatchNorm2d(self.visual_config.global_channels[2]),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((4, 4)),  # Pools to fixed 4x4 spatial size
+            nn.AdaptiveAvgPool2d((GLOBAL_VIEW_SPATIAL_SIZE, GLOBAL_VIEW_SPATIAL_SIZE)),
         )
         # Fully connected layers
-        # AdaptiveAvgPool2d ensures output is always 4x4 regardless of input size
+        # AdaptiveAvgPool2d ensures output is always GLOBAL_VIEW_SPATIAL_SIZE regardless of input size
         self.fc = nn.Sequential(
             nn.Flatten(),
             nn.Linear(
-                self.visual_config.global_channels[2] * 4 * 4,
+                self.visual_config.global_channels[2]
+                * GLOBAL_VIEW_SPATIAL_SIZE
+                * GLOBAL_VIEW_SPATIAL_SIZE,
                 self.visual_config.global_output_dim,
             ),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(MLP_DROPOUT),
         )
         self.current_in_channels = in_channels
 
     def forward(self, x):
-        """Forward pass for single-frame global view (not stacked).
+        """Forward pass for single-frame global view (NOT stacked).
 
-        Handles single frames only:
-        - [batch, H, W, 1] -> [batch, 1, H, W] after channel reordering
+        Global view is never stacked - it provides spatial context at each timestep.
+        Input is expected to be in [0, 1] range (normalized by caller).
+
+        Supported input shapes:
+        - [batch, H, W, 1] (NHWC format from environment)
+        - [batch, H, W] (HW format)
+
+        Internal conversion to PyTorch NCHW format:
+        - [batch, H, W, 1] -> [batch, 1, H, W]
         - [batch, H, W] -> [batch, 1, H, W]
+
+        Args:
+            x: Input tensor in [0, 1] range
+
+        Returns:
+            Extracted features [batch, global_output_dim]
         """
-        # Handle single frame input
+        # Handle single frame input (global view is never stacked)
         if x.dim() == 4 and x.shape[-1] == 1:
             # [batch, H, W, 1] -> [batch, 1, H, W]
             x = x.permute(0, 3, 1, 2).contiguous()
@@ -202,15 +263,11 @@ class GlobalViewCNN(nn.Module):
             # [batch, H, W] -> [batch, 1, H, W]
             x = x.unsqueeze(1)
 
-        # Rebuild layers if input channels changed (should be rare for global view)
+        # Validate input channels (global view should always be 1 channel)
         in_channels = x.shape[1]
         if in_channels != self.current_in_channels:
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(
-                f"GlobalViewCNN input channels changed from {self.current_in_channels} to {in_channels}. "
-                f"Rebuilding layers (weights will be reset!)."
+                f"GlobalViewCNN: Rebuilding for {in_channels} channels (was {self.current_in_channels})"
             )
             self._build_layers(in_channels)
             self.conv_layers = self.conv_layers.to(x.device)
@@ -228,22 +285,39 @@ class StateMLP(nn.Module):
     Supports dynamic rebuilding if input dimensions change (e.g., state stacking configuration).
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        default_input_dim: Optional[int] = None,
+    ):
         super().__init__()
         self.base_input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
-        self.current_input_dim = input_dim
+
+        # Use provided default or compute from config
+        actual_input_dim = (
+            default_input_dim if default_input_dim is not None else input_dim
+        )
+        self.current_input_dim = actual_input_dim
 
         # Build layers immediately during initialization
-        self._build_layers(input_dim)
+        self._build_layers(actual_input_dim)
+
+        # Log initialization for debugging state stacking
+        if actual_input_dim != input_dim:
+            logger.info(
+                f"StateMLP initialized with {actual_input_dim} input dim (state stacking: {actual_input_dim // input_dim}x)"
+            )
 
     def _build_layers(self, actual_input_dim: int):
         """Build MLP layers based on actual input dimension (may be stacked)."""
         self.mlp = nn.Sequential(
             nn.Linear(actual_input_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(CNN_DROPOUT),
             nn.Linear(self.hidden_dim, self.output_dim),
             nn.ReLU(),
         )
@@ -261,15 +335,28 @@ class StateMLP(nn.Module):
             batch_size, stack_size, state_dim = x.shape
             x = x.view(batch_size, stack_size * state_dim)
 
-        # Rebuild layers if input dimension changed (e.g., different state stacking)
+        # Validate input dimensions match expected (strict mode for pretrained weights)
         actual_input_dim = x.shape[-1]
         if actual_input_dim != self.current_input_dim:
-            import logging
+            # Check if this layer has been trained (non-default weights)
+            has_trained_weights = any(
+                p.requires_grad and not torch.all(p == 0).item()
+                for p in self.parameters()
+                if p.numel() > 0
+            )
 
-            logger = logging.getLogger(__name__)
+            if has_trained_weights:
+                raise ValueError(
+                    f"State input dimension mismatch detected! "
+                    f"Expected {self.current_input_dim} but got {actual_input_dim}. "
+                    f"This indicates a state stacking configuration mismatch between "
+                    f"BC pretraining and RL training. All pretrained weights would be lost. "
+                    f"Fix: Ensure frame_stack_config matches between BC and RL training."
+                )
+
+            # Only rebuild if no trained weights exist (random initialization)
             logger.warning(
-                f"StateMLP input dimension changed from {self.current_input_dim} to {actual_input_dim}. "
-                f"Rebuilding layers (weights will be reset!)."
+                f"StateMLP: Rebuilding for {actual_input_dim} dims (was {self.current_input_dim})"
             )
             self._build_layers(actual_input_dim)
             self.mlp = self.mlp.to(x.device)
@@ -291,17 +378,48 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     This enables systematic comparison of architecture variants.
     """
 
-    def __init__(self, observation_space: gym.spaces.Dict, config: ArchitectureConfig):
+    def __init__(
+        self,
+        observation_space: gym.spaces.Dict,
+        config: ArchitectureConfig,
+        frame_stack_config: Optional[Dict[str, Any]] = None,
+    ):
         """
         Args:
             observation_space: Gymnasium Dict space with observation components
             config: ArchitectureConfig specifying which modalities to use
+            frame_stack_config: Frame stacking configuration dict with keys:
+                - enable_visual_frame_stacking: bool
+                - visual_stack_size: int
+                - enable_state_stacking: bool
+                - state_stack_size: int
+                - padding_type: str ('zero' or 'repeat')
         """
         # Initialize with final features dimension
         super().__init__(observation_space, config.features_dim)
 
         self.config = config
         self.modalities = config.modalities
+        self.frame_stack_config = frame_stack_config or {}
+
+        # Log frame stacking configuration for debugging
+        if self.frame_stack_config:
+            visual_enabled = self.frame_stack_config.get(
+                "enable_visual_frame_stacking", False
+            )
+            state_enabled = self.frame_stack_config.get("enable_state_stacking", False)
+            if visual_enabled or state_enabled:
+                logger.info(
+                    "ConfigurableMultimodalExtractor initialized with frame stacking:"
+                )
+                if visual_enabled:
+                    logger.info(
+                        f"  Visual: {self.frame_stack_config.get('visual_stack_size', 4)} frames"
+                    )
+                if state_enabled:
+                    logger.info(
+                        f"  State: {self.frame_stack_config.get('state_stack_size', 4)} states"
+                    )
 
         # Track which modalities are actually available
         self.has_player_frame = "player_frame" in observation_space.spaces
@@ -321,7 +439,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         feature_dims = []
 
         # 1. Player frame processing (2D CNN for single grayscale frame)
-        if self.has_player_frame:
+        if self.modalities.use_player_frame and self.has_player_frame:
             self.player_frame_cnn = self._create_player_frame_cnn(config.visual)
             feature_dims.append(config.visual.player_frame_output_dim)
 
@@ -379,10 +497,12 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         References:
         - Mnih et al. (2015): DQN uses 4-frame stacking with similar CNN architecture
         """
-        # Determine input channels dynamically based on observation space
-        # Will be set during forward pass based on actual input dimensions
-        # Default to 1 for single frame, but handle stacked frames dynamically
-        return PlayerFrameCNN(visual_config)
+        # Calculate initial input channels from frame_stack_config
+        default_in_channels = 1
+        if self.frame_stack_config.get("enable_visual_frame_stacking", False):
+            default_in_channels = self.frame_stack_config.get("visual_stack_size", 4)
+
+        return PlayerFrameCNN(visual_config, default_in_channels=default_in_channels)
 
     def _create_global_cnn(self, visual_config) -> nn.Module:
         """Create 2D CNN for global view processing (single frame only, not stacked)."""
@@ -441,7 +561,15 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self, input_dim: int, hidden_dim: int, output_dim: int
     ) -> nn.Module:
         """Create MLP for game state processing with stacking support."""
-        return StateMLP(input_dim, hidden_dim, output_dim)
+        # Calculate state input dimension accounting for stacking
+        default_input_dim = input_dim
+        if self.frame_stack_config.get("enable_state_stacking", False):
+            stack_size = self.frame_stack_config.get("state_stack_size", 4)
+            default_input_dim = input_dim * stack_size
+
+        return StateMLP(
+            input_dim, hidden_dim, output_dim, default_input_dim=default_input_dim
+        )
 
     def _create_reachability_mlp(
         self, input_dim: int, hidden_dim: int, output_dim: int
@@ -502,18 +630,12 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         """
         features = []
 
-        # Process player frame (single grayscale frame)
+        # Process player frame (can be single frame or stacked frames)
         if self.player_frame_cnn is not None and "player_frame" in observations:
             player_frame_obs = observations["player_frame"]
-            # Handle different input formats
-            if player_frame_obs.dim() == 4:
-                # [batch, H, W, 1] -> [batch, 1, H, W]
-                if player_frame_obs.shape[-1] == 1:
-                    player_frame_obs = player_frame_obs.permute(0, 3, 1, 2)
-                # [batch, 1, H, W] -> already correct
-            elif player_frame_obs.dim() == 3:
-                # [batch, H, W] -> [batch, 1, H, W]
-                player_frame_obs = player_frame_obs.unsqueeze(1)
+
+            # Normalize to [0, 1] range before passing to CNN
+            # Note: PlayerFrameCNN.forward() handles channel reordering internally
             player_frame_features = self.player_frame_cnn(
                 player_frame_obs.float() / 255.0
             )
