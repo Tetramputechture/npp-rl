@@ -29,6 +29,8 @@ class EnvironmentFactory:
         enable_mine_avoidance_reward: bool = True,
         output_dir: Optional[Path] = None,
         pretrained_checkpoint: Optional[str] = None,
+        enable_icm: bool = False,
+        icm_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize environment factory.
 
@@ -41,6 +43,8 @@ class EnvironmentFactory:
             enable_mine_avoidance_reward: Enable mine avoidance component in PBRS
             output_dir: Output directory for BC normalization stats
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
+            enable_icm: Enable Intrinsic Curiosity Module (ICM)
+            icm_config: ICM configuration dict (eta, alpha, etc.)
         """
         self.use_curriculum = use_curriculum
         self.curriculum_manager = curriculum_manager
@@ -52,6 +56,11 @@ class EnvironmentFactory:
         self.pretrained_checkpoint = pretrained_checkpoint
         self.bc_normalization_applied = False
         self.vec_normalize_wrapper = None
+        
+        # ICM integration
+        self.enable_icm = enable_icm
+        self.icm_config = icm_config or {}
+        self.icm_integration = None
 
     def create_training_env(
         self,
@@ -142,6 +151,24 @@ class EnvironmentFactory:
             logger.info("GPU available - applying GPUObservationWrapper for memory optimization...")
             env = GPUObservationWrapper(env, use_pinned_memory=True)
             logger.info("✓ GPUObservationWrapper applied (observations will be on GPU)")
+
+        # Wrap with ICM intrinsic rewards if enabled
+        if self.enable_icm:
+            logger.info("ICM enabled - creating intrinsic curiosity module...")
+            from npp_rl.training.icm_integration import create_icm_integration
+            
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.icm_integration = create_icm_integration(
+                enable_icm=True,
+                icm_config=self.icm_config,
+                device=device,
+            )
+            
+            if self.icm_integration is not None:
+                env = self.icm_integration.wrap_environment(env, policy=None)
+                logger.info("✓ ICM wrapper applied - intrinsic rewards enabled")
+            else:
+                logger.warning("⚠ ICM integration failed - continuing without ICM")
 
         # Wrap with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
