@@ -33,7 +33,7 @@ The agent demonstrates **significant learning on simple curriculum stages** (78.
 | **simplest** | **78.3%** | 129 | 1,051 | ✅ Good |
 | **simpler** | **45.0%** | 191 | 2,795 | ⚠️ Moderate |
 | **simple** | **26.6%** | 94 | 2,879 | ❌ Poor |
-| medium | 0.0% | 0 | N/A | ❌ Never reached |
+| medium | 0.0% | 0 | N/A | ❌ Never reached | 
 | complex | 0.0% | 0 | N/A | ❌ Never reached |
 | exploration | 0.0% | 0 | N/A | ❌ Never reached |
 | mine_heavy | 0.0% | 0 | N/A | ❌ Never reached |
