@@ -7,6 +7,7 @@ from typing import List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
 from npp_rl.training.training_callbacks import VerboseTrainingCallback
+from npp_rl.training.callbacks import DiagnosticLoggingCallback
 from npp_rl.callbacks import RouteVisualizationCallback, EnhancedTensorBoardCallback
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,16 @@ class CallbackFactory:
         verbose_callback = VerboseTrainingCallback(log_freq=1)
         callbacks.append(verbose_callback)
         logger.info("Added verbose training callback")
+
+        # Add comprehensive diagnostic logging callback (100+ metrics)
+        diagnostic_callback = DiagnosticLoggingCallback(
+            log_freq=1000,  # Log every 1000 steps
+            verbose=1,
+        )
+        callbacks.append(diagnostic_callback)
+        logger.info(
+            "Added comprehensive diagnostic logging callback (distance/, pbrs/, reward_components/)"
+        )
 
         # Add user callback if provided
         if user_callback is not None:
