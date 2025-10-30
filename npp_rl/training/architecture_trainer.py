@@ -428,6 +428,16 @@ class ArchitectureTrainer:
             **self.hyperparams,
         )
         logger.info("✓ PPO model created successfully")
+        
+        # Note: Mixed precision training (use_mixed_precision flag) is not yet
+        # supported by stable-baselines3 PPO. To enable it, would require custom
+        # PPO implementation with AMP integration. Current training uses FP32.
+        if self.use_mixed_precision:
+            logger.warning(
+                "Mixed precision requested but not supported by stable-baselines3 PPO. "
+                "Training will use FP32. To enable mixed precision, implement custom "
+                "PPO with AMPHelper integration."
+            )
 
     def _load_pretrained_weights(self) -> None:
         """Load BC pretrained weights into model."""

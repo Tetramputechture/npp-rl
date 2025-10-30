@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
+from npp_rl.rendering import render_tiles_to_axis, render_mines_to_axis
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,8 @@ class RouteVisualizationCallback(BaseCallback):
                 "start_time": 0,
                 "tiles": None,
                 "mines": None,
+                "locked_doors": None,
+                "is_success": None,
             }
         )
 
@@ -220,8 +223,11 @@ class RouteVisualizationCallback(BaseCallback):
 
                     # If this is the first position of a new episode, capture level data
                     if len(self.env_routes[env_idx]["positions"]) == 0:
-                        self.env_routes[env_idx]["tiles"] = self._get_tile_data()
-                        self.env_routes[env_idx]["mines"] = self._get_mine_data()
+                        self.env_routes[env_idx]["tiles"] = self._get_tile_data(env_idx)
+                        self.env_routes[env_idx]["mines"] = self._get_mine_data(env_idx)
+                        self.env_routes[env_idx]["locked_doors"] = (
+                            self._get_locked_door_data(env_idx)
+                        )
 
                     self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
         except Exception as e:
@@ -234,13 +240,10 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
-        # Check if episode was successful
-        is_success = info["is_success"]
-
         route_positions = info["episode_route"]
 
         # Only save routes for successful completions with valid position data
-        if is_success and route_positions and len(route_positions) > 0:
+        if route_positions and len(route_positions) > 0:
             # Check if we should save this route
             if self.routes_saved_this_checkpoint < self.max_routes_per_checkpoint:
                 self._queue_route_save(env_idx, info, route_positions)
@@ -253,6 +256,7 @@ class RouteVisualizationCallback(BaseCallback):
             "start_time": self.num_timesteps,
             "tiles": None,
             "mines": None,
+            "locked_doors": None,
         }
 
     def _queue_route_save(
@@ -270,6 +274,7 @@ class RouteVisualizationCallback(BaseCallback):
         """
         exit_switch_pos = info.get("exit_switch_pos", None)
         exit_door_pos = info.get("exit_door_pos", None)
+        is_success = info.get("is_success", False)
 
         # Try to get episode reward from various possible locations
         episode_reward = 0.0
@@ -284,10 +289,11 @@ class RouteVisualizationCallback(BaseCallback):
         # Get episode length
         episode_length = info.get("l", len(route_positions))
 
-        # Use stored tile and mine data (captured at episode start, not end)
+        # Use stored tile, mine, and locked door data (captured at episode start, not end)
         # This ensures we get the correct level data before auto-reset
         tiles = self.env_routes[env_idx].get("tiles", {})
         mines = self.env_routes[env_idx].get("mines", [])
+        locked_doors = self.env_routes[env_idx].get("locked_doors", [])
 
         route_data = {
             "positions": list(route_positions),
@@ -301,6 +307,8 @@ class RouteVisualizationCallback(BaseCallback):
             "exit_door_pos": exit_door_pos,
             "tiles": tiles,
             "mines": mines,
+            "locked_doors": locked_doors,
+            "is_success": is_success,
         }
 
         self.save_queue.append(route_data)
@@ -398,53 +406,128 @@ class RouteVisualizationCallback(BaseCallback):
             y_min = min(y_min, door_y - padding)
             y_max = max(y_max, door_y + padding)
 
+        # Include locked doors in bounds if available
+        if route_data.get("locked_doors"):
+            for door in route_data["locked_doors"]:
+                # Include switch position
+                switch_x = door.get("switch_x", 0)
+                switch_y = door.get("switch_y", 0)
+                x_min = min(x_min, switch_x - padding)
+                x_max = max(x_max, switch_x + padding)
+                y_min = min(y_min, switch_y - padding)
+                y_max = max(y_max, switch_y + padding)
+                # Include door segment position
+                door_x = door.get("door_x", 0)
+                door_y = door.get("door_y", 0)
+                x_min = min(x_min, door_x - padding)
+                x_max = max(x_max, door_x + padding)
+                y_min = min(y_min, door_y - padding)
+                y_max = max(y_max, door_y + padding)
+
         # Render tiles if available (must be before route so tiles are behind)
         # Only render tiles within the visible bounds for performance
         if route_data.get("tiles"):
-            try:
-                from npp_rl.rendering import render_tiles_to_axis
+            # Filter tiles to only those in visible area
+            # Tile coordinates are in grid units, convert bounds to grid units
+            tile_x_min = int((x_min / 24.0) - 1)
+            tile_x_max = int((x_max / 24.0) + 2)
+            tile_y_min = int((y_min / 24.0) - 1)
+            tile_y_max = int((y_max / 24.0) + 2)
 
-                # Filter tiles to only those in visible area
-                # Tile coordinates are in grid units, convert bounds to grid units
-                tile_x_min = int((x_min / 24.0) - 1)
-                tile_x_max = int((x_max / 24.0) + 2)
-                tile_y_min = int((y_min / 24.0) - 1)
-                tile_y_max = int((y_max / 24.0) + 2)
+            visible_tiles = {
+                coords: tile_type
+                for coords, tile_type in route_data["tiles"].items()
+                if tile_x_min <= coords[0] <= tile_x_max
+                and tile_y_min <= coords[1] <= tile_y_max
+            }
 
-                visible_tiles = {
-                    coords: tile_type
-                    for coords, tile_type in route_data["tiles"].items()
-                    if tile_x_min <= coords[0] <= tile_x_max
-                    and tile_y_min <= coords[1] <= tile_y_max
-                }
-
-                render_tiles_to_axis(
-                    ax,
-                    visible_tiles,
-                    tile_size=24.0,
-                    tile_color="#606060",  # Dark gray for tiles
-                    alpha=1.0,  # Solid fill
-                )
-            except Exception as e:
-                if self.verbose >= 2:
-                    logger.debug(f"Could not render tiles: {e}")
-
+            render_tiles_to_axis(
+                ax,
+                visible_tiles,
+                tile_size=24.0,
+                tile_color="#606060",  # Dark gray for tiles
+                alpha=1.0,  # Solid fill
+            )
         # Render mines if available (after tiles, before route)
         # Mines already have visibility culling in the render function
         if route_data.get("mines"):
-            try:
-                from npp_rl.rendering import render_mines_to_axis
+            render_mines_to_axis(
+                ax,
+                route_data["mines"],
+                tile_color="#FF4444",  # Red for dangerous mines
+                safe_color="#44FFFF",  # Cyan for safe mines
+                alpha=0.8,
+            )
 
-                render_mines_to_axis(
-                    ax,
-                    route_data["mines"],
-                    tile_color="#FF4444",  # Red for dangerous mines
-                    safe_color="#44FFFF",  # Cyan for safe mines
-                    alpha=0.8,
+        # Render locked doors if available (after mines, before route)
+        if route_data.get("locked_doors"):
+            for door in route_data["locked_doors"]:
+                switch_x = door.get("switch_x", 0)
+                switch_y = door.get("switch_y", 0)
+                door_x = door.get("door_x", 0)
+                door_y = door.get("door_y", 0)
+                is_closed = door.get("closed", True)
+                segment_x1 = door.get("segment_x1", door_x)
+                segment_y1 = door.get("segment_y1", door_y)
+                segment_x2 = door.get("segment_x2", door_x)
+                segment_y2 = door.get("segment_y2", door_y)
+
+                # Draw door segment (only if closed)
+                if is_closed:
+                    ax.plot(
+                        [segment_x1, segment_x2],
+                        [segment_y1, segment_y2],
+                        color="#FF8800",  # Orange for closed door segments
+                        linewidth=3,
+                        alpha=0.9,
+                        zorder=3,  # Above tiles but below route
+                        label="Locked Door"
+                        if door == route_data["locked_doors"][0]
+                        else "",
+                    )
+                else:
+                    # Draw open door segment (dashed, lighter) for debugging
+                    ax.plot(
+                        [segment_x1, segment_x2],
+                        [segment_y1, segment_y2],
+                        color="#FF8800",
+                        linewidth=2,
+                        linestyle="--",
+                        alpha=0.3,
+                        zorder=1,  # Behind everything
+                    )
+
+                # Draw switch position
+                switch_color = (
+                    "#00AA00" if not is_closed else "#FF6600"
+                )  # Green if collected, orange if not
+                ax.scatter(
+                    switch_x,
+                    switch_y,
+                    c=switch_color,
+                    s=80,
+                    marker="s",  # Square marker for switches
+                    zorder=6,
+                    edgecolors="white",
+                    linewidths=1.5,
+                    label="Door Switch"
+                    if door == route_data["locked_doors"][0]
+                    else "",
                 )
-            except Exception as e:
-                if self.verbose >= 2:
-                    logger.debug(f"Could not render mines: {e}")
+
+                # Draw switch radius circle
+                switch_radius = door.get("switch_radius", 5)
+                switch_circle = self.plt.Circle(
+                    (switch_x, switch_y),
+                    switch_radius,
+                    color=switch_color,
+                    fill=False,
+                    linestyle=":",
+                    linewidth=1,
+                    alpha=0.5,
+                    zorder=2,
+                )
+                ax.add_patch(switch_circle)
 
         # Plot route with color gradient (blue=start, green=end)
         num_points = len(positions)
@@ -564,7 +647,9 @@ class RouteVisualizationCallback(BaseCallback):
         ax.set_ylabel("Y Position")
 
         # Build title with curriculum stage and generator prominently displayed
-        title_parts = [f"Successful Route - Step {route_data['timestep']}"]
+        is_success = route_data.get("is_success", False)
+        title = "Successful Route" if is_success else "Failed Route"
+        title_parts = [f"{title} - Step {route_data['timestep']}"]
 
         # Show curriculum stage if available
         if (
@@ -674,22 +759,62 @@ class RouteVisualizationCallback(BaseCallback):
             except Exception as e:
                 logger.warning(f"Could not remove old file {old_file}: {e}")
 
-    def _get_tile_data(self) -> Dict[Tuple[int, int], int]:
+    def _get_tile_data(self, env_idx: int = 0) -> Dict[Tuple[int, int], int]:
         """Extract tile data from the environment.
+
+        Args:
+            env_idx: Environment index (default 0)
 
         Returns:
             Dictionary mapping (x, y) grid coordinates to tile type values,
             or empty dict if tiles are not accessible
         """
         try:
-            # Unwrap environment to access nplay_headless
-            env = (
-                self.training_env.envs[0]
-                if hasattr(self.training_env, "envs")
-                else self.training_env
-            )
+            # Start with training_env - it might be VecNormalize wrapping VecEnv
+            venv = self.training_env
 
-            # Unwrap to base environment
+            # Unwrap VecNormalize wrapper if present
+            if hasattr(venv, "venv"):
+                venv = venv.venv
+
+            # Now venv should be the actual VecEnv (SubprocVecEnv or DummyVecEnv)
+            # For SubprocVecEnv, use env_method to call remote method
+            if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
+                # SubprocVecEnv - call remote method
+                try:
+                    results = venv.env_method(
+                        "get_route_visualization_tile_data", indices=[env_idx]
+                    )
+                    if results and len(results) > 0 and results[0] is not None:
+                        return dict(results[0])
+                    else:
+                        if self.verbose >= 1:
+                            logger.warning(
+                                f"env_method returned empty result for tile data (env {env_idx})"
+                            )
+                        return {}
+                except Exception as e:
+                    if self.verbose >= 1:
+                        logger.warning(
+                            f"env_method failed for tile data (env {env_idx}): {e}. "
+                            "Falling back to direct access."
+                        )
+                    # Fall through to direct access fallback
+
+            # Direct access for DummyVecEnv or fallback from SubprocVecEnv failure
+            if hasattr(venv, "envs"):
+                # DummyVecEnv - direct access
+                env = venv.envs[env_idx]
+            else:
+                # Can't access - return empty
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Cannot access tile data for env {env_idx}: "
+                        "No accessible environment found."
+                    )
+                return {}
+
+            # Unwrap wrappers to get to base environment
             while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
                 env = env.env
 
@@ -697,30 +822,73 @@ class RouteVisualizationCallback(BaseCallback):
                 tile_dic = env.nplay_headless.get_tile_data()
                 return dict(tile_dic)  # Make a copy
             else:
-                if self.verbose >= 2:
-                    logger.debug("Environment does not have nplay_headless attribute")
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Environment {env_idx} does not have nplay_headless attribute. "
+                        "Cannot extract tile data."
+                    )
                 return {}
         except Exception as e:
-            if self.verbose >= 2:
-                logger.debug(f"Could not extract tile data: {e}")
+            if self.verbose >= 1:
+                logger.warning(f"Could not extract tile data for env {env_idx}: {e}")
             return {}
 
-    def _get_mine_data(self) -> List[Dict[str, Any]]:
+    def _get_mine_data(self, env_idx: int = 0) -> List[Dict[str, Any]]:
         """Extract mine data from the environment.
+
+        Args:
+            env_idx: Environment index (default 0)
 
         Returns:
             List of mine dictionaries with keys: x, y, state, radius
             Returns empty list if mines are not accessible
         """
         try:
-            # Unwrap environment to access nplay_headless
-            env = (
-                self.training_env.envs[0]
-                if hasattr(self.training_env, "envs")
-                else self.training_env
-            )
+            # Start with training_env - it might be VecNormalize wrapping VecEnv
+            venv = self.training_env
 
-            # Unwrap to base environment
+            # Unwrap VecNormalize wrapper if present
+            if hasattr(venv, "venv"):
+                venv = venv.venv
+
+            # Now venv should be the actual VecEnv (SubprocVecEnv or DummyVecEnv)
+            # For SubprocVecEnv, use env_method to call remote method
+            if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
+                # SubprocVecEnv - call remote method
+                try:
+                    results = venv.env_method(
+                        "get_route_visualization_mine_data", indices=[env_idx]
+                    )
+                    if results and len(results) > 0 and results[0] is not None:
+                        return results[0]
+                    else:
+                        if self.verbose >= 1:
+                            logger.warning(
+                                f"env_method returned empty result for mine data (env {env_idx})"
+                            )
+                        return []
+                except Exception as e:
+                    if self.verbose >= 1:
+                        logger.warning(
+                            f"env_method failed for mine data (env {env_idx}): {e}. "
+                            "Falling back to direct access."
+                        )
+                    # Fall through to direct access fallback
+
+            # Direct access for DummyVecEnv or fallback from SubprocVecEnv failure
+            if hasattr(venv, "envs"):
+                # DummyVecEnv - direct access
+                env = venv.envs[env_idx]
+            else:
+                # Can't access - return empty
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Cannot access mine data for env {env_idx}: "
+                        "No accessible environment found."
+                    )
+                return []
+
+            # Unwrap wrappers to get to base environment
             while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
                 env = env.env
 
@@ -755,12 +923,147 @@ class RouteVisualizationCallback(BaseCallback):
 
                 return mines
             else:
-                if self.verbose >= 2:
-                    logger.debug("Environment does not have nplay_headless attribute")
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Environment {env_idx} does not have nplay_headless attribute. "
+                        "Cannot extract mine data."
+                    )
                 return []
         except Exception as e:
-            if self.verbose >= 2:
-                logger.debug(f"Could not extract mine data: {e}")
+            if self.verbose >= 1:
+                logger.warning(f"Could not extract mine data for env {env_idx}: {e}")
+            return []
+
+    def _get_locked_door_data(self, env_idx: int = 0) -> List[Dict[str, Any]]:
+        """Extract locked door data from the environment.
+
+        Args:
+            env_idx: Environment index (default 0)
+
+        Returns:
+            List of locked door dictionaries with keys:
+            - switch_x, switch_y: Switch position
+            - door_x, door_y: Door segment center position
+            - segment_x1, segment_y1, segment_x2, segment_y2: Door segment endpoints
+            - closed: Whether door is closed (True) or open (False)
+            - active: Whether switch is still collectible (True = not collected, door closed)
+            - switch_radius: Switch radius
+            Returns empty list if locked doors are not accessible
+        """
+        try:
+            # Start with training_env - it might be VecNormalize wrapping VecEnv
+            venv = self.training_env
+
+            # Unwrap VecNormalize wrapper if present
+            if hasattr(venv, "venv"):
+                venv = venv.venv
+
+            # Now venv should be the actual VecEnv (SubprocVecEnv or DummyVecEnv)
+            # For SubprocVecEnv, use env_method to call remote method
+            if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
+                # SubprocVecEnv - call remote method
+                try:
+                    results = venv.env_method(
+                        "get_route_visualization_locked_door_data", indices=[env_idx]
+                    )
+                    if results and len(results) > 0 and results[0] is not None:
+                        return results[0]
+                    else:
+                        if self.verbose >= 1:
+                            logger.warning(
+                                f"env_method returned empty result for locked door data (env {env_idx})"
+                            )
+                        return []
+                except Exception as e:
+                    if self.verbose >= 1:
+                        logger.warning(
+                            f"env_method failed for locked door data (env {env_idx}): {e}. "
+                            "Falling back to direct access."
+                        )
+                    # Fall through to direct access fallback
+
+            # Direct access for DummyVecEnv or fallback from SubprocVecEnv failure
+            if hasattr(venv, "envs"):
+                # DummyVecEnv - direct access
+                env = venv.envs[env_idx]
+            else:
+                # Can't access - return empty
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Cannot access locked door data for env {env_idx}: "
+                        "No accessible environment found."
+                    )
+                return []
+
+            # Unwrap wrappers to get to base environment
+            while hasattr(env, "env") and not hasattr(env, "nplay_headless"):
+                env = env.env
+
+            if hasattr(env, "nplay_headless"):
+                locked_doors = []
+                locked_door_entities = env.nplay_headless.locked_doors()
+
+                # Import door constants
+                try:
+                    from nclone.entity_classes.entity_door_locked import (
+                        EntityDoorLocked,
+                    )
+                except ImportError:
+                    # Fallback to default values if import fails
+                    EntityDoorLocked = type("EntityDoorLocked", (), {"RADIUS": 5})
+
+                for door_entity in locked_door_entities:
+                    # Get switch position (entity position)
+                    switch_x = float(getattr(door_entity, "xpos", 0.0))
+                    switch_y = float(getattr(door_entity, "ypos", 0.0))
+
+                    # Get door segment
+                    segment = getattr(door_entity, "segment", None)
+                    if segment:
+                        segment_x1 = float(getattr(segment, "x1", 0.0))
+                        segment_y1 = float(getattr(segment, "y1", 0.0))
+                        segment_x2 = float(getattr(segment, "x2", 0.0))
+                        segment_y2 = float(getattr(segment, "y2", 0.0))
+                        door_x = (segment_x1 + segment_x2) * 0.5
+                        door_y = (segment_y1 + segment_y2) * 0.5
+                    else:
+                        # Fallback if segment not available
+                        segment_x1 = segment_y1 = segment_x2 = segment_y2 = 0.0
+                        door_x = door_y = 0.0
+
+                    # Get door state
+                    closed = bool(getattr(door_entity, "closed", True))
+                    active = bool(getattr(door_entity, "active", True))
+
+                    locked_doors.append(
+                        {
+                            "switch_x": switch_x,
+                            "switch_y": switch_y,
+                            "door_x": door_x,
+                            "door_y": door_y,
+                            "segment_x1": segment_x1,
+                            "segment_y1": segment_y1,
+                            "segment_x2": segment_x2,
+                            "segment_y2": segment_y2,
+                            "closed": closed,
+                            "active": active,
+                            "switch_radius": float(EntityDoorLocked.RADIUS),
+                        }
+                    )
+
+                return locked_doors
+            else:
+                if self.verbose >= 1:
+                    logger.warning(
+                        f"Environment {env_idx} does not have nplay_headless attribute. "
+                        "Cannot extract locked door data."
+                    )
+                return []
+        except Exception as e:
+            if self.verbose >= 1:
+                logger.warning(
+                    f"Could not extract locked door data for env {env_idx}: {e}"
+                )
             return []
 
     def _on_training_end(self) -> None:

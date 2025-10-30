@@ -7,6 +7,7 @@ from typing import List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
 from npp_rl.training.training_callbacks import VerboseTrainingCallback
+from npp_rl.callbacks import RouteVisualizationCallback, EnhancedTensorBoardCallback
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,6 @@ class CallbackFactory:
             logger.info("Added user-provided callback")
 
         # Add enhanced TensorBoard metrics callback
-        # Note: PBRS logging integrated into this callback to avoid duplication
-        from npp_rl.callbacks import EnhancedTensorBoardCallback
-
         enhanced_tb_callback = EnhancedTensorBoardCallback(
             log_freq=200,  # Log scalars every 200 steps (reduced overhead)
             histogram_freq=5000,  # Log histograms every 5000 steps (expensive operation)
@@ -79,14 +77,11 @@ class CallbackFactory:
             "Added enhanced TensorBoard callback (includes PBRS and curriculum metrics)"
         )
 
-        # Add route visualization callback
-        from npp_rl.callbacks import RouteVisualizationCallback
-
         routes_dir = self.output_dir / "route_visualizations"
         route_callback = RouteVisualizationCallback(
             save_dir=str(routes_dir),
             max_routes_per_checkpoint=10,
-            visualization_freq=100,
+            visualization_freq=10000,
             max_stored_routes=100,
             async_save=True,
             image_size=(800, 600),
