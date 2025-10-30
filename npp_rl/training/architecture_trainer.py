@@ -277,6 +277,8 @@ class ArchitectureTrainer:
                 enable_mine_avoidance_reward=self.enable_mine_avoidance_reward,
                 output_dir=self.output_dir,
                 pretrained_checkpoint=self.pretrained_checkpoint,
+                enable_icm=self.config.get("enable_icm", False),
+                icm_config=self.config.get("icm_config", {}),
             )
 
             # Create training environment
