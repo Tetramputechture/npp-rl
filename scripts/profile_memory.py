@@ -384,20 +384,20 @@ def profile_architecture_memory(
                     f"{results['summary']['recommended_max_envs_per_gpu']}"
                 )
                 logger.info(
-                    f"  Note: CPU memory is separate and may be the limiting factor "
-                    f"for very large numbers of environments"
+                    "  Note: CPU memory is separate and may be the limiting factor "
+                    "for very large numbers of environments"
                 )
             else:
                 logger.warning(
-                    f"  Cannot calculate summary: average memory per environment is zero"
+                    "  Cannot calculate summary: average memory per environment is zero"
                 )
         else:
             logger.warning(
-                f"  Cannot calculate summary: no valid memory measurements collected"
+                "  Cannot calculate summary: no valid memory measurements collected"
             )
     else:
         logger.warning(
-            f"  Cannot calculate summary: need at least 2 environment counts to measure memory per environment"
+            "  Cannot calculate summary: need at least 2 environment counts to measure memory per environment"
         )
 
     return results

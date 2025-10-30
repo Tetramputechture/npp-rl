@@ -12,7 +12,7 @@ Key features:
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import torch

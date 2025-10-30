@@ -1,0 +1,18 @@
+[
+  {
+    "architecture": "mlp_baseline",
+    "condition": "",
+    "training": {
+      "status": "completed",
+      "total_timesteps": 50000
+    },
+    "evaluation": {
+      "success_rate": 0.14285714285714285,
+      "avg_steps": 3608.1428571428573,
+      "std_steps": 2200.739254274827,
+      "efficiency": 12.87001287001287,
+      "total_episodes": 7
+    },
+    "output_dir": "experiments/quick_test_20251030_114301/mlp_baseline"
+  }
+]

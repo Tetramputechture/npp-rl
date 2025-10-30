@@ -138,9 +138,44 @@ class ComprehensiveEvaluator:
                     # Standard shapes: player_frame=(84, 84, 1), global_view=(176, 100, 1)
                     # Frame stacked: player_frame=(84, 84, N), global_view=(176, 100, N)
                     # where N is the stack size
-
+                    
+                    # Expected dimensions for player_frame: (84, 84, C) or (C, 84, 84)
+                    # Expected dimensions for global_view: (176, 100, C) or (C, 176, 100)
+                    
+                    # Determine which dimension is the channel dimension
+                    # Channel dimension should be 1 (no stacking) or > 1 (stacking)
                     if len(expected_shape) == 3:
-                        channels = expected_shape[2]
+                        # Try to identify the channel dimension
+                        # For player_frame: 84x84 are spatial dims, channel should be 1 or stack_size
+                        # For global_view: 176x100 are spatial dims, channel should be 1 or stack_size
+                        
+                        if key == "player_frame":
+                            # Check which dimension is not 84
+                            if expected_shape[0] not in [84, 85] and expected_shape[0] < 20:
+                                # First dim is likely channels (C, H, W) format
+                                channels = expected_shape[0]
+                            elif expected_shape[2] not in [84, 85] and expected_shape[2] < 20:
+                                # Last dim is likely channels (H, W, C) format
+                                channels = expected_shape[2]
+                            else:
+                                # Can't determine channel dimension reliably, skip validation
+                                logger.debug(f"Cannot determine channel dimension for {key} with shape {expected_shape}, skipping validation")
+                                continue
+                        elif key == "global_view":
+                            # Check which dimension is not 176 or 100
+                            if expected_shape[0] not in [176, 100] and expected_shape[0] < 20:
+                                # First dim is likely channels (C, H, W) format
+                                channels = expected_shape[0]
+                            elif expected_shape[2] not in [176, 100] and expected_shape[2] < 20:
+                                # Last dim is likely channels (H, W, C) format  
+                                channels = expected_shape[2]
+                            else:
+                                # Can't determine channel dimension reliably, skip validation
+                                logger.debug(f"Cannot determine channel dimension for {key} with shape {expected_shape}, skipping validation")
+                                continue
+                        else:
+                            # Unknown key, assume channels-last format
+                            channels = expected_shape[2]
 
                         # If channels > 1, frame stacking is expected
                         if channels > 1:

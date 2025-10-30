@@ -1,0 +1,111 @@
+{
+  "overall": {
+    "success_rate": 0.14285714285714285,
+    "avg_steps": 3608.1428571428573,
+    "std_steps": 2200.739254274827,
+    "efficiency": 12.87001287001287,
+    "total_episodes": 7
+  },
+  "by_category": {
+    "simplest": {
+      "success_rate": 1.0,
+      "avg_steps": 111.0,
+      "std_steps": 0.0,
+      "avg_reward": 11.133490440795867,
+      "efficiency": 90.09009009009009,
+      "episode_steps": [
+        111
+      ],
+      "successes": [
+        1
+      ],
+      "n_episodes": 1
+    },
+    "simpler": {
+      "success_rate": 0.0,
+      "avg_steps": 5000.0,
+      "std_steps": 0.0,
+      "avg_reward": -5.980040464637568,
+      "efficiency": 0.0,
+      "episode_steps": [
+        5000
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    },
+    "simple": {
+      "success_rate": 0.0,
+      "avg_steps": 5000.0,
+      "std_steps": 0.0,
+      "avg_reward": -50.3572732625762,
+      "efficiency": 0.0,
+      "episode_steps": [
+        5000
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    },
+    "medium": {
+      "success_rate": 0.0,
+      "avg_steps": 5000.0,
+      "std_steps": 0.0,
+      "avg_reward": -0.31698517201471077,
+      "efficiency": 0.0,
+      "episode_steps": [
+        5000
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    },
+    "complex": {
+      "success_rate": 0.0,
+      "avg_steps": 5000.0,
+      "std_steps": 0.0,
+      "avg_reward": -25.210056108713616,
+      "efficiency": 0.0,
+      "episode_steps": [
+        5000
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    },
+    "exploration": {
+      "success_rate": 0.0,
+      "avg_steps": 5000.0,
+      "std_steps": 0.0,
+      "avg_reward": -49.82001996059262,
+      "efficiency": 0.0,
+      "episode_steps": [
+        5000
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    },
+    "mine_heavy": {
+      "success_rate": 0.0,
+      "avg_steps": 146.0,
+      "std_steps": 0.0,
+      "avg_reward": -0.6214630769754876,
+      "efficiency": 0.0,
+      "episode_steps": [
+        146
+      ],
+      "successes": [
+        0
+      ],
+      "n_episodes": 1
+    }
+  },
+  "by_difficulty_tier": {},
+  "failure_modes": []
+}
