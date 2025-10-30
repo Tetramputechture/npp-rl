@@ -5,12 +5,9 @@ This module provides efficient rendering of N++ tiles and entities using matplot
 adapted from the Cairo-based rendering in nclone.shared_tile_renderer.
 """
 
-import math
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
-from matplotlib.collections import PatchCollection
 
 
 def group_tiles_by_type(tile_dic: Dict[Tuple[int, int], int]) -> Dict[int, List[Tuple[int, int]]]:

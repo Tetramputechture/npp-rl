@@ -62,6 +62,176 @@ class ComprehensiveEvaluator:
         logger.info(f"Initialized evaluator on device: {device}")
         logger.info(f"Test suite: {self.loader.get_summary()}")
 
+    @staticmethod
+    def detect_frame_stack_config(model) -> Optional[Dict[str, Any]]:
+        """Auto-detect frame stacking configuration from model's observation space.
+
+        Args:
+            model: Trained model
+
+        Returns:
+            Detected frame_stack_config dict, or None if no frame stacking detected
+        """
+        try:
+            obs_space = model.observation_space
+
+            if not isinstance(obs_space, gym.spaces.Dict):
+                return None
+
+            # Check for visual frame stacking
+            visual_stack_size = None
+            for key in ["player_frame", "global_view"]:
+                if key in obs_space.spaces:
+                    shape = obs_space.spaces[key].shape
+                    if len(shape) == 3 and shape[2] > 1:
+                        visual_stack_size = shape[2]
+                        break
+
+            # Check for state stacking (heuristic - check if game_state dim is multiple of base)
+            state_stack_size = None
+            if "game_state" in obs_space.spaces:
+                state_dim = obs_space.spaces["game_state"].shape[0]
+                # Base state dim is typically 26
+                if state_dim > 26 and state_dim % 26 == 0:
+                    state_stack_size = state_dim // 26
+
+            if visual_stack_size or state_stack_size:
+                return {
+                    "enable_visual_frame_stacking": visual_stack_size is not None,
+                    "visual_stack_size": visual_stack_size or 4,
+                    "enable_state_stacking": state_stack_size is not None,
+                    "state_stack_size": state_stack_size or 4,
+                    "padding_type": "zero",
+                }
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Could not detect frame stacking from model: {e}")
+            return None
+
+    def _validate_frame_stack_config(
+        self, model, frame_stack_config: Optional[Dict[str, Any]]
+    ) -> None:
+        """Validate that frame_stack_config matches model's expected observation space.
+
+        Args:
+            model: Trained model
+            frame_stack_config: Frame stacking configuration
+
+        Raises:
+            ValueError: If configuration mismatch is detected
+        """
+        # Try to detect frame stacking from the model's observation space
+        try:
+            obs_space = model.observation_space
+
+            # Check if we have dict observation space with visual observations
+            if not isinstance(obs_space, gym.spaces.Dict):
+                return  # Can't validate non-dict spaces
+
+            # Check player_frame and global_view for frame stacking
+            for key in ["player_frame", "global_view"]:
+                if key in obs_space.spaces:
+                    expected_shape = obs_space.spaces[key].shape
+
+                    # Standard shapes: player_frame=(84, 84, 1), global_view=(176, 100, 1)
+                    # Frame stacked: player_frame=(84, 84, N), global_view=(176, 100, N)
+                    # where N is the stack size
+
+                    if len(expected_shape) == 3:
+                        channels = expected_shape[2]
+
+                        # If channels > 1, frame stacking is expected
+                        if channels > 1:
+                            visual_stack_enabled = (
+                                frame_stack_config
+                                and frame_stack_config.get(
+                                    "enable_visual_frame_stacking", False
+                                )
+                            )
+
+                            if not visual_stack_enabled:
+                                # Try to auto-detect and provide helpful error
+                                detected_config = self.detect_frame_stack_config(model)
+                                config_str = (
+                                    f"  frame_stack_config={detected_config}"
+                                    if detected_config
+                                    else f"  frame_stack_config={{\n"
+                                    f"    'enable_visual_frame_stacking': True,\n"
+                                    f"    'visual_stack_size': {channels},\n"
+                                    f"    'enable_state_stacking': False,\n"
+                                    f"    'state_stack_size': 4,\n"
+                                    f"    'padding_type': 'zero'\n"
+                                    f"  }}"
+                                )
+                                raise ValueError(
+                                    f"Model expects {channels} stacked frames in '{key}' "
+                                    f"(shape: {expected_shape}), but frame_stack_config is not enabled!\n\n"
+                                    f"The model was trained with frame stacking. You must pass:\n"
+                                    f"{config_str}\n\n"
+                                    f"If using ArchitectureTrainer, pass frame_stack_config to __init__().\n"
+                                    f"If evaluating directly, pass frame_stack_config to evaluate_model()."
+                                )
+
+                            config_stack_size = frame_stack_config.get(
+                                "visual_stack_size", 4
+                            )
+                            if config_stack_size != channels:
+                                raise ValueError(
+                                    f"Frame stacking size mismatch for '{key}':\n"
+                                    f"  Model expects: {channels} frames (shape: {expected_shape})\n"
+                                    f"  Config provides: {config_stack_size} frames\n"
+                                    f"Please update visual_stack_size in frame_stack_config to {channels}"
+                                )
+
+                            logger.info(
+                                f"✓ Validated frame stacking for '{key}': {channels} frames"
+                            )
+                        else:
+                            # No frame stacking in model
+                            visual_stack_enabled = (
+                                frame_stack_config
+                                and frame_stack_config.get(
+                                    "enable_visual_frame_stacking", False
+                                )
+                            )
+                            if visual_stack_enabled:
+                                logger.warning(
+                                    f"⚠️  Model expects single frame in '{key}' (shape: {expected_shape}), "
+                                    f"but frame_stack_config has visual stacking enabled. "
+                                    f"This may cause shape mismatch!"
+                                )
+
+            # Check game_state for state stacking
+            if "game_state" in obs_space.spaces:
+                expected_shape = obs_space.spaces["game_state"].shape
+
+                # Standard shape: (26,) or similar
+                # State stacked: (26*N,) where N is stack size
+                if len(expected_shape) == 1:
+                    expected_dim = expected_shape[0]
+
+                    # If dim is multiple of standard state dim (26), state stacking might be used
+                    # This is heuristic since we don't know the base state dim for certain
+                    state_stack_enabled = frame_stack_config and frame_stack_config.get(
+                        "enable_state_stacking", False
+                    )
+
+                    if state_stack_enabled:
+                        state_stack_size = frame_stack_config.get("state_stack_size", 4)
+                        logger.info(
+                            f"State stacking enabled: {state_stack_size} frames "
+                            f"(expected dim: {expected_dim})"
+                        )
+
+        except Exception as e:
+            logger.warning(
+                f"Could not validate frame stacking configuration: {e}. "
+                f"Proceeding with evaluation, but this may cause errors if "
+                f"frame_stack_config doesn't match training configuration."
+            )
+
     def evaluate_model(
         self,
         model,
@@ -93,6 +263,7 @@ class ComprehensiveEvaluator:
             frame_stack_config: Frame stacking configuration dict matching training config
                 Should include: enable_visual_frame_stacking, visual_stack_size,
                 enable_state_stacking, state_stack_size, padding_type
+                IMPORTANT: Must match the configuration used during training!
 
         Returns:
             Comprehensive results dictionary
@@ -100,6 +271,9 @@ class ComprehensiveEvaluator:
         logger.info("=" * 60)
         logger.info("Starting comprehensive evaluation")
         logger.info("=" * 60)
+
+        # Validate frame stacking configuration matches model expectations
+        self._validate_frame_stack_config(model, frame_stack_config)
 
         # Validate video recording parameters
         if record_videos and video_output_dir is None:

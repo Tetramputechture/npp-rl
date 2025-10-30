@@ -11,6 +11,7 @@ from .curriculum_env import (
     make_curriculum_env
 )
 from .position_tracking_wrapper import PositionTrackingWrapper
+from .gpu_observation_wrapper import GPUObservationWrapper
 
 __all__ = [
     "HierarchicalRewardWrapper",
@@ -20,4 +21,5 @@ __all__ = [
     "CurriculumVecEnvWrapper",
     "make_curriculum_env",
     "PositionTrackingWrapper",
+    "GPUObservationWrapper",
 ]

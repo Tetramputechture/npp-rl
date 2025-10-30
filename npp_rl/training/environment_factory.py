@@ -5,11 +5,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import numpy as np
+import torch
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
 from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
+from npp_rl.wrappers.gpu_observation_wrapper import GPUObservationWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,12 @@ class EnvironmentFactory:
             self._apply_bc_normalization(env, gamma)
         else:
             logger.info("No BC checkpoint - skipping BC observation normalization")
+
+        # Wrap with GPU observation transfer if GPU is available
+        if torch.cuda.is_available():
+            logger.info("GPU available - applying GPUObservationWrapper for memory optimization...")
+            env = GPUObservationWrapper(env, use_pinned_memory=True)
+            logger.info("✓ GPUObservationWrapper applied (observations will be on GPU)")
 
         # Wrap with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:

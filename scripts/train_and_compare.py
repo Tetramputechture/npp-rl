@@ -997,7 +997,15 @@ def main():
     if args.hardware_profile:
         if args.hardware_profile.lower() == "auto":
             logger.info("Auto-detecting hardware profile...")
-            hardware_profile = auto_detect_profile()
+            # Use first architecture for auto-detection if available
+            # This provides architecture-aware memory estimation
+            architecture_name = (
+                args.architectures[0] if args.architectures else "full_hgt"
+            )
+            logger.info(
+                f"Using architecture '{architecture_name}' for memory estimation"
+            )
+            hardware_profile = auto_detect_profile(architecture_name=architecture_name)
         else:
             hardware_profile = get_hardware_profile(args.hardware_profile)
 
