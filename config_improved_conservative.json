@@ -1,0 +1,94 @@
+{
+  "experiment_name": "improved_mlp_conservative_v1",
+  "description": "Conservative improvements: reward scaling fixes, extended training, more environments",
+  "architectures": [
+    "mlp_baseline"
+  ],
+  "train_dataset": "/home/ubuntu/datasets/train",
+  "test_dataset": "/home/ubuntu/datasets/test",
+  "output_dir": "/home/ubuntu/experiments",
+  "test_pretraining": false,
+  "no_pretraining": false,
+  "replay_data_dir": "../nclone/bc_replays",
+  "bc_epochs": 50,
+  "bc_batch_size": 128,
+  
+  "_comment_training": "Extended to 3M timesteps for better learning convergence",
+  "total_timesteps": 3000000,
+  
+  "_comment_envs": "Increased from 28 to 64 for more diverse experience and faster training",
+  "num_envs": 64,
+  
+  "eval_freq": 200000,
+  "save_freq": 500000,
+  "num_eval_episodes": 10,
+  "skip_final_eval": false,
+  
+  "hardware_profile": "auto",
+  "num_gpus": 1,
+  "distributed_backend": "nccl",
+  "mixed_precision": true,
+  "use_hierarchical_ppo": false,
+  "high_level_update_freq": 50,
+  
+  "_comment_curriculum": "Lowered threshold from 0.8 to 0.7 to enable progression",
+  "use_curriculum": true,
+  "curriculum_start_stage": "simplest",
+  "curriculum_threshold": 0.7,
+  "curriculum_min_episodes": 100,
+  
+  "_comment_pbrs": "PBRS scaling increased in reward_constants.py (5.0x)",
+  "pbrs_gamma": 0.995,
+  "enable_mine_avoidance_reward": true,
+  "disable_trend_advancement": false,
+  "disable_early_advancement": false,
+  
+  "_comment_lr": "No annealing for conservative approach",
+  "enable_lr_annealing": false,
+  "initial_lr": null,
+  
+  "s3_bucket": "npp-rl-training-artifacts",
+  "s3_prefix": "experiments/improved/",
+  "s3_sync_freq": 500000,
+  
+  "_comment_frames": "Frame stacking configuration",
+  "enable_visual_frame_stacking": true,
+  "visual_stack_size": 3,
+  "enable_state_stacking": false,
+  "state_stack_size": 4,
+  "frame_stack_padding": "zero",
+  
+  "_comment_video": "Record more eval videos for analysis",
+  "record_eval_videos": true,
+  "max_videos_per_category": 3,
+  "video_fps": 60,
+  
+  "resume_from": null,
+  "visualize_training": false,
+  "vis_render_freq": 100,
+  "vis_env_idx": 0,
+  "vis_fps": 60,
+  "debug": false,
+  
+  "_metadata": {
+    "created": "2025-11-02",
+    "based_on": "mlp_f3_curr_with_mines",
+    "changes": [
+      "PBRS distance scale: 1.0 -> 5.0 (in reward_constants.py)",
+      "PBRS hazard weight: 0.1 -> 0.5 (in reward_constants.py)",
+      "Exploration rewards: 0.001 -> 0.005 (5x increase)",
+      "NOOP penalty: -0.01 -> -0.02",
+      "Total timesteps: 1M -> 3M",
+      "Num environments: 28 -> 64",
+      "Curriculum threshold: 0.8 -> 0.7",
+      "Curriculum min episodes: 50 -> 100"
+    ],
+    "expected_outcomes": [
+      "PBRS rewards in ±0.05 to ±0.2 range (was ±0.009)",
+      "Mean episode reward becomes positive",
+      "Success on simplest_with_mines: 70-75% (was 60%)",
+      "Curriculum progression to stage 2-3",
+      "NOOP usage < 12% (was 17.9%)"
+    ]
+  }
+}

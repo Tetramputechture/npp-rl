@@ -1,0 +1,106 @@
+{
+  "experiment_name": "improved_gat_aggressive_v1",
+  "description": "Aggressive improvements: GNN architecture, reward scaling, extended training, LR annealing",
+  "architectures": [
+    "gat"
+  ],
+  "train_dataset": "/home/ubuntu/datasets/train",
+  "test_dataset": "/home/ubuntu/datasets/test",
+  "output_dir": "/home/ubuntu/experiments",
+  "test_pretraining": false,
+  "no_pretraining": false,
+  "replay_data_dir": "../nclone/bc_replays",
+  "bc_epochs": 75,
+  "bc_batch_size": 128,
+  
+  "_comment_training": "Extended to 10M timesteps for full curriculum mastery",
+  "total_timesteps": 10000000,
+  
+  "_comment_envs": "Increased to 128 for maximum parallelism and data diversity",
+  "num_envs": 128,
+  
+  "eval_freq": 250000,
+  "save_freq": 1000000,
+  "num_eval_episodes": 20,
+  "skip_final_eval": false,
+  
+  "hardware_profile": "auto",
+  "num_gpus": 1,
+  "distributed_backend": "nccl",
+  "mixed_precision": true,
+  "use_hierarchical_ppo": false,
+  "high_level_update_freq": 50,
+  
+  "_comment_curriculum": "Enhanced curriculum with lower threshold for smoother progression",
+  "use_curriculum": true,
+  "curriculum_start_stage": "simplest",
+  "curriculum_threshold": 0.7,
+  "curriculum_min_episodes": 100,
+  
+  "_comment_pbrs": "PBRS scaling increased in reward_constants.py (5.0x)",
+  "pbrs_gamma": 0.995,
+  "enable_mine_avoidance_reward": true,
+  "disable_trend_advancement": false,
+  "disable_early_advancement": false,
+  
+  "_comment_lr": "Learning rate annealing for better convergence",
+  "enable_lr_annealing": true,
+  "initial_lr": 0.0003,
+  "final_lr": 0.00003,
+  
+  "s3_bucket": "npp-rl-training-artifacts",
+  "s3_prefix": "experiments/improved_aggressive/",
+  "s3_sync_freq": 1000000,
+  
+  "_comment_frames": "Frame stacking with optimal configuration",
+  "enable_visual_frame_stacking": true,
+  "visual_stack_size": 3,
+  "enable_state_stacking": false,
+  "state_stack_size": 4,
+  "frame_stack_padding": "zero",
+  
+  "_comment_video": "Record comprehensive eval videos",
+  "record_eval_videos": true,
+  "max_videos_per_category": 5,
+  "video_fps": 60,
+  
+  "resume_from": null,
+  "visualize_training": false,
+  "vis_render_freq": 100,
+  "vis_env_idx": 0,
+  "vis_fps": 60,
+  "debug": false,
+  
+  "_metadata": {
+    "created": "2025-11-02",
+    "based_on": "mlp_f3_curr_with_mines",
+    "architecture_upgrade": "mlp_baseline -> gat",
+    "changes": [
+      "Architecture: MLP Baseline -> GAT (Graph Attention Networks)",
+      "PBRS distance scale: 1.0 -> 5.0 (in reward_constants.py)",
+      "PBRS hazard weight: 0.1 -> 0.5 (in reward_constants.py)",
+      "Exploration rewards: 0.001 -> 0.005 (5x increase)",
+      "NOOP penalty: -0.01 -> -0.02",
+      "Total timesteps: 1M -> 10M (10x increase)",
+      "Num environments: 28 -> 128 (4.5x increase)",
+      "Curriculum threshold: 0.8 -> 0.7",
+      "Curriculum min episodes: 50 -> 100",
+      "LR annealing: disabled -> enabled (0.0003 -> 0.00003)",
+      "BC epochs: 50 -> 75"
+    ],
+    "expected_outcomes": [
+      "PBRS rewards in ±0.05 to ±0.2 range (was ±0.009)",
+      "Mean episode reward strongly positive",
+      "Success on simplest_with_mines: 80-85% (was 60%)",
+      "Success on simple: 75-85%",
+      "Success on medium: 60-70%",
+      "Curriculum progression through stage 5+",
+      "NOOP usage < 10% (was 17.9%)",
+      "Average completion time < 6000 steps"
+    ],
+    "training_time_estimate": {
+      "with_128_envs": "2-3 days for 10M steps",
+      "with_64_envs": "4-5 days for 10M steps"
+    }
+  }
+}
