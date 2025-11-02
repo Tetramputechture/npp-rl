@@ -1,6 +1,35 @@
-numpy
-torch
-pyautogui
-opencv-python
-pywin32
-pillow
+# Core numerical computing
+numpy>=1.21.0,<1.27.0
+
+# PyTorch ecosystem - CPU-only versions for setup
+# Note: setup.sh installs CPU-only versions from PyTorch CPU repository
+# For GPU support after setup, manually reinstall with CUDA support:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0,<2.5.0
+torchvision>=0.17.0,<0.20.0
+torchaudio>=2.2.0,<2.5.0
+torch_geometric>=2.3.0
+
+# Computer vision and image processing
+opencv-python>=4.8.0
+pillow>=10.0.0
+matplotlib>=3.5.0
+gymnasium>=1.1.1
+sb3-contrib>=2.4.0
+stable-baselines3>=2.7.0
+optuna>=3.3.0
+tensorboard>=2.14.0,<3.0.0
+protobuf>=3.20.0,<4.0.0  # Pin to 3.x for TensorBoard compatibility
+rich>=13.0.0  # Required for SB3 progress bars
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.8
+albumentations>=2.0.0
+pytest>=8.4.1
+# nclone is expected to be installed locally from a sibling directory.
+# See README.md for installation instructions.
+
+# Installation Notes:
+# - Run .openhands/setup.sh for automated CPU-only installation
+# - For manual installation: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+#   Then: pip install -r requirements.txt
+# - CPU-only PyTorch is ~700MB (much smaller than CUDA versions)

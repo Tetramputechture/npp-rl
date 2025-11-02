@@ -1,0 +1,691 @@
+"""
+Training Script for N++ RL Agent
+
+This script implements configurable multimodal architecture
+for training an RL agent to play N++. It uses the ConfigurableMultimodalExtractor
+with support for multiple architecture variants (HGT, GAT, GCN, MLP baseline, etc.).
+
+Key Features:
+- Configurable architecture system with 8 validated variants
+- Full HGT, Simplified HGT, GAT, GCN support
+- MLP baseline, vision-free, and local-frames-only options
+- Adaptive exploration with ICM and novelty detection
+- Comprehensive logging and evaluation
+
+Usage:
+    # Full HGT architecture (recommended)
+    python -m npp_rl.agents.training --num_envs 64 --total_timesteps 10000000 --architecture full_hgt
+
+    # Simplified for faster training
+    python -m npp_rl.agents.training --architecture gat --num_envs 32
+
+    # MLP baseline (no graph processing)
+    python -m npp_rl.agents.training --architecture mlp_baseline
+"""
+
+import argparse
+import torch
+from pathlib import Path
+import json
+import datetime
+from stable_baselines3 import PPO
+from stable_baselines3.common.utils import LinearSchedule
+from stable_baselines3.common.callbacks import (
+    EvalCallback,
+    StopTrainingOnNoModelImprovement,
+    BaseCallback,
+)
+from stable_baselines3.common.vec_env import (
+    SubprocVecEnv,
+    VecMonitor,
+    DummyVecEnv,
+    VecCheckNan,
+)
+from stable_baselines3.common.logger import configure
+
+from npp_rl.agents.hyperparameters.ppo_hyperparameters import (
+    HYPERPARAMETERS,
+    NET_ARCH_SIZE,
+)
+from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
+from npp_rl.training.architecture_configs import get_architecture_config
+from npp_rl.agents.adaptive_exploration import AdaptiveExplorationManager
+from nclone.gym_environment import (
+    create_reachability_aware_env,
+    create_hierarchical_env,
+)
+from npp_rl.agents.hierarchical_ppo import (
+    HierarchicalPPO,
+    HierarchicalActorCriticPolicy,
+)
+from npp_rl.hrl.completion_controller import CompletionController
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class HierarchicalLoggingCallback(BaseCallback):
+    """
+    Custom callback for logging hierarchical RL metrics.
+
+    This callback logs subtask transitions, completion controller metrics,
+    and hierarchical performance statistics during training.
+    """
+
+    def __init__(
+        self,
+        completion_controller: CompletionController,
+        log_freq: int = 10,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.completion_controller = completion_controller
+        self.log_freq = log_freq
+        self.step_count = 0
+
+    def _on_step(self) -> bool:
+        self.step_count += 1
+
+        if self.step_count % self.log_freq == 0:
+            # Log hierarchical metrics
+            metrics = self.completion_controller.get_subtask_metrics()
+
+            # Log to tensorboard/logger
+            self.logger.record(
+                "hierarchical/current_subtask",
+                metrics.get("current_subtask", "unknown"),
+            )
+            self.logger.record(
+                "hierarchical/subtask_step_count", metrics.get("subtask_step_count", 0)
+            )
+            self.logger.record(
+                "hierarchical/subtask_duration", metrics.get("subtask_duration", 0.0)
+            )
+            self.logger.record(
+                "hierarchical/total_transitions", metrics.get("total_transitions", 0)
+            )
+
+            # Log recent transitions
+            recent_transitions = metrics.get("recent_transitions", [])
+            if recent_transitions:
+                avg_transition_steps = sum(
+                    t.get("step_count", 0) for t in recent_transitions
+                ) / len(recent_transitions)
+                self.logger.record(
+                    "hierarchical/avg_transition_steps", avg_transition_steps
+                )
+
+        return True
+
+
+class ExplorationLoggingCallback(BaseCallback):
+    """Callback for logging exploration training metrics."""
+
+    def __init__(
+        self, exploration_manager: AdaptiveExplorationManager, log_freq: int = 1000
+    ):
+        super().__init__()
+        self.exploration_manager = exploration_manager
+        self.log_freq = log_freq
+        self.episode_rewards = []
+        self.episode_lengths = []
+
+    def _on_step(self) -> bool:
+        # Log exploration statistics
+        if self.n_calls % self.log_freq == 0:
+            stats = self.exploration_manager.get_exploration_stats()
+            for key, value in stats.items():
+                self.logger.record(f"exploration/{key}", value)
+
+        # Log hierarchical extractor auxiliary losses if available
+        # Handle DDP-wrapped policies
+        from npp_rl.training.distributed_utils import is_model_wrapped_ddp
+
+        policy = (
+            self.model.policy.module
+            if is_model_wrapped_ddp(self.model.policy)
+            else self.model.policy
+        )
+
+        if hasattr(policy.features_extractor, "get_auxiliary_losses"):
+            aux_losses = policy.features_extractor.get_auxiliary_losses()
+            for loss_name, loss_value in aux_losses.items():
+                if isinstance(loss_value, torch.Tensor):
+                    self.logger.record(f"hierarchical/{loss_name}", loss_value.item())
+
+        return True
+
+
+def create_environment(render_mode: str = "grayscale_array", **kwargs):
+    """Create environment with hierarchical graph observations and reachability features."""
+    from nclone.gym_environment.config import EnvironmentConfig, RenderConfig
+
+    # Create environment with proper config
+    render_config = RenderConfig(
+        render_mode=render_mode,
+        enable_animation=False,
+        enable_debug_overlay=False,
+    )
+    config = EnvironmentConfig(
+        eval_mode=False,
+        render=render_config,
+        enable_logging=False,
+        **kwargs,
+    )
+
+    # Use the reachability-aware environment factory
+    env = create_reachability_aware_env(config=config)
+
+    return env
+
+
+def train_hierarchical_agent(
+    num_envs: int = 64,
+    total_timesteps: int = 10_000_000,
+    load_model: str = None,
+    render_mode: str = "grayscale_array",
+    disable_exploration: bool = False,
+    save_freq: int = 100_000,
+    eval_freq: int = 50_000,
+    log_interval: int = 10,
+    enable_subtask_rewards: bool = True,
+    subtask_reward_scale: float = 0.1,
+):
+    """
+    Train the hierarchical agent with completion planner integration.
+
+    This function implements hierarchical RL training using the completion planner
+    for strategic subtask selection and HGT-based multimodal feature extraction.
+
+    Args:
+        num_envs: Number of parallel environments
+        total_timesteps: Total training timesteps
+        load_model: Path to existing model to resume training
+        render_mode: Rendering mode ('grayscale_array' for headless, 'human' for visual)
+        disable_exploration: Whether to disable adaptive exploration
+        save_freq: Frequency of model saves
+        eval_freq: Frequency of evaluation
+        log_interval: Logging interval
+        enable_subtask_rewards: Whether to enable subtask-specific reward shaping
+        subtask_reward_scale: Scaling factor for subtask rewards
+    """
+
+    # Force single environment for human rendering
+    if render_mode == "human":
+        num_envs = 1
+        print("Human rendering mode detected. Setting num_envs=1.")
+
+    print(f"Training hierarchical agent with {num_envs} environments")
+    print(f"Device: {device}")
+    print(f"Total timesteps: {total_timesteps:,}")
+    print(f"Subtask rewards: {'enabled' if enable_subtask_rewards else 'disabled'}")
+
+    # Create timestamped log directory
+    timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    log_dir = Path(f"./training_logs/hierarchical_ppo/session-{timestamp}")
+    log_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create completion controller
+    completion_controller = CompletionController()
+
+    # Create environment factory for hierarchical training
+    def make_hierarchical_env():
+        return create_hierarchical_env(
+            render_mode=render_mode,
+            level_set="intro",
+            max_episode_steps=2000,
+            completion_controller=completion_controller,
+            enable_subtask_rewards=enable_subtask_rewards,
+            subtask_reward_scale=subtask_reward_scale,
+        )
+
+    # Create vectorized environment
+    if num_envs == 1:
+        env = DummyVecEnv([make_hierarchical_env])
+    else:
+        env = SubprocVecEnv([make_hierarchical_env for _ in range(num_envs)])
+
+    # Add monitoring and NaN checking
+    env = VecMonitor(env, str(log_dir / "monitor"))
+    env = VecCheckNan(env, raise_exception=True)
+
+    # Initialize adaptive exploration manager
+    exploration_manager = None
+    if not disable_exploration:
+        exploration_manager = AdaptiveExplorationManager(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            device=device,
+        )
+        print("Adaptive exploration enabled (ICM + Novelty)")
+    else:
+        print("Adaptive exploration disabled")
+
+    print("Using hierarchical PPO with HGT-based multimodal extractor")
+
+    # Configure hierarchical policy
+    extractor_kwargs = {
+        "features_dim": 512,
+        "hgt_hidden_dim": 256,
+        "hgt_num_layers": 3,
+        "hgt_output_dim": 256,
+        "use_cross_modal_attention": True,
+        "use_spatial_attention": True,
+        "reachability_dim": 8,  # 8-dimensional reachability features
+    }
+
+    policy_kwargs = {
+        "features_extractor_class": ConfigurableMultimodalExtractor,
+        "features_extractor_kwargs": extractor_kwargs,
+        "net_arch": [dict(pi=[256, 256], vf=[256, 256])],
+        "activation_fn": torch.nn.ReLU,
+        "normalize_images": False,
+        "completion_controller": completion_controller,
+    }
+
+    # Create hierarchical PPO model
+    hierarchical_ppo = HierarchicalPPO(
+        policy_class=HierarchicalActorCriticPolicy,
+        completion_controller=completion_controller,
+        policy_kwargs=policy_kwargs,
+        **HYPERPARAMETERS,
+    )
+
+    # Create or load model
+    if load_model:
+        print(f"Loading hierarchical model from: {load_model}")
+        model = hierarchical_ppo.load(load_model, env=env, device=device)
+    else:
+        model = hierarchical_ppo.create_model(env=env, device=device)
+
+    # Configure logger
+    logger = configure(str(log_dir), ["stdout", "csv", "tensorboard"])
+    model.set_logger(logger)
+
+    # Create callbacks
+    callbacks = []
+
+    # Early stopping callback (must be passed to EvalCallback)
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=10, min_evals=5, verbose=1
+    )
+
+    # Evaluation callback
+    eval_env = DummyVecEnv([make_hierarchical_env])
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(log_dir / "best_model"),
+        log_path=str(log_dir / "eval"),
+        eval_freq=eval_freq // num_envs,
+        deterministic=True,
+        render=False,
+        callback_after_eval=stop_callback,  # Attach stop callback to eval
+    )
+    callbacks.append(eval_callback)
+
+    # Custom hierarchical logging callback
+    hierarchical_callback = HierarchicalLoggingCallback(
+        completion_controller=completion_controller,
+        log_freq=log_interval,
+    )
+    callbacks.append(hierarchical_callback)
+
+    # Save hyperparameters
+    hyperparams_path = log_dir / "hyperparameters.json"
+    with open(hyperparams_path, "w") as f:
+        hyperparams = {
+            **HYPERPARAMETERS,
+            "num_envs": num_envs,
+            "total_timesteps": total_timesteps,
+            "extractor_kwargs": extractor_kwargs,
+            "enable_subtask_rewards": enable_subtask_rewards,
+            "subtask_reward_scale": subtask_reward_scale,
+            "hierarchical": True,
+        }
+        json.dump(hyperparams, f, indent=2)
+
+    print("Starting hierarchical training...")
+    print(f"Logs will be saved to: {log_dir}")
+
+    # Only main process shows progress bar in distributed mode
+    import torch.distributed as dist
+    from npp_rl.training.distributed_utils import is_main_process
+
+    show_progress = True
+    if dist.is_initialized():
+        show_progress = is_main_process()
+
+    # Train the model
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callbacks,
+        log_interval=log_interval,
+        progress_bar=show_progress,
+    )
+
+    # Save final model
+    final_model_path = log_dir / "final_model"
+    model.save(str(final_model_path))
+    print(f"Final hierarchical model saved to: {final_model_path}")
+
+    # Save completion controller metrics
+    metrics_path = log_dir / "hierarchical_metrics.json"
+    with open(metrics_path, "w") as f:
+        metrics = completion_controller.get_subtask_metrics()
+        json.dump(metrics, f, indent=2)
+
+    env.close()
+    eval_env.close()
+
+    return model
+
+
+def train_agent(
+    num_envs: int = 64,
+    total_timesteps: int = 10_000_000,
+    load_model: str = None,
+    render_mode: str = "grayscale_array",
+    disable_exploration: bool = False,
+    save_freq: int = 100_000,
+    eval_freq: int = 50_000,
+    log_interval: int = 10,
+    extractor_type: str = "3d",
+    architecture: str = None,
+):
+    """
+    Train the multimodal agent with configurable architecture and reachability features.
+
+    Args:
+        num_envs: Number of parallel environments
+        total_timesteps: Total training timesteps
+        load_model: Path to existing model to resume training
+        render_mode: Rendering mode ('grayscale_array' for headless, 'human' for visual)
+        disable_exploration: Whether to disable adaptive exploration
+        save_freq: Frequency of model saves
+        eval_freq: Frequency of evaluation
+        log_interval: Logging interval
+        extractor_type: [LEGACY] Type of feature extractor (use architecture instead)
+        architecture: Architecture variant (full_hgt, gat, gcn, mlp_baseline, etc.)
+    """
+
+    # Force single environment for human rendering
+    if render_mode == "human":
+        num_envs = 1
+        print("Human rendering mode detected. Setting num_envs=1.")
+
+    print(f"Training hierarchical agent with {num_envs} environments")
+    print(f"Device: {device}")
+    print(f"Total timesteps: {total_timesteps:,}")
+
+    # Create timestamped log directory
+    timestamp = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    log_dir = Path(f"./training_logs/ppo_training/session-{timestamp}")
+    log_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create environment factory
+    def make_env():
+        return create_environment(render_mode=render_mode)
+
+    # Create vectorized environment
+    if num_envs == 1:
+        env = DummyVecEnv([make_env])
+    else:
+        env = SubprocVecEnv([make_env for _ in range(num_envs)])
+
+    # Add monitoring and NaN checking
+    env = VecMonitor(env, str(log_dir / "monitor"))
+    env = VecCheckNan(env, raise_exception=True)
+
+    # Initialize adaptive exploration manager
+    exploration_manager = None
+    if not disable_exploration:
+        exploration_manager = AdaptiveExplorationManager(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            device=device,
+        )
+        print("Adaptive exploration enabled (ICM + Novelty)")
+    else:
+        print("Adaptive exploration disabled")
+
+    # Select architecture configuration
+    # Use architecture parameter if provided, otherwise map legacy extractor_type
+    if architecture:
+        architecture_name = architecture
+        print(f"Using architecture: {architecture_name}")
+    else:
+        # Map legacy extractor_type to architecture configs
+        architecture_map = {
+            "vision_free": "vision_free",
+            "minimal": "mlp_baseline",
+            "hgt": "full_hgt",
+            "3d": "full_hgt",
+        }
+        architecture_name = architecture_map.get(extractor_type, "full_hgt")
+        print(
+            f"Using architecture (mapped from extractor_type={extractor_type}): {architecture_name}"
+        )
+
+    # Get architecture configuration
+    architecture_config = get_architecture_config(architecture_name)
+
+    # Use ConfigurableMultimodalExtractor
+    extractor_class = ConfigurableMultimodalExtractor
+    extractor_kwargs = {
+        "config": architecture_config,
+    }
+
+    policy_kwargs = {
+        "features_extractor_class": extractor_class,
+        "features_extractor_kwargs": extractor_kwargs,
+        "net_arch": dict(pi=NET_ARCH_SIZE, vf=NET_ARCH_SIZE),
+        "activation_fn": torch.nn.ReLU,
+        "normalize_images": False,  # We handle normalization in the extractor
+    }
+
+    # Create or load model
+    if load_model:
+        print(f"Loading model from: {load_model}")
+        model = PPO.load(
+            load_model, env=env, device=device, policy_kwargs=policy_kwargs
+        )
+        # Update hyperparameters for continued training
+        for key, value in HYPERPARAMETERS.items():
+            if hasattr(model, key):
+                setattr(model, key, value)
+    else:
+        # Create new model with hyperparameters
+        model = PPO(
+            policy="MultiInputPolicy",
+            env=env,
+            device=device,
+            policy_kwargs=policy_kwargs,
+            **HYPERPARAMETERS,
+        )
+
+    # Configure learning rate schedule
+    model.learning_rate = LinearSchedule(3e-4, 1e-6, 0.8)
+
+    # Setup logging
+    logger = configure(str(log_dir / "tensorboard"), ["tensorboard", "csv"])
+    model.set_logger(logger)
+
+    # Save training configuration
+    config = {
+        "num_envs": num_envs,
+        "total_timesteps": total_timesteps,
+        "hyperparameters": HYPERPARAMETERS,
+        "policy_kwargs": {k: str(v) for k, v in policy_kwargs.items()},
+        "device": str(device),
+        "exploration_enabled": not disable_exploration,
+        "timestamp": timestamp,
+    }
+
+    with open(log_dir / "training_config.json", "w") as f:
+        json.dump(config, f, indent=2)
+
+    # Setup callbacks
+    callbacks = []
+
+    # Evaluation callback with stop on no improvement
+    eval_env = DummyVecEnv([make_env])
+    eval_env = VecMonitor(eval_env)
+
+    # Stop training callback (must be passed as callback to EvalCallback)
+    stop_callback = StopTrainingOnNoModelImprovement(
+        max_no_improvement_evals=10, min_evals=5, verbose=1
+    )
+
+    eval_callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(log_dir / "best_model"),
+        log_path=str(log_dir / "eval"),
+        eval_freq=eval_freq // num_envs,
+        deterministic=True,
+        render=False,
+        n_eval_episodes=10,
+        callback_after_eval=stop_callback,  # Attach stop callback to eval
+    )
+    callbacks.append(eval_callback)
+
+    # Logging callback
+    if exploration_manager:
+        logging_callback = HierarchicalLoggingCallback(
+            exploration_manager=exploration_manager, log_freq=1000
+        )
+        callbacks.append(logging_callback)
+
+    print("Starting training...")
+    print(f"Logs will be saved to: {log_dir}")
+    print(f"Monitor tensorboard with: tensorboard --logdir {log_dir / 'tensorboard'}")
+
+    # Only main process shows progress bar in distributed mode
+    import torch.distributed as dist
+    from npp_rl.training.distributed_utils import is_main_process
+
+    show_progress = True
+    if dist.is_initialized():
+        show_progress = is_main_process()
+
+    # Train the model
+    try:
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=callbacks,
+            log_interval=log_interval,
+            progress_bar=show_progress,
+        )
+
+        # Save final model
+        final_model_path = log_dir / "final_model"
+        model.save(str(final_model_path))
+        print(f"Training completed! Final model saved to: {final_model_path}")
+
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user")
+        # Save current model
+        interrupt_model_path = log_dir / "interrupted_model"
+        model.save(str(interrupt_model_path))
+        print(f"Model saved to: {interrupt_model_path}")
+
+    finally:
+        env.close()
+        if "eval_env" in locals():
+            eval_env.close()
+
+
+def main():
+    """Main entry point for training."""
+    parser = argparse.ArgumentParser(description="N++ RL Agent Training")
+
+    parser.add_argument(
+        "--num_envs",
+        type=int,
+        default=64,
+        help="Number of parallel environments (default: 64)",
+    )
+    parser.add_argument(
+        "--total_timesteps",
+        type=int,
+        default=10_000_000,
+        help="Total training timesteps (default: 10M)",
+    )
+    parser.add_argument(
+        "--load_model",
+        type=str,
+        default=None,
+        help="Path to existing model to resume training",
+    )
+    parser.add_argument(
+        "--render_mode",
+        type=str,
+        default="grayscale_array",
+        choices=["grayscale_array", "human"],
+        help="Rendering mode (default: grayscale_array)",
+    )
+    parser.add_argument(
+        "--disable_exploration",
+        action="store_true",
+        help="Disable adaptive exploration",
+    )
+    parser.add_argument(
+        "--save_freq",
+        type=int,
+        default=100_000,
+        help="Model save frequency (default: 100k)",
+    )
+    parser.add_argument(
+        "--eval_freq",
+        type=int,
+        default=50_000,
+        help="Evaluation frequency (default: 50k)",
+    )
+    parser.add_argument(
+        "--log_interval", type=int, default=10, help="Logging interval (default: 10)"
+    )
+    parser.add_argument(
+        "--extractor_type",
+        type=str,
+        default="hgt",
+        choices=["hgt", "hierarchical", "vision_free", "minimal", "3d"],
+        help="[LEGACY] Feature extractor type (use --architecture instead). Maps to: hgt→full_hgt, vision_free→vision_free, minimal→mlp_baseline",
+    )
+    parser.add_argument(
+        "--architecture",
+        type=str,
+        default=None,
+        choices=[
+            "full_hgt",
+            "simplified_hgt",
+            "gat",
+            "gcn",
+            "mlp_baseline",
+            "vision_free",
+            "no_global_view",
+        ],
+        help="Architecture variant to use (overrides --extractor_type). Options: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, no_global_view, local_frames_only",
+    )
+    parser.add_argument(
+        "--disable_reachability",
+        action="store_true",
+        help="Disable reachability feature integration (default: enabled)",
+    )
+
+    args = parser.parse_args()
+
+    # Train the agent
+    train_agent(
+        num_envs=args.num_envs,
+        total_timesteps=args.total_timesteps,
+        load_model=args.load_model,
+        render_mode=args.render_mode,
+        disable_exploration=args.disable_exploration,
+        save_freq=args.save_freq,
+        eval_freq=args.eval_freq,
+        log_interval=args.log_interval,
+        extractor_type=args.extractor_type,
+        architecture=args.architecture,
+    )
+
+
+if __name__ == "__main__":
+    main()

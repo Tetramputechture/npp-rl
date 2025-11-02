@@ -1,0 +1,297 @@
+---
+description: Testing guidelines and patterns for NPP-RL project
+globs: ["**/test_*.py", "**/tests/**"]
+alwaysApply: false
+---
+
+# Testing Guidelines for NPP-RL
+
+## Core Testing Philosophy
+
+**Focus on behavior, not implementation details. Test what the code DOES, not what it IS.**
+
+## Avoid Testing Static Values and Constants
+
+### BAD: Testing Static Enum Values
+```python
+# DON'T DO THIS - Tests constants, not behavior
+def test_movement_type_enum_values(self):
+    self.assertEqual(MovementType.WALK, 0)
+    self.assertEqual(MovementType.JUMP, 1)
+    self.assertIsInstance(MovementType.WALK, int)
+```
+
+### GOOD: Testing Functional Behavior
+```python
+# DO THIS - Tests actual functionality
+def test_horizontal_movement_classified_as_walk(self):
+    """Test that horizontal ground movement is classified as walking."""
+    movement_type, params = self.classifier.classify_movement(
+        src_pos=(100.0, 100.0),
+        tgt_pos=(150.0, 100.0)  # Pure horizontal movement
+    )
+    
+    self.assertEqual(movement_type, MovementType.WALK)
+    self.assertGreater(params['time_estimate'], 0)
+    self.assertLess(params['energy_cost'], 10.0)  # Reasonable energy cost
+```
+
+## Behavioral Testing Patterns
+
+### Test Input-Output Relationships
+```python
+def test_upward_movement_requires_jumping(self):
+    """Test that upward movements are classified as jumps with appropriate physics."""
+    result = self.calculator.calculate_trajectory(
+        src_pos=(100.0, 100.0),
+        tgt_pos=(150.0, 50.0)  # 50 pixels up
+    )
+    
+    # Test the physics make sense
+    self.assertTrue(result.requires_jump)
+    self.assertGreater(result.energy_cost, 0)
+    self.assertBetween(result.success_probability, 0.0, 1.0)
+    self.assertGreater(result.time_of_flight, 0)
+```
+
+### Test Edge Cases and Boundaries
+```python
+def test_zero_distance_movement(self):
+    """Test handling of zero-distance movement."""
+    result = self.classifier.classify_movement(
+        src_pos=(100.0, 100.0),
+        tgt_pos=(100.0, 100.0)  # Same position
+    )
+    
+    # Should handle gracefully, not crash
+    self.assertIsNotNone(result)
+    # Behavior: zero movement should be feasible with minimal cost
+    movement_type, params = result
+    self.assertGreaterEqual(params['energy_cost'], 0)
+```
+
+### Test Integration Between Components
+```python
+def test_movement_classifier_trajectory_calculator_integration(self):
+    """Test that movement classification and trajectory calculation are consistent."""
+    # Test a jump movement
+    src_pos, tgt_pos = (100.0, 100.0), (150.0, 50.0)
+    
+    # Both components should agree this is a jump
+    movement_type, _ = self.classifier.classify_movement(src_pos, tgt_pos)
+    trajectory = self.calculator.calculate_trajectory(src_pos, tgt_pos)
+    
+    if movement_type == MovementType.JUMP:
+        self.assertTrue(trajectory.requires_jump)
+    if movement_type == MovementType.WALK:
+        self.assertFalse(trajectory.requires_jump)
+```
+
+## Machine Learning Model Testing
+
+### Test Model Instantiation and Forward Pass
+```python
+def test_gnn_forward_pass_with_realistic_graphs(self):
+    """Test that GNN processes variable-sized graphs correctly."""
+    encoder = create_graph_encoder(node_feature_dim=10, edge_feature_dim=5)
+    
+    # Test with different graph sizes
+    for num_nodes in [5, 10, 20]:
+        graph_obs = self.create_mock_graph(num_nodes)
+        
+        output = encoder(graph_obs)
+        
+        # Test output properties
+        self.assertEqual(output.shape[0], 1)  # Batch size
+        self.assertEqual(output.shape[1], 256)  # Output dim
+        self.assertTrue(torch.all(torch.isfinite(output)))
+        self.assertFalse(torch.all(output == 0))  # Not all zeros
+```
+
+### Test Model Behavior Under Different Conditions
+```python
+def test_feature_extractor_handles_different_input_ranges(self):
+    """Test that feature extractor works with various input value ranges."""
+    extractor = 3DFeatureExtractor(self.obs_space)
+    
+    # Test with different value ranges
+    test_cases = [
+        torch.zeros(1, 84, 84, 12),  # All zeros
+        torch.ones(1, 84, 84, 12) * 255,  # All white
+        torch.randint(0, 256, (1, 84, 84, 12)),  # Random values
+    ]
+    
+    for test_input in test_cases:
+        mock_obs = {'player_frame': test_input, ...}
+        output = extractor(mock_obs)
+        
+        # Should produce reasonable outputs for all inputs
+        self.assertTrue(torch.all(torch.isfinite(output)))
+        self.assertGreater(torch.norm(output), 0)  # Not all zeros
+```
+
+## Physics and Game Logic Testing
+
+### Test Physics Calculations
+```python
+def test_gravity_effects_on_trajectory(self):
+    """Test that gravity affects trajectory calculations appropriately."""
+    # Horizontal vs. vertical movements should have different physics
+    horizontal = self.calculator.calculate_trajectory((0, 0), (100, 0))
+    upward = self.calculator.calculate_trajectory((0, 0), (0, -100))
+    downward = self.calculator.calculate_trajectory((0, 0), (0, 100))
+    
+    # Upward movement should cost more energy (fighting gravity)
+    self.assertGreater(upward.energy_cost, horizontal.energy_cost)
+    
+    # Downward movement should be easier (gravity assists)
+    self.assertLess(downward.energy_cost, upward.energy_cost)
+```
+
+### Test Game State Integration
+```python
+def test_ninja_state_affects_movement_classification(self):
+    """Test that ninja state properly influences movement classification."""
+    # Same movement with different ninja states should classify differently
+    src_pos, tgt_pos = (100.0, 100.0), (100.0, 150.0)
+    
+    # Ground state vs wall-sliding state
+    ground_state = NinjaState(movement_state=1, ground_contact=True)
+    wall_state = NinjaState(movement_state=5, wall_contact=True)
+    
+    ground_result = self.classifier.classify_movement(src_pos, tgt_pos, ground_state)
+    wall_result = self.classifier.classify_movement(src_pos, tgt_pos, wall_state)
+    
+    # Should produce different classifications or parameters
+    self.assertNotEqual(ground_result[0], wall_result[0])
+```
+
+## Test Organization and Structure
+
+### Group Related Tests
+```python
+class TestMovementClassifierWalkBehavior(unittest.TestCase):
+    """Test walking movement classification behavior."""
+    
+    def setUp(self):
+        self.classifier = MovementClassifier()
+    
+    def test_horizontal_movement_is_walk(self):
+        # Test horizontal movement
+        
+    def test_slight_incline_is_still_walk(self):
+        # Test small elevation changes
+        
+    def test_walk_energy_costs_are_reasonable(self):
+        # Test energy calculations
+
+class TestMovementClassifierJumpBehavior(unittest.TestCase):
+    """Test jumping movement classification behavior."""
+    # Jump-specific tests...
+```
+
+### Use Descriptive Test Names
+```python
+# GOOD: Describes what behavior is being tested
+def test_long_horizontal_movements_have_linear_energy_scaling(self):
+def test_wall_contact_enables_wall_slide_classification(self):
+def test_high_velocity_movements_classified_as_launch_pad_boosts(self):
+
+# BAD: Unclear what behavior is being verified
+def test_movement_params(self):
+def test_classifier(self):
+def test_values(self):
+```
+
+### Test Data and Fixtures
+```python
+def setUp(self):
+    """Set up test fixtures with realistic game scenarios."""
+    self.classifier = MovementClassifier()
+    
+    # Create test scenarios based on actual game situations
+    self.test_scenarios = {
+        'horizontal_run': ((100, 100), (200, 100)),
+        'small_jump': ((100, 100), (150, 80)),
+        'high_jump': ((100, 100), (120, 50)),
+        'wall_slide': ((100, 100), (100, 150)),
+        'launch_pad_boost': ((100, 100), (300, 20)),
+    }
+```
+
+## Performance and Memory Testing
+
+### Test with Realistic Data Sizes
+```python
+def test_batch_processing_performance(self):
+    """Test that models handle realistic batch sizes efficiently."""
+    model = self.create_test_model()
+    
+    # Test with training-like batch sizes
+    batch_sizes = [1, 4, 16, 64, 256]
+    
+    for batch_size in batch_sizes:
+        start_time = time.time()
+        
+        mock_input = self.create_mock_batch(batch_size)
+        with torch.no_grad():
+            output = model(mock_input)
+        
+        processing_time = time.time() - start_time
+        
+        # Should scale reasonably with batch size
+        self.assertLess(processing_time, batch_size * 0.1)  # Reasonable per-sample time
+```
+
+## Error Handling and Robustness
+
+### Test Error Conditions
+```python
+def test_handles_invalid_positions_gracefully(self):
+    """Test that invalid positions are handled without crashing."""
+    invalid_positions = [
+        (float('inf'), 100),
+        (100, float('nan')),
+        (-1e10, 1e10),
+    ]
+    
+    for invalid_pos in invalid_positions:
+        try:
+            result = self.classifier.classify_movement((0, 0), invalid_pos)
+            # Should either return a reasonable default or raise appropriate exception
+            self.assertIsInstance(result, tuple)
+        except ValueError:
+            # Acceptable to raise ValueError for invalid input
+            pass
+```
+
+## Assertion Patterns
+
+### Use Appropriate Assertions
+```python
+# For ranges and bounds
+self.assertBetween(value, min_val, max_val)
+self.assertGreater(result.energy_cost, 0)
+self.assertLessEqual(probability, 1.0)
+
+# For object properties
+self.assertIsNotNone(result)
+self.assertTrue(result.feasible)
+
+# For collections
+self.assertIn('energy_cost', params)
+self.assertEqual(len(trajectory_points), expected_count)
+
+# For floating point comparisons
+self.assertAlmostEqual(calculated_distance, expected_distance, places=3)
+```
+
+### Avoid Over-Specific Assertions
+```python
+# BAD: Too specific, brittle to implementation changes
+self.assertEqual(params['energy_cost'], 2.3456789)
+
+# GOOD: Test reasonable ranges and relationships
+self.assertBetween(params['energy_cost'], 1.0, 5.0)
+self.assertGreater(jump_energy, walk_energy)
+```

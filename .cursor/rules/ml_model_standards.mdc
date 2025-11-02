@@ -1,0 +1,219 @@
+---
+description: Machine learning model development standards for NPP-RL
+globs: ["**/models/**", "**/agents/**", "**/intrinsic/**"]
+alwaysApply: false
+---
+
+# ML Model Development Standards
+
+## Neural Network Architecture
+
+### Feature Extractors and Model Components
+
+- Use clear, descriptive class names that indicate the model's purpose
+- Inherit from appropriate base classes (`BaseFeaturesExtractor`, `nn.Module`)
+- Include comprehensive docstrings explaining the architecture choices
+- Reference research papers that inform the design
+
+```python
+class 3DFeatureExtractor(BaseFeaturesExtractor):
+    """
+    Feature extractor using 3D convolutions for temporal modeling.
+    
+    Based on research showing 37.9% reduction in optimality gap with:
+    - Frame stacking (12 frames)
+    - 3D convolutions for spatiotemporal features (Ji et al., 2013)
+    - Larger convolutional kernels (He et al., 2015)
+    """
+```
+
+### Model Configuration
+
+- Store hyperparameters in dedicated configuration modules
+- Use descriptive variable names for hyperparameters
+- Include comments explaining the rationale for parameter choices
+- Reference tuning studies or literature when available
+
+```python
+# From npp_rl/agents/hyperparameters/ppo_hyperparameters.py
+HYPERPARAMETERS = {
+    # Increased from 512 to 1024 based on scaling law research
+    # Larger values -> more stable training but slower convergence
+    "n_steps": 1024,
+    
+    # Increased from 128 to 256 for better gradient estimates
+    # Should be <= n_steps for proper batch processing
+    "batch_size": 256,
+}
+```
+
+## Model Testing and Validation
+
+### Architectural Tests
+
+Test that models can be instantiated and perform forward passes:
+
+```python
+def test_3d_feature_extractor_forward_pass(self):
+    """Test that the 3D feature extractor processes observations correctly."""
+    # Create mock observation space matching environment
+    obs_space = SpacesDict({
+        'player_frame': Box(low=0, high=255, shape=(84, 84, 12)),
+        'global_view': Box(low=0, high=255, shape=(176, 100, 1)),
+        'game_state': Box(low=-np.inf, high=np.inf, shape=(32,))
+    })
+    
+    extractor = 3DFeatureExtractor(obs_space, features_dim=512)
+    
+    # Test forward pass with realistic batch
+    batch_size = 4
+    mock_obs = {
+        'player_frame': torch.randint(0, 256, (batch_size, 84, 84, 12)),
+        'global_view': torch.randint(0, 256, (batch_size, 176, 100, 1)),
+        'game_state': torch.randn(batch_size, 32)
+    }
+    
+    features = extractor(mock_obs)
+    
+    # Verify output shape and properties
+    self.assertEqual(features.shape, (batch_size, 512))
+    self.assertTrue(torch.all(torch.isfinite(features)))
+```
+
+### Performance and Memory Tests
+
+```python
+def test_model_memory_efficiency(self):
+    """Test that models don't consume excessive memory."""
+    model = self.create_test_model()
+    
+    # Test with reasonable batch sizes
+    for batch_size in [1, 4, 16, 64]:
+        with torch.no_grad():
+            mock_input = self.create_mock_input(batch_size)
+            output = model(mock_input)
+            
+            # Verify no memory leaks
+            self.assertLess(torch.cuda.memory_allocated(), MAX_MEMORY_THRESHOLD)
+```
+
+## Training and Optimization
+
+### Learning Rate Scheduling
+
+- Use established learning rate schedules with clear documentation
+- Log learning rate changes during training
+- Consider the relationship between batch size and learning rate
+
+### Loss Function Design
+
+- Clearly document custom loss functions
+- Explain the rationale for loss function choices
+- Test loss functions with edge cases
+
+```python
+def compute_icm_loss(self, state_features, next_state_features, actions):
+    """
+    Compute Intrinsic Curiosity Module loss as described in Pathak et al. (2017).
+    
+    The loss combines:
+    1. Forward model prediction error (encourages exploration)
+    2. Inverse model action prediction error (learns meaningful features)
+    
+    Args:
+        state_features: Current state embeddings [batch_size, feature_dim]
+        next_state_features: Next state embeddings [batch_size, feature_dim]
+        actions: Actions taken [batch_size, action_dim]
+    """
+```
+
+## Graph Neural Networks
+
+### Message Passing Implementation
+
+- Implement proper masking for variable-sized graphs
+- Use established aggregation methods (mean, max, attention)
+- Handle edge cases (isolated nodes, empty graphs)
+
+```python
+def _aggregate_neighbors(self, node_features, edge_index, node_mask, edge_mask):
+    """
+    Aggregate neighbor features using masked message passing.
+    
+    Handles variable-sized graphs by:
+    - Using node_mask to ignore padded nodes
+    - Using edge_mask to ignore padded edges
+    - Proper aggregation without NaN values
+    """
+```
+
+### Graph Construction
+
+- Validate graph connectivity and structure
+- Handle edge cases in graph building
+- Ensure deterministic graph construction for reproducibility
+
+## Model Serialization and Checkpointing
+
+### Save/Load Patterns
+
+- Include model configuration in saved checkpoints
+- Version control for model format changes
+- Test that saved models can be loaded correctly
+
+```python
+def save_model_checkpoint(self, model, optimizer, epoch, metrics, filepath):
+    """Save complete model checkpoint with metadata."""
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epoch,
+        'metrics': metrics,
+        'model_config': model.get_config(),
+        'version': MODEL_VERSION
+    }
+    torch.save(checkpoint, filepath)
+```
+
+## Integration with Stable Baselines3
+
+### Custom Feature Extractors
+
+- Properly inherit from `BaseFeaturesExtractor`
+- Implement the required interface correctly
+- Test compatibility with SB3 algorithms
+
+### Policy Network Integration
+
+- Ensure feature extractors output the expected dimensions
+- Handle multi-modal observations correctly
+- Test with actual RL training loops
+
+## Performance Optimization
+
+### CUDA and GPU Usage
+
+- Use appropriate device placement
+- Implement proper CUDA memory management
+- Test with different GPU configurations
+
+### Batch Processing
+
+- Design models to handle variable batch sizes
+- Use vectorized operations where possible
+- Consider memory vs. computation trade-offs
+
+```python
+def forward_batch(self, observations, batch_size=None):
+    """Process observations in batches to manage memory usage."""
+    if batch_size is None:
+        return self.forward(observations)
+    
+    # Process in chunks if batch is too large
+    outputs = []
+    for i in range(0, len(observations), batch_size):
+        batch = {k: v[i:i+batch_size] for k, v in observations.items()}
+        outputs.append(self.forward(batch))
+    
+    return torch.cat(outputs, dim=0)
+```
