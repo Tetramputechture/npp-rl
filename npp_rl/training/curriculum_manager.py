@@ -55,14 +55,14 @@ class CurriculumManager:
     # Progressive thresholds that decrease with difficulty to ensure forward progress
     # while maintaining competence requirements
     STAGE_THRESHOLDS = {
-        "simplest": 0.80,  # Reduced from 0.80
-        "simplest_with_mines": 0.75,  # Slightly lower than simplest due to mines
-        "simpler": 0.60,  # Reduced from 0.70
-        "simple": 0.50,  # Reduced from 0.60
-        "medium": 0.45,  # Reduced from 0.55
-        "complex": 0.40,  # Reduced from 0.50
-        "exploration": 0.35,  # Reduced from 0.45
-        "mine_heavy": 0.30,  # Reduced from 0.40
+        "simplest": 0.90,
+        "simplest_with_mines": 0.75,
+        "simpler": 0.70,
+        "simple": 0.60,
+        "medium": 0.50,
+        "complex": 0.50,
+        "exploration": 0.50,
+        "mine_heavy": 0.50,
     }
 
     # Stage-specific minimum episodes for adaptive progression
@@ -113,8 +113,6 @@ class CurriculumManager:
         Args:
             dataset_path: Path to dataset containing level categories
             starting_stage: Initial curriculum stage (default: 'simplest')
-            advancement_threshold: Global threshold override (None = use stage-specific)
-            min_episodes_per_stage: Global min episodes override (None = use stage-specific)
             performance_window: Window size for performance tracking (default: 50)
             allow_stage_mixing: If True, mix in previous stage levels (default: True)
             mixing_ratio: Base ratio of previous stage levels (default: 0.2, can be adapted)
@@ -472,7 +470,6 @@ class CurriculumManager:
                 "episodes": 0,
                 "recent_episodes": 0,
                 "can_advance": False,
-                "advancement_threshold": stage_threshold,
                 "min_episodes": stage_min_episodes,
                 "trend": 0.0,
                 "can_early_advance": False,
@@ -604,7 +601,7 @@ class CurriculumManager:
             logger.info("Performance Summary:")
             logger.info(f"  Success rate: {perf['success_rate']:.1%}")
             logger.info(f"  Episodes completed: {perf['episodes']}")
-            logger.info(f"  Threshold: {perf['advancement_threshold']:.1%}")
+            logger.info(f"  Threshold: {self.STAGE_THRESHOLDS[self.current_stage]:.1%}")
             logger.info(f"  Min episodes: {perf['min_episodes']}")
             if self.enable_trend_analysis:
                 logger.info(f"  Performance trend: {perf['trend']:+.2f}")
@@ -927,7 +924,6 @@ class CurriculumManager:
 def create_curriculum_manager(
     dataset_path: str,
     starting_stage: str = "simplest",
-    advancement_threshold: float = 0.7,
     **kwargs,
 ) -> CurriculumManager:
     """Create curriculum manager with validation.
@@ -935,7 +931,6 @@ def create_curriculum_manager(
     Args:
         dataset_path: Path to dataset
         starting_stage: Initial stage (default: 'simplest')
-        advancement_threshold: Success rate needed to advance
         **kwargs: Additional curriculum manager arguments
 
     Returns:
@@ -945,7 +940,6 @@ def create_curriculum_manager(
         manager = CurriculumManager(
             dataset_path=dataset_path,
             starting_stage=starting_stage,
-            advancement_threshold=advancement_threshold,
             **kwargs,
         )
         return manager

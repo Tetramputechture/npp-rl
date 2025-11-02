@@ -606,8 +606,6 @@ def train_architecture(
         if args.use_curriculum:
             curriculum_kwargs = {
                 "starting_stage": args.curriculum_start_stage,
-                "advancement_threshold": args.curriculum_threshold,
-                "min_episodes_per_stage": args.curriculum_min_episodes,
                 "enable_trend_analysis": not args.disable_trend_advancement,
                 "enable_early_advancement": not args.disable_early_advancement,
             }

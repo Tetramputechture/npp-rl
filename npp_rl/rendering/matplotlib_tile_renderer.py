@@ -404,18 +404,24 @@ def render_mines_to_axis(
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
 
-    # Add some padding to include mines partially visible at edges
-    padding = 50  # pixels
-    x_min, x_max = min(xlim) - padding, max(xlim) + padding
-    y_min, y_max = min(ylim) - padding, max(ylim) + padding
+    # Check if axis limits are at default (unset) values
+    # Default matplotlib limits are typically (0.0, 1.0) when not set
+    use_culling = not (xlim == (0.0, 1.0) and ylim == (0.0, 1.0))
+
+    if use_culling:
+        # Add some padding to include mines partially visible at edges
+        padding = 50  # pixels
+        x_min, x_max = min(xlim) - padding, max(xlim) + padding
+        y_min, y_max = min(ylim) - padding, max(ylim) + padding
 
     for mine in mines:
         x = mine["x"]
         y = mine["y"]
 
-        # Cull mines outside visible area
-        if not (x_min <= x <= x_max and y_min <= y <= y_max):
-            continue
+        # Cull mines outside visible area (only if limits are set)
+        if use_culling:
+            if not (x_min <= x <= x_max and y_min <= y <= y_max):
+                continue
 
         radius = mine["radius"]
         state = mine["state"]

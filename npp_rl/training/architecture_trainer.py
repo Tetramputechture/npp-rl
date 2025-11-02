@@ -48,9 +48,6 @@ class ArchitectureTrainer:
     ):
         """Initialize architecture trainer.
 
-        NOTE: PBRS is ALWAYS enabled in base environment. No enable_pbrs flag.
-        Graph building is automatically configured for PBRS requirements.
-
         Args:
             architecture_config: Architecture configuration
             train_dataset_path: Path to training dataset
@@ -324,7 +321,6 @@ class ArchitectureTrainer:
             logger.error(f"Error message: {str(e)}")
             logger.error(f"Num envs: {num_envs}")
             logger.error(f"Frame stack config: {self.frame_stack_config}")
-            logger.error(f"PBRS enabled: {self.enable_pbrs}")
             logger.error("Full traceback:", exc_info=True)
             logger.error("!" * 60)
             raise

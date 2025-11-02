@@ -357,9 +357,7 @@ def auto_detect_profile(
 
     # Calculate rollout buffer memory overhead
     # Start with initial estimate for max envs per GPU
-    initial_max_envs_per_gpu = max(
-        8, min(256, int((gpu_memory_gb) / memory_per_env_gb))
-    )
+    initial_max_envs_per_gpu = max(8, min(256, int(gpu_memory_gb / memory_per_env_gb)))
 
     # Estimate rollout buffer memory for this configuration
     rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
@@ -374,16 +372,14 @@ def auto_detect_profile(
     model_overhead_gb = gpu_memory_gb * 0.1
 
     # Available memory for environments = total - rollout buffers - model overhead
-    available_for_envs_gb = (
-        (gpu_memory_gb * 0.8) - rollout_buffer_memory_gb - model_overhead_gb
-    )
+    available_for_envs_gb = rollout_buffer_memory_gb - model_overhead_gb
 
     # Recalculate max envs with rollout buffer consideration
     if available_for_envs_gb > 0:
         envs_per_gpu = max(8, min(256, int(available_for_envs_gb / memory_per_env_gb)))
     else:
         # Fallback: use conservative estimate
-        envs_per_gpu = max(8, min(256, int((gpu_memory_gb * 0.6) / memory_per_env_gb)))
+        envs_per_gpu = max(8, min(256, int(gpu_memory_gb / memory_per_env_gb)))
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4

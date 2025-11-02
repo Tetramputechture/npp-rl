@@ -92,7 +92,7 @@ class CallbackFactory:
         route_callback = RouteVisualizationCallback(
             save_dir=str(routes_dir),
             max_routes_per_checkpoint=10,
-            visualization_freq=50000,
+            visualization_freq=100,
             max_stored_routes=100,
             async_save=True,
             image_size=(800, 600),
