@@ -176,7 +176,6 @@ def profile_architecture_memory(
             env_factory = EnvironmentFactory(
                 use_curriculum=False,
                 frame_stack_config=None,
-                enable_pbrs=False,
             )
 
             # Create environments separately for memory measurement
@@ -248,7 +247,6 @@ def profile_architecture_memory(
                 use_curriculum=False,
                 use_distributed=False,
                 frame_stack_config=None,
-                enable_pbrs=False,
             )
 
             # Setup model first (this initializes hyperparams needed by setup_environments)

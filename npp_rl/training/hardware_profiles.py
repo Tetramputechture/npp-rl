@@ -358,7 +358,7 @@ def auto_detect_profile(
     # Calculate rollout buffer memory overhead
     # Start with initial estimate for max envs per GPU
     initial_max_envs_per_gpu = max(
-        8, min(256, int((gpu_memory_gb * 0.8) / memory_per_env_gb))
+        8, min(256, int((gpu_memory_gb) / memory_per_env_gb))
     )
 
     # Estimate rollout buffer memory for this configuration

@@ -290,8 +290,10 @@ edge_feat_dim = 1
 Verify environment configuration matches feature extractor expectations:
 ```python
 env = NPPEnvironment(
-    enable_graph_updates=True,  # Required for graph obs
-    enable_reachability=True,   # Required for reachability obs
+    config=EnvironmentConfig(
+        graph=GraphConfig(enable_graph_for_observations=True),  # Required for graph obs
+        reachability=ReachabilityConfig(enable_reachability=True),   # Required for reachability obs
+    )
 )
 ```
 

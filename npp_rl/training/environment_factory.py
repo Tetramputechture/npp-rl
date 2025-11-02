@@ -24,7 +24,6 @@ class EnvironmentFactory:
         use_curriculum: bool = False,
         curriculum_manager=None,
         frame_stack_config: Optional[Dict[str, Any]] = None,
-        enable_pbrs: bool = False,
         pbrs_gamma: float = 0.99,
         enable_mine_avoidance_reward: bool = True,
         output_dir: Optional[Path] = None,
@@ -34,13 +33,15 @@ class EnvironmentFactory:
     ):
         """Initialize environment factory.
 
+        NOTE: PBRS is always enabled in base environment. No enable_pbrs flag.
+        Graph building is automatically configured for PBRS requirements.
+
         Args:
             use_curriculum: Enable curriculum learning
             curriculum_manager: Curriculum manager instance
             frame_stack_config: Frame stacking configuration dict
-            enable_pbrs: Enable Potential-Based Reward Shaping
-            pbrs_gamma: Discount factor for PBRS
-            enable_mine_avoidance_reward: Enable mine avoidance component in PBRS
+            pbrs_gamma: Discount factor for PBRS (base environment)
+            enable_mine_avoidance_reward: Enable mine avoidance component in hierarchical rewards
             output_dir: Output directory for BC normalization stats
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
             enable_icm: Enable Intrinsic Curiosity Module (ICM)
@@ -49,14 +50,13 @@ class EnvironmentFactory:
         self.use_curriculum = use_curriculum
         self.curriculum_manager = curriculum_manager
         self.frame_stack_config = frame_stack_config or {}
-        self.enable_pbrs = enable_pbrs
         self.pbrs_gamma = pbrs_gamma
         self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
         self.output_dir = output_dir
         self.pretrained_checkpoint = pretrained_checkpoint
         self.bc_normalization_applied = False
         self.vec_normalize_wrapper = None
-        
+
         # ICM integration
         self.enable_icm = enable_icm
         self.icm_config = icm_config or {}
@@ -148,7 +148,9 @@ class EnvironmentFactory:
 
         # Wrap with GPU observation transfer if GPU is available
         if torch.cuda.is_available():
-            logger.info("GPU available - applying GPUObservationWrapper for memory optimization...")
+            logger.info(
+                "GPU available - applying GPUObservationWrapper for memory optimization..."
+            )
             env = GPUObservationWrapper(env, use_pinned_memory=True)
             logger.info("✓ GPUObservationWrapper applied (observations will be on GPU)")
 
@@ -156,14 +158,14 @@ class EnvironmentFactory:
         if self.enable_icm:
             logger.info("ICM enabled - creating intrinsic curiosity module...")
             from npp_rl.training.icm_integration import create_icm_integration
-            
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.icm_integration = create_icm_integration(
                 enable_icm=True,
                 icm_config=self.icm_config,
                 device=device,
             )
-            
+
             if self.icm_integration is not None:
                 env = self.icm_integration.wrap_environment(env, policy=None)
                 logger.info("✓ ICM wrapper applied - intrinsic rewards enabled")
@@ -195,6 +197,8 @@ class EnvironmentFactory:
 
         def make_eval_env():
             env_config = EnvironmentConfig.for_training()
+            env_config.graph.enable_graph_for_observations = False
+
             env = NppEnvironment(config=env_config)
 
             # Apply FrameStackWrapper if frame stacking is enabled
@@ -244,6 +248,10 @@ class EnvironmentFactory:
 
             env_config = EnvironmentConfig.for_training()
 
+            # Graph observations remain False by default for performance
+            # They can be enabled separately if architecture uses graph modality
+            env_config.graph.enable_graph_for_observations = False
+
             # Enable human rendering for visualization
             if visualize:
                 env_config.render.render_mode = "human"
@@ -280,21 +288,20 @@ class EnvironmentFactory:
 
             env = PositionTrackingWrapper(env)
 
-            # Wrap with PBRS if enabled
-            if self.enable_pbrs:
-                from npp_rl.wrappers import HierarchicalRewardWrapper
+            # Always wrap with hierarchical reward (subtask milestones + mine avoidance)
+            # PBRS itself is handled by base environment (nclone)
+            from npp_rl.wrappers import HierarchicalRewardWrapper
 
-                env = HierarchicalRewardWrapper(
-                    env,
-                    enable_pbrs=True,
-                    pbrs_gamma=self.pbrs_gamma,
-                    enable_mine_avoidance=self.enable_mine_avoidance_reward,
-                    log_reward_components=True,
+            env = HierarchicalRewardWrapper(
+                env,
+                enable_mine_avoidance=self.enable_mine_avoidance_reward,
+                log_reward_components=True,
+            )
+            if rank == 0:
+                logger.info(
+                    f"✓ Hierarchical rewards enabled (mine_avoidance={self.enable_mine_avoidance_reward})"
                 )
-                if rank == 0:
-                    logger.info(
-                        f"✓ PBRS enabled (gamma={self.pbrs_gamma}, mine_avoidance={self.enable_mine_avoidance_reward})"
-                    )
+                logger.info("✓ PBRS always enabled in base environment (nclone)")
 
             # Wrap with curriculum if enabled
             if include_curriculum and self.curriculum_manager:

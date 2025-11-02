@@ -42,6 +42,7 @@ class CurriculumManager:
     # Curriculum progression order
     CURRICULUM_ORDER = [
         "simplest",
+        "simplest_with_mines",
         "simpler",
         "simple",
         "medium",
@@ -56,9 +57,10 @@ class CurriculumManager:
     # UPDATED Oct 28, 2025: Lowered thresholds based on training analysis
     # Previous thresholds were too aggressive, causing agent to get stuck at simple stage
     STAGE_THRESHOLDS = {
-        "simplest": 0.70,  # Reduced from 0.80
+        "simplest": 0.80,  # Reduced from 0.80
+        "simplest_with_mines": 0.75,  # Slightly lower than simplest due to mines
         "simpler": 0.60,  # Reduced from 0.70
-        "simple": 0.50,  # Reduced from 0.60 - CRITICAL: agent was stuck here at 14%
+        "simple": 0.50,  # Reduced from 0.60
         "medium": 0.45,  # Reduced from 0.55
         "complex": 0.40,  # Reduced from 0.50
         "exploration": 0.35,  # Reduced from 0.45
@@ -67,12 +69,12 @@ class CurriculumManager:
 
     # Stage-specific minimum episodes for adaptive progression
     # Harder stages require more episodes to ensure sufficient learning
-    # UPDATED Oct 28, 2025: Reduced minimums to allow faster progression
     # Previous minimums (200-300) were never reached in 1M timesteps
     # With 10M timesteps and better rewards, these should be achievable
     STAGE_MIN_EPISODES = {
-        "simplest": 50,  # Reduced from 200 - quick validation of basics
-        "simpler": 50,  # Reduced from 200
+        "simplest": 100,  # Reduced from 200 - quick validation of basics
+        "simplest_with_mines": 100,  # Same as simplest - similar difficulty with mines
+        "simpler": 100,  # Reduced from 200
         "simple": 75,  # Reduced from 200 - agent got stuck here
         "medium": 100,  # Reduced from 250
         "complex": 150,  # Reduced from 300
@@ -87,6 +89,7 @@ class CurriculumManager:
     # Regression thresholds to prevent catastrophic forgetting
     # If performance drops too low, regress to previous stage
     REGRESSION_THRESHOLDS = {
+        "simplest_with_mines": 0.30,
         "simpler": 0.30,
         "simple": 0.30,
         "medium": 0.25,

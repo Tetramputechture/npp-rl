@@ -41,11 +41,15 @@ class ArchitectureTrainer:
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
         frame_stack_config: Optional[Dict[str, Any]] = None,
-        enable_pbrs: bool = False,
         pbrs_gamma: float = 0.99,
         enable_mine_avoidance_reward: bool = True,
+        use_icm: bool = False,
+        icm_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize architecture trainer.
+
+        NOTE: PBRS is ALWAYS enabled in base environment. No enable_pbrs flag.
+        Graph building is automatically configured for PBRS requirements.
 
         Args:
             architecture_config: Architecture configuration
@@ -67,9 +71,10 @@ class ArchitectureTrainer:
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str
-            enable_pbrs: Enable Potential-Based Reward Shaping
-            pbrs_gamma: Discount factor for PBRS
-            enable_mine_avoidance_reward: Enable mine avoidance component in PBRS
+            pbrs_gamma: Discount factor for PBRS (always enabled)
+            enable_mine_avoidance_reward: Enable mine avoidance component in hierarchical rewards
+            use_icm: Enable Intrinsic Curiosity Module (ICM)
+            icm_config: ICM configuration dict (eta, alpha, etc.)
         """
         self.architecture_config = architecture_config
         self.train_dataset_path = Path(train_dataset_path)
@@ -84,10 +89,10 @@ class ArchitectureTrainer:
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
         self.frame_stack_config = frame_stack_config or {}
-        self.enable_pbrs = enable_pbrs
         self.pbrs_gamma = pbrs_gamma
         self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
-
+        self.use_icm = use_icm
+        self.icm_config = icm_config or {}
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Training state
@@ -107,10 +112,9 @@ class ArchitectureTrainer:
         logger.info(f"Device: cuda:{device_id}")
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
-        logger.info(f"PBRS enabled: {enable_pbrs}")
-        if enable_pbrs:
-            logger.info(f"  PBRS gamma: {pbrs_gamma}")
-            logger.info(f"  Mine avoidance reward: {enable_mine_avoidance_reward}")
+        logger.info("PBRS: ALWAYS ENABLED (mandatory)")
+        logger.info(f"  PBRS gamma: {pbrs_gamma}")
+        logger.info(f"  Mine avoidance reward: {enable_mine_avoidance_reward}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
 
@@ -272,13 +276,12 @@ class ArchitectureTrainer:
                 use_curriculum=self.use_curriculum,
                 curriculum_manager=self.curriculum_manager,
                 frame_stack_config=self.frame_stack_config,
-                enable_pbrs=self.enable_pbrs,
                 pbrs_gamma=self.pbrs_gamma,
                 enable_mine_avoidance_reward=self.enable_mine_avoidance_reward,
                 output_dir=self.output_dir,
                 pretrained_checkpoint=self.pretrained_checkpoint,
-                enable_icm=self.config.get("enable_icm", False),
-                icm_config=self.config.get("icm_config", {}),
+                enable_icm=self.use_icm,
+                icm_config=self.icm_config,
             )
 
             # Create training environment
@@ -430,7 +433,7 @@ class ArchitectureTrainer:
             **self.hyperparams,
         )
         logger.info("✓ PPO model created successfully")
-        
+
         # Note: Mixed precision training (use_mixed_precision flag) is not yet
         # supported by stable-baselines3 PPO. To enable it, would require custom
         # PPO implementation with AMP integration. Current training uses FP32.

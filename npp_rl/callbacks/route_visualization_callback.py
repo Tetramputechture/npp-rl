@@ -893,23 +893,39 @@ class RouteVisualizationCallback(BaseCallback):
                 env = env.env
 
             if hasattr(env, "nplay_headless"):
-                # Access toggle mines (entity type 1)
+                # Access toggle mines (entity types 1 and 21)
+                # Type 1: Initial untoggled state
+                # Type 21: Initial toggled state
                 mines = []
                 entity_dic = env.nplay_headless.sim.entity_dic
 
+                from nclone.constants.physics_constants import TOGGLE_MINE_RADII
+
+                # Process entity type 1 (untoggled mines)
                 if 1 in entity_dic:
                     toggle_mines = entity_dic[1]
-
-                    # Import mine radius constants
-                    try:
-                        from nclone.constants import TOGGLE_MINE_RADII
-                    except ImportError:
-                        # Fallback to default values if import fails
-                        TOGGLE_MINE_RADII = {0: 4.0, 1: 3.5, 2: 4.5}
-
                     for mine in toggle_mines:
                         if hasattr(mine, "xpos") and hasattr(mine, "ypos"):
                             state = getattr(mine, "state", 1)
+                            radius = TOGGLE_MINE_RADII.get(state, 4.0)
+
+                            mines.append(
+                                {
+                                    "x": float(mine.xpos),
+                                    "y": float(mine.ypos),
+                                    "state": int(state),
+                                    "radius": float(radius),
+                                }
+                            )
+
+                # Process entity type 21 (toggled mines - start in toggled state)
+                if 21 in entity_dic:
+                    toggled_mines = entity_dic[21]
+                    for mine in toggled_mines:
+                        if hasattr(mine, "xpos") and hasattr(mine, "ypos"):
+                            state = getattr(
+                                mine, "state", 0
+                            )  # Type 21 starts toggled (state 0)
                             radius = TOGGLE_MINE_RADII.get(state, 4.0)
 
                             mines.append(

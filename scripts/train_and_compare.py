@@ -185,6 +185,7 @@ def parse_args():
         default="simplest",
         choices=[
             "simplest",
+            "simplest_with_mines",
             "simpler",
             "simple",
             "medium",
@@ -197,7 +198,7 @@ def parse_args():
     parser.add_argument(
         "--curriculum-threshold",
         type=float,
-        default=0.5,
+        default=0.8,
         help="Success rate threshold for curriculum advancement (lowered based on analysis)",
     )
     parser.add_argument(
@@ -209,22 +210,16 @@ def parse_args():
 
     # Reward shaping options
     parser.add_argument(
-        "--enable-pbrs",
-        action="store_true",
-        default=False,
-        help="Enable Potential-Based Reward Shaping for dense rewards (RECOMMENDED)",
-    )
-    parser.add_argument(
         "--pbrs-gamma",
         type=float,
         default=0.995,
-        help="Discount factor for PBRS (must match PPO gamma for policy invariance)",
+        help="Discount factor for PBRS (always enabled, must match PPO gamma for policy invariance)",
     )
     parser.add_argument(
         "--enable-mine-avoidance-reward",
         action="store_true",
         default=True,
-        help="Enable mine avoidance component in PBRS (default: True)",
+        help="Enable mine avoidance component in hierarchical rewards (default: True)",
     )
 
     # Curriculum safety options
@@ -653,7 +648,6 @@ def train_architecture(
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
             frame_stack_config=frame_stack_config,
-            enable_pbrs=args.enable_pbrs,
             pbrs_gamma=args.pbrs_gamma,
             enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
         )

@@ -367,6 +367,7 @@ class EnhancedTensorBoardCallback(BaseCallback):
             # Map stage name to index for timeline visualization
             stage_order = [
                 "simplest",
+                "simplest_with_mines",
                 "simpler",
                 "simple",
                 "medium",
