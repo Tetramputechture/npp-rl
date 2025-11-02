@@ -25,6 +25,53 @@ env/
 .venv/
 .ENV/
 .env/
+.env
 
 # Data directory
 data/
+
+# Log files
+training_logs/
+
+# Eval data
+agent_eval_data/
+
+# Game config
+game_config.json
+
+# Model zip files
+*.zip
+
+anim_data_line_new.txt.bin
+
+# Benchmarking
+benchmark_data/
+
+# Videos
+videos/
+actions/
+
+# Tune logs
+tune_logs/
+
+# Ruff
+.ruff_cache/
+
+# OpenHands tasks
+.openhands/TASKS.md
+
+.openhands/.setup.log
+
+# Mermaid diagrams
+*.mmd
+
+# experiments
+experiments/
+
+logs/
+
+*.txtevents.out.tfevents.*
+
+*.log
+
+*.txt
