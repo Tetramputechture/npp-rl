@@ -377,6 +377,13 @@ class RouteVisualizationCallback(BaseCallback):
             figsize=(self.image_size[0] / 100, self.image_size[1] / 100), dpi=100
         )
 
+        # Set background color to light green for successful routes
+        is_success = route_data.get("is_success", False)
+        if is_success:
+            light_green = "#90EE90"  # Light green color
+            fig.patch.set_facecolor(light_green)
+            ax.set_facecolor(light_green)
+
         # Set aspect ratio to equal for proper level visualization
         ax.set_aspect("equal")
 
@@ -454,7 +461,7 @@ class RouteVisualizationCallback(BaseCallback):
             render_mines_to_axis(
                 ax,
                 route_data["mines"],
-                tile_color="#FF4444",  # Red for dangerous mines
+                tile_color="#FF0000",  # Red for dangerous mines
                 safe_color="#44FFFF",  # Cyan for safe mines
                 alpha=0.8,
             )
@@ -477,7 +484,7 @@ class RouteVisualizationCallback(BaseCallback):
                     ax.plot(
                         [segment_x1, segment_x2],
                         [segment_y1, segment_y2],
-                        color="#FF8800",  # Orange for closed door segments
+                        color="#000000",  # Black for closed door segments
                         linewidth=3,
                         alpha=0.9,
                         zorder=3,  # Above tiles but below route
@@ -490,7 +497,7 @@ class RouteVisualizationCallback(BaseCallback):
                     ax.plot(
                         [segment_x1, segment_x2],
                         [segment_y1, segment_y2],
-                        color="#FF8800",
+                        color="#000000",
                         linewidth=2,
                         linestyle="--",
                         alpha=0.3,
@@ -651,22 +658,15 @@ class RouteVisualizationCallback(BaseCallback):
         title = "Successful Route" if is_success else "Failed Route"
         title_parts = [f"{title} - Step {route_data['timestep']}"]
 
-        # Show curriculum stage if available
-        if (
-            route_data.get("curriculum_stage")
-            and route_data["curriculum_stage"] != "unknown"
-        ):
-            title_parts.append(f"Stage: {route_data['curriculum_stage']}")
-
         # Show generator type if available
         if (
             route_data.get("curriculum_generator")
             and route_data["curriculum_generator"] != "unknown"
         ):
-            title_parts.append(f"Gen: {route_data['curriculum_generator']}")
+            title_parts.append(f"{route_data['curriculum_generator']}")
 
         # Show episode stats
-        title_parts.append(f"Length: {route_data['episode_length']}")
+        title_parts.append(f"{route_data['episode_length']}")
         title_parts.append(f"Reward: {route_data['episode_reward']:.2f}")
 
         # Combine into multi-line title

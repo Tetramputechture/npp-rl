@@ -83,9 +83,6 @@ train_single_architecture() {
     log INFO "Starting training for ${arch}..."
     log INFO "Training logs: ${arch_log}"
     
-    # Build training command optimized for 8x A100 (80 GB)
-    # Use hardware profile for automatic optimization
-    # Set CUDA environment variables for proper GPU access
     local train_cmd="cd ${REMOTE_NPP_RL_DIR} && \
         export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY} && \
         export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY} && \
@@ -105,7 +102,7 @@ train_single_architecture() {
             --bc-epochs 50 \
             --bc-batch-size 128 \
             --hardware-profile auto \
-            --total-timesteps 1000000 \
+            --total-timesteps 2000000 \
             --distributed-backend nccl \
             --record-eval-videos \
             --max-videos-per-category 2 \
