@@ -19,7 +19,6 @@ Usage:
 import logging
 from typing import Any, Dict, Optional
 
-import torch
 from stable_baselines3.common.vec_env import VecEnv
 
 from npp_rl.intrinsic.icm import ICMNetwork, ICMTrainer
@@ -93,7 +92,7 @@ class ICMIntegration:
         logger.info("=" * 60)
         
         # Create ICM network
-        logger.info(f"Creating ICM network:")
+        logger.info("Creating ICM network:")
         logger.info(f"  Feature dim:      {self.feature_dim}")
         logger.info(f"  Action dim:       {self.action_dim}")
         logger.info(f"  Hidden dim:       {self.hidden_dim}")
@@ -114,7 +113,7 @@ class ICMIntegration:
         logger.info("✓ ICM network created and moved to device")
         
         # Create ICM trainer
-        logger.info(f"Creating ICM trainer:")
+        logger.info("Creating ICM trainer:")
         logger.info(f"  Learning rate:    {self.learning_rate}")
         logger.info(f"  Lambda inv:       {self.lambda_inv}")
         logger.info(f"  Lambda fwd:       {self.lambda_fwd}")
@@ -127,7 +126,7 @@ class ICMIntegration:
         
         logger.info("✓ ICM trainer created")
         logger.info("=" * 60)
-        logger.info(f"ICM CONFIGURATION SUMMARY:")
+        logger.info("ICM CONFIGURATION SUMMARY:")
         logger.info(f"  Intrinsic weight (alpha):     {self.alpha} ({self.alpha*100:.0f}%)")
         logger.info(f"  Extrinsic weight:             {1-self.alpha} ({(1-self.alpha)*100:.0f}%)")
         logger.info(f"  Reward clipping:              ±{self.r_int_clip}")
