@@ -54,8 +54,6 @@ class CurriculumManager:
     # Stage-specific advancement thresholds for granular progression
     # Progressive thresholds that decrease with difficulty to ensure forward progress
     # while maintaining competence requirements
-    # UPDATED Oct 28, 2025: Lowered thresholds based on training analysis
-    # Previous thresholds were too aggressive, causing agent to get stuck at simple stage
     STAGE_THRESHOLDS = {
         "simplest": 0.80,  # Reduced from 0.80
         "simplest_with_mines": 0.75,  # Slightly lower than simplest due to mines
@@ -69,8 +67,6 @@ class CurriculumManager:
 
     # Stage-specific minimum episodes for adaptive progression
     # Harder stages require more episodes to ensure sufficient learning
-    # Previous minimums (200-300) were never reached in 1M timesteps
-    # With 10M timesteps and better rewards, these should be achievable
     STAGE_MIN_EPISODES = {
         "simplest": 100,  # Reduced from 200 - quick validation of basics
         "simplest_with_mines": 100,  # Same as simplest - similar difficulty with mines
@@ -84,7 +80,7 @@ class CurriculumManager:
 
     # Early advancement threshold - if agent excels, can advance sooner
     EARLY_ADVANCEMENT_THRESHOLD = 0.90
-    EARLY_ADVANCEMENT_MIN_EPISODES = 30
+    EARLY_ADVANCEMENT_MIN_EPISODES = 50
 
     # Regression thresholds to prevent catastrophic forgetting
     # If performance drops too low, regress to previous stage
@@ -104,15 +100,13 @@ class CurriculumManager:
         self,
         dataset_path: str,
         starting_stage: str = "simplest",
-        advancement_threshold: float = None,  # Now optional - uses stage-specific by default
-        min_episodes_per_stage: int = None,  # Now optional - uses stage-specific by default
         performance_window: int = 50,
         allow_stage_mixing: bool = True,
         mixing_ratio: float = 0.2,
         enable_adaptive_mixing: bool = True,
         enable_early_advancement: bool = True,
         enable_trend_analysis: bool = True,
-        enable_regression: bool = True,  # FIXED: Add regression capability
+        enable_regression: bool = True,
     ):
         """Initialize curriculum manager with granular progression settings.
 
@@ -130,10 +124,6 @@ class CurriculumManager:
             enable_regression: If True, allow regressing to easier stages on poor performance (default: True)
         """
         self.dataset_path = Path(dataset_path)
-
-        # Global overrides (None = use stage-specific)
-        self.global_advancement_threshold = advancement_threshold
-        self.global_min_episodes = min_episodes_per_stage
 
         self.performance_window = performance_window
         self.allow_stage_mixing = allow_stage_mixing
@@ -188,21 +178,16 @@ class CurriculumManager:
         logger.info("=" * 60)
         logger.info(f"Starting stage: {self.current_stage}")
         logger.info("Adaptive features:")
-        logger.info(f"  - Stage-specific thresholds: {not bool(advancement_threshold)}")
-        logger.info(
-            f"  - Stage-specific min episodes: {not bool(min_episodes_per_stage)}"
-        )
         logger.info(f"  - Adaptive mixing: {enable_adaptive_mixing}")
         logger.info(f"  - Early advancement: {enable_early_advancement}")
         logger.info(f"  - Trend analysis: {enable_trend_analysis}")
         logger.info(f"Stage mixing: {'enabled' if allow_stage_mixing else 'disabled'}")
 
-        if not advancement_threshold:
-            logger.info("\nStage-specific advancement thresholds:")
-            for stage in self.CURRICULUM_ORDER:
-                threshold = self.STAGE_THRESHOLDS.get(stage, 0.7)
-                min_eps = self.STAGE_MIN_EPISODES.get(stage, 100)
-                logger.info(f"  {stage}: {threshold:.0%} success, {min_eps} episodes")
+        logger.info("\nStage-specific advancement thresholds:")
+        for stage in self.CURRICULUM_ORDER:
+            threshold = self.STAGE_THRESHOLDS.get(stage, 0.7)
+            min_eps = self.STAGE_MIN_EPISODES.get(stage, 100)
+            logger.info(f"  {stage}: {threshold:.0%} success, {min_eps} episodes")
 
         logger.info("\nLevels per stage (by generator type):")
         for stage, generators in self.levels_by_stage_and_generator.items():
@@ -478,17 +463,8 @@ class CurriculumManager:
         """
         results = self.stage_performance.get(stage, deque())
 
-        # Get stage-specific thresholds or use global overrides
-        stage_threshold = (
-            self.global_advancement_threshold
-            if self.global_advancement_threshold is not None
-            else self.STAGE_THRESHOLDS.get(stage, 0.7)
-        )
-        stage_min_episodes = (
-            self.global_min_episodes
-            if self.global_min_episodes is not None
-            else self.STAGE_MIN_EPISODES.get(stage, 100)
-        )
+        stage_threshold = self.STAGE_THRESHOLDS.get(stage, 0.7)
+        stage_min_episodes = self.STAGE_MIN_EPISODES.get(stage, 100)
 
         if not results:
             return {
@@ -523,7 +499,6 @@ class CurriculumManager:
             and episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES
         ):
             can_early_advance = success_rate >= self.EARLY_ADVANCEMENT_THRESHOLD
-            # Note: Logging moved to check_advancement() to avoid duplicate logs
 
         # Trend-based advancement: if showing strong improvement, can advance slightly earlier
         trend_bonus = False
@@ -538,7 +513,6 @@ class CurriculumManager:
             # Reduced from 5% to 2% margin for more conservative advancement
             if success_rate >= max(stage_threshold - 0.02, HARD_MINIMUM_THRESHOLD):
                 trend_bonus = True
-                # Note: Logging moved to check_advancement() to avoid duplicate logs
 
         return {
             "success_rate": success_rate,
