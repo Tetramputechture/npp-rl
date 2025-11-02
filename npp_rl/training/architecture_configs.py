@@ -4,12 +4,6 @@ Architecture configuration system for model optimization.
 This module defines standardized configurations for different architecture variants
 to enable systematic comparison and benchmarking. Each configuration specifies
 which modalities to use and how to process them.
-
-Note: PBRS (Potential-Based Reward Shaping) is enabled by default in training
-to provide dense reward signals for improved learning. Graph building for PBRS
-path distance calculations is automatically enabled when PBRS is active, but
-graph observations are separately controlled based on whether the architecture
-uses graph modality (see ModalityConfig.use_graph).
 """
 
 from dataclasses import dataclass

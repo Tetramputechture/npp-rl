@@ -37,18 +37,19 @@ class HierarchicalRewardWrapper(gym.Wrapper):
         self,
         env: gym.Env,
         enable_mine_avoidance: bool = True,
+        enable_pbrs: bool = True,
+        pbrs_gamma: float = 0.99,
         log_reward_components: bool = True,
         default_subtask: Subtask = Subtask.NAVIGATE_TO_EXIT_SWITCH,
     ):
         """
         Initialize hierarchical reward wrapper.
-        
-        NOTE: PBRS is handled by base environment (nclone). This wrapper
-        provides ONLY subtask-specific milestones and progress rewards.
 
         Args:
             env: Base environment
             enable_mine_avoidance: Whether to include mine avoidance rewards
+            enable_pbrs: Whether to enable PBRS for subtasks
+            pbrs_gamma: Discount factor for PBRS
             log_reward_components: Whether to log individual reward components
             default_subtask: Default subtask if none is provided
         """
@@ -56,6 +57,8 @@ class HierarchicalRewardWrapper(gym.Wrapper):
 
         self.subtask_calculator = SubtaskRewardCalculator(
             enable_mine_avoidance=enable_mine_avoidance,
+            enable_pbrs=enable_pbrs,
+            pbrs_gamma=pbrs_gamma,
         )
 
         self.log_reward_components = log_reward_components
@@ -337,18 +340,21 @@ class SubtaskAwareRewardShaping:
     def __init__(
         self,
         enable_mine_avoidance: bool = True,
+        enable_pbrs: bool = True,
+        pbrs_gamma: float = 0.99,
     ):
         """
         Initialize subtask-aware reward shaping.
-        
-        NOTE: PBRS is handled by base environment (nclone). This utility
-        provides ONLY subtask-specific milestones and progress rewards.
 
         Args:
             enable_mine_avoidance: Whether to include mine avoidance rewards
+            enable_pbrs: Whether to enable PBRS
+            pbrs_gamma: Discount factor for PBRS
         """
         self.calculator = SubtaskRewardCalculator(
             enable_mine_avoidance=enable_mine_avoidance,
+            enable_pbrs=enable_pbrs,
+            pbrs_gamma=pbrs_gamma,
         )
 
     def calculate_augmented_reward(

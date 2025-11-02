@@ -142,18 +142,20 @@ class SubtaskRewardCalculator:
     def __init__(
         self,
         enable_mine_avoidance: bool = True,
+        enable_pbrs: bool = True,
+        pbrs_gamma: float = 0.99,
     ):
         """
         Initialize subtask reward calculator.
 
-        NOTE: PBRS is handled by base environment (nclone). This calculator
-        provides ONLY subtask-specific milestones, proximity bonuses, and
-        progress tracking. Distance-based shaping is handled by base PBRS.
-
         Args:
             enable_mine_avoidance: Whether to include mine avoidance rewards
+            enable_pbrs: Whether to calculate PBRS potentials
+            pbrs_gamma: Discount factor for PBRS
         """
         self.enable_mine_avoidance = enable_mine_avoidance
+        self.enable_pbrs = enable_pbrs
+        self.pbrs_gamma = pbrs_gamma
 
         # Track progress for each subtask
         self.progress_trackers = {
@@ -162,6 +164,9 @@ class SubtaskRewardCalculator:
             Subtask.NAVIGATE_TO_EXIT_DOOR: ProgressTracker(),
             Subtask.EXPLORE_FOR_SWITCHES: ExplorationTracker(),
         }
+
+        # Track PBRS potentials
+        self.prev_potential = None
 
         # Track switch activation time for efficiency bonus
         self.switch_activation_step = None
@@ -202,6 +207,11 @@ class SubtaskRewardCalculator:
         if self.enable_mine_avoidance:
             mine_reward = self._calculate_mine_avoidance_reward(obs, prev_obs)
             reward += mine_reward
+
+        # Add PBRS shaping reward if enabled
+        if self.enable_pbrs:
+            pbrs_reward = self._calculate_pbrs_reward(obs, current_subtask)
+            reward += pbrs_reward
 
         # Track switch activation for efficiency bonus
         if obs["switch_activated"] and not prev_obs["switch_activated"]:
@@ -411,6 +421,65 @@ class SubtaskRewardCalculator:
 
         return reward
 
+    def _calculate_pbrs_reward(
+        self,
+        obs: Dict[str, Any],
+        current_subtask: Subtask,
+    ) -> float:
+        """
+        Calculate potential-based reward shaping for current subtask.
+
+        PBRS provides theoretically grounded reward shaping that doesn't
+        alter the optimal policy.
+        """
+        current_potential = self._calculate_subtask_potential(obs, current_subtask)
+
+        if self.prev_potential is not None:
+            # r_shaped = γ * Φ(s') - Φ(s)
+            pbrs_reward = self.pbrs_gamma * current_potential - self.prev_potential
+        else:
+            pbrs_reward = 0.0
+
+        self.prev_potential = current_potential
+        return pbrs_reward
+
+    def _calculate_subtask_potential(
+        self,
+        obs: Dict[str, Any],
+        current_subtask: Subtask,
+    ) -> float:
+        """
+        Calculate state potential for current subtask.
+
+        Potential is based on negative distance to the subtask's target,
+        scaled appropriately for each subtask type.
+        """
+        ninja_pos = np.array([obs["player_x"], obs["player_y"]])
+
+        if current_subtask == Subtask.NAVIGATE_TO_EXIT_SWITCH:
+            target_pos = np.array([obs["switch_x"], obs["switch_y"]])
+            distance = np.linalg.norm(ninja_pos - target_pos)
+            return -distance * 0.1
+
+        elif current_subtask == Subtask.NAVIGATE_TO_LOCKED_DOOR_SWITCH:
+            nearest_locked_switch = self._find_nearest_locked_switch(obs)
+            if nearest_locked_switch is not None:
+                distance = np.linalg.norm(ninja_pos - nearest_locked_switch)
+                return -distance * 0.1
+            return 0.0
+
+        elif current_subtask == Subtask.NAVIGATE_TO_EXIT_DOOR:
+            target_pos = np.array([obs["exit_door_x"], obs["exit_door_y"]])
+            distance = np.linalg.norm(ninja_pos - target_pos)
+            return -distance * 0.15  # Higher weight for final objective
+
+        elif current_subtask == Subtask.EXPLORE_FOR_SWITCHES:
+            # Exploration potential based on reachability/connectivity
+            connectivity_score = obs["reachability_features"][5]
+            return connectivity_score * 0.05
+
+        return 0.0
+
     # Helper methods
 
     def _find_nearest_locked_switch(self, obs: Dict[str, Any]) -> Optional[np.ndarray]:
@@ -579,15 +648,13 @@ class SubtaskRewardCalculator:
         for tracker in self.progress_trackers.values():
             tracker.reset()
 
+        self.prev_potential = None
         self.switch_activation_step = None
         self.current_step = 0
 
     def get_subtask_components(self, current_subtask: Subtask) -> Dict[str, float]:
         """
         Get individual reward components for debugging/logging.
-
-        NOTE: PBRS potentials are tracked by base environment, not here.
-        This only returns subtask-specific milestone and progress metrics.
 
         Returns:
             Dictionary of reward component values for current subtask
@@ -599,6 +666,9 @@ class SubtaskRewardCalculator:
             if tracker.has_previous_distance()
             else float("inf"),
             "steps_in_subtask": tracker.get_steps(),
+            "pbrs_potential": self.prev_potential
+            if self.prev_potential is not None
+            else 0.0,
         }
 
         if current_subtask == Subtask.EXPLORE_FOR_SWITCHES:
