@@ -54,15 +54,18 @@ class CurriculumManager:
     # Stage-specific advancement thresholds for granular progression
     # Progressive thresholds that decrease with difficulty to ensure forward progress
     # while maintaining competence requirements
+    # UPDATED 2025-11-08: Further reduced thresholds based on comprehensive training
+    # analysis showing agent stuck at stage 1 with 44% success (couldn't reach 80%).
+    # New progressive schedule enables curriculum progression while maintaining quality.
     STAGE_THRESHOLDS = {
-        "simplest": 0.80,  # Reduced from 0.80
-        "simplest_with_mines": 0.75,  # Slightly lower than simplest due to mines
-        "simpler": 0.60,  # Reduced from 0.70
-        "simple": 0.50,  # Reduced from 0.60
-        "medium": 0.45,  # Reduced from 0.55
-        "complex": 0.40,  # Reduced from 0.50
-        "exploration": 0.35,  # Reduced from 0.45
-        "mine_heavy": 0.30,  # Reduced from 0.40
+        "simplest": 0.75,  # Reduced from 0.80 to allow faster progression
+        "simplest_with_mines": 0.65,  # Reduced from 0.75 - critical bottleneck
+        "simpler": 0.60,  # Unchanged
+        "simple": 0.50,  # Unchanged
+        "medium": 0.45,  # Unchanged
+        "complex": 0.40,  # Unchanged
+        "exploration": 0.35,  # Unchanged
+        "mine_heavy": 0.30,  # Unchanged
     }
 
     # Stage-specific minimum episodes for adaptive progression
