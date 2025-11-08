@@ -96,8 +96,10 @@ train_single_architecture() {
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
             --use-curriculum \
+            --enable-auto-curriculum-adjustment \
+            --enable-early-stopping \
             --replay-data-dir ../nclone/bc_replays \
-            --bc-epochs 50 \
+            --bc-epochs 10 \
             --bc-batch-size 128 \
             --bc-num-workers 6 \
             --hardware-profile auto \
@@ -105,11 +107,13 @@ train_single_architecture() {
             --distributed-backend nccl \
             --record-eval-videos \
             --max-videos-per-category 2 \
-            --num-eval-episodes 2 \
+            --num-eval-episodes 10 \
             --video-fps 60 \
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
+            --enable-visual-frame-stacking \
+            --visual-stack-size 4 \
             --enable-state-stacking \
             --state-stack-size 4 \
             --enable-lr-annealing \

@@ -42,6 +42,7 @@ class CurriculumManager:
     # Curriculum progression order
     CURRICULUM_ORDER = [
         "simplest",
+        "simplest_few_mines",  # NEW: Intermediate stage
         "simplest_with_mines",
         "simpler",
         "simple",
@@ -59,6 +60,7 @@ class CurriculumManager:
     # New progressive schedule enables curriculum progression while maintaining quality.
     STAGE_THRESHOLDS = {
         "simplest": 0.75,  # Reduced from 0.80 to allow faster progression
+        "simplest_few_mines": 0.70,  # NEW: Between simplest and simplest_with_mines
         "simplest_with_mines": 0.65,  # Reduced from 0.75 - critical bottleneck
         "simpler": 0.60,  # Unchanged
         "simple": 0.50,  # Unchanged
@@ -72,6 +74,7 @@ class CurriculumManager:
     # Harder stages require more episodes to ensure sufficient learning
     STAGE_MIN_EPISODES = {
         "simplest": 100,  # Reduced from 200 - quick validation of basics
+        "simplest_few_mines": 100,  # NEW: Same as other simple stages
         "simplest_with_mines": 100,  # Same as simplest - similar difficulty with mines
         "simpler": 100,  # Reduced from 200
         "simple": 75,  # Reduced from 200 - agent got stuck here
@@ -88,6 +91,7 @@ class CurriculumManager:
     # Regression thresholds to prevent catastrophic forgetting
     # If performance drops too low, regress to previous stage
     REGRESSION_THRESHOLDS = {
+        "simplest_few_mines": 0.30,  # NEW
         "simplest_with_mines": 0.30,
         "simpler": 0.30,
         "simple": 0.30,
@@ -110,6 +114,9 @@ class CurriculumManager:
         enable_early_advancement: bool = True,
         enable_trend_analysis: bool = True,
         enable_regression: bool = True,
+        enable_auto_adjustment: bool = False,
+        auto_adjustment_freq: int = 50000,
+        auto_adjustment_min_threshold: float = 0.40,
     ):
         """Initialize curriculum manager with granular progression settings.
 
@@ -123,6 +130,9 @@ class CurriculumManager:
             enable_early_advancement: If True, allow fast advancement for high performers (default: True)
             enable_trend_analysis: If True, consider performance trends in decisions (default: True)
             enable_regression: If True, allow regressing to easier stages on poor performance (default: True)
+            enable_auto_adjustment: If True, automatically reduce thresholds when stuck (default: False)
+            auto_adjustment_freq: Steps between automatic threshold checks (default: 50000)
+            auto_adjustment_min_threshold: Minimum threshold floor (default: 0.40)
         """
         self.dataset_path = Path(dataset_path)
 
@@ -133,6 +143,10 @@ class CurriculumManager:
         self.enable_early_advancement = enable_early_advancement
         self.enable_trend_analysis = enable_trend_analysis
         self.enable_regression = enable_regression  # FIXED: Store regression flag
+        self.enable_auto_adjustment = enable_auto_adjustment
+        self.auto_adjustment_freq = auto_adjustment_freq
+        self.auto_adjustment_min_threshold = auto_adjustment_min_threshold
+        self.last_auto_adjustment_step = 0
 
         # Validate starting stage
         if starting_stage not in self.CURRICULUM_ORDER:
@@ -543,6 +557,55 @@ class CurriculumManager:
         if not results:
             return 0.0
         return float(np.mean(results))
+
+    def check_auto_adjustment(self, global_step: int) -> bool:
+        """Check if curriculum threshold should be automatically reduced.
+        
+        Reduces threshold by 5% if agent stuck on current stage for extended period.
+        
+        Args:
+            global_step: Current training step count
+            
+        Returns:
+            True if threshold was adjusted, False otherwise
+        """
+        if not self.enable_auto_adjustment:
+            return False
+        
+        # Only check at specified frequency
+        if global_step - self.last_auto_adjustment_step < self.auto_adjustment_freq:
+            return False
+        
+        self.last_auto_adjustment_step = global_step
+        
+        # Get current stage performance
+        current_stage = self.current_stage
+        perf = self.get_stage_performance(current_stage)
+        current_threshold = self.STAGE_THRESHOLDS.get(current_stage, 0.7)
+        min_episodes = self.STAGE_MIN_EPISODES.get(current_stage, 100)
+        
+        # If below threshold with sufficient episodes, consider adjustment
+        if (perf['success_rate'] < current_threshold and 
+            perf['episodes'] >= min_episodes):
+            
+            # Calculate new threshold (5% reduction)
+            new_threshold = max(
+                current_threshold * 0.95,  # 5% reduction
+                self.auto_adjustment_min_threshold  # Floor at 40%
+            )
+            
+            if new_threshold < current_threshold:
+                logger.warning(
+                    f"📉 Auto-adjusting curriculum threshold for '{current_stage}': "
+                    f"{current_threshold:.1%} → {new_threshold:.1%} "
+                    f"(current: {perf['success_rate']:.1%}, episodes: {perf['episodes']})"
+                )
+                
+                # Update threshold (modifies class dictionary)
+                self.STAGE_THRESHOLDS[current_stage] = new_threshold
+                return True
+        
+        return False
 
     def check_advancement(self) -> bool:
         """Check if agent should advance to next curriculum stage.

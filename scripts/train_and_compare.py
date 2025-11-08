@@ -120,7 +120,10 @@ def parse_args():
         "--num-envs", type=int, default=64, help="Number of parallel environments"
     )
     parser.add_argument(
-        "--eval-freq", type=int, default=100000, help="Evaluation frequency (timesteps)"
+        "--eval-freq",
+        type=int,
+        default=25000,
+        help="Evaluation frequency (timesteps) - increased 4x for better monitoring",
     )
     parser.add_argument(
         "--save-freq",
@@ -191,6 +194,7 @@ def parse_args():
         default="simplest",
         choices=[
             "simplest",
+            "simplest_few_mines",
             "simplest_with_mines",
             "simpler",
             "simple",
@@ -238,6 +242,38 @@ def parse_args():
         "--disable-early-advancement",
         action="store_true",
         help="Disable early advancement even with high performance",
+    )
+
+    # Automatic curriculum adjustment (Week 3-4)
+    parser.add_argument(
+        "--enable-auto-curriculum-adjustment",
+        action="store_true",
+        help="Automatically reduce curriculum thresholds when agent stuck (5%% reduction, 40%% floor)",
+    )
+    parser.add_argument(
+        "--curriculum-adjustment-freq",
+        type=int,
+        default=50000,
+        help="Steps between automatic curriculum threshold checks",
+    )
+    parser.add_argument(
+        "--curriculum-min-threshold",
+        type=float,
+        default=0.40,
+        help="Minimum curriculum threshold floor for auto-adjustment",
+    )
+
+    # Early stopping options (Week 3-4)
+    parser.add_argument(
+        "--enable-early-stopping",
+        action="store_true",
+        help="Enable early stopping when training plateaus (default: 10 evals patience)",
+    )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=10,
+        help="Number of evaluations without improvement before early stopping",
     )
 
     # Learning rate options
@@ -614,6 +650,9 @@ def train_architecture(
                 "starting_stage": args.curriculum_start_stage,
                 "enable_trend_analysis": not args.disable_trend_advancement,
                 "enable_early_advancement": not args.disable_early_advancement,
+                "enable_auto_adjustment": args.enable_auto_curriculum_adjustment,
+                "auto_adjustment_freq": args.curriculum_adjustment_freq,
+                "auto_adjustment_min_threshold": args.curriculum_min_threshold,
             }
 
         # Calculate environments per GPU
@@ -654,6 +693,8 @@ def train_architecture(
             frame_stack_config=frame_stack_config,
             pbrs_gamma=args.pbrs_gamma,
             enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
+            enable_early_stopping=args.enable_early_stopping,
+            early_stopping_patience=args.early_stopping_patience,
         )
 
         # Build PPO hyperparameters from hardware profile
@@ -1096,15 +1137,7 @@ def main():
             )
             logger.warning("   Recommendation: Remove --use-hierarchical-ppo flag")
 
-        # Check 2: Warn if frame stacking is enabled
-        if args.enable_visual_frame_stacking or args.enable_state_stacking:
-            logger.warning("⚠️  WARNING: Frame stacking enabled for MLP baseline")
-            logger.warning(
-                "   This adds 4x computational overhead with no spatial reasoning benefit"
-            )
-            logger.warning("   Recommendation: Remove frame stacking flags")
-
-        # Check 3: Validate environment count
+        # Check 2: Validate environment count
         if args.num_envs and args.num_envs < 64:
             logger.warning(f"⚠️  WARNING: Only {args.num_envs} environments specified")
             logger.warning(

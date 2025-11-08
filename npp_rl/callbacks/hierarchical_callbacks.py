@@ -609,6 +609,12 @@ class CurriculumProgressionCallback(BaseCallback):
         # Skip if VecEnvWrapper handles it (avoids race conditions)
         if self.step_count % self.check_freq == 0:
             if self.curriculum_manager is not None and not self.use_vec_wrapper:
+                # Check for automatic threshold adjustment (Week 3-4)
+                if hasattr(self.curriculum_manager, 'check_auto_adjustment'):
+                    adjusted = self.curriculum_manager.check_auto_adjustment(self.num_timesteps)
+                    if adjusted:
+                        self.logger.record("curriculum/auto_adjustment_event", 1.0)
+                
                 advanced = self.curriculum_manager.check_advancement()
                 if advanced:
                     self._handle_advancement()

@@ -131,128 +131,95 @@ class ComprehensiveEvaluator:
                 return  # Can't validate non-dict spaces
 
             # Check player_frame and global_view for frame stacking
-            for key in ["player_frame", "global_view"]:
-                if key in obs_space.spaces:
-                    expected_shape = obs_space.spaces[key].shape
+            key = "player_frame"
+            if key in obs_space.spaces:
+                expected_shape = obs_space.spaces[key].shape
 
-                    # Standard shapes: player_frame=(84, 84, 1), global_view=(176, 100, 1)
-                    # Frame stacked: player_frame=(84, 84, N), global_view=(176, 100, N)
-                    # where N is the stack size
+                # FrameStackWrapper stacks along the FIRST dimension:
+                # Standard: player_frame=(84, 84, 1), global_view=(176, 100, 1)
+                # Stacked: player_frame=(stack_size, 84, 84, 1), global_view=(stack_size, 176, 100, 1)
+                # OR if channels-first: (stack_size, 1, 84, 84) or (stack_size, 1, 176, 100)
 
-                    # Expected dimensions for player_frame: (84, 84, C) or (C, 84, 84)
-                    # Expected dimensions for global_view: (176, 100, C) or (C, 176, 100)
+                # Check if shape has 4 dimensions (indicating frame stacking)
+                if len(expected_shape) == 4:
+                    # Frame stacking detected: (stack_size, H, W, C) or (stack_size, C, H, W)
+                    stack_size = expected_shape[0]
 
-                    # Determine which dimension is the channel dimension
-                    # Channel dimension should be 1 (no stacking) or > 1 (stacking)
-                    if len(expected_shape) == 3:
-                        # Try to identify the channel dimension
-                        # For player_frame: 84x84 are spatial dims, channel should be 1 or stack_size
-                        # For global_view: 176x100 are spatial dims, channel should be 1 or stack_size
+                    # Validate that first dimension is a reasonable stack size (2-12)
+                    if 2 <= stack_size <= 12:
+                        visual_stack_enabled = (
+                            frame_stack_config
+                            and frame_stack_config.get(
+                                "enable_visual_frame_stacking", False
+                            )
+                        )
 
-                        if key == "player_frame":
-                            # Check which dimension is not 84
-                            if (
-                                expected_shape[0] not in [84, 85]
-                                and expected_shape[0] < 20
-                            ):
-                                # First dim is likely channels (C, H, W) format
-                                channels = expected_shape[0]
-                            elif (
-                                expected_shape[2] not in [84, 85]
-                                and expected_shape[2] < 20
-                            ):
-                                # Last dim is likely channels (H, W, C) format
-                                channels = expected_shape[2]
-                            else:
-                                # Can't determine channel dimension reliably, skip validation
-                                logger.debug(
-                                    f"Cannot determine channel dimension for {key} with shape {expected_shape}, skipping validation"
-                                )
-                                continue
-                        elif key == "global_view":
-                            # Check which dimension is not 176 or 100
-                            if (
-                                expected_shape[0] not in [176, 100]
-                                and expected_shape[0] < 20
-                            ):
-                                # First dim is likely channels (C, H, W) format
-                                channels = expected_shape[0]
-                            elif (
-                                expected_shape[2] not in [176, 100]
-                                and expected_shape[2] < 20
-                            ):
-                                # Last dim is likely channels (H, W, C) format
-                                channels = expected_shape[2]
-                            else:
-                                # Can't determine channel dimension reliably, skip validation
-                                logger.debug(
-                                    f"Cannot determine channel dimension for {key} with shape {expected_shape}, skipping validation"
-                                )
-                                continue
-                        else:
-                            # Unknown key, assume channels-last format
-                            channels = expected_shape[2]
-
-                        # If channels > 1, frame stacking is expected
-                        if channels > 1:
-                            visual_stack_enabled = (
-                                frame_stack_config
-                                and frame_stack_config.get(
-                                    "enable_visual_frame_stacking", False
-                                )
+                        if not visual_stack_enabled:
+                            # Try to auto-detect and provide helpful error
+                            detected_config = self.detect_frame_stack_config(model)
+                            config_str = (
+                                f"  frame_stack_config={detected_config}"
+                                if detected_config
+                                else f"  frame_stack_config={{\n"
+                                f"    'enable_visual_frame_stacking': True,\n"
+                                f"    'visual_stack_size': {stack_size},\n"
+                                f"    'enable_state_stacking': False,\n"
+                                f"    'state_stack_size': 4,\n"
+                                f"    'padding_type': 'zero'\n"
+                                f"  }}"
+                            )
+                            raise ValueError(
+                                f"Model expects {stack_size} stacked frames in '{key}' "
+                                f"(shape: {expected_shape}), but frame_stack_config is not enabled!\n\n"
+                                f"The model was trained with frame stacking. You must pass:\n"
+                                f"{config_str}\n\n"
+                                f"If using ArchitectureTrainer, pass frame_stack_config to __init__().\n"
+                                f"If evaluating directly, pass frame_stack_config to evaluate_model()."
                             )
 
-                            if not visual_stack_enabled:
-                                # Try to auto-detect and provide helpful error
-                                detected_config = self.detect_frame_stack_config(model)
-                                config_str = (
-                                    f"  frame_stack_config={detected_config}"
-                                    if detected_config
-                                    else f"  frame_stack_config={{\n"
-                                    f"    'enable_visual_frame_stacking': True,\n"
-                                    f"    'visual_stack_size': {channels},\n"
-                                    f"    'enable_state_stacking': False,\n"
-                                    f"    'state_stack_size': 4,\n"
-                                    f"    'padding_type': 'zero'\n"
-                                    f"  }}"
-                                )
-                                raise ValueError(
-                                    f"Model expects {channels} stacked frames in '{key}' "
-                                    f"(shape: {expected_shape}), but frame_stack_config is not enabled!\n\n"
-                                    f"The model was trained with frame stacking. You must pass:\n"
-                                    f"{config_str}\n\n"
-                                    f"If using ArchitectureTrainer, pass frame_stack_config to __init__().\n"
-                                    f"If evaluating directly, pass frame_stack_config to evaluate_model()."
-                                )
+                        config_stack_size = frame_stack_config.get(
+                            "visual_stack_size", 4
+                        )
+                        if config_stack_size != stack_size:
+                            raise ValueError(
+                                f"Frame stacking size mismatch for '{key}':\n"
+                                f"  Model expects: {stack_size} frames (shape: {expected_shape})\n"
+                                f"  Config provides: {config_stack_size} frames\n"
+                                f"Please update visual_stack_size in frame_stack_config to {stack_size}"
+                            )
 
-                            config_stack_size = frame_stack_config.get(
-                                "visual_stack_size", 4
-                            )
-                            if config_stack_size != channels:
-                                raise ValueError(
-                                    f"Frame stacking size mismatch for '{key}':\n"
-                                    f"  Model expects: {channels} frames (shape: {expected_shape})\n"
-                                    f"  Config provides: {config_stack_size} frames\n"
-                                    f"Please update visual_stack_size in frame_stack_config to {channels}"
-                                )
-
-                            logger.info(
-                                f"✓ Validated frame stacking for '{key}': {channels} frames"
-                            )
-                        else:
-                            # No frame stacking in model
-                            visual_stack_enabled = (
-                                frame_stack_config
-                                and frame_stack_config.get(
-                                    "enable_visual_frame_stacking", False
-                                )
-                            )
-                            if visual_stack_enabled:
-                                logger.warning(
-                                    f"⚠️  Model expects single frame in '{key}' (shape: {expected_shape}), "
-                                    f"but frame_stack_config has visual stacking enabled. "
-                                    f"This may cause shape mismatch!"
-                                )
+                        logger.info(
+                            f"✓ Validated frame stacking for '{key}': {stack_size} frames"
+                        )
+                    else:
+                        # First dimension doesn't look like stack size, might be channels-first format
+                        logger.debug(
+                            f"Shape {expected_shape} for '{key}' has 4 dims but first dim ({expected_shape[0]}) "
+                            f"doesn't look like stack size, skipping validation"
+                        )
+                elif len(expected_shape) == 3:
+                    # Standard 3D shape: (H, W, C) or (C, H, W) - no frame stacking
+                    # Check if frame stacking is enabled but model doesn't expect it
+                    visual_stack_enabled = (
+                        frame_stack_config
+                        and frame_stack_config.get(
+                            "enable_visual_frame_stacking", False
+                        )
+                    )
+                    if visual_stack_enabled:
+                        logger.warning(
+                            f"⚠️  Model expects single frame in '{key}' (shape: {expected_shape}), "
+                            f"but frame_stack_config has visual stacking enabled. "
+                            f"This may cause shape mismatch! "
+                            f"Note: If the model was trained with frame stacking, the observation space "
+                            f"should have been updated during training. Check that frame_stack_config "
+                            f"matches the training configuration."
+                        )
+                else:
+                    # Unexpected shape, skip validation
+                    logger.debug(
+                        f"Unexpected shape {expected_shape} for '{key}', skipping validation"
+                    )
 
             # Check game_state for state stacking
             if "game_state" in obs_space.spaces:
@@ -467,40 +434,47 @@ class ComprehensiveEvaluator:
                         test_dataset_path=str(self.test_dataset_path)
                     )
 
-                    # Apply frame stacking configuration if provided (matches training config)
-                    if frame_stack_config:
-                        from nclone.gym_environment import FrameStackConfig
-
-                        config.frame_stack = FrameStackConfig(
-                            enable_visual_frame_stacking=frame_stack_config.get(
-                                "enable_visual_frame_stacking", False
-                            ),
-                            visual_stack_size=frame_stack_config.get(
-                                "visual_stack_size", 4
-                            ),
-                            enable_state_stacking=frame_stack_config.get(
-                                "enable_state_stacking", False
-                            ),
-                            state_stack_size=frame_stack_config.get(
-                                "state_stack_size", 4
-                            ),
-                            padding_type=frame_stack_config.get("padding_type", "zero"),
-                        )
-                        logger.debug(
-                            f"Applied frame stacking: visual={frame_stack_config.get('enable_visual_frame_stacking')}, "
-                            f"state={frame_stack_config.get('enable_state_stacking')}"
-                        )
-
                     # Override render mode for video recording (RGB instead of grayscale)
                     if should_record:
                         config.render.render_mode = "rgb_array"
                         logger.debug("Set render_mode=rgb_array for video recording")
 
                     env = NppEnvironment(config=config)
+
                     # Load the specific map from level_data
                     if "map_data" in lvl_data:
                         logger.debug(f"Loading map data for level: {level_id}")
                         env.nplay_headless.load_map_from_map_data(lvl_data["map_data"])
+
+                    # Apply frame stacking wrapper if provided (matches training config)
+                    if frame_stack_config and (
+                        frame_stack_config.get("enable_visual_frame_stacking", False)
+                        or frame_stack_config.get("enable_state_stacking", False)
+                    ):
+                        from nclone.gym_environment.frame_stack_wrapper import (
+                            FrameStackWrapper,
+                        )
+
+                        env = FrameStackWrapper(
+                            env,
+                            visual_stack_size=frame_stack_config.get(
+                                "visual_stack_size", 4
+                            ),
+                            state_stack_size=frame_stack_config.get(
+                                "state_stack_size", 4
+                            ),
+                            enable_visual_stacking=frame_stack_config.get(
+                                "enable_visual_frame_stacking", False
+                            ),
+                            enable_state_stacking=frame_stack_config.get(
+                                "enable_state_stacking", False
+                            ),
+                            padding_type=frame_stack_config.get("padding_type", "zero"),
+                        )
+                        logger.debug(
+                            f"✓ FrameStackWrapper applied: visual={frame_stack_config.get('enable_visual_frame_stacking')}, "
+                            f"state={frame_stack_config.get('enable_state_stacking')}"
+                        )
 
                     return SkipMapLoadWrapper(env)
 

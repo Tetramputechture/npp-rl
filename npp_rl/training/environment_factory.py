@@ -365,6 +365,10 @@ class EnvironmentFactory:
 
             initialized_count = 0
             initialized_keys = []
+
+            # Get actual observation space from environment to validate shapes
+            test_obs = env.reset()
+
             for key in keys:
                 mean_key = f"{key}_mean"
                 std_key = f"{key}_std"
@@ -372,6 +376,64 @@ class EnvironmentFactory:
                 if mean_key in bc_stats and std_key in bc_stats:
                     mean = bc_stats[mean_key]
                     std = bc_stats[std_key]
+
+                    # Validate and reshape to match current observation space
+                    if key in test_obs:
+                        # Get expected shape (single env observation)
+                        expected_shape = (
+                            test_obs[key][0].shape
+                            if test_obs[key].ndim > 1
+                            else test_obs[key].shape
+                        )
+
+                        # Handle shape mismatches due to frame stacking differences
+                        # BC dataset uses np.concatenate() which flattens stacked states: (stack_size * state_dim,)
+                        # Environment uses FrameStackWrapper which stacks states: (stack_size, state_dim)
+                        if mean.shape != expected_shape:
+                            reshaped = False
+
+                            # Case 1: BC stats are flattened (1D) but environment expects stacked (2D)
+                            # This is the common case when BC was trained with frame stacking
+                            if (
+                                mean.ndim == 1
+                                and len(expected_shape) == 2
+                                and mean.size == np.prod(expected_shape)
+                            ):
+                                # Reshape from flattened (stack_size * state_dim,) to stacked (stack_size, state_dim)
+                                # The reshape preserves element order: frame 0's elements become row 0, etc.
+                                mean = mean.reshape(expected_shape)
+                                std = std.reshape(expected_shape)
+                                reshaped = True
+                                logger.info(
+                                    f"  ↻ Reshaped '{key}' BC stats from {bc_stats[mean_key].shape} "
+                                    f"to {expected_shape} to match stacked observation format"
+                                )
+
+                            # Case 2: BC stats are stacked (2D) but environment expects flattened (1D)
+                            # This is less common but could happen if BC used a different stacking method
+                            elif (
+                                mean.ndim == 2
+                                and len(expected_shape) == 1
+                                and mean.size == expected_shape[0]
+                            ):
+                                # Reshape from stacked (stack_size, state_dim) to flattened (stack_size * state_dim,)
+                                mean = mean.flatten()
+                                std = std.flatten()
+                                reshaped = True
+                                logger.info(
+                                    f"  ↻ Reshaped '{key}' BC stats from {bc_stats[mean_key].shape} "
+                                    f"to {expected_shape} to match flattened observation format"
+                                )
+
+                            # If reshaping didn't work (incompatible sizes), skip this key
+                            if not reshaped:
+                                logger.warning(
+                                    f"  ⚠️  Skipping '{key}': BC stats shape {bc_stats[mean_key].shape} "
+                                    f"doesn't match current observation shape {expected_shape} "
+                                    f"(total size mismatch: {mean.size} vs {np.prod(expected_shape)}). "
+                                    f"This may indicate incompatible frame stacking configurations."
+                                )
+                                continue
 
                     # Initialize RunningMeanStd for this observation key
                     rms = RunningMeanStd(shape=mean.shape)

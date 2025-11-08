@@ -23,20 +23,21 @@ HYPERPARAMETERS = {
     # Number of epochs when optimizing the surrogate loss
     # More epochs -> more optimization steps on the same data
     # Higher values can lead to overfitting but better sample efficiency
-    "n_epochs": 5,
+    # UPDATED 2025-11-08: Increased from 5 to 10 for better sample efficiency (comprehensive analysis Nov 2025)
+    "n_epochs": 10,
     # Discount factor for future rewards
     # Range: 0.0 to 1.0
     # Higher values -> agent cares more about long-term rewards
     # Lower values -> agent focuses more on immediate rewards
     "gamma": PBRS_GAMMA,
     # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-    # UPDATED: Reduced from 0.9988 to 0.97 for lower variance advantage estimates
+    # UPDATED 2025-11-08: Reduced from 0.97 to 0.92 for lower variance advantage estimates
     # High GAE lambda was causing unstable learning with high gamma
-    # (See training analysis Oct 28, 2025)
+    # (See comprehensive analysis Nov 2025)
     # Range: 0.0 to 1.0
     # Higher values -> less bias, more variance
     # Lower values -> more bias, less variance
-    "gae_lambda": 0.97,
+    "gae_lambda": 0.92,
     # Clipping parameter for PPO loss
     # Limits the amount the policy can change in one update
     # Smaller values -> more conservative updates
@@ -46,13 +47,15 @@ HYPERPARAMETERS = {
     # Similar to clip_range but for value function
     # None means no clipping
     # IMPORTANT: this clipping depends on the reward scaling
-    "clip_range_vf": 0.1,
+    # UPDATED 2025-11-08: Increased from 0.1 to 1.0 to match reward scale (comprehensive analysis Nov 2025)
+    "clip_range_vf": 1.0,
     # Entropy coefficient for the loss calculation
     # Higher entropy maintains exploration for longer duration
     # Encourages exploration by penalizing deterministic policies
     # Higher values -> more exploration
     # Lower values -> more exploitation
-    "ent_coef": 0.02,
+    # UPDATED 2025-11-08: Increased from 0.02 to 0.05 for better exploration (comprehensive analysis Nov 2025)
+    "ent_coef": 0.05,
     # Value function coefficient for the loss calculation
     # UPDATED:Increased from 0.469 to 0.5 for more standard value
     # Controls importance of value function loss vs policy loss

@@ -193,7 +193,7 @@ ARCHITECTURE_MEMORY_PROFILES: Dict[str, float] = {
     # MLP baseline - empirically measured: 0.315 GB env-only
     # With rollout buffers (1024 steps × 64 envs × 24 KB = ~1.5 GB) and overhead,
     # total is ~0.9-1.0 GB per env. Using 1.0 GB for safety.
-    "mlp_baseline": 1.0,
+    "mlp_baseline": 1.5,
     # GNN variants - graph processing adds memory overhead
     # Estimate ~2x MLP baseline for graph data structures (nodes/edges)
     # Note: Graph data memory excluded from optimization analysis per user request

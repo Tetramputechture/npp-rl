@@ -47,6 +47,8 @@ class ArchitectureTrainer:
         enable_mine_avoidance_reward: bool = True,
         use_icm: bool = False,
         icm_config: Optional[Dict[str, Any]] = None,
+        enable_early_stopping: bool = False,
+        early_stopping_patience: int = 10,
     ):
         """Initialize architecture trainer.
 
@@ -98,6 +100,8 @@ class ArchitectureTrainer:
         self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
         self.use_icm = use_icm
         self.icm_config = icm_config or {}
+        self.enable_early_stopping = enable_early_stopping
+        self.early_stopping_patience = early_stopping_patience
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Training state
@@ -426,6 +430,8 @@ class ArchitectureTrainer:
                 curriculum_manager=self.curriculum_manager,
                 use_distributed=self.use_distributed,
                 world_size=self.world_size,
+                enable_early_stopping=self.enable_early_stopping,
+                early_stopping_patience=self.early_stopping_patience,
             )
 
             # Create the model with the environment
@@ -481,6 +487,19 @@ class ArchitectureTrainer:
 
             logger.info(f"✓ Model is on device: {self.model.device}")
             logger.info("=" * 60)
+
+            # Update model's observation space to match frame-stacked environment
+            # This ensures evaluation correctly detects frame stacking configuration
+            if self.frame_stack_config and (
+                self.frame_stack_config.get("enable_visual_frame_stacking", False)
+                or self.frame_stack_config.get("enable_state_stacking", False)
+            ):
+                logger.info(
+                    "Updating model observation space to match frame-stacked environment..."
+                )
+                self.model.observation_space = self.env.observation_space
+                self.model.policy.observation_space = self.env.observation_space
+                logger.info("✓ Model observation space updated to match environment")
 
             # Load pretrained weights if provided
             if self.pretrained_checkpoint:

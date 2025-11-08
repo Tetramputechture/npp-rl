@@ -26,6 +26,70 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
     the cleanest way to integrate with stable-baselines3's PPO algorithm.
     """
 
+    def _predict(
+        self,
+        observation: Union[torch.Tensor, Dict[str, torch.Tensor]],
+        deterministic: bool = False,
+    ) -> torch.Tensor:
+        """
+        Predict action with action mask support.
+
+        Overrides base ActorCriticPolicy._predict() to properly handle action_mask
+        in observation dictionaries during inference (model.predict() calls this).
+
+        Args:
+            observation: Observation tensor or dict (may contain action_mask)
+            deterministic: Whether to use deterministic action selection
+
+        Returns:
+            Predicted action tensor
+        """
+        # Extract action mask before feature extraction (if present)
+        action_mask = None
+        if isinstance(observation, dict):
+            action_mask = observation.get("action_mask", None)
+            # Create a copy without action_mask for feature extraction
+            obs_for_features = {
+                k: v for k, v in observation.items() if k != "action_mask"
+            }
+        else:
+            obs_for_features = observation
+
+        # Get device from model parameters
+        device = next(self.parameters()).device
+
+        # Convert numpy arrays to tensors if needed
+        if isinstance(obs_for_features, dict):
+            obs_for_features = {
+                k: torch.as_tensor(v, device=device) if isinstance(v, np.ndarray) else v
+                for k, v in obs_for_features.items()
+            }
+        elif isinstance(obs_for_features, np.ndarray):
+            obs_for_features = torch.as_tensor(obs_for_features, device=device)
+
+        # Preprocess the observation if needed
+        features = self.extract_features(obs_for_features)
+        latent_pi, _ = self.mlp_extractor(features)
+
+        # Get action logits
+        action_logits = self.action_net(latent_pi)
+
+        # Apply action mask if present
+        if action_mask is not None:
+            # Convert mask to tensor if needed
+            if isinstance(action_mask, np.ndarray):
+                action_mask = torch.as_tensor(action_mask, device=device)
+            elif not isinstance(action_mask, torch.Tensor):
+                action_mask = torch.tensor(action_mask, device=device)
+
+            action_logits = self._apply_action_mask(action_logits, action_mask)
+
+        # Create distribution and sample action
+        distribution = self.action_dist.proba_distribution(action_logits=action_logits)
+        actions = distribution.get_actions(deterministic=deterministic)
+
+        return actions
+
     def _get_action_dist_from_latent(
         self, latent_pi: torch.Tensor, latent_sde: Optional[torch.Tensor] = None
     ) -> CategoricalDistribution:
@@ -34,7 +98,8 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
 
         This method is called by predict() path only. Since we don't have access
         to observations here, we can't apply masking. The masking is instead
-        applied in forward() and evaluate_actions() which are used during training.
+        applied in forward(), evaluate_actions(), and _predict() which handle
+        action masks properly.
 
         Args:
             latent_pi: Latent code for the actor
@@ -47,7 +112,7 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         action_logits = self.action_net(latent_pi)
 
         # Create and return distribution
-        # Note: Masking handled in forward() and evaluate_actions()
+        # Note: Masking handled in forward(), evaluate_actions(), and _predict()
         return self.action_dist.proba_distribution(action_logits=action_logits)
 
     def forward(

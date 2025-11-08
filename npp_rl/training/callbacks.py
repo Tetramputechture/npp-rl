@@ -1,5 +1,6 @@
 """Custom callbacks for training diagnostics and logging."""
 
+from collections import deque
 from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
 
@@ -53,6 +54,14 @@ class DiagnosticLoggingCallback(BaseCallback):
 
         # Action-reward correlation
         self.action_reward_pairs = []
+        
+        # PBRS component tracking (Week 3-4 enhancement)
+        self.episode_pbrs_components = {
+            'objective': deque(maxlen=100),
+            'hazard': deque(maxlen=100),
+            'impact': deque(maxlen=100),
+            'exploration': deque(maxlen=100),
+        }
 
         # Curriculum tracking
         self.stage_metrics = {}
@@ -101,6 +110,13 @@ class DiagnosticLoggingCallback(BaseCallback):
                 else:
                     self.episode_outcomes["timeout"] += 1
 
+            # PBRS component tracking (Week 3-4 enhancement)
+            if "pbrs_components" in info:
+                components = info["pbrs_components"]
+                for key in self.episode_pbrs_components:
+                    if key in components:
+                        self.episode_pbrs_components[key].append(components[key])
+            
             # Terminal events
             if info.get("player_won", False):
                 self.terminal_events["completion"].append(rewards[idx])
@@ -222,6 +238,13 @@ class DiagnosticLoggingCallback(BaseCallback):
             if dense:
                 self.logger.record("reward_type/dense_mean_mag", np.mean(np.abs(dense)))
 
+        # === PBRS COMPONENT BREAKDOWN (Week 3-4 enhancement) ===
+        for component, values in self.episode_pbrs_components.items():
+            if len(values) > 0:
+                vals = np.array(values)
+                self.logger.record(f"pbrs_rewards/{component}_mean", float(np.mean(vals)))
+                self.logger.record(f"pbrs_rewards/{component}_std", float(np.std(vals)))
+
         # === ACTION-REWARD CORRELATION (12 metrics for 6 actions) ===
         if self.action_reward_pairs:
             action_rewards = {}
@@ -230,8 +253,13 @@ class DiagnosticLoggingCallback(BaseCallback):
                     action_rewards[action] = []
                 action_rewards[action].append(reward)
 
+            action_names = ['NOOP', 'Left', 'Right', 'Jump', 'Jump+Left', 'Jump+Right']
             for action_id, rewards_list in action_rewards.items():
-                if rewards_list:
+                if rewards_list and len(rewards_list) > 10:  # Require minimum samples
+                    self.logger.record(
+                        f"actions/action_{action_id}_{action_names[action_id]}_mean_reward",
+                        float(np.mean(rewards_list))
+                    )
                     self.logger.record(
                         f"action_reward/action_{action_id}_mean", np.mean(rewards_list)
                     )

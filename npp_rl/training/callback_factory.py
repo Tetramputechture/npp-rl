@@ -24,6 +24,8 @@ class CallbackFactory:
         curriculum_manager=None,
         use_distributed: bool = False,
         world_size: int = 1,
+        enable_early_stopping: bool = False,
+        early_stopping_patience: int = 10,
     ):
         """Initialize callback factory.
 
@@ -34,6 +36,8 @@ class CallbackFactory:
             curriculum_manager: Curriculum manager instance
             use_distributed: Whether using distributed training
             world_size: Number of GPUs for distributed training
+            enable_early_stopping: Enable early stopping callback (default: False)
+            early_stopping_patience: Patience for early stopping (default: 10)
         """
         self.output_dir = Path(output_dir)
         self.use_hierarchical_ppo = use_hierarchical_ppo
@@ -41,6 +45,8 @@ class CallbackFactory:
         self.curriculum_manager = curriculum_manager
         self.use_distributed = use_distributed
         self.world_size = world_size
+        self.enable_early_stopping = enable_early_stopping
+        self.early_stopping_patience = early_stopping_patience
 
     def create_callbacks(
         self, user_callback: Optional[BaseCallback] = None
@@ -108,6 +114,23 @@ class CallbackFactory:
         # Add curriculum progression callback if curriculum learning is enabled
         if self.use_curriculum and self.curriculum_manager is not None:
             self._add_curriculum_callback(callbacks)
+            
+            # Add early stopping if enabled (Week 3-4)
+            if self.enable_early_stopping:
+                from npp_rl.callbacks.early_stopping import CurriculumEarlyStoppingCallback
+                
+                early_stop_callback = CurriculumEarlyStoppingCallback(
+                    patience=self.early_stopping_patience,
+                    min_delta=0.01,  # 1% improvement required
+                    min_evaluations=5,
+                    curriculum_manager=self.curriculum_manager,
+                    eval_freq=25000,  # Match default eval freq
+                    verbose=1,
+                )
+                callbacks.append(early_stop_callback)
+                logger.info(
+                    f"Added early stopping callback (patience={self.early_stopping_patience})"
+                )
 
         # Add distributed progress callback if using multi-GPU training
         if self.use_distributed and self.world_size > 1:

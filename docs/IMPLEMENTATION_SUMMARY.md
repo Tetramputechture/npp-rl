@@ -1,4 +1,4 @@
-# Week 1 Implementation Summary: RL Optimization for NPP Agent
+# Week 1 and Week 2 Implementation Summary: RL Optimization for NPP Agent
 
 **Date**: November 8, 2025  
 **Branch**: `comprehensive-rl-optimization-nov2025` (npp-rl), `rl-optimization-nov2025` (nclone)  
@@ -8,7 +8,10 @@
 
 ## Overview
 
-This document summarizes the Week 1 critical fixes implemented based on comprehensive analysis of TensorBoard logs, route visualizations, and observation space utilization. These changes address the most critical issues preventing agent learning with minimal code changes and maximum impact.
+This document summarizes the Week 1 and Week 2 critical fixes implemented based on comprehensive analysis of TensorBoard logs, route visualizations, and observation space utilization. These changes address the most critical issues preventing agent learning with minimal code changes and maximum impact.
+
+**Week 1**: Reward structure fixes and curriculum threshold adjustments  
+**Week 2**: Intermediate curriculum stage, PPO hyperparameter tuning, and evaluation frequency improvements
 
 **Training System Architecture**: The NPP-RL training system uses:
 - **Architecture configs**: Defined in `npp_rl/training/architecture_configs.py` (e.g., `mlp_baseline`, `full_hgt`)
@@ -124,6 +127,7 @@ STAGE_THRESHOLDS = {
 # AFTER:
 STAGE_THRESHOLDS = {
     "simplest": 0.75,  # -5%: Allows faster progression
+    "simplest_few_mines": 0.70,  # NEW: Intermediate stage
     "simplest_with_mines": 0.65,  # -10%: Critical bottleneck fix
     "simpler": 0.60,  # Unchanged
     # ... rest unchanged
@@ -134,6 +138,54 @@ STAGE_THRESHOLDS = {
 - Agent stuck at 44% on stage 1, couldn't reach 75% threshold
 - Lowering to 65% allows progression while maintaining quality
 - Progressive schedule maintains difficulty increase
+- Added intermediate stage for smoother progression
+
+### 2B. Intermediate Curriculum Stage "simplest_few_mines" (Week 2)
+
+**Files**: 
+- `nclone/nclone/map_generation/generator_configs.py` - Add category definition
+- `nclone/nclone/gym_environment/curriculum_config.py` - Add default weight
+- `npp-rl/npp_rl/training/curriculum_manager.py` - Add to curriculum order and thresholds
+
+**Changes**:
+
+```python
+# NEW category in generator_configs.py:
+"simplest_few_mines": CategoryConfig(
+    name="simplest_few_mines",
+    description="Minimal direct paths with 1-2 mines (gradual mine introduction)",
+    ratio=0.1,
+    seed_base_test=150,
+    seed_base_train=1500,
+    generators=[
+        ("vertical_corridor", "minimal_with_mines"),  # Has boundary mines
+        ("horizontal_corridor", "minimal"),  # No mines variant
+        ("corridors", "simplest"),  # No mines variant
+    ],
+)
+
+# Updated curriculum order:
+CURRICULUM_ORDER = [
+    "simplest",
+    "simplest_few_mines",  # NEW: Intermediate stage
+    "simplest_with_mines",
+    ...
+]
+
+# Updated thresholds:
+STAGE_THRESHOLDS = {
+    "simplest": 0.75,
+    "simplest_few_mines": 0.70,  # NEW: Between simplest and simplest_with_mines
+    "simplest_with_mines": 0.65,
+    ...
+}
+```
+
+**Impact**:
+- Gradual introduction of mines (1-2 mines vs full mine coverage)
+- Smoother difficulty curve: simplest → simplest_few_mines → simplest_with_mines
+- Reduces premature difficulty jump that blocked progression
+- Agent can learn mine avoidance incrementally
 
 ### 3. Training Script Enhancements (npp-rl)
 
@@ -159,6 +211,50 @@ python scripts/train_and_compare.py \
 - State stacking provides critical temporal information for physics
 - Minimal overhead (~4x features but reachable computation cached)
 
+### 3B. PPO Hyperparameter Updates (Week 2)
+
+**File**: `npp-rl/npp_rl/agents/hyperparameters/ppo_hyperparameters.py`
+
+**Changes**:
+
+```python
+# BEFORE → AFTER:
+"gae_lambda": 0.97 → 0.92  # Reduced for lower variance advantage estimates
+"clip_range_vf": 0.1 → 1.0  # Increased to match reward scale
+"ent_coef": 0.02 → 0.05  # Increased for better exploration
+"n_epochs": 5 → 10  # Increased for better sample efficiency
+```
+
+**Rationale**:
+- **GAE Lambda (0.97 → 0.92)**: Reduces variance in advantage estimates, improving training stability
+- **Clip Range VF (0.1 → 1.0)**: Allows larger value function updates to match new reward scale
+- **Entropy Coefficient (0.02 → 0.05)**: Maintains exploration longer, preventing premature convergence
+- **N Epochs (5 → 10)**: Better sample efficiency by optimizing each batch more thoroughly
+
+**Impact**:
+- More stable advantage estimates (lower clip fraction expected)
+- Better value function learning (matches reward magnitudes)
+- Longer exploration phase (slower entropy decay)
+- Improved sample efficiency (fewer steps to reach same performance)
+
+### 3C. Evaluation Frequency Update (Week 2)
+
+**File**: `npp-rl/scripts/train_and_compare.py`
+
+```python
+# BEFORE:
+"--eval-freq", type=int, default=100000
+
+# AFTER:
+"--eval-freq", type=int, default=25000  # Increased 4x for better monitoring
+```
+
+**Impact**:
+- More frequent evaluation (every 25k steps vs 100k)
+- Better monitoring of curriculum progression
+- Earlier detection of training issues
+- More granular performance tracking
+
 ---
 
 ## Expected Performance Improvements
@@ -172,21 +268,24 @@ Mean reward:                   Negative (-0.0089 to -0.0305)
 Curriculum progression:        NONE (stuck at stage 1)
 ```
 
-### After Week 1 Changes
+### After Week 1 + Week 2 Changes
 ```
 Stage 0 (simplest):           85-90% success (+8-13%)
-Stage 1 (simplest_with_mines): 70-75% success (+26-31%)
-Stage 2 (simpler):            50-60% success (NEW)
-Stage 3 (simple):             35-45% success (NEW)
-Mean reward:                   POSITIVE (+0.5 to +2.0)
-Curriculum progression:        YES (stages 0-3)
+Stage 1 (simplest_few_mines): 70-75% success (NEW intermediate stage)
+Stage 2 (simplest_with_mines): 65-70% success (+21-26% from baseline)
+Stage 3 (simpler):            50-60% success (NEW)
+Stage 4 (simple):             35-45% success (NEW)
+Mean reward:                   POSITIVE (+0.05 to +0.15)
+Curriculum progression:        YES (stages 0-4)
+Training stability:            Improved (lower clip fraction, smoother curves)
 ```
 
 ### Estimated Total Improvement
 - **Success rate**: +26-31% on stage 1 (critical bottleneck)
-- **Curriculum progression**: From 0 stages to 2-3 stages
-- **Reward positivity**: From negative to strongly positive
-- **Training efficiency**: Better gradient, faster learning
+- **Curriculum progression**: From 0 stages to 4-5 stages
+- **Reward positivity**: From negative to positive regime
+- **Training efficiency**: Better gradient, faster learning, more stable
+- **Hyperparameter tuning**: Reduced variance, better exploration, improved sample efficiency
 
 ---
 
@@ -398,13 +497,29 @@ After validating Week 1 changes, consider:
 ## File Summary
 
 ### Modified Files
+
+**nclone (2 files)**:
 1. `nclone/gym_environment/reward_calculation/reward_constants.py`
    - Time penalty, PBRS weights, momentum bonus, buffer bonus
 
-2. `npp-rl/npp_rl/training/curriculum_manager.py`
-   - Stage thresholds for simplest and simplest_with_mines
+2. `nclone/nclone/map_generation/generator_configs.py` (Week 2)
+   - Added `simplest_few_mines` category definition
 
-3. `npp-rl/scripts/lib/training.sh`
+3. `nclone/nclone/gym_environment/curriculum_config.py` (Week 2)
+   - Added `simplest_few_mines` to default_weights
+
+**npp-rl (4 files)**:
+1. `npp-rl/npp_rl/training/curriculum_manager.py`
+   - Stage thresholds for simplest and simplest_with_mines
+   - Added `simplest_few_mines` to curriculum order and thresholds (Week 2)
+
+2. `npp-rl/npp_rl/agents/hyperparameters/ppo_hyperparameters.py` (Week 2)
+   - Updated GAE lambda, clip_range_vf, ent_coef, n_epochs
+
+3. `npp-rl/scripts/train_and_compare.py` (Week 2)
+   - Updated default eval_freq from 100000 to 25000
+
+4. `npp-rl/scripts/lib/training.sh`
    - Added `--enable-state-stacking`, `--state-stack-size 4`, `--enable-lr-annealing`
 
 ### New Files
