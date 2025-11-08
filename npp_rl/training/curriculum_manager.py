@@ -560,51 +560,52 @@ class CurriculumManager:
 
     def check_auto_adjustment(self, global_step: int) -> bool:
         """Check if curriculum threshold should be automatically reduced.
-        
+
         Reduces threshold by 5% if agent stuck on current stage for extended period.
-        
+
         Args:
             global_step: Current training step count
-            
+
         Returns:
             True if threshold was adjusted, False otherwise
         """
         if not self.enable_auto_adjustment:
             return False
-        
+
         # Only check at specified frequency
         if global_step - self.last_auto_adjustment_step < self.auto_adjustment_freq:
             return False
-        
+
         self.last_auto_adjustment_step = global_step
-        
+
         # Get current stage performance
         current_stage = self.current_stage
         perf = self.get_stage_performance(current_stage)
         current_threshold = self.STAGE_THRESHOLDS.get(current_stage, 0.7)
         min_episodes = self.STAGE_MIN_EPISODES.get(current_stage, 100)
-        
+
         # If below threshold with sufficient episodes, consider adjustment
-        if (perf['success_rate'] < current_threshold and 
-            perf['episodes'] >= min_episodes):
-            
+        if (
+            perf["success_rate"] < current_threshold
+            and perf["episodes"] >= min_episodes
+        ):
             # Calculate new threshold (5% reduction)
             new_threshold = max(
                 current_threshold * 0.95,  # 5% reduction
-                self.auto_adjustment_min_threshold  # Floor at 40%
+                self.auto_adjustment_min_threshold,  # Floor at 40%
             )
-            
+
             if new_threshold < current_threshold:
                 logger.warning(
                     f"📉 Auto-adjusting curriculum threshold for '{current_stage}': "
                     f"{current_threshold:.1%} → {new_threshold:.1%} "
                     f"(current: {perf['success_rate']:.1%}, episodes: {perf['episodes']})"
                 )
-                
+
                 # Update threshold (modifies class dictionary)
                 self.STAGE_THRESHOLDS[current_stage] = new_threshold
                 return True
-        
+
         return False
 
     def check_advancement(self) -> bool:
