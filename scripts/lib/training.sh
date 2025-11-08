@@ -110,6 +110,9 @@ train_single_architecture() {
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
+            --enable-state-stacking \
+            --state-stack-size 4 \
+            --enable-lr-annealing \
             --debug"
 
     echo $train_cmd
