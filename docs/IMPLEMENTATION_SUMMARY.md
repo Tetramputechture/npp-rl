@@ -10,6 +10,12 @@
 
 This document summarizes the Week 1 critical fixes implemented based on comprehensive analysis of TensorBoard logs, route visualizations, and observation space utilization. These changes address the most critical issues preventing agent learning with minimal code changes and maximum impact.
 
+**Training System Architecture**: The NPP-RL training system uses:
+- **Architecture configs**: Defined in `npp_rl/training/architecture_configs.py` (e.g., `mlp_baseline`, `full_hgt`)
+- **Training script**: `scripts/train_and_compare.py` with command-line arguments
+- **Orchestration**: `scripts/lib/training.sh` for remote training execution
+- **Config output**: Training saves `config.json` as OUTPUT (not input)
+
 ---
 
 ## Changes Implemented
@@ -129,29 +135,29 @@ STAGE_THRESHOLDS = {
 - Lowering to 65% allows progression while maintaining quality
 - Progressive schedule maintains difficulty increase
 
-### 3. Configuration Template (npp-rl)
+### 3. Training Script Enhancements (npp-rl)
 
-**File**: `npp-rl/config_optimized_week1.json`
+**File**: `npp-rl/scripts/lib/training.sh`
 
-Key additions:
-```json
-{
-  "enable_lr_annealing": true,
-  "initial_lr": 0.0003,
-  "final_lr": 0.00003,
-  
-  "enable_state_stacking": true,
-  "state_stack_size": 4,
-  "frame_stack_padding": "repeat",
-  
-  "curriculum_threshold": 0.65
-}
+Key additions to the training command:
+```bash
+python scripts/train_and_compare.py \
+    # ... existing args ...
+    --enable-state-stacking \
+    --state-stack-size 4 \
+    --enable-lr-annealing \
+    --debug
 ```
 
+**Command-line flags added**:
+- `--enable-state-stacking`: Enable temporal context (4 frame history)
+- `--state-stack-size 4`: Stack 4 frames (68 × 4 = 272 total features)
+- `--enable-lr-annealing`: Linear LR decay from 3e-4 to 0 for convergence
+
 **Impact**: 
-- LR annealing improves convergence
-- State stacking provides temporal context (68 × 4 = 272 features)
-- Updated curriculum threshold matches new defaults
+- LR annealing improves final-stage convergence
+- State stacking provides critical temporal information for physics
+- Minimal overhead (~4x features but reachable computation cached)
 
 ---
 
@@ -253,7 +259,17 @@ Curriculum progression:        YES (stages 0-3)
 ### Phase 1: Quick Validation (100k steps, ~30 min)
 ```bash
 cd /workspace/npp-rl
-python scripts/train_rl_agent.py config_optimized_week1.json --total_timesteps 100000
+python scripts/train_and_compare.py \
+    --experiment-name week1_validation_quick \
+    --architectures mlp_baseline \
+    --train-dataset ~/datasets/train \
+    --test-dataset ~/datasets/test \
+    --use-curriculum \
+    --total-timesteps 100000 \
+    --enable-state-stacking \
+    --state-stack-size 4 \
+    --enable-lr-annealing \
+    --output-dir experiments/
 ```
 
 **Metrics to check**:
@@ -264,7 +280,17 @@ python scripts/train_rl_agent.py config_optimized_week1.json --total_timesteps 1
 
 ### Phase 2: Curriculum Validation (500k steps, ~2.5 hours)
 ```bash
-python scripts/train_rl_agent.py config_optimized_week1.json --total_timesteps 500000
+python scripts/train_and_compare.py \
+    --experiment-name week1_validation_medium \
+    --architectures mlp_baseline \
+    --train-dataset ~/datasets/train \
+    --test-dataset ~/datasets/test \
+    --use-curriculum \
+    --total-timesteps 500000 \
+    --enable-state-stacking \
+    --state-stack-size 4 \
+    --enable-lr-annealing \
+    --output-dir experiments/
 ```
 
 **Metrics to check**:
@@ -275,7 +301,17 @@ python scripts/train_rl_agent.py config_optimized_week1.json --total_timesteps 5
 
 ### Phase 3: Full Run (2M steps, ~10 hours)
 ```bash
-python scripts/train_rl_agent.py config_optimized_week1.json --total_timesteps 2000000
+python scripts/train_and_compare.py \
+    --experiment-name week1_validation_full \
+    --architectures mlp_baseline \
+    --train-dataset ~/datasets/train \
+    --test-dataset ~/datasets/test \
+    --use-curriculum \
+    --total-timesteps 2000000 \
+    --enable-state-stacking \
+    --state-stack-size 4 \
+    --enable-lr-annealing \
+    --output-dir experiments/
 ```
 
 **Metrics to check**:
@@ -368,39 +404,53 @@ After validating Week 1 changes, consider:
 2. `npp-rl/npp_rl/training/curriculum_manager.py`
    - Stage thresholds for simplest and simplest_with_mines
 
-### New Files
-1. `npp-rl/config_optimized_week1.json`
-   - Template configuration with all Week 1 fixes
+3. `npp-rl/scripts/lib/training.sh`
+   - Added `--enable-state-stacking`, `--state-stack-size 4`, `--enable-lr-annealing`
 
-2. `/workspace/COMPREHENSIVE_RL_ANALYSIS.md`
+### New Files
+1. `npp-rl/docs/COMPREHENSIVE_RL_ANALYSIS.md`
    - Full analysis of training issues and recommendations
 
-3. `/workspace/OBSERVATION_SPACE_UTILIZATION_ANALYSIS.md`
+2. `npp-rl/docs/OBSERVATION_SPACE_UTILIZATION_ANALYSIS.md`
    - Deep dive into observation space and feature utilization
 
-4. `/workspace/IMPLEMENTATION_SUMMARY.md` (this file)
+3. `npp-rl/docs/IMPLEMENTATION_SUMMARY.md` (this file)
    - Summary of implemented changes
 
 ---
 
-## Commit Message Template
+## Rollback Instructions
+
+### Revert nclone reward changes:
+```bash
+cd nclone
+git revert HEAD  # Reverts reward_constants.py changes
+```
+
+### Revert npp-rl curriculum and training changes:
+```bash
+cd npp-rl
+git revert HEAD~2  # Reverts last 2 commits (docs + curriculum/training)
+```
+
+### Manual rollback of training.sh:
+Remove the three added lines from `scripts/lib/training.sh`:
+- `--enable-state-stacking \`
+- `--state-stack-size 4 \`
+- `--enable-lr-annealing \`
+
+---
+
+## Commit Summary
 
 ```
-feat: Week 1 RL optimization - Critical reward and curriculum fixes
-
-CRITICAL FIXES:
-- Reduce time penalty 10x: -0.0001 → -0.00001 (eliminate negative regime)
-- Increase PBRS weights 3x: objective 1.5 → 4.5 (strengthen gradient)
-- Increase hazard/impact PBRS 3.75x: 0.04 → 0.15 (better safety)
-- Increase momentum bonus 5x: 0.0002 → 0.001 (encourage speed)
-- Increase buffer bonus 2x: 0.05 → 0.1 (reward skill)
-- Lower curriculum thresholds: stage 1 from 75% → 65% (allow progression)
-
-EXPECTED IMPACT:
-- Positive reward regime (was negative)
-- Curriculum progression (was stuck at stage 1)
-- +26-31% success rate on stage 1
-- Progression to stages 2-3 within 500k steps
+nclone commit (rl-optimization-nov2025):
+- feat: Week 1 RL optimization - Critical reward fixes
+  
+npp-rl commits (comprehensive-rl-optimization-nov2025):
+1. feat: Week 1 RL optimization - Critical curriculum fixes and config
+2. docs: Add comprehensive RL analysis and implementation guides
+3. feat: Enable state stacking and LR annealing in training script
 
 ANALYSIS BASIS:
 - Comprehensive TensorBoard analysis of 2M step run
