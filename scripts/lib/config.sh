@@ -33,6 +33,7 @@ LOCAL_LOG_DIR="./logs/arch_comparison_${TIMESTAMP}"
 TENSORBOARD_PORT=6006
 TENSORBOARD_PID=""
 LOG_TAIL_PID=""
+OPTUNA_DASHBOARD_PID=""
 
 # Local paths (script runs from npp-rl directory)
 NPP_RL_DIR="$(pwd)"

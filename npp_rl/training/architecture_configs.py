@@ -46,7 +46,7 @@ class ModalityConfig:
     use_global_view: bool = True  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
-        True  # Game state vector (26 features after redundancy removal)
+        True  # Game state vector (GAME_STATE_CHANNELS features, currently 29)
     )
     use_reachability: bool = True  # Reachability features (8 features)
 
@@ -581,7 +581,7 @@ def create_vision_free_simplified_config() -> ArchitectureConfig:
 
 def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
     """Full HGT architecture designed for use with frame stacking.
-    
+
     Note: This config defines the architecture that processes stacked frames.
     Frame stacking must be enabled separately via command-line flags:
         --enable-visual-frame-stacking --visual-stack-size 4
@@ -637,8 +637,8 @@ def create_full_hgt_frame_stacked_config() -> ArchitectureConfig:
 
 def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
     """Vision-free architecture designed for use with state stacking.
-    
-    Note: This config defines the architecture. Frame stacking must be enabled 
+
+    Note: This config defines the architecture. Frame stacking must be enabled
     separately via: --enable-state-stacking --state-stack-size 4
     """
     return ArchitectureConfig(
@@ -681,8 +681,8 @@ def create_vision_free_frame_stacked_config() -> ArchitectureConfig:
 
 def create_visual_frame_stacked_only_config() -> ArchitectureConfig:
     """Visual frames with stacking only - tests if visual temporal info is sufficient.
-    
-    Note: This config defines the architecture. Visual frame stacking must be enabled 
+
+    Note: This config defines the architecture. Visual frame stacking must be enabled
     separately via: --enable-visual-frame-stacking --visual-stack-size 4
     (Do NOT enable state stacking for this config)
     """

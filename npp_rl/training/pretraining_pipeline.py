@@ -37,6 +37,7 @@ class PretrainingPipeline:
         output_dir: Path,
         tensorboard_writer: Optional[SummaryWriter] = None,
         frame_stack_config: Optional[Dict] = None,
+        test_dataset_path: Optional[str] = None,
     ):
         """Initialize pretraining pipeline.
 
@@ -51,12 +52,14 @@ class PretrainingPipeline:
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str ('zero' or 'repeat')
+            test_dataset_path: Path to test dataset
         """
         self.replay_data_dir = Path(replay_data_dir)
         self.architecture_config = architecture_config
         self.output_dir = Path(output_dir)
         self.tensorboard_writer = tensorboard_writer
         self.frame_stack_config = frame_stack_config or {}
+        self.test_dataset_path = test_dataset_path
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +91,7 @@ class PretrainingPipeline:
         use_cache: bool = True,
         max_replays: Optional[int] = None,
         filter_successful_only: bool = True,
+        num_workers: Optional[int] = None,
     ) -> Optional[BCReplayDataset]:
         """Process replay data into BC training format.
 
@@ -97,6 +101,9 @@ class PretrainingPipeline:
             use_cache: If True, use cached processed data if available
             max_replays: Maximum number of replays to load (None for all)
             filter_successful_only: Only include successful replays
+            num_workers: Number of parallel workers for processing replays.
+                If None, auto-detects to min(len(replay_files), 4).
+                Set to 1 for sequential processing.
 
         Returns:
             BCReplayDataset instance, or None if no data available
@@ -123,6 +130,7 @@ class PretrainingPipeline:
                 max_replays=max_replays,
                 architecture_config=self.architecture_config,
                 frame_stack_config=self.frame_stack_config,
+                num_workers=num_workers,
             )
 
             if len(dataset) == 0:
@@ -180,6 +188,7 @@ class PretrainingPipeline:
                 validation_split=0.1,
                 tensorboard_writer=self.tensorboard_writer,
                 frame_stack_config=self.frame_stack_config,
+                test_dataset_path=self.test_dataset_path,
             )
 
             # Run training
@@ -275,6 +284,8 @@ def run_bc_pretraining_if_available(
     max_replays: Optional[int] = None,
     tensorboard_writer: Optional[SummaryWriter] = None,
     frame_stack_config: Optional[Dict] = None,
+    test_dataset_path: Optional[str] = None,
+    dataset_num_workers: Optional[int] = None,
 ) -> Optional[str]:
     """Convenience function to run BC pretraining if replay data available.
 
@@ -285,11 +296,15 @@ def run_bc_pretraining_if_available(
         epochs: Number of BC epochs
         batch_size: BC batch size
         learning_rate: Learning rate
-        num_workers: Number of data loading workers
+        num_workers: Number of data loading workers (for DataLoader)
         device: Device to train on
         max_replays: Maximum number of replays to use (None for all)
         tensorboard_writer: Optional TensorBoard writer
         frame_stack_config: Frame stacking configuration dict
+        test_dataset_path: Path to test dataset
+        dataset_num_workers: Number of parallel workers for processing replays.
+            If None, auto-detects to min(len(replay_files), 4).
+            Set to 1 for sequential processing.
 
     Returns:
         Path to pretrained checkpoint, or None if skipped/failed
@@ -314,6 +329,7 @@ def run_bc_pretraining_if_available(
             output_dir=output_dir,
             tensorboard_writer=tensorboard_writer,
             frame_stack_config=frame_stack_config,
+            test_dataset_path=test_dataset_path,
         )
 
         # Check for existing checkpoint
@@ -329,6 +345,7 @@ def run_bc_pretraining_if_available(
             use_cache=True,
             max_replays=max_replays,
             filter_successful_only=True,
+            num_workers=dataset_num_workers,
         )
 
         # Run pretraining

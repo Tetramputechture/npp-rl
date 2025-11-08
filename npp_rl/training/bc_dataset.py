@@ -11,6 +11,7 @@ from collections import deque
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+import multiprocessing
 
 from nclone.replay import CompactReplay
 from nclone.gym_environment.npp_environment import NppEnvironment
@@ -151,6 +152,342 @@ class ObservationNormalizer:
             return False
 
 
+def _process_replay_file_worker(
+    replay_path: Path,
+    cache_dir: Path,
+    use_cache: bool,
+    filter_successful_only: bool,
+    architecture_config: Optional[Any],
+    frame_stack_config: Dict,
+) -> Tuple[Path, List[Tuple[Dict, int]]]:
+    """Worker function to process a single replay file.
+
+    This is a standalone function designed for multiprocessing. It processes
+    a single replay file and returns the results along with the replay path
+    for identification.
+
+    Args:
+        replay_path: Path to replay file
+        cache_dir: Directory for caching processed data
+        use_cache: Whether to use cached processed data
+        filter_successful_only: Only include successful replays
+        architecture_config: Optional architecture config to filter observations
+        frame_stack_config: Frame stacking configuration dict
+
+    Returns:
+        Tuple of (replay_path, samples) where samples is a list of (observation, action) tuples
+    """
+    try:
+        # Check cache first
+        cache_name = replay_path.stem + ".npz"
+        cache_path = cache_dir / cache_name
+
+        if use_cache and cache_path.exists():
+            samples = _load_from_cache_worker(cache_path)
+            return (replay_path, samples)
+
+        # Load replay
+        with open(replay_path, "rb") as f:
+            replay_data = f.read()
+
+        replay = CompactReplay.from_binary(replay_data)
+
+        # Filter by success if requested
+        if filter_successful_only and not replay.success:
+            logger.debug(f"Skipping unsuccessful replay: {replay_path.name}")
+            return (replay_path, [])
+
+        # Generate observations by simulating the replay
+        samples = _simulate_replay_worker(
+            replay, architecture_config, frame_stack_config, filter_successful_only
+        )
+
+        # Save to cache if enabled
+        if use_cache and samples:
+            _save_to_cache_worker(samples, cache_path)
+
+        return (replay_path, samples)
+
+    except Exception as e:
+        logger.warning(f"Failed to process {replay_path.name}: {e}")
+        return (replay_path, [])
+
+
+def _simulate_replay_worker(
+    replay: CompactReplay,
+    architecture_config: Optional[Any],
+    frame_stack_config: Dict,
+    filter_successful_only: bool,
+) -> List[Tuple[Dict, int]]:
+    """Simulate a replay to generate observations and actions with frame stacking.
+
+    Worker version that doesn't rely on instance state.
+
+    Args:
+        replay: CompactReplay object
+        architecture_config: Optional architecture config to filter observations
+        frame_stack_config: Frame stacking configuration dict
+        filter_successful_only: Whether to filter by success
+
+    Returns:
+        List of (observation, action) tuples
+    """
+    samples = []
+
+    # Extract frame stacking config
+    enable_visual_stacking = frame_stack_config.get(
+        "enable_visual_frame_stacking", False
+    )
+    visual_stack_size = frame_stack_config.get("visual_stack_size", 4)
+    enable_state_stacking = frame_stack_config.get("enable_state_stacking", False)
+    state_stack_size = frame_stack_config.get("state_stack_size", 4)
+    padding_type = frame_stack_config.get("padding_type", "zero")
+
+    # Initialize frame buffers
+    player_frame_buffer = deque(
+        maxlen=visual_stack_size if enable_visual_stacking else 1
+    )
+    game_state_buffer = deque(maxlen=state_stack_size if enable_state_stacking else 1)
+
+    try:
+        # Use ReplayExecutor to regenerate observations deterministically
+        from nclone.replay.replay_executor import ReplayExecutor
+
+        executor = ReplayExecutor()
+
+        # Execute replay to get observations
+        observations = executor.execute_replay(replay.map_data, replay.input_sequence)
+
+        # Validate success by checking final observation
+        if filter_successful_only and observations:
+            try:
+                raw_obs = executor._get_raw_observation()
+                if "player_won" in raw_obs:
+                    if not raw_obs["player_won"]:
+                        logger.debug(
+                            f"Skipping replay - player_won=False at final frame. "
+                            f"Episode: {replay.episode_id}"
+                        )
+                        executor.close()
+                        return []
+                elif not replay.success:
+                    logger.debug(
+                        f"Skipping replay - success flag is False. Episode: {replay.episode_id}"
+                    )
+                    executor.close()
+                    return []
+            except AttributeError:
+                if not replay.success:
+                    logger.debug(
+                        f"Skipping replay - success flag is False. Episode: {replay.episode_id}"
+                    )
+                    executor.close()
+                    return []
+
+        executor.close()
+
+        # Process observations with frame stacking
+        for obs_data in observations:
+            observation = _process_observation_worker(
+                obs_data["observation"], architecture_config
+            )
+            action = obs_data["action"]
+
+            # Add to frame buffers
+            if enable_visual_stacking:
+                player_frame = observation.get("player_frame")
+                if player_frame is not None:
+                    player_frame_buffer.append(player_frame.copy())
+                    # Pad initial frames
+                    while len(player_frame_buffer) < visual_stack_size:
+                        if padding_type == "repeat" and len(player_frame_buffer) > 0:
+                            player_frame_buffer.appendleft(
+                                player_frame_buffer[0].copy()
+                            )
+                        elif player_frame is not None:
+                            player_frame_buffer.appendleft(np.zeros_like(player_frame))
+                        else:
+                            break
+
+            if enable_state_stacking:
+                game_state = observation.get("game_state")
+                if game_state is not None:
+                    game_state_buffer.append(game_state.copy())
+                    # Pad initial states
+                    while len(game_state_buffer) < state_stack_size:
+                        if padding_type == "repeat" and len(game_state_buffer) > 0:
+                            game_state_buffer.appendleft(game_state_buffer[0].copy())
+                        else:
+                            game_state_buffer.appendleft(np.zeros_like(game_state))
+
+            # Check if buffers are ready
+            visual_ready = not enable_visual_stacking or (
+                len(player_frame_buffer) >= visual_stack_size
+            )
+            state_ready = not enable_state_stacking or (
+                len(game_state_buffer) >= state_stack_size
+            )
+
+            # Only create samples once buffers are ready
+            if visual_ready and state_ready:
+                stacked_obs = observation.copy()
+
+                if enable_visual_stacking and "player_frame" in observation:
+                    if len(player_frame_buffer) > 0:
+                        stacked_obs["player_frame"] = np.array(
+                            list(player_frame_buffer)
+                        )
+
+                if enable_state_stacking and "game_state" in observation:
+                    if len(game_state_buffer) > 0:
+                        stacked_obs["game_state"] = np.concatenate(
+                            list(game_state_buffer)
+                        )
+
+                samples.append((stacked_obs, int(action)))
+
+    except Exception as e:
+        logger.warning(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
+        return []
+
+    return samples
+
+
+def _process_observation_worker(obs: Dict, architecture_config: Optional[Any]) -> Dict:
+    """Process observation into format suitable for caching (worker version).
+
+    Args:
+        obs: Raw observation from environment or ReplayExecutor
+        architecture_config: Optional architecture config to filter observations
+
+    Returns:
+        Processed observation dictionary
+    """
+    processed = {}
+
+    # Define all possible observation keys
+    all_keys = {
+        "player_frame": "player_frame",
+        "global_view": "global_view",
+        "game_state": "game_state",
+        "reachability_features": "reachability_features",
+        "entity_positions": "entity_positions",
+        "graph_node_feats": "graph_node_feats",
+        "graph_edge_index": "graph_edge_index",
+        "graph_edge_feats": "graph_edge_feats",
+        "graph_node_mask": "graph_node_mask",
+        "graph_edge_mask": "graph_edge_mask",
+        "graph_node_types": "graph_node_types",
+        "graph_edge_types": "graph_edge_types",
+    }
+
+    # Filter based on architecture config if provided
+    if architecture_config is not None and hasattr(architecture_config, "modalities"):
+        modalities = architecture_config.modalities
+
+        required_keys = []
+        if modalities.use_player_frame:
+            required_keys.append("player_frame")
+        if modalities.use_global_view:
+            required_keys.append("global_view")
+        if modalities.use_game_state:
+            required_keys.append("game_state")
+        if modalities.use_reachability:
+            required_keys.append("reachability_features")
+        if modalities.use_graph:
+            required_keys.extend(
+                [
+                    "graph_node_feats",
+                    "graph_edge_index",
+                    "graph_edge_feats",
+                    "graph_node_mask",
+                    "graph_edge_mask",
+                    "graph_node_types",
+                    "graph_edge_types",
+                ]
+            )
+    else:
+        required_keys = list(all_keys.keys())
+
+    # Copy only required keys that are present in observation
+    for key in required_keys:
+        if key in obs:
+            processed[key] = obs[key].copy()
+
+    return processed
+
+
+def _save_to_cache_worker(samples: List[Tuple[Dict, int]], cache_path: Path) -> None:
+    """Save processed samples to cache file (worker version).
+
+    Args:
+        samples: List of (observation, action) tuples
+        cache_path: Path to cache file
+    """
+    if not samples:
+        return
+
+    try:
+        cache_data = {"num_samples": len(samples)}
+
+        for i, (obs, action) in enumerate(samples):
+            for key, value in obs.items():
+                cache_key = f"obs_{i}_{key}"
+                cache_data[cache_key] = value
+            cache_data[f"action_{i}"] = action
+
+        np.savez_compressed(cache_path, **cache_data)
+        logger.debug(f"Cached {len(samples)} samples to {cache_path.name}")
+
+    except Exception as e:
+        logger.warning(f"Failed to save cache to {cache_path}: {e}")
+
+
+def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
+    """Load processed samples from cache file (worker version).
+
+    Args:
+        cache_path: Path to cache file
+
+    Returns:
+        List of (observation, action) tuples
+    """
+    try:
+        data = np.load(cache_path, allow_pickle=False)
+        num_samples = int(data["num_samples"])
+
+        samples = []
+        for i in range(num_samples):
+            obs = {}
+            for key in [
+                "game_state",
+                "global_view",
+                "reachability_features",
+                "player_frame",
+                "entity_positions",
+                "graph_node_feats",
+                "graph_edge_index",
+                "graph_edge_feats",
+                "graph_node_mask",
+                "graph_edge_mask",
+                "graph_node_types",
+                "graph_edge_types",
+            ]:
+                cache_key = f"obs_{i}_{key}"
+                if cache_key in data:
+                    obs[key] = data[cache_key]
+
+            action = int(data[f"action_{i}"])
+            samples.append((obs, action))
+
+        logger.debug(f"Loaded {len(samples)} samples from cache {cache_path.name}")
+        return samples
+
+    except Exception as e:
+        logger.warning(f"Failed to load cache from {cache_path}: {e}")
+        return []
+
+
 class BCReplayDataset(Dataset):
     """PyTorch Dataset for behavioral cloning from N++ replay files.
 
@@ -175,6 +512,7 @@ class BCReplayDataset(Dataset):
         architecture_config: Optional[Any] = None,
         normalize_observations: bool = True,
         frame_stack_config: Optional[Dict] = None,
+        num_workers: Optional[int] = None,
     ):
         """Initialize BC replay dataset.
 
@@ -192,6 +530,9 @@ class BCReplayDataset(Dataset):
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str ('zero' or 'repeat')
+            num_workers: Number of parallel workers for processing replays.
+                If None, auto-detects to min(len(replay_files), 4).
+                Set to 1 for sequential processing.
         """
         self.replay_dir = Path(replay_dir)
         self.cache_dir = Path(cache_dir) if cache_dir else self.replay_dir / "cache"
@@ -199,6 +540,7 @@ class BCReplayDataset(Dataset):
         self.filter_successful_only = filter_successful_only
         self.architecture_config = architecture_config
         self.normalize_observations = normalize_observations
+        self.num_workers = num_workers
 
         # Frame stacking configuration
         self.frame_stack_config = frame_stack_config or {}
@@ -309,25 +651,86 @@ class BCReplayDataset(Dataset):
         Args:
             replay_files: List of replay file paths
         """
-        for replay_path in replay_files:
+        if not replay_files:
+            return
+
+        # Determine number of workers
+        num_workers = self.num_workers
+        if num_workers is None:
+            num_workers = min(len(replay_files), 2)
+
+        # Use sequential processing if num_workers is 1
+        if num_workers == 1:
+            for replay_path in replay_files:
+                try:
+                    cache_path = self._get_cache_path(replay_path)
+
+                    if self.use_cache and cache_path.exists():
+                        samples = self._load_from_cache(cache_path)
+                    else:
+                        samples = self._process_replay_file(replay_path)
+
+                        if self.use_cache:
+                            self._save_to_cache(samples, cache_path)
+
+                    self.samples.extend(samples)
+
+                except Exception as e:
+                    logger.warning(f"Failed to process {replay_path.name}: {e}")
+                    continue
+        else:
+            # Parallel processing with multiprocessing
+            logger.info(
+                f"Processing {len(replay_files)} replay files with {num_workers} workers"
+            )
+
             try:
-                # Check cache first
-                cache_path = self._get_cache_path(replay_path)
+                with multiprocessing.Pool(
+                    processes=num_workers, maxtasksperchild=1
+                ) as pool:
+                    # Prepare arguments for worker function
+                    worker_args = [
+                        (
+                            replay_path,
+                            self.cache_dir,
+                            self.use_cache,
+                            self.filter_successful_only,
+                            self.architecture_config,
+                            self.frame_stack_config,
+                        )
+                        for replay_path in replay_files
+                    ]
 
-                if self.use_cache and cache_path.exists():
-                    samples = self._load_from_cache(cache_path)
-                else:
-                    samples = self._process_replay_file(replay_path)
+                    # Process replays in parallel
+                    results = pool.starmap(_process_replay_file_worker, worker_args)
 
-                    if self.use_cache:
-                        self._save_to_cache(samples, cache_path)
-
-                # Add samples to dataset
-                self.samples.extend(samples)
+                    # Collect results
+                    for replay_path, samples in results:
+                        if samples:
+                            self.samples.extend(samples)
 
             except Exception as e:
-                logger.warning(f"Failed to process {replay_path.name}: {e}")
-                continue
+                logger.error(
+                    f"Multiprocessing failed: {e}. Falling back to sequential processing."
+                )
+                # Fall back to sequential processing
+                for replay_path in replay_files:
+                    try:
+                        cache_path = self._get_cache_path(replay_path)
+
+                        if self.use_cache and cache_path.exists():
+                            samples = self._load_from_cache(cache_path)
+                        else:
+                            samples = self._process_replay_file(replay_path)
+
+                        if self.use_cache:
+                            self._save_to_cache(samples, cache_path)
+
+                        self.samples.extend(samples)
+
+                    except Exception as e2:
+                        logger.warning(f"Failed to process {replay_path.name}: {e2}")
+                        continue
 
     def _process_replay_file(self, replay_path: Path) -> List[Tuple[Dict, int]]:
         """Process a single replay file into training samples.

@@ -471,6 +471,7 @@ class CurriculumManager:
                 "recent_episodes": 0,
                 "can_advance": False,
                 "min_episodes": stage_min_episodes,
+                "advancement_threshold": stage_threshold,
                 "trend": 0.0,
                 "can_early_advance": False,
             }

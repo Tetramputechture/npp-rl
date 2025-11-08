@@ -620,7 +620,7 @@ class RouteVisualizationCallback(BaseCallback):
                 fill=False,
                 linestyle=":",
                 linewidth=1,
-                alpha=0.7,
+                alpha=0.8,
                 zorder=3,
             )
             ax.add_patch(switch_circle)
@@ -632,7 +632,7 @@ class RouteVisualizationCallback(BaseCallback):
                 door_x,
                 door_y,
                 c="purple",
-                s=200,
+                s=100,
                 marker="*",
                 label="Exit Door",
                 zorder=6,
@@ -649,7 +649,7 @@ class RouteVisualizationCallback(BaseCallback):
                 fill=False,
                 linestyle=":",
                 linewidth=1,
-                alpha=0.4,
+                alpha=0.8,
                 zorder=3,
             )
             ax.add_patch(door_circle)
@@ -688,7 +688,6 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Combine into multi-line title
         ax.set_title(title_parts[0] + "\n" + " | ".join(title_parts[1:]))
-        ax.legend(loc="best")
         ax.grid(True, alpha=0.3)
 
         # Set axis limits to the calculated bounds (zoomed to route area)

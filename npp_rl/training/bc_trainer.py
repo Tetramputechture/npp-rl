@@ -52,6 +52,7 @@ class BCTrainer:
         validation_split: float = 0.1,
         tensorboard_writer: Optional[SummaryWriter] = None,
         frame_stack_config: Optional[Dict] = None,
+        test_dataset_path: Optional[str] = None,
     ):
         """Initialize BC trainer.
 
@@ -69,6 +70,7 @@ class BCTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.frame_stack_config = frame_stack_config or {}
+        self.test_dataset_path = test_dataset_path
 
         # Setup device
         if device == "auto":
@@ -88,7 +90,9 @@ class BCTrainer:
         from gymnasium import spaces
 
         obs_space = create_observation_space_from_config(
-            architecture_config, frame_stack_config=self.frame_stack_config
+            architecture_config,
+            frame_stack_config=self.frame_stack_config,
+            test_dataset_path=self.test_dataset_path,
         )
         action_space = spaces.Discrete(6)  # N++ has 6 actions
 

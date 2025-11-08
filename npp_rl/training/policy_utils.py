@@ -24,12 +24,14 @@ logger = logging.getLogger(__name__)
 def create_observation_space_from_config(
     architecture_config: ArchitectureConfig,
     frame_stack_config: Optional[Dict] = None,
+    test_dataset_path: Optional[str] = None,
 ) -> spaces.Dict:
     """Create observation space based on architecture configuration.
 
     Args:
         architecture_config: Architecture configuration
         frame_stack_config: Frame stacking configuration (must match training)
+        test_dataset_path: Path to test dataset (for environment initialization)
 
     Returns:
         Gymnasium Dict observation space
@@ -38,7 +40,7 @@ def create_observation_space_from_config(
     from nclone.gym_environment.config import EnvironmentConfig
 
     # Create environment
-    config = EnvironmentConfig.for_training()
+    config = EnvironmentConfig.for_training(test_dataset_path=test_dataset_path)
     env = NppEnvironment(config=config)
 
     # Apply FrameStackWrapper if frame stacking is enabled

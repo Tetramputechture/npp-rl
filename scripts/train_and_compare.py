@@ -102,6 +102,12 @@ def parse_args():
         default=128,  # Updated from 64 for faster convergence
         help="BC training batch size",
     )
+    parser.add_argument(
+        "--bc-num-workers",
+        type=int,
+        default=4,
+        help="Number of workers for BC dataset processing",
+    )
 
     # Training options
     parser.add_argument(
@@ -802,7 +808,6 @@ def train_worker(
         experiment_name: Name of experiment
     """
     try:
-        # CRITICAL: Initialize distributed training using distributed_utils
         setup_distributed(
             rank=rank, world_size=world_size, backend=args.distributed_backend
         )
@@ -873,6 +878,8 @@ def train_worker(
                         tensorboard_writer=TensorBoardManager(
                             exp_dir / arch_name / "pretrain" / "tensorboard"
                         ),
+                        test_dataset_path=str(args.test_dataset),
+                        dataset_num_workers=args.bc_num_workers,
                     )
                     conditions = [
                         ("no_pretrain", None),
@@ -889,6 +896,8 @@ def train_worker(
                         tensorboard_writer=TensorBoardManager(
                             exp_dir / arch_name / "pretrain" / "tensorboard"
                         ),
+                        test_dataset_path=str(args.test_dataset),
+                        dataset_num_workers=args.bc_num_workers,
                     )
                     if pretrained_ckpt:
                         conditions = [("with_pretrain", pretrained_ckpt)]
@@ -1207,6 +1216,8 @@ def main():
                 epochs=args.bc_epochs,
                 batch_size=args.bc_batch_size,
                 frame_stack_config=bc_frame_stack_config,
+                test_dataset_path=str(args.test_dataset),
+                dataset_num_workers=args.bc_num_workers,
             )
             conditions = [("no_pretrain", None), ("with_pretrain", pretrained_ckpt)]
         else:
@@ -1218,6 +1229,8 @@ def main():
                 epochs=args.bc_epochs,
                 batch_size=args.bc_batch_size,
                 frame_stack_config=bc_frame_stack_config,
+                test_dataset_path=str(args.test_dataset),
+                dataset_num_workers=args.bc_num_workers,
             )
             if pretrained_ckpt:
                 conditions = [("with_pretrain", pretrained_ckpt)]

@@ -266,7 +266,7 @@ def estimate_rollout_buffer_memory_gb(
     # Observation size per step (excluding graph data):
     # - player_frame: 84×84×1 uint8 = 7,056 bytes
     # - global_view: 176×100×1 uint8 = 17,600 bytes
-    # - game_state: 26 float32 = 104 bytes
+    # - game_state: GAME_STATE_CHANNELS float32 (29 features * 4 bytes = 116 bytes)
     # - reachability_features: 8 float32 = 32 bytes
     # - entity_positions: 6 float32 = 24 bytes
     # - switch_states: 25 float32 = 100 bytes

@@ -30,6 +30,7 @@ class EnvironmentFactory:
         pretrained_checkpoint: Optional[str] = None,
         enable_icm: bool = False,
         icm_config: Optional[Dict[str, Any]] = None,
+        test_dataset_path: Optional[str] = None,
     ):
         """Initialize environment factory.
 
@@ -46,8 +47,10 @@ class EnvironmentFactory:
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
             enable_icm: Enable Intrinsic Curiosity Module (ICM)
             icm_config: ICM configuration dict (eta, alpha, etc.)
+            test_dataset_path: Path to test dataset (for evaluation environments)
         """
         self.use_curriculum = use_curriculum
+        self.test_dataset_path = test_dataset_path
         self.curriculum_manager = curriculum_manager
         self.frame_stack_config = frame_stack_config or {}
         self.pbrs_gamma = pbrs_gamma
@@ -196,7 +199,9 @@ class EnvironmentFactory:
         logger.info("Creating evaluation environment...")
 
         def make_eval_env():
-            env_config = EnvironmentConfig.for_training()
+            env_config = EnvironmentConfig.for_training(
+                test_dataset_path=self.test_dataset_path
+            )
             env_config.graph.enable_graph_for_observations = False
 
             env = NppEnvironment(config=env_config)
@@ -246,7 +251,9 @@ class EnvironmentFactory:
             if rank == 0:
                 logger.info("[Env 0] Creating NppEnvironment...")
 
-            env_config = EnvironmentConfig.for_training()
+            env_config = EnvironmentConfig.for_training(
+                test_dataset_path=self.test_dataset_path
+            )
 
             # Graph observations remain False by default for performance
             # They can be enabled separately if architecture uses graph modality

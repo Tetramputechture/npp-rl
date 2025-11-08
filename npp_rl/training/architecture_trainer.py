@@ -5,6 +5,7 @@ setup, training loop, evaluation, and checkpointing.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -19,6 +20,7 @@ from npp_rl.training.curriculum_manager import create_curriculum_manager
 from npp_rl.training.bc_weight_loader import BCWeightLoader
 from npp_rl.training.environment_factory import EnvironmentFactory
 from npp_rl.training.callback_factory import CallbackFactory
+from npp_rl.agents.masked_actor_critic_policy import MaskedActorCriticPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +79,11 @@ class ArchitectureTrainer:
             icm_config: ICM configuration dict (eta, alpha, etc.)
         """
         self.architecture_config = architecture_config
-        self.train_dataset_path = Path(train_dataset_path)
-        self.test_dataset_path = Path(test_dataset_path)
+        # Resolve paths to absolute to ensure consistent resolution regardless of working directory
+        # (important for distributed training where worker processes may have different CWDs)
+        # Expand user home directory (~) before resolving
+        self.train_dataset_path = Path(os.path.expanduser(train_dataset_path)).resolve()
+        self.test_dataset_path = Path(os.path.expanduser(test_dataset_path)).resolve()
         self.output_dir = Path(output_dir)
         self.device_id = device_id
         self.world_size = world_size
@@ -109,6 +114,8 @@ class ArchitectureTrainer:
 
         logger.info(f"Initialized trainer for architecture: {architecture_config.name}")
         logger.info(f"Output directory: {self.output_dir}")
+        logger.info(f"Train dataset: {self.train_dataset_path}")
+        logger.info(f"Test dataset: {self.test_dataset_path}")
         logger.info(f"Device: cuda:{device_id}")
         logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Curriculum learning: {use_curriculum}")
@@ -117,6 +124,52 @@ class ArchitectureTrainer:
         logger.info(f"  Mine avoidance reward: {enable_mine_avoidance_reward}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
+
+    @classmethod
+    def from_hyperparameter_dict(
+        cls,
+        architecture_config: ArchitectureConfig,
+        hyperparameters: Dict[str, Any],
+        train_dataset_path: str,
+        test_dataset_path: str,
+        output_dir: str,
+        experiment_name: str,
+        device_id: int = 0,
+        **kwargs,
+    ) -> "ArchitectureTrainer":
+        """
+        Create ArchitectureTrainer from Optuna hyperparameter dictionary.
+
+        Args:
+            architecture_config: Architecture configuration
+            hyperparameters: Dict of sampled hyperparameters from Optuna trial
+            train_dataset_path: Path to training dataset
+            test_dataset_path: Path to test dataset
+            output_dir: Output directory for checkpoints/logs
+            experiment_name: Experiment name
+            device_id: CUDA device ID
+            **kwargs: Additional arguments passed to __init__
+
+        Returns:
+            Configured ArchitectureTrainer instance
+        """
+        # Create output directory with experiment name
+        output_path = Path(output_dir) / experiment_name
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        trainer = cls(
+            architecture_config=architecture_config,
+            train_dataset_path=train_dataset_path,
+            test_dataset_path=test_dataset_path,
+            output_dir=output_path,
+            device_id=device_id,
+            **kwargs,
+        )
+
+        # Store hyperparameters for use in setup_model()
+        trainer._optuna_hyperparameters = hyperparameters
+
+        return trainer
 
     def setup_model(self, pretrained_checkpoint: Optional[str] = None, **ppo_kwargs):
         """Initialize model configuration from architecture config.
@@ -134,15 +187,43 @@ class ArchitectureTrainer:
         self.pretrained_checkpoint = pretrained_checkpoint
 
         # Set up policy kwargs with architecture config
+        # Build net_arch from Optuna params if available
+        if hasattr(self, "_optuna_hyperparameters"):
+            optuna_params = self._optuna_hyperparameters
+            if "net_arch_depth" in optuna_params and "net_arch_width" in optuna_params:
+                net_arch = [optuna_params["net_arch_width"]] * optuna_params[
+                    "net_arch_depth"
+                ]
+                default_net_arch = {"pi": net_arch, "vf": net_arch}
+            else:
+                default_net_arch = {"pi": [256, 256, 128], "vf": [256, 256, 128]}
+        else:
+            default_net_arch = {"pi": [256, 256, 128], "vf": [256, 256, 128]}
+
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
             "features_extractor_kwargs": {
                 "config": self.architecture_config,
                 "frame_stack_config": self.frame_stack_config,
             },
-            "net_arch": {"pi": [256, 256, 128], "vf": [256, 256, 128]},
+            "net_arch": default_net_arch,
             "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
         }
+
+        # Override features_dim if specified in Optuna params
+        if hasattr(self, "_optuna_hyperparameters"):
+            optuna_params = self._optuna_hyperparameters
+            if "features_dim" in optuna_params:
+                # Update architecture config's features_dim (create modified config)
+                from dataclasses import replace
+
+                self.architecture_config = replace(
+                    self.architecture_config, features_dim=optuna_params["features_dim"]
+                )
+                # Update features_extractor_kwargs
+                self.policy_kwargs["features_extractor_kwargs"]["config"] = (
+                    self.architecture_config
+                )
 
         # Set policy class based on hierarchical PPO flag
         if self.use_hierarchical_ppo:
@@ -166,7 +247,11 @@ class ArchitectureTrainer:
                 "Using HierarchicalActorCriticPolicy with hierarchical parameters"
             )
         else:
-            self.policy_class = "MultiInputPolicy"
+            # Use MaskedActorCriticPolicy for action masking support
+            self.policy_class = MaskedActorCriticPolicy
+            logger.info(
+                "Using MaskedActorCriticPolicy with action masking for invalid actions"
+            )
 
         # Configure hyperparameters
         self._configure_hyperparameters(ppo_kwargs)
@@ -225,7 +310,39 @@ class ArchitectureTrainer:
             "device": f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         }
 
-        # Merge with provided hyperparameters
+        # If Optuna hyperparameters provided, override defaults
+        if hasattr(self, "_optuna_hyperparameters"):
+            optuna_params = self._optuna_hyperparameters
+
+            # Override PPO hyperparameters
+            for key in [
+                "learning_rate",
+                "n_steps",
+                "batch_size",
+                "gamma",
+                "gae_lambda",
+                "clip_range",
+                "clip_range_vf",
+                "ent_coef",
+                "vf_coef",
+                "max_grad_norm",
+                "n_epochs",
+            ]:
+                if key in optuna_params:
+                    default_hyperparams[key] = optuna_params[key]
+
+            # Handle learning rate schedule
+            if "lr_schedule" in optuna_params:
+                if optuna_params["lr_schedule"] == "linear":
+                    from stable_baselines3.common.utils import get_linear_fn
+
+                    base_lr = default_hyperparams["learning_rate"]
+                    default_hyperparams["learning_rate"] = get_linear_fn(
+                        base_lr, 1e-6, 1.0
+                    )
+                    logger.info(f"Using linear LR schedule: {base_lr:.2e} -> 1e-6")
+
+        # Merge with provided hyperparameters (ppo_kwargs takes precedence)
         self.hyperparams = {**default_hyperparams, **ppo_kwargs}
 
         # Log final hyperparameters
@@ -282,6 +399,7 @@ class ArchitectureTrainer:
                 pretrained_checkpoint=self.pretrained_checkpoint,
                 enable_icm=self.use_icm,
                 icm_config=self.icm_config,
+                test_dataset_path=str(self.test_dataset_path),
             )
 
             # Create training environment

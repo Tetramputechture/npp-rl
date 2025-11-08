@@ -96,11 +96,10 @@ train_single_architecture() {
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
             --use-curriculum \
-            --enable-visual-frame-stacking \
-            --visual-stack-size 3 \
             --replay-data-dir ../nclone/bc_replays \
             --bc-epochs 50 \
             --bc-batch-size 128 \
+            --bc-num-workers 6 \
             --hardware-profile auto \
             --total-timesteps 2000000 \
             --distributed-backend nccl \
