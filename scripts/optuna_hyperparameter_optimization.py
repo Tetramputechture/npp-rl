@@ -10,7 +10,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict
 
 import optuna
 from optuna.pruners import MedianPruner
@@ -87,7 +86,9 @@ def parse_args():
     )
 
     # S3 upload
-    parser.add_argument("--s3-bucket", type=str, default=None, help="S3 bucket for uploads")
+    parser.add_argument(
+        "--s3-bucket", type=str, default=None, help="S3 bucket for uploads"
+    )
     parser.add_argument(
         "--s3-prefix", type=str, default="hpo/", help="S3 prefix for uploads"
     )
@@ -95,20 +96,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def objective(
-    trial: optuna.Trial, args, architecture_config
-) -> float:
+def objective(trial: optuna.Trial, args, architecture_config) -> float:
     """
     Optuna objective function to minimize.
-    
+
     Returns: -1 * (0.7 * success_rate + 0.3 * normalized_mean_reward)
     We return negative because Optuna minimizes by default.
-    
+
     Args:
         trial: Optuna trial object
         args: Parsed command-line arguments
         architecture_config: Architecture configuration
-        
+
     Returns:
         Negative optimization metric (to minimize)
     """
@@ -197,7 +196,9 @@ def objective(
     )
 
     # Training settings
-    num_envs = trial.suggest_categorical("num_envs", search_space["num_envs"]["choices"])
+    num_envs = trial.suggest_categorical(
+        "num_envs", search_space["num_envs"]["choices"]
+    )
     hyperparams["lr_schedule"] = trial.suggest_categorical(
         "lr_schedule", search_space["lr_schedule"]["choices"]
     )
@@ -277,7 +278,9 @@ def objective(
         # Calculate optimization metric
         success_rate = eval_results.get("success_rate", 0.0)
         # Use avg_reward from ComprehensiveEvaluator results
-        mean_reward = eval_results.get("avg_reward", eval_results.get("mean_reward", 0.0))
+        mean_reward = eval_results.get(
+            "avg_reward", eval_results.get("mean_reward", 0.0)
+        )
 
         # Normalize reward (assuming range -1000 to 1000)
         normalized_reward = max(0.0, min(1.0, (mean_reward + 1000) / 2000))
@@ -299,7 +302,7 @@ def objective(
         logger.info(f"Trial {trial.number} was pruned")
         raise  # Re-raise to let Optuna handle it
     except Exception as e:
-        logger.error(f"Trial {trial.number} failed: {e}", exc_info=True)
+        print(f"Trial {trial.number} failed: {e}", exc_info=True)
         return float("inf")  # Return worst possible value
     finally:
         trainer.cleanup()
@@ -353,10 +356,10 @@ def generate_visualizations(study: optuna.Study, args) -> None:
                 fig.write_image(str(output_dir / "contour.png"))
                 logger.info("Saved contour plot")
             except Exception as e:
-                logger.warning(f"Could not generate contour plot: {e}")
+                print(f"Could not generate contour plot: {e}")
 
     except Exception as e:
-        logger.warning(f"Could not generate some visualizations: {e}")
+        print(f"Could not generate some visualizations: {e}")
 
 
 def upload_to_s3(args) -> None:
@@ -386,7 +389,7 @@ def upload_to_s3(args) -> None:
 
         logger.info(f"Uploaded results to s3://{args.s3_bucket}/{args.s3_prefix}")
     except Exception as e:
-        logger.warning(f"Failed to upload to S3: {e}")
+        print(f"Failed to upload to S3: {e}")
 
 
 def main():
@@ -457,4 +460,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

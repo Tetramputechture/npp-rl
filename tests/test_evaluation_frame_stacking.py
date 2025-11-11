@@ -23,17 +23,23 @@ from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
 def test_masked_policy_predict_with_action_mask():
     """Test that MaskedActorCriticPolicy._predict() properly handles action masks."""
     try:
-        arch_config = get_architecture_config("mlp_baseline")
+        arch_config = get_architecture_config("mlp_cnn")
     except:
         pytest.skip("Architecture config not available")
 
     # Create observation space with action_mask
-    obs_space = spaces.Dict({
-        "player_frame": spaces.Box(low=0, high=255, shape=(64, 64, 1), dtype=np.uint8),
-        "global_view": spaces.Box(low=0, high=255, shape=(128, 128, 1), dtype=np.uint8),
-        "game_state": spaces.Box(low=-1, high=1, shape=(50,), dtype=np.float32),
-        "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
-    })
+    obs_space = spaces.Dict(
+        {
+            "player_frame": spaces.Box(
+                low=0, high=255, shape=(64, 64, 1), dtype=np.uint8
+            ),
+            "global_view": spaces.Box(
+                low=0, high=255, shape=(128, 128, 1), dtype=np.uint8
+            ),
+            "game_state": spaces.Box(low=-1, high=1, shape=(50,), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
+        }
+    )
     action_space = spaces.Discrete(6)
 
     # Create policy
@@ -63,9 +69,15 @@ def test_masked_policy_predict_with_action_mask():
         action_counts[action.item()] += 1
 
     # Masked actions (3, 4, 5) should NEVER be selected
-    assert action_counts[3] == 0, f"Masked action 3 was selected {action_counts[3]} times!"
-    assert action_counts[4] == 0, f"Masked action 4 was selected {action_counts[4]} times!"
-    assert action_counts[5] == 0, f"Masked action 5 was selected {action_counts[5]} times!"
+    assert action_counts[3] == 0, (
+        f"Masked action 3 was selected {action_counts[3]} times!"
+    )
+    assert action_counts[4] == 0, (
+        f"Masked action 4 was selected {action_counts[4]} times!"
+    )
+    assert action_counts[5] == 0, (
+        f"Masked action 5 was selected {action_counts[5]} times!"
+    )
 
     # Valid actions (0, 1, 2) should be selected
     assert action_counts[0] > 0, "Action 0 should be available"
@@ -76,17 +88,23 @@ def test_masked_policy_predict_with_action_mask():
 def test_frame_stacked_observation_space_detection():
     """Test that frame-stacked observation spaces are correctly detected."""
     try:
-        arch_config = get_architecture_config("mlp_baseline")
+        arch_config = get_architecture_config("mlp_cnn")
     except:
         pytest.skip("Architecture config not available")
 
     # Create observation space with frame stacking (4 frames)
-    obs_space_stacked = spaces.Dict({
-        "player_frame": spaces.Box(low=0, high=255, shape=(4, 64, 64, 1), dtype=np.uint8),
-        "global_view": spaces.Box(low=0, high=255, shape=(4, 128, 128, 1), dtype=np.uint8),
-        "game_state": spaces.Box(low=-1, high=1, shape=(4, 50), dtype=np.float32),
-        "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
-    })
+    obs_space_stacked = spaces.Dict(
+        {
+            "player_frame": spaces.Box(
+                low=0, high=255, shape=(4, 64, 64, 1), dtype=np.uint8
+            ),
+            "global_view": spaces.Box(
+                low=0, high=255, shape=(4, 128, 128, 1), dtype=np.uint8
+            ),
+            "game_state": spaces.Box(low=-1, high=1, shape=(4, 50), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
+        }
+    )
     action_space = spaces.Discrete(6)
 
     # Create a mock model with frame-stacked observation space
@@ -103,7 +121,7 @@ def test_frame_stacked_observation_space_detection():
     )
 
     detected_config = evaluator.detect_frame_stack_config(model)
-    
+
     # Should detect visual stacking
     assert detected_config is not None
     assert detected_config["enable_visual_frame_stacking"] is True
@@ -113,17 +131,23 @@ def test_frame_stacked_observation_space_detection():
 def test_frame_stacked_observation_space_validation():
     """Test that validation correctly handles frame-stacked observation spaces."""
     try:
-        arch_config = get_architecture_config("mlp_baseline")
+        arch_config = get_architecture_config("mlp_cnn")
     except:
         pytest.skip("Architecture config not available")
 
     # Create observation space with frame stacking (4 frames)
-    obs_space_stacked = spaces.Dict({
-        "player_frame": spaces.Box(low=0, high=255, shape=(4, 64, 64, 1), dtype=np.uint8),
-        "global_view": spaces.Box(low=0, high=255, shape=(4, 128, 128, 1), dtype=np.uint8),
-        "game_state": spaces.Box(low=-1, high=1, shape=(4, 50), dtype=np.float32),
-        "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
-    })
+    obs_space_stacked = spaces.Dict(
+        {
+            "player_frame": spaces.Box(
+                low=0, high=255, shape=(4, 64, 64, 1), dtype=np.uint8
+            ),
+            "global_view": spaces.Box(
+                low=0, high=255, shape=(4, 128, 128, 1), dtype=np.uint8
+            ),
+            "game_state": spaces.Box(low=-1, high=1, shape=(4, 50), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
+        }
+    )
 
     # Create a mock model with frame-stacked observation space
     class MockModel:
@@ -170,19 +194,27 @@ def test_frame_stacked_observation_space_validation():
 def test_action_masking_with_model_predict():
     """Test that action masking works when using model.predict() (integration test)."""
     try:
-        arch_config = get_architecture_config("mlp_baseline")
+        arch_config = get_architecture_config("mlp_cnn")
     except:
         pytest.skip("Architecture config not available")
 
     # Create a simple mock environment that returns observations with action masks
     class MockEnv:
         def __init__(self):
-            self.observation_space = spaces.Dict({
-                "player_frame": spaces.Box(low=0, high=255, shape=(64, 64, 1), dtype=np.uint8),
-                "global_view": spaces.Box(low=0, high=255, shape=(128, 128, 1), dtype=np.uint8),
-                "game_state": spaces.Box(low=-1, high=1, shape=(50,), dtype=np.float32),
-                "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
-            })
+            self.observation_space = spaces.Dict(
+                {
+                    "player_frame": spaces.Box(
+                        low=0, high=255, shape=(64, 64, 1), dtype=np.uint8
+                    ),
+                    "global_view": spaces.Box(
+                        low=0, high=255, shape=(128, 128, 1), dtype=np.uint8
+                    ),
+                    "game_state": spaces.Box(
+                        low=-1, high=1, shape=(50,), dtype=np.float32
+                    ),
+                    "action_mask": spaces.Box(low=0, high=1, shape=(6,), dtype=np.int8),
+                }
+            )
             self.action_space = spaces.Discrete(6)
 
         def reset(self):
@@ -190,7 +222,9 @@ def test_action_masking_with_model_predict():
                 "player_frame": np.random.randint(0, 255, (64, 64, 1), dtype=np.uint8),
                 "global_view": np.random.randint(0, 255, (128, 128, 1), dtype=np.uint8),
                 "game_state": np.random.randn(50).astype(np.float32),
-                "action_mask": np.array([1, 1, 1, 0, 0, 0], dtype=np.int8),  # Only actions 0,1,2 allowed
+                "action_mask": np.array(
+                    [1, 1, 1, 0, 0, 0], dtype=np.int8
+                ),  # Only actions 0,1,2 allowed
             }
             return obs, {}
 
@@ -236,12 +270,17 @@ def test_action_masking_with_model_predict():
         action_counts[action] += 1
 
     # Masked actions (3, 4, 5) should NEVER be selected
-    assert action_counts[3] == 0, f"Masked action 3 was selected {action_counts[3]} times!"
-    assert action_counts[4] == 0, f"Masked action 4 was selected {action_counts[4]} times!"
-    assert action_counts[5] == 0, f"Masked action 5 was selected {action_counts[5]} times!"
+    assert action_counts[3] == 0, (
+        f"Masked action 3 was selected {action_counts[3]} times!"
+    )
+    assert action_counts[4] == 0, (
+        f"Masked action 4 was selected {action_counts[4]} times!"
+    )
+    assert action_counts[5] == 0, (
+        f"Masked action 5 was selected {action_counts[5]} times!"
+    )
 
     # Valid actions (0, 1, 2) should be selected
     assert action_counts[0] > 0, "Action 0 should be available"
     assert action_counts[1] > 0, "Action 1 should be available"
     assert action_counts[2] > 0, "Action 2 should be available"
-

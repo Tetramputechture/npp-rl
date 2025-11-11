@@ -125,7 +125,7 @@ class HGTFactory:
             return model
 
         except Exception as e:
-            self.logger.error(f"Failed to create PyTorch Geometric HGT: {e}")
+            self.print(f"Failed to create PyTorch Geometric HGT: {e}")
             return None
 
     def create_multimodal_hgt_system(

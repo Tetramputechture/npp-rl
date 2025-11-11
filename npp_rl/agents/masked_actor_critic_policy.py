@@ -68,8 +68,20 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             obs_for_features = torch.as_tensor(obs_for_features, device=device)
 
         # Preprocess the observation if needed
-        features = self.extract_features(obs_for_features)
-        latent_pi, _ = self.mlp_extractor(features)
+        # Extract features (handles both shared and separate extractors)
+        features = self.extract_features(obs_for_features, self.features_extractor)
+
+        # Handle tuple return when using separate feature extractors
+        if isinstance(features, tuple):
+            features_pi, _ = features
+        else:
+            features_pi = features
+
+        # Get policy latent using appropriate method
+        if hasattr(self.mlp_extractor, "forward_policy"):
+            latent_pi = self.mlp_extractor.forward_policy(features_pi)
+        else:
+            latent_pi, _ = self.mlp_extractor(features_pi)
 
         # Get action logits
         action_logits = self.action_net(latent_pi)
@@ -142,15 +154,73 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             obs_for_features = obs
 
         # Preprocess the observation if needed
+        # Extract features (handles both shared and separate extractors)
         features = self.extract_features(obs_for_features)
-        latent_pi, latent_vf = self.mlp_extractor(features)
+
+        # Handle tuple return when using separate feature extractors
+        if isinstance(features, tuple):
+            features_pi, features_vf = features
+        else:
+            features_pi = features_vf = features
+
+        # Validate features after extraction
+        if torch.isnan(features_pi).any():
+            nan_mask = torch.isnan(features_pi)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_FWD] NaN in policy features from extract_features in batch indices: {batch_indices.tolist()}"
+            )
+        if torch.isnan(features_vf).any():
+            nan_mask = torch.isnan(features_vf)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_FWD] NaN in value features from extract_features in batch indices: {batch_indices.tolist()}"
+            )
+
+        # Extract latents using separate forward methods if available (DeepResNet), otherwise use standard approach
+        if hasattr(self.mlp_extractor, "forward_policy") and hasattr(
+            self.mlp_extractor, "forward_value"
+        ):
+            latent_pi = self.mlp_extractor.forward_policy(features_pi)
+            latent_vf = self.mlp_extractor.forward_value(features_vf)
+        else:
+            # Standard MLP extractor: extract both latents separately
+            latent_pi, _ = self.mlp_extractor(features_pi)
+            _, latent_vf = self.mlp_extractor(features_vf)
+
+        # Validate latent after MLP extractor
+        if torch.isnan(latent_pi).any():
+            nan_mask = torch.isnan(latent_pi)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_FWD] NaN in latent_pi from mlp_extractor in batch indices: {batch_indices.tolist()}"
+            )
 
         # Get action logits
         action_logits = self.action_net(latent_pi)
 
+        # Validate action logits before masking
+        if torch.isnan(action_logits).any():
+            nan_mask = torch.isnan(action_logits)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_FWD] NaN in action_logits BEFORE masking in batch indices: {batch_indices.tolist()}. "
+                f"Logits shape: {action_logits.shape}, range: [{action_logits[~nan_mask].min():.4f}, {action_logits[~nan_mask].max():.4f}]"
+            )
+
         # Apply action mask if present
         if action_mask is not None:
             action_logits = self._apply_action_mask(action_logits, action_mask)
+
+            # Validate action logits after masking
+            if torch.isnan(action_logits).any():
+                nan_mask = torch.isnan(action_logits)
+                batch_indices = torch.where(nan_mask.any(dim=1))[0]
+                raise ValueError(
+                    f"[POLICY_FWD] NaN in action_logits AFTER masking in batch indices: {batch_indices.tolist()}. "
+                    f"Logits shape: {action_logits.shape}. "
+                    f"Action mask for failed batches: {action_mask[batch_indices].cpu().numpy()}"
+                )
 
         # Create distribution and sample
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -189,15 +259,71 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             obs_for_features = obs
 
         # Preprocess the observation if needed
+        # Extract features (handles both shared and separate extractors)
         features = self.extract_features(obs_for_features)
-        latent_pi, latent_vf = self.mlp_extractor(features)
+
+        # Handle tuple return when using separate feature extractors
+        if isinstance(features, tuple):
+            features_pi, features_vf = features
+        else:
+            features_pi = features_vf = features
+
+        # Validate features after extraction
+        if torch.isnan(features_pi).any():
+            nan_mask = torch.isnan(features_pi)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_EVAL] NaN in policy features from extract_features in batch indices: {batch_indices.tolist()}"
+            )
+        if torch.isnan(features_vf).any():
+            nan_mask = torch.isnan(features_vf)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_EVAL] NaN in value features from extract_features in batch indices: {batch_indices.tolist()}"
+            )
+
+        # Extract latents using separate forward methods if available (DeepResNet), otherwise use standard approach
+        if hasattr(self.mlp_extractor, "forward_policy") and hasattr(
+            self.mlp_extractor, "forward_value"
+        ):
+            latent_pi = self.mlp_extractor.forward_policy(features_pi)
+            latent_vf = self.mlp_extractor.forward_value(features_vf)
+        else:
+            # Standard MLP extractor: extract both latents separately
+            latent_pi, _ = self.mlp_extractor(features_pi)
+            _, latent_vf = self.mlp_extractor(features_vf)
+
+        # Validate latent after MLP extractor
+        if torch.isnan(latent_pi).any():
+            nan_mask = torch.isnan(latent_pi)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_EVAL] NaN in latent_pi from mlp_extractor in batch indices: {batch_indices.tolist()}"
+            )
 
         # Get action logits
         action_logits = self.action_net(latent_pi)
 
+        # Validate action logits before masking
+        if torch.isnan(action_logits).any():
+            nan_mask = torch.isnan(action_logits)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_EVAL] NaN in action_logits BEFORE masking in batch indices: {batch_indices.tolist()}"
+            )
+
         # Apply action mask if present
         if action_mask is not None:
             action_logits = self._apply_action_mask(action_logits, action_mask)
+
+            # Validate action logits after masking
+            if torch.isnan(action_logits).any():
+                nan_mask = torch.isnan(action_logits)
+                batch_indices = torch.where(nan_mask.any(dim=1))[0]
+                raise ValueError(
+                    f"[POLICY_EVAL] NaN in action_logits AFTER masking in batch indices: {batch_indices.tolist()}. "
+                    f"Action mask for failed batches: {action_mask[batch_indices].cpu().numpy()}"
+                )
 
         # Create distribution and evaluate
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -238,6 +364,35 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         if action_mask.dim() == 1:
             # Single mask for all batch elements, expand it
             action_mask = action_mask.unsqueeze(0).expand_as(action_logits)
+
+        # Validate action mask - check for NaN and ensure at least one valid action per batch
+        if torch.isnan(action_mask.float()).any():
+            nan_mask = torch.isnan(action_mask.float())
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[POLICY_MASK] NaN detected in action_mask for batch indices: {batch_indices.tolist()}"
+            )
+
+        # Check if any batch has all actions masked (would lead to all -inf logits)
+        valid_actions_per_batch = action_mask.sum(dim=1)
+        all_masked_batches = torch.where(valid_actions_per_batch == 0)[0]
+        if len(all_masked_batches) > 0:
+            import sys
+
+            print(
+                f"\n{'=' * 60}\n"
+                f"[POLICY_MASK_CRITICAL] All actions masked for batch indices: {all_masked_batches.tolist()}!\n"
+                f"This should never happen due to ninja.py fallback.\n"
+                f"Action masks: {action_mask[all_masked_batches].cpu().numpy()}\n"
+                f"{'=' * 60}\n",
+                file=sys.stderr,
+            )
+            raise ValueError(
+                f"[POLICY_MASK] All actions masked for batch indices: {all_masked_batches.tolist()}. "
+                f"This would create all -inf logits leading to NaN in distribution. "
+                f"Action masks: {action_mask[all_masked_batches].cpu().numpy()}. "
+                f"This indicates a bug in ninja.get_valid_action_mask() - the fallback should prevent this!"
+            )
 
         # Set masked actions to -inf (will have zero probability after softmax)
         masked_logits = torch.where(

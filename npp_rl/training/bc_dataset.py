@@ -40,7 +40,7 @@ class ObservationNormalizer:
             samples: List of (observation, action) tuples
         """
         if not samples:
-            logger.warning("No samples provided for normalization statistics")
+            print("No samples provided for normalization statistics")
             return
 
         # Visual observations (player_frame, global_view) are normalized by the feature
@@ -119,7 +119,7 @@ class ObservationNormalizer:
             )
             logger.debug(f"Saved normalization statistics to {path}")
         except Exception as e:
-            logger.warning(f"Failed to save normalization statistics: {e}")
+            print(f"Failed to save normalization statistics: {e}")
 
     def load_stats(self, path: Path) -> bool:
         """Load normalization statistics from file.
@@ -148,7 +148,7 @@ class ObservationNormalizer:
             logger.debug(f"Loaded normalization statistics from {path}")
             return True
         except Exception as e:
-            logger.warning(f"Failed to load normalization statistics: {e}")
+            print(f"Failed to load normalization statistics: {e}")
             return False
 
 
@@ -209,7 +209,7 @@ def _process_replay_file_worker(
         return (replay_path, samples)
 
     except Exception as e:
-        logger.warning(f"Failed to process {replay_path.name}: {e}")
+        print(f"Failed to process {replay_path.name}: {e}")
         return (replay_path, [])
 
 
@@ -347,7 +347,7 @@ def _simulate_replay_worker(
                 samples.append((stacked_obs, int(action)))
 
     except Exception as e:
-        logger.warning(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
+        print(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
         return []
 
     return samples
@@ -440,7 +440,7 @@ def _save_to_cache_worker(samples: List[Tuple[Dict, int]], cache_path: Path) -> 
         logger.debug(f"Cached {len(samples)} samples to {cache_path.name}")
 
     except Exception as e:
-        logger.warning(f"Failed to save cache to {cache_path}: {e}")
+        print(f"Failed to save cache to {cache_path}: {e}")
 
 
 def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
@@ -484,7 +484,7 @@ def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
         return samples
 
     except Exception as e:
-        logger.warning(f"Failed to load cache from {cache_path}: {e}")
+        print(f"Failed to load cache from {cache_path}: {e}")
         return []
 
 
@@ -623,7 +623,7 @@ class BCReplayDataset(Dataset):
         replay_files = sorted(self.replay_dir.glob("*.replay"))
 
         if not replay_files:
-            logger.warning(
+            print(
                 f"No .replay files found in {self.replay_dir}. "
                 f"Please ensure replay data is available for BC pretraining."
             )
@@ -676,7 +676,7 @@ class BCReplayDataset(Dataset):
                     self.samples.extend(samples)
 
                 except Exception as e:
-                    logger.warning(f"Failed to process {replay_path.name}: {e}")
+                    print(f"Failed to process {replay_path.name}: {e}")
                     continue
         else:
             # Parallel processing with multiprocessing
@@ -710,7 +710,7 @@ class BCReplayDataset(Dataset):
                             self.samples.extend(samples)
 
             except Exception as e:
-                logger.error(
+                print(
                     f"Multiprocessing failed: {e}. Falling back to sequential processing."
                 )
                 # Fall back to sequential processing
@@ -729,7 +729,7 @@ class BCReplayDataset(Dataset):
                         self.samples.extend(samples)
 
                     except Exception as e2:
-                        logger.warning(f"Failed to process {replay_path.name}: {e2}")
+                        print(f"Failed to process {replay_path.name}: {e2}")
                         continue
 
     def _process_replay_file(self, replay_path: Path) -> List[Tuple[Dict, int]]:
@@ -913,16 +913,12 @@ class BCReplayDataset(Dataset):
                     samples.append((stacked_obs, int(action)))
 
         except Exception as e:
-            logger.warning(
-                f"Failed to simulate replay (episode {replay.episode_id}): {e}"
-            )
+            print(f"Failed to simulate replay (episode {replay.episode_id}): {e}")
             # Try fallback method using environment directly
             try:
                 samples = self._simulate_replay_with_env(replay)
             except Exception as e2:
-                logger.warning(
-                    f"Fallback simulation also failed for {replay.episode_id}: {e2}"
-                )
+                print(f"Fallback simulation also failed for {replay.episode_id}: {e2}")
                 return []
 
         return samples
@@ -1098,7 +1094,7 @@ class BCReplayDataset(Dataset):
             logger.debug(f"Cached {len(samples)} samples to {cache_path.name}")
 
         except Exception as e:
-            logger.warning(f"Failed to save cache to {cache_path}: {e}")
+            print(f"Failed to save cache to {cache_path}: {e}")
 
     def _load_from_cache(self, cache_path: Path) -> List[Tuple[Dict, int]]:
         """Load processed samples from cache file.
@@ -1144,7 +1140,7 @@ class BCReplayDataset(Dataset):
             return samples
 
         except Exception as e:
-            logger.warning(f"Failed to load cache from {cache_path}: {e}")
+            print(f"Failed to load cache from {cache_path}: {e}")
             return []
 
     def _log_dataset_statistics(self) -> None:

@@ -42,13 +42,15 @@ class GCNLayer(nn.Module):
         self,
         node_features: torch.Tensor,
         edge_index: torch.Tensor,
-        node_mask: Optional[torch.Tensor] = None
+        node_mask: Optional[torch.Tensor] = None,
+        edge_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
             node_features: [batch_size, max_nodes, in_dim]
             edge_index: [batch_size, 2, num_edges] - source and target node indices
             node_mask: [batch_size, max_nodes] - mask for valid nodes
+            edge_mask: [batch_size, num_edges] - 1 for valid edges, 0 for padding
             
         Returns:
             Updated node features [batch_size, max_nodes, out_dim]
@@ -65,11 +67,21 @@ class GCNLayer(nn.Module):
         
         for b in range(batch_size):
             edges = edge_index[b]  # [2, num_edges]
+            
+            # CRITICAL: Filter edges using mask before processing
+            if edge_mask is not None:
+                valid_edge_indices = torch.where(edge_mask[b] == 1)[0]
+                if len(valid_edge_indices) == 0:
+                    # No valid edges: skip aggregation for this batch
+                    continue
+                edges = edges[:, valid_edge_indices]  # Only process valid edges!
+            
+            # Early exit if no edges after filtering
             if edges.shape[1] == 0:
                 continue
                 
-            src_nodes = edges[0].long()  # Source nodes [num_edges]
-            tgt_nodes = edges[1].long()  # Target nodes [num_edges]
+            src_nodes = edges[0].long()  # Source nodes [num_edges] - now only valid edges
+            tgt_nodes = edges[1].long()  # Target nodes [num_edges] - now only valid edges
             
             # Get source node features to aggregate
             src_features = h[b, src_nodes]  # [num_edges, out_dim]
@@ -130,13 +142,15 @@ class GCNEncoder(nn.Module):
         self,
         node_features: torch.Tensor,
         edge_index: torch.Tensor,
-        node_mask: Optional[torch.Tensor] = None
+        node_mask: Optional[torch.Tensor] = None,
+        edge_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             node_features: [batch_size, max_nodes, node_feature_dim]
             edge_index: [batch_size, 2, num_edges]
             node_mask: [batch_size, max_nodes]
+            edge_mask: [batch_size, num_edges] - 1 for valid edges, 0 for padding
             
         Returns:
             node_embeddings: [batch_size, max_nodes, output_dim]
@@ -147,7 +161,7 @@ class GCNEncoder(nn.Module):
         
         # Apply GCN layers
         for layer in self.layers:
-            h = layer(h, edge_index, node_mask)
+            h = layer(h, edge_index, node_mask, edge_mask)
         
         # Output projection
         node_embeddings = self.output_proj(h)

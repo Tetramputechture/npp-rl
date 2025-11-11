@@ -44,7 +44,7 @@ The framework includes 8 predefined architecture variants:
 - **Use Case**: Minimal graph processing complexity
 - **Expected**: Fastest graph-based approach, lower performance ceiling
 
-### 5. MLP Baseline (`mlp_baseline`)
+### 5. MLP Baseline (`mlp_cnn`)
 - **Description**: No graph processing, only vision and state
 - **Modalities**: Player frame, global view, game state, reachability (no graph)
 - **Use Case**: Baseline to measure graph contribution

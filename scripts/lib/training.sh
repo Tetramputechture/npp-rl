@@ -101,7 +101,7 @@ train_single_architecture() {
             --replay-data-dir ../nclone/bc_replays \
             --bc-epochs 10 \
             --bc-batch-size 128 \
-            --bc-num-workers 6 \
+            --bc-num-workers 8 \
             --hardware-profile auto \
             --total-timesteps 2000000 \
             --distributed-backend nccl \
@@ -113,9 +113,7 @@ train_single_architecture() {
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
             --enable-visual-frame-stacking \
-            --visual-stack-size 4 \
-            --enable-state-stacking \
-            --state-stack-size 4 \
+            --visual-stack-size 2 \
             --enable-lr-annealing \
             --debug"
 

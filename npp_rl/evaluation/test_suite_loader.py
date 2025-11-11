@@ -53,7 +53,7 @@ class TestSuiteLoader:
                 logger.info(f"Loaded metadata from {fname}")
                 return metadata
 
-        logger.warning("No metadata file found")
+        print("No metadata file found")
         return None
 
     def load_category(self, category: str) -> List[Dict[str, Any]]:
@@ -73,7 +73,7 @@ class TestSuiteLoader:
         category_dir = self.dataset_path / category
 
         if not category_dir.exists():
-            logger.warning(f"Category directory not found: {category_dir}")
+            print(f"Category directory not found: {category_dir}")
             return []
 
         levels = []
@@ -84,7 +84,7 @@ class TestSuiteLoader:
                     level_data = pickle.load(f)
                 levels.append(level_data)
             except Exception as e:
-                logger.error(f"Failed to load level {level_file}: {e}")
+                print(f"Failed to load level {level_file}: {e}")
 
         logger.info(f"Loaded {len(levels)} levels from category '{category}'")
         return levels

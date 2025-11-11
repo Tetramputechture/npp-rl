@@ -54,13 +54,13 @@ class DiagnosticLoggingCallback(BaseCallback):
 
         # Action-reward correlation
         self.action_reward_pairs = []
-        
+
         # PBRS component tracking (Week 3-4 enhancement)
         self.episode_pbrs_components = {
-            'objective': deque(maxlen=100),
-            'hazard': deque(maxlen=100),
-            'impact': deque(maxlen=100),
-            'exploration': deque(maxlen=100),
+            "objective": deque(maxlen=100),
+            "hazard": deque(maxlen=100),
+            "impact": deque(maxlen=100),
+            "exploration": deque(maxlen=100),
         }
 
         # Curriculum tracking
@@ -97,6 +97,13 @@ class DiagnosticLoggingCallback(BaseCallback):
                         self.step_metrics[key] = []
                     self.step_metrics[key].append(val)
 
+            # Collect observation metrics from environments
+            if "observation_metrics" in info:
+                for key, val in info["observation_metrics"].items():
+                    if key not in self.step_metrics:
+                        self.step_metrics[key] = []
+                    self.step_metrics[key].append(val)
+
             # Episode completion tracking
             if "episode" in info:
                 self.episode_rewards.append(info["episode"]["r"])
@@ -110,13 +117,13 @@ class DiagnosticLoggingCallback(BaseCallback):
                 else:
                     self.episode_outcomes["timeout"] += 1
 
-            # PBRS component tracking (Week 3-4 enhancement)
+            # PBRS component tracking
             if "pbrs_components" in info:
                 components = info["pbrs_components"]
                 for key in self.episode_pbrs_components:
                     if key in components:
                         self.episode_pbrs_components[key].append(components[key])
-            
+
             # Terminal events
             if info.get("player_won", False):
                 self.terminal_events["completion"].append(rewards[idx])
@@ -147,7 +154,7 @@ class DiagnosticLoggingCallback(BaseCallback):
     def _log_all_metrics(self):
         """Log comprehensive metrics (100+) to TensorBoard."""
 
-        # === REWARD DISTRIBUTION (15+ metrics) ===
+        # === REWARD DISTRIBUTION ===
         if self.reward_history:
             r = np.array(self.reward_history)
             self.logger.record("reward_dist/mean", np.mean(r))
@@ -189,7 +196,7 @@ class DiagnosticLoggingCallback(BaseCallback):
             outliers = np.abs(r - np.mean(r)) > 3 * np.std(r)
             self.logger.record("reward_dist/outlier_ratio", np.sum(outliers) / len(r))
 
-        # === EPISODE REWARDS (8+ metrics) ===
+        # === EPISODE REWARDS ===
         if self.episode_rewards:
             ep = np.array(self.episode_rewards)
             self.logger.record("episode_reward/mean", np.mean(ep))
@@ -216,13 +223,13 @@ class DiagnosticLoggingCallback(BaseCallback):
                     self.episode_outcomes["timeout"] / total_eps,
                 )
 
-        # === TERMINAL EVENTS (6 metrics) ===
+        # === TERMINAL EVENTS ===
         for event_type, values in self.terminal_events.items():
             if values:
                 self.logger.record(f"terminal/{event_type}_mean", np.mean(values))
                 self.logger.record(f"terminal/{event_type}_count", len(values))
 
-        # === SPARSE VS DENSE (4 metrics) ===
+        # === SPARSE VS DENSE ===
         if self.reward_history:
             sparse = [r for r in self.reward_history if abs(r) > 1.0]
             dense = [r for r in self.reward_history if 0 < abs(r) < 0.1]
@@ -238,14 +245,16 @@ class DiagnosticLoggingCallback(BaseCallback):
             if dense:
                 self.logger.record("reward_type/dense_mean_mag", np.mean(np.abs(dense)))
 
-        # === PBRS COMPONENT BREAKDOWN (Week 3-4 enhancement) ===
+        # === PBRS COMPONENT BREAKDOWN ===
         for component, values in self.episode_pbrs_components.items():
             if len(values) > 0:
                 vals = np.array(values)
-                self.logger.record(f"pbrs_rewards/{component}_mean", float(np.mean(vals)))
+                self.logger.record(
+                    f"pbrs_rewards/{component}_mean", float(np.mean(vals))
+                )
                 self.logger.record(f"pbrs_rewards/{component}_std", float(np.std(vals)))
 
-        # === ACTION-REWARD CORRELATION (12 metrics for 6 actions) ===
+        # === ACTION-REWARD CORRELATION ===
         if self.action_reward_pairs:
             action_rewards = {}
             for action, reward in self.action_reward_pairs:
@@ -253,12 +262,12 @@ class DiagnosticLoggingCallback(BaseCallback):
                     action_rewards[action] = []
                 action_rewards[action].append(reward)
 
-            action_names = ['NOOP', 'Left', 'Right', 'Jump', 'Jump+Left', 'Jump+Right']
+            action_names = ["NOOP", "Left", "Right", "Jump", "Jump+Left", "Jump+Right"]
             for action_id, rewards_list in action_rewards.items():
                 if rewards_list and len(rewards_list) > 10:  # Require minimum samples
                     self.logger.record(
                         f"actions/action_{action_id}_{action_names[action_id]}_mean_reward",
-                        float(np.mean(rewards_list))
+                        float(np.mean(rewards_list)),
                     )
                     self.logger.record(
                         f"action_reward/action_{action_id}_mean", np.mean(rewards_list)
@@ -267,7 +276,7 @@ class DiagnosticLoggingCallback(BaseCallback):
                         f"action_reward/action_{action_id}_count", len(rewards_list)
                     )
 
-        # === CURRICULUM METRICS (varies by stages) ===
+        # === CURRICULUM METRICS ===
         for stage, metrics in self.stage_metrics.items():
             if metrics["rewards"]:
                 stage_r = np.array(metrics["rewards"])
@@ -280,8 +289,23 @@ class DiagnosticLoggingCallback(BaseCallback):
                         metrics["successes"] / metrics["episodes"],
                     )
 
-        # === STEP METRICS (20-40 metrics from diagnostic system) ===
-        for key, values in self.step_metrics.items():
+        # === OBSERVATION VALUES ===
+        # Log individual observation features (aggregated across environments as mean)
+        obs_metrics = {
+            k: v for k, v in self.step_metrics.items() if k.startswith("obs/")
+        }
+        for key, values in obs_metrics.items():
+            if values:
+                v = np.array(values)
+                # Log mean value across environments (individual feature values)
+                self.logger.record(key, np.mean(v))
+
+        # === STEP METRICS ===
+        # Log non-observation metrics with full statistics
+        non_obs_metrics = {
+            k: v for k, v in self.step_metrics.items() if not k.startswith("obs/")
+        }
+        for key, values in non_obs_metrics.items():
             if values:
                 v = np.array(values)
                 self.logger.record(f"{key}/mean", np.mean(v))

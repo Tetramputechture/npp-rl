@@ -163,13 +163,11 @@ class TrainingVisualizationCallback(BaseCallback):
                         if self.clock and self.target_fps > 0:
                             self.clock.tick(self.target_fps)
                     else:
-                        logger.warning(
+                        print(
                             f"Environment {self.env_idx} does not have a render method"
                         )
             else:
-                logger.warning(
-                    "Cannot access individual environments for visualization"
-                )
+                print("Cannot access individual environments for visualization")
 
         except Exception as e:
             logger.debug(f"Error during visualization render: {e}")

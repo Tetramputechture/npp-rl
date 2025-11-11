@@ -243,7 +243,6 @@ def create_reachability_aware_icm_config(
     learning_rate: float = 1e-3,
     alpha: float = 0.1,
     r_int_clip: float = 1.0,
-    enable_reachability_awareness: bool = True,
     reachability_dim: int = 8,
     reachability_scale_factor: float = 2.0,
     frontier_boost_factor: float = 3.0,
@@ -263,7 +262,6 @@ def create_reachability_aware_icm_config(
         learning_rate: Learning rate for ICM optimizer
         alpha: Weight for combining intrinsic and extrinsic rewards
         r_int_clip: Maximum intrinsic reward value
-        enable_reachability_awareness: Whether to enable reachability modulation
         reachability_dim: Dimension of reachability features
         reachability_scale_factor: Boost factor for reachable areas
         frontier_boost_factor: Extra boost for newly accessible areas
@@ -288,7 +286,6 @@ def create_reachability_aware_icm_config(
     # Add reachability-specific parameters
     config.update(
         {
-            "enable_reachability_awareness": enable_reachability_awareness,
             "reachability_dim": reachability_dim,
             "reachability_scale_factor": reachability_scale_factor,
             "frontier_boost_factor": frontier_boost_factor,

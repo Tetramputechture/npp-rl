@@ -15,7 +15,6 @@ uses graph modality (see ModalityConfig.use_graph).
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from enum import Enum
-from nclone.gym_environment.constants import GAME_STATE_CHANNELS
 
 
 class GraphArchitectureType(Enum):
@@ -46,7 +45,7 @@ class ModalityConfig:
     use_global_view: bool = True  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
-        True  # Game state vector (GAME_STATE_CHANNELS features, currently 29)
+        True  # Game state vector (GAME_STATE_CHANNELS features, currently 52)
     )
     use_reachability: bool = True  # Reachability features (8 features)
 
@@ -83,9 +82,9 @@ class GraphConfig:
     """
     Configuration for graph neural network architecture.
 
-    Note: Input dimensions come from nclone (optimized):
-    - node_feature_dim = 19 (NODE_FEATURE_DIM from nclone.graph.common, reduced from 55)
-    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common, unchanged)
+    Note: Input dimensions come from nclone:
+    - node_feature_dim = 50 (NODE_FEATURE_DIM from nclone.graph.common)
+    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common)
     These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
     """
 
@@ -127,10 +126,16 @@ class StateConfig:
     """Configuration for state vector processing."""
 
     # Dimensions from nclone environment observations
-    game_state_dim: int = GAME_STATE_CHANNELS
+    # game_state_dim now includes path-aware objectives, enhanced mines, and sequential goals (58 total)
+    game_state_dim: int = 58  # CHANGED from 52: 29 physics + 15 objectives + 8 mines + 3 progress + 3 sequential
     reachability_dim: int = 8  # Reachability features from nclone
-    hidden_dim: int = 128
+    hidden_dim: int = (
+        192  # Increased from 128 to handle increased input dimension (58 vs 29)
+    )
     output_dim: int = 128
+    use_attentive_state_mlp: bool = (
+        True  # NEW FIELD: Enable attention-based state encoder
+    )
 
 
 @dataclass(frozen=True)
@@ -348,10 +353,10 @@ def create_gcn_config() -> ArchitectureConfig:
     )
 
 
-def create_mlp_baseline_config() -> ArchitectureConfig:
+def create_mlp_cnn_config() -> ArchitectureConfig:
     """MLP baseline without graph processing."""
     return ArchitectureConfig(
-        name="mlp_baseline",
+        name="mlp_cnn",
         description="MLP baseline: no graph processing, only vision and state",
         detailed_description="""
         Non-graph baseline measuring GNN contribution. Vision and state only.
@@ -731,6 +736,137 @@ def create_visual_frame_stacked_only_config() -> ArchitectureConfig:
     )
 
 
+def create_attention_config() -> ArchitectureConfig:
+    """Create attention-based architecture with objective-specific attention and dueling."""
+    return ArchitectureConfig(
+        name="attention",
+        description="Multi-attention architecture with objective-specific attention and dueling",
+        detailed_description="""
+        Comprehensive attention architecture with five levels of attention for robust generalization:
+        
+        1. AttentiveStateMLP (State Component Attention):
+           - Processes 58-dim game state split into 5 semantic components
+           - Components: Physics (29), Objectives (15), Mines (8), Progress (3), Sequential (3)
+           - Each component encoded separately, then projected to uniform 64-dim space
+           - Multi-head cross-component attention (4 heads): each component attends to all others
+           - Enables: physics↔mines (hazard avoidance), objectives<->sequential (goal prioritization)
+           - Output: 128-dim state features
+        
+        2. GAT Graph Encoder (Spatial Attention):
+           - Graph Attention Network with sparse edge-based attention
+           - Uses proper GAT formula: LeakyReLU(a^T [W h_i || W h_j]) with learnable attention param
+           - Batched operations with torch_scatter for efficient aggregation (fallback if unavailable)
+           - Input: 50-dim node features (NODE_FEATURE_DIM from nclone), 6-dim edge features
+           - 3 layers, 4 heads per layer, 128 hidden dim, 256 output dim
+           - Handles variable graph sizes (robust to level complexity)
+           - Output: 256-dim graph features
+        
+        3. MultiHeadFusion (Cross-Modal Attention):
+           - Splits concatenated modality features into separate tokens
+           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128), Reachability (64)
+           - Projects each to uniform 256-dim, adds learned modality embeddings
+           - Multi-head cross-modal attention (8 heads): vision<->graph<->state interactions
+           - Feed-forward network per token, mean pooling across modalities
+           - Output: 512-dim final features
+        
+        4. ObjectiveAttentionPolicy (Objective Prioritization): **NEW**
+           - Attention over variable objectives (1-16 locked doors + exit)
+           - Permutation invariant over locked doors
+           - Learns sequential goal prioritization dynamically
+           - Each objective type encoded separately (exit switch/door, locked doors, switches)
+           - Multi-head attention (8 heads, 512 attention dim) queries: current state, keys/values: objectives
+           - Handles variable door counts with attention masking
+           - Output: 6 action logits
+        
+        5. Dueling Value Head (V(s) + A(s,a)): **NEW**
+           - Separate state value and action advantage streams
+           - State value stream: how good is this state regardless of action?
+           - Advantage stream: how much better is each action than average?
+           - Combines as V(s) + mean(A(s,*)) for stable value estimation
+           - Better gradient flow and faster convergence
+           - Output: scalar state value
+        
+        Total parameters: ~15-18M
+        - Deep ResNet MLPs: ~6-8M (policy + value with residual connections)
+        - Objective attention: ~1.5M
+        - Dueling in MLP extractor: integrated into ResNet value stream
+        - Feature extractors (separate): ~7M
+        - Baseline (attention without DeepResNet): ~7M
+        
+        Feature Dimension Flow:
+        - Player Frame CNN: [batch, 84, 84, 1] → 256
+        - Global View CNN: [batch, 176, 100, 1] → 128
+        - GAT Encoder: [batch, max_nodes, 50] → 256 (global pooling)
+        - AttentiveStateMLP: [batch, 58] → 128
+        - Reachability MLP: [batch, 8] → 64
+        - Concatenated: 256 + 128 + 256 + 128 + 64 = 832
+        - MultiHeadFusion: 832 → 512 (final features_dim)
+        
+        Policy Stream (Deep ResNet with residual connections):
+        - Features: 512 → Deep ResNet MLP [512, 512, 384, 256, 256] → 256 (policy latent)
+        - ObjectiveAttentionPolicy: 256 + objectives → 6 actions
+        
+        Value Stream (Deep ResNet with dueling):
+        - Features: 512 → Deep ResNet MLP [512, 384, 256] → 256 (value latent)
+        - Dueling: V(s) stream [256, 256, 1] + A(s,a) stream [256, 256, 6]
+        - Combined: V(s) + (A(s,a) - mean(A)) → scalar value
+        
+        Design Rationale:
+        - Deep ResNet MLPs: 5-layer policy and 3-layer value networks with residual connections
+          enable deep reasoning chains without gradient degradation
+        - GAT instead of HGT: simpler, faster, attention-based. Node features (50 dims) already
+          encode type information, so heterogeneous type processing is redundant.
+        - Attention at 5 levels enables hierarchical reasoning:
+          * Component-level: understand state relationships (AttentiveStateMLP)
+          * Spatial-level: understand graph connectivity (GAT)
+          * Modality-level: integrate multi-modal information (MultiHeadFusion)
+          * Objective-level: prioritize goals dynamically (ObjectiveAttentionPolicy)
+          * Value decomposition: separate state quality from action preferences (Dueling)
+        - Residual connections in MLPs enable deep reasoning without gradient degradation
+        - Robust to variable game complexity (1-16 doors, variable mines, different level sizes)
+        - Permutation invariance over locked doors ensures generalization
+        
+        Training budget: 500k timesteps with curriculum learning
+        Best for: Generalization across 1-16 doors with sequential goal structure
+        """,
+        modalities=ModalityConfig(
+            use_player_frame=True,
+            use_global_view=True,
+            use_graph=True,
+            use_game_state=True,
+            use_reachability=True,
+        ),
+        visual=VisualConfig(
+            player_frame_channels=[32, 64, 64],
+            player_frame_output_dim=256,
+            global_channels=[16, 32, 64],
+            global_output_dim=128,
+        ),
+        graph=GraphConfig(
+            architecture=GraphArchitectureType.GAT,
+            hidden_dim=128,
+            output_dim=256,
+            num_layers=3,
+            num_heads=4,
+            dropout=0.1,
+            use_type_embeddings=False,
+        ),
+        state=StateConfig(
+            game_state_dim=58,
+            reachability_dim=8,
+            hidden_dim=128,
+            output_dim=128,
+            use_attentive_state_mlp=True,
+        ),
+        fusion=FusionConfig(
+            fusion_type=FusionType.MULTI_HEAD_ATTENTION,
+            num_attention_heads=8,
+            dropout=0.1,
+        ),
+        features_dim=512,
+    )
+
+
 # ===== Configuration Registry =====
 
 ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
@@ -738,7 +874,7 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
     "simplified_hgt": create_simplified_hgt_config(),
     "gat": create_gat_config(),
     "gcn": create_gcn_config(),
-    "mlp_baseline": create_mlp_baseline_config(),
+    "mlp_cnn": create_mlp_cnn_config(),
     "vision_free": create_vision_free_config(),
     "vision_free_gat": create_vision_free_gat_config(),
     "vision_free_gcn": create_vision_free_gcn_config(),
@@ -748,6 +884,8 @@ ARCHITECTURE_REGISTRY: Dict[str, ArchitectureConfig] = {
     "full_hgt_frame_stacked": create_full_hgt_frame_stacked_config(),
     "vision_free_frame_stacked": create_vision_free_frame_stacked_config(),
     "visual_frame_stacked_only": create_visual_frame_stacked_only_config(),
+    # Attention-based architecture
+    "attention": create_attention_config(),
 }
 
 

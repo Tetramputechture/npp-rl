@@ -50,12 +50,12 @@ COMPLETION_REWARD = 1.0  # Scaled to match death penalty magnitude
 # In curriculum_manager.py
 def check_regression(self):
     if regressed:
-        logger.warning(f"Regressed to {prev_stage}")
+        print(f"Regressed to {prev_stage}")
         return True
 
 # In curriculum_env.py
 if self.curriculum_manager.check_regression():
-    logger.warning(f"Curriculum regressed to {self.curriculum_manager.get_current_stage()}")
+    print(f"Curriculum regressed to {self.curriculum_manager.get_current_stage()}")
 ```
 
 **Example - GOOD (single source of truth):**
@@ -63,7 +63,7 @@ if self.curriculum_manager.check_regression():
 # In curriculum_manager.py
 def check_regression(self):
     if regressed:
-        logger.warning(f"Curriculum regression: {current_stage} → {prev_stage}")
+        print(f"Curriculum regression: {current_stage} → {prev_stage}")
         return True
 
 # In curriculum_env.py

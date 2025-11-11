@@ -112,7 +112,7 @@ class PretrainingPipeline:
         replay_files = list(self.replay_data_dir.glob("*.replay"))
 
         if not replay_files:
-            logger.warning(
+            print(
                 f"No .replay files found in {self.replay_data_dir}. "
                 "Skipping BC pretraining."
             )
@@ -134,14 +134,14 @@ class PretrainingPipeline:
             )
 
             if len(dataset) == 0:
-                logger.warning("No training samples generated from replays")
+                print("No training samples generated from replays")
                 return None
 
             logger.info(f"BC dataset ready with {len(dataset)} training samples")
             return dataset
 
-        except Exception as e:
-            logger.error(f"Failed to create BC dataset: {e}", exc_info=True)
+        except Exception:
+            # print(f"Failed to create BC dataset: {e}", exc_info=True)
             return None
 
     def run_pretraining(
@@ -204,9 +204,9 @@ class PretrainingPipeline:
             logger.info(f"BC pretraining completed: {best_checkpoint_path}")
             return best_checkpoint_path
 
-        except Exception as e:
-            logger.error(f"BC pretraining failed: {e}", exc_info=True)
-            logger.warning("Continuing without pretrained checkpoint")
+        except Exception:
+            # print(f"BC pretraining failed: {e}", exc_info=True)
+            print("Continuing without pretrained checkpoint")
             return None
 
     def validate_checkpoint(self, checkpoint_path: str) -> bool:
@@ -224,7 +224,7 @@ class PretrainingPipeline:
         checkpoint_path = Path(checkpoint_path)
 
         if not checkpoint_path.exists():
-            logger.warning(f"Checkpoint not found: {checkpoint_path}")
+            print(f"Checkpoint not found: {checkpoint_path}")
             return False
 
         try:
@@ -242,14 +242,14 @@ class PretrainingPipeline:
                     logger.info(f"Checkpoint validated: {checkpoint_path}")
                     return True
                 else:
-                    logger.warning(f"Checkpoint missing required keys: {required_keys}")
+                    print(f"Checkpoint missing required keys: {required_keys}")
                     return False
             else:
-                logger.warning("Checkpoint is not a dictionary")
+                print("Checkpoint is not a dictionary")
                 return False
 
         except Exception as e:
-            logger.error(f"Failed to load checkpoint: {e}")
+            print(f"Failed to load checkpoint: {e}")
             return False
 
     def get_checkpoint_path(self) -> Optional[Path]:
@@ -316,19 +316,45 @@ def run_bc_pretraining_if_available(
     replay_data_dir = Path(replay_data_dir)
 
     if not replay_data_dir.exists():
-        logger.warning(
+        print(
             f"Replay data directory not found: {replay_data_dir}. "
             "Skipping BC pretraining."
         )
         return None
 
     try:
+        # Conditionally disable state stacking for AttentiveStateMLP architectures
+        # AttentiveStateMLP expects single 58-dim states (split into 5 semantic components)
+        # and cannot handle stacked states
+        bc_frame_stack_config = frame_stack_config
+        if frame_stack_config and frame_stack_config.get(
+            "enable_state_stacking", False
+        ):
+            if hasattr(architecture_config, "state") and hasattr(
+                architecture_config.state, "use_attentive_state_mlp"
+            ):
+                if architecture_config.state.use_attentive_state_mlp:
+                    # Create a modified config with state stacking disabled
+                    bc_frame_stack_config = frame_stack_config.copy()
+                    bc_frame_stack_config["enable_state_stacking"] = False
+                    logger.info(
+                        f"Architecture '{architecture_config.name}' uses AttentiveStateMLP - "
+                        "disabling state stacking for BC pretraining"
+                    )
+                    logger.info(
+                        "  AttentiveStateMLP expects single 58-dim states, not stacked states"
+                    )
+                    logger.info(
+                        f"  Visual frame stacking remains enabled: "
+                        f"{bc_frame_stack_config.get('enable_visual_frame_stacking', False)}"
+                    )
+
         pipeline = PretrainingPipeline(
             replay_data_dir=str(replay_data_dir),
             architecture_config=architecture_config,
             output_dir=output_dir,
             tensorboard_writer=tensorboard_writer,
-            frame_stack_config=frame_stack_config,
+            frame_stack_config=bc_frame_stack_config,
             test_dataset_path=test_dataset_path,
         )
 
@@ -362,10 +388,10 @@ def run_bc_pretraining_if_available(
             logger.info(f"BC pretraining completed: {checkpoint_path}")
             return checkpoint_path
         else:
-            logger.warning("BC pretraining did not produce valid checkpoint")
+            print("BC pretraining did not produce valid checkpoint")
             return None
 
     except Exception as e:
-        logger.error(f"BC pretraining pipeline failed: {e}", exc_info=True)
-        logger.warning("Continuing without pretraining")
+        print(f"BC pretraining pipeline failed: {e}", exc_info=True)
+        print("Continuing without pretraining")
         return None

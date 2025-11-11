@@ -48,13 +48,13 @@ REMOTE_NCLONE_DIR="${REMOTE_BASE_DIR}/nclone"
 DETECTED_CUDA_HOME="/usr/local/cuda"
 
 # Architectures to compare
-# Our HGT based archiectures are way too slow for now, so we're only comparing the other architectures.
 ARCHITECTURES=(
+    "attention"
     # "full_hgt"
     # "simplified_hgt"
     # "gat"
     # "gcn"
-    "mlp_baseline"
+    # "mlp_cnn"
     # "vision_free"
     # "vision_free_gat"
     # "vision_free_gcn"

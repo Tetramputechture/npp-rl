@@ -120,14 +120,14 @@ def profile_architecture_memory(
     logger.info(f"{'=' * 70}")
 
     if not torch.cuda.is_available():
-        logger.error("CUDA not available. Cannot profile GPU memory.")
+        print("CUDA not available. Cannot profile GPU memory.")
         return {}
 
     # Get architecture config
     try:
         architecture_config = get_architecture_config(architecture_name)
     except ValueError as e:
-        logger.error(f"Failed to get architecture config: {e}")
+        print(f"Failed to get architecture config: {e}")
         return {}
 
     # Get GPU info
@@ -230,7 +230,7 @@ def profile_architecture_memory(
                         f"(GPU: {gpu_memory_per_env:.3f} GB, CPU: {cpu_memory_per_env:.3f} GB)"
                     )
                 else:
-                    logger.warning(
+                    print(
                         f"  Invalid memory per environment calculation: total={total_memory_per_env:.3f}"
                     )
 
@@ -308,7 +308,7 @@ def profile_architecture_memory(
                     f"  Peak memory during forward pass: {forward_memory['peak_gb']:.2f} GB"
                 )
             except Exception as e:
-                logger.warning(f"  Could not measure forward pass memory: {e}")
+                print(f"  Could not measure forward pass memory: {e}")
                 # Still measure memory even if forward pass failed
                 forward_memory = measure_memory_at_checkpoint(
                     f"forward_pass_{num_envs}_envs_failed"
@@ -336,7 +336,7 @@ def profile_architecture_memory(
             prev_num_envs = num_envs
 
         except Exception as e:
-            logger.error(f"Error profiling {num_envs} environments: {e}")
+            print(f"Error profiling {num_envs} environments: {e}")
             logger.exception("Full traceback:")
             break
 
@@ -386,15 +386,13 @@ def profile_architecture_memory(
                     "for very large numbers of environments"
                 )
             else:
-                logger.warning(
+                print(
                     "  Cannot calculate summary: average memory per environment is zero"
                 )
         else:
-            logger.warning(
-                "  Cannot calculate summary: no valid memory measurements collected"
-            )
+            print("  Cannot calculate summary: no valid memory measurements collected")
     else:
-        logger.warning(
+        print(
             "  Cannot calculate summary: need at least 2 environment counts to measure memory per environment"
         )
 
@@ -409,8 +407,8 @@ def main():
     parser.add_argument(
         "--architectures",
         nargs="+",
-        default=["mlp_baseline", "full_hgt", "simplified_hgt", "gat", "gcn"],
-        help="Architecture names to profile (default: mlp_baseline full_hgt simplified_hgt gat gcn)",
+        default=["mlp_cnn", "full_hgt", "simplified_hgt", "gat", "gcn"],
+        help="Architecture names to profile (default: mlp_cnn full_hgt simplified_hgt gat gcn)",
     )
     parser.add_argument(
         "--max-envs",
@@ -452,7 +450,7 @@ def main():
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
-        logger.error("CUDA not available. Cannot profile GPU memory.")
+        print("CUDA not available. Cannot profile GPU memory.")
         sys.exit(1)
 
     # Generate list of environment counts to test
@@ -483,9 +481,7 @@ def main():
     # Profile each architecture
     for arch_name in args.architectures:
         if arch_name not in ARCHITECTURE_REGISTRY:
-            logger.warning(
-                f"Architecture '{arch_name}' not found in registry. Skipping."
-            )
+            print(f"Architecture '{arch_name}' not found in registry. Skipping.")
             continue
 
         try:
@@ -499,7 +495,7 @@ def main():
             )
             all_results["results"].append(result)
         except Exception as e:
-            logger.error(f"Failed to profile {arch_name}: {e}")
+            print(f"Failed to profile {arch_name}: {e}")
             logger.exception("Full traceback:")
 
     # Save results
@@ -527,10 +523,10 @@ def main():
             )
 
     if summary_count == 0:
-        logger.warning(
+        print(
             "  No architectures successfully completed profiling with valid measurements."
         )
-        logger.warning(
+        print(
             "  This may be because only 1 environment was tested (need at least 2 for per-env calculation)."
         )
 

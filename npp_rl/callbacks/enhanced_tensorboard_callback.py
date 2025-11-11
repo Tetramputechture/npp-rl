@@ -138,7 +138,7 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 break
 
         if self.tb_writer is None:
-            logger.warning("TensorBoard writer not found - enhanced logging disabled")
+            print("TensorBoard writer not found - enhanced logging disabled")
             return
 
         self.start_time = time.time()

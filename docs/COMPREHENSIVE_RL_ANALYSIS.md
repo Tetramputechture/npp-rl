@@ -351,7 +351,7 @@ clip_range = 0.2       # PPO clipping range
 
 #### Phase 1: Fix Fundamentals (Current Priority)
 ```python
-"architectures": ["mlp_baseline"]
+"architectures": ["mlp_cnn"]
 ```
 - Focus on reward/curriculum fixes first
 - Validate improvements with simple architecture

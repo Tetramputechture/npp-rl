@@ -334,7 +334,7 @@ class AMPHelper:
         else:
             self.scaler = None
             if enabled:
-                logger.warning("Mixed precision requested but CUDA not available")
+                print("Mixed precision requested but CUDA not available")
 
     def autocast(self):
         """Get autocast context manager."""
@@ -424,7 +424,7 @@ def configure_cuda_for_training(
         benchmark: If True, enable cudnn benchmark mode
     """
     if not torch.cuda.is_available():
-        logger.warning("CUDA not available, skipping GPU configuration")
+        print("CUDA not available, skipping GPU configuration")
         return
 
     torch.cuda.set_device(device_id)

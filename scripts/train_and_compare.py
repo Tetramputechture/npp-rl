@@ -117,7 +117,10 @@ def parse_args():
         help="Total training timesteps",
     )
     parser.add_argument(
-        "--num-envs", type=int, default=64, help="Number of parallel environments"
+        "--num-envs",
+        type=int,
+        default=128,  # INCREASED from 64 with optimized hyperparameters
+        help="Number of parallel environments (optimized for memory efficiency)",
     )
     parser.add_argument(
         "--eval-freq",
@@ -180,6 +183,31 @@ def parse_args():
         type=int,
         default=50,
         help="High-level policy update frequency (hierarchical PPO)",
+    )
+
+    # Deep ResNet policy options (deprecated - automatically enabled for 'attention' architecture)
+    parser.add_argument(
+        "--use-deep-resnet-policy",
+        action="store_true",
+        help="Use deep ResNet policy with separate feature extractors (DEPRECATED: automatically enabled for 'attention' architecture)",
+    )
+    parser.add_argument(
+        "--deep-resnet-use-residual",
+        action="store_true",
+        default=True,
+        help="Use residual connections in deep ResNet policy (default: True)",
+    )
+    parser.add_argument(
+        "--deep-resnet-use-layer-norm",
+        action="store_true",
+        default=True,
+        help="Use LayerNorm in deep ResNet policy (default: True)",
+    )
+    parser.add_argument(
+        "--deep-resnet-dropout",
+        type=float,
+        default=0.1,
+        help="Dropout rate for deep ResNet policy (default: 0.1)",
     )
 
     # Curriculum learning options
@@ -317,7 +345,7 @@ def parse_args():
     parser.add_argument(
         "--enable-state-stacking",
         action="store_true",
-        help="Enable frame stacking for game state observations",
+        help="Enable frame stacking for game state observations (RECOMMENDED: provides temporal context for physics)",
     )
     parser.add_argument(
         "--state-stack-size",
@@ -629,6 +657,17 @@ def train_architecture(
     logger.info(f"Training: {architecture_name}{condition_suffix} on GPU {device_id}")
     logger.info("=" * 70)
 
+    # AUTOMATIC DETECTION: Enable ObjectiveAttentionActorCriticPolicy for 'attention' architecture
+    use_objective_attention_policy = architecture_name == "attention"
+    if use_objective_attention_policy:
+        logger.info("🎯 Detected 'attention' architecture")
+        logger.info("   Automatically enabling: ObjectiveAttentionActorCriticPolicy")
+        logger.info("   - Deep ResNet MLP (5-layer policy, 3-layer value)")
+        logger.info("   - Objective-specific attention over 1-16 locked doors")
+        logger.info("   - Dueling value architecture (always enabled)")
+        logger.info("   - Residual connections + LayerNorm + SiLU")
+        logger.info("   Total parameters: ~15-18M")
+
     # Create condition-specific output directory
     if condition_name:
         arch_output_dir = output_dir / architecture_name / condition_name
@@ -687,6 +726,7 @@ def train_architecture(
             tensorboard_writer=tb_writer.get_writer("training") if tb_writer else None,
             use_mixed_precision=args.mixed_precision,
             use_hierarchical_ppo=args.use_hierarchical_ppo,
+            use_objective_attention_policy=use_objective_attention_policy,
             use_curriculum=args.use_curriculum,
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
@@ -727,6 +767,24 @@ def train_architecture(
             else:
                 ppo_kwargs["learning_rate"] = base_lr
                 logger.info(f"Learning rate: {base_lr:.2e} (constant)")
+
+        # Add deep ResNet policy kwargs if enabled (or for attention architecture)
+        if args.use_deep_resnet_policy or use_objective_attention_policy:
+            ppo_kwargs["use_residual"] = args.deep_resnet_use_residual
+            ppo_kwargs["use_layer_norm"] = args.deep_resnet_use_layer_norm
+            ppo_kwargs["dropout"] = args.deep_resnet_dropout
+
+            # Note: dueling is always enabled for ObjectiveAttentionActorCriticPolicy
+            if not use_objective_attention_policy:
+                ppo_kwargs["dueling"] = True  # Force dueling for consistency
+
+            if not use_objective_attention_policy:
+                # Only log for manual deep ResNet policy (attention arch already logged above)
+                logger.info("Deep ResNet policy enabled:")
+                logger.info(f"  Residual connections: {args.deep_resnet_use_residual}")
+                logger.info(f"  LayerNorm: {args.deep_resnet_use_layer_norm}")
+                logger.info("  Dueling architecture: True (always enabled)")
+                logger.info(f"  Dropout: {args.deep_resnet_dropout}")
 
         # Setup model
         trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs)
@@ -807,7 +865,7 @@ def train_architecture(
         }
 
     except Exception as e:
-        logger.error(f"Training failed for {architecture_name}{condition_suffix}: {e}")
+        print(f"Training failed for {architecture_name}{condition_suffix}: {e}")
         # Clean up environments even on failure (if trainer was initialized)
         if "trainer" in locals():
             trainer.cleanup()
@@ -888,7 +946,7 @@ def train_worker(
             try:
                 arch_config = get_architecture_config(arch_name)
             except Exception as e:
-                logger.error(
+                print(
                     f"[Rank {rank}] Failed to load architecture config for '{arch_name}': {e}"
                 )
                 continue
@@ -1089,13 +1147,13 @@ def main():
 
         # Validate num_gpus argument
         if args.num_gpus > num_gpus:
-            logger.warning(
+            print(
                 f"Requested {args.num_gpus} GPUs but only {num_gpus} available. "
                 f"Using {num_gpus} GPUs."
             )
             args.num_gpus = num_gpus
     else:
-        logger.warning("No GPUs available via torch.cuda.is_available()")
+        print("No GPUs available via torch.cuda.is_available()")
         logger.info("Possible reasons:")
         logger.info("  1. PyTorch not built with CUDA support")
         logger.info("  2. CUDA drivers not installed or incompatible")
@@ -1109,7 +1167,7 @@ def main():
                 ["nvidia-smi"], capture_output=True, text=True, timeout=5
             )
             if nvidia_smi.returncode == 0:
-                logger.warning("nvidia-smi found GPUs but PyTorch cannot access them!")
+                print("nvidia-smi found GPUs but PyTorch cannot access them!")
                 logger.info("nvidia-smi output (first 10 lines):")
                 for line in nvidia_smi.stdout.split("\n")[:10]:
                     logger.info(f"  {line}")
@@ -1123,7 +1181,7 @@ def main():
     logger.info("=" * 70)
 
     # Validate configuration for BC pretraining with MLP baseline
-    if "mlp_baseline" in args.architectures and args.replay_data_dir:
+    if "mlp_cnn" in args.architectures and args.replay_data_dir:
         logger.info("")
         logger.info("=" * 70)
         logger.info("Configuration Validation for MLP Baseline")
@@ -1131,17 +1189,18 @@ def main():
 
         # Check 1: Warn if hierarchical PPO is enabled
         if args.use_hierarchical_ppo:
-            logger.warning("⚠️  WARNING: Hierarchical PPO enabled for MLP baseline")
-            logger.warning(
+            print("⚠️  WARNING: Hierarchical PPO enabled for MLP baseline")
+            print(
                 "   This adds 46 random parameters and may cause incomplete weight loading"
             )
-            logger.warning("   Recommendation: Remove --use-hierarchical-ppo flag")
+            print("   Recommendation: Remove --use-hierarchical-ppo flag")
 
         # Check 2: Validate environment count
-        if args.num_envs and args.num_envs < 64:
-            logger.warning(f"⚠️  WARNING: Only {args.num_envs} environments specified")
-            logger.warning(
-                "   Recommendation: Use --num-envs 128 or higher for better data diversity"
+        if args.num_envs and args.num_envs < 128:
+            print(f"⚠️  WARNING: Only {args.num_envs} environments specified")
+            print(
+                "   Recommendation: Use --num-envs 128 or higher for better data diversity "
+                "(optimized hyperparameters enable 2x more environments)"
             )
 
         logger.info("=" * 70)
@@ -1221,7 +1280,7 @@ def main():
         try:
             arch_config = get_architecture_config(arch_name)
         except Exception as e:
-            logger.error(f"Failed to load architecture config for '{arch_name}': {e}")
+            print(f"Failed to load architecture config for '{arch_name}': {e}")
             continue
 
         # Build frame stacking configuration for BC pretraining

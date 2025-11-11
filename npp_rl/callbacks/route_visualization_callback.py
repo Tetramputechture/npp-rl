@@ -130,7 +130,7 @@ class RouteVisualizationCallback(BaseCallback):
                     try:
                         matplotlib.use("Agg")
                     except Exception:
-                        logger.warning(
+                        print(
                             "Could not set matplotlib backend to Agg - visualization may fail in headless mode"
                         )
 
@@ -139,9 +139,7 @@ class RouteVisualizationCallback(BaseCallback):
                 self.plt = plt
                 self._matplotlib_imported = True
             except ImportError:
-                logger.warning(
-                    "matplotlib not available - route visualization disabled"
-                )
+                print("matplotlib not available - route visualization disabled")
                 self._matplotlib_imported = False
         return self._matplotlib_imported
 
@@ -330,9 +328,7 @@ class RouteVisualizationCallback(BaseCallback):
             return
 
         if not self._import_matplotlib():
-            logger.warning(
-                "Cannot save route visualizations - matplotlib not available"
-            )
+            print("Cannot save route visualizations - matplotlib not available")
             self.save_queue.clear()
             return
 
@@ -365,7 +361,7 @@ class RouteVisualizationCallback(BaseCallback):
             try:
                 self._save_route_visualization(route_data)
             except Exception as e:
-                logger.error(f"Error saving route visualization: {e}")
+                print(f"Error saving route visualization: {e}")
 
     def _save_route_visualization(self, route_data: Dict[str, Any]) -> None:
         """Save a single route visualization.
@@ -773,7 +769,7 @@ class RouteVisualizationCallback(BaseCallback):
                     if self.verbose >= 2:
                         logger.info(f"Removed old route visualization: {old_file.name}")
             except Exception as e:
-                logger.warning(f"Could not remove old file {old_file}: {e}")
+                print(f"Could not remove old file {old_file}: {e}")
 
     def _get_tile_data(self, env_idx: int = 0) -> Dict[Tuple[int, int], int]:
         """Extract tile data from the environment.
@@ -805,13 +801,13 @@ class RouteVisualizationCallback(BaseCallback):
                         return dict(results[0])
                     else:
                         if self.verbose >= 1:
-                            logger.warning(
+                            print(
                                 f"env_method returned empty result for tile data (env {env_idx})"
                             )
                         return {}
                 except Exception as e:
                     if self.verbose >= 1:
-                        logger.warning(
+                        print(
                             f"env_method failed for tile data (env {env_idx}): {e}. "
                             "Falling back to direct access."
                         )
@@ -824,7 +820,7 @@ class RouteVisualizationCallback(BaseCallback):
             else:
                 # Can't access - return empty
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Cannot access tile data for env {env_idx}: "
                         "No accessible environment found."
                     )
@@ -839,14 +835,14 @@ class RouteVisualizationCallback(BaseCallback):
                 return dict(tile_dic)  # Make a copy
             else:
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Environment {env_idx} does not have nplay_headless attribute. "
                         "Cannot extract tile data."
                     )
                 return {}
         except Exception as e:
             if self.verbose >= 1:
-                logger.warning(f"Could not extract tile data for env {env_idx}: {e}")
+                print(f"Could not extract tile data for env {env_idx}: {e}")
             return {}
 
     def _get_mine_data(self, env_idx: int = 0) -> List[Dict[str, Any]]:
@@ -879,13 +875,13 @@ class RouteVisualizationCallback(BaseCallback):
                         return results[0]
                     else:
                         if self.verbose >= 1:
-                            logger.warning(
+                            print(
                                 f"env_method returned empty result for mine data (env {env_idx})"
                             )
                         return []
                 except Exception as e:
                     if self.verbose >= 1:
-                        logger.warning(
+                        print(
                             f"env_method failed for mine data (env {env_idx}): {e}. "
                             "Falling back to direct access."
                         )
@@ -898,7 +894,7 @@ class RouteVisualizationCallback(BaseCallback):
             else:
                 # Can't access - return empty
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Cannot access mine data for env {env_idx}: "
                         "No accessible environment found."
                     )
@@ -913,14 +909,14 @@ class RouteVisualizationCallback(BaseCallback):
                 return env.nplay_headless.get_all_mine_data_for_visualization()
             else:
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Environment {env_idx} does not have nplay_headless attribute. "
                         "Cannot extract mine data."
                     )
                 return []
         except Exception as e:
             if self.verbose >= 1:
-                logger.warning(f"Could not extract mine data for env {env_idx}: {e}")
+                print(f"Could not extract mine data for env {env_idx}: {e}")
             return []
 
     def _get_locked_door_data(self, env_idx: int = 0) -> List[Dict[str, Any]]:
@@ -959,13 +955,13 @@ class RouteVisualizationCallback(BaseCallback):
                         return results[0]
                     else:
                         if self.verbose >= 1:
-                            logger.warning(
+                            print(
                                 f"env_method returned empty result for locked door data (env {env_idx})"
                             )
                         return []
                 except Exception as e:
                     if self.verbose >= 1:
-                        logger.warning(
+                        print(
                             f"env_method failed for locked door data (env {env_idx}): {e}. "
                             "Falling back to direct access."
                         )
@@ -978,7 +974,7 @@ class RouteVisualizationCallback(BaseCallback):
             else:
                 # Can't access - return empty
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Cannot access locked door data for env {env_idx}: "
                         "No accessible environment found."
                     )
@@ -1043,16 +1039,14 @@ class RouteVisualizationCallback(BaseCallback):
                 return locked_doors
             else:
                 if self.verbose >= 1:
-                    logger.warning(
+                    print(
                         f"Environment {env_idx} does not have nplay_headless attribute. "
                         "Cannot extract locked door data."
                     )
                 return []
         except Exception as e:
             if self.verbose >= 1:
-                logger.warning(
-                    f"Could not extract locked door data for env {env_idx}: {e}"
-                )
+                print(f"Could not extract locked door data for env {env_idx}: {e}")
             return []
 
     def _on_training_end(self) -> None:

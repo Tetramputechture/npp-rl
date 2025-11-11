@@ -32,7 +32,7 @@
 #     --aws-secret-key wJalr... \
 #     --s3-bucket npp-rl-experiments \
 #     --experiment-name hpo_mlp_v1 \
-#     --architecture mlp_baseline
+#     --architecture mlp_cnn
 #
 # Optional:
 #   --ssh-key ~/.ssh/my_key.pem
@@ -149,7 +149,7 @@ Example:
     --aws-secret-key wJalr... \\
     --s3-bucket npp-rl-experiments \\
     --experiment-name hpo_mlp_v1 \\
-    --architecture mlp_baseline \\
+    --architecture mlp_cnn \\
     --num-trials 20 \\
     --timesteps-per-trial 500000
 

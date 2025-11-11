@@ -83,11 +83,11 @@ class S3Uploader:
         local_path = Path(local_path)
 
         if not local_path.exists():
-            logger.warning(f"File not found, skipping: {local_path}")
+            print(f"File not found, skipping: {local_path}")
             return False
 
         if not local_path.is_file():
-            logger.warning(f"Not a file, skipping: {local_path}")
+            print(f"Not a file, skipping: {local_path}")
             return False
 
         # Determine S3 key
@@ -139,7 +139,7 @@ class S3Uploader:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to upload {local_path}: {e}")
+            print(f"Failed to upload {local_path}: {e}")
             return False
 
     def upload_directory(
@@ -159,7 +159,7 @@ class S3Uploader:
         local_path = Path(local_dir)
 
         if not local_path.exists() or not local_path.is_dir():
-            logger.warning(f"Directory not found: {local_dir}")
+            print(f"Directory not found: {local_dir}")
             return 0
 
         upload_count = 0
@@ -259,6 +259,6 @@ def create_s3_uploader(
         uploader = S3Uploader(bucket, prefix, experiment_name, dry_run=dry_run)
         return uploader
     except Exception as e:
-        logger.error(f"Failed to initialize S3 uploader: {e}")
-        logger.warning("Continuing without S3 upload")
+        print(f"Failed to initialize S3 uploader: {e}")
+        print("Continuing without S3 upload")
         return None

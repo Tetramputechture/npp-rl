@@ -59,9 +59,9 @@ class CurriculumManager:
     # analysis showing agent stuck at stage 1 with 44% success (couldn't reach 80%).
     # New progressive schedule enables curriculum progression while maintaining quality.
     STAGE_THRESHOLDS = {
-        "simplest": 0.75,  # Reduced from 0.80 to allow faster progression
-        "simplest_few_mines": 0.70,  # NEW: Between simplest and simplest_with_mines
-        "simplest_with_mines": 0.65,  # Reduced from 0.75 - critical bottleneck
+        "simplest": 0.70,  # Reduced from 0.80 to allow faster progression
+        "simplest_few_mines": 0.65,  # NEW: Between simplest and simplest_with_mines
+        "simplest_with_mines": 0.60,  # Reduced from 0.75 - critical bottleneck
         "simpler": 0.60,  # Unchanged
         "simple": 0.50,  # Unchanged
         "medium": 0.45,  # Unchanged
@@ -142,7 +142,7 @@ class CurriculumManager:
         self.enable_adaptive_mixing = enable_adaptive_mixing
         self.enable_early_advancement = enable_early_advancement
         self.enable_trend_analysis = enable_trend_analysis
-        self.enable_regression = enable_regression  # FIXED: Store regression flag
+        self.enable_regression = enable_regression
         self.enable_auto_adjustment = enable_auto_adjustment
         self.auto_adjustment_freq = auto_adjustment_freq
         self.auto_adjustment_min_threshold = auto_adjustment_min_threshold
@@ -230,8 +230,7 @@ class CurriculumManager:
             levels_by_stage_and_generator[stage] = {}
 
             if stage not in all_levels:
-                logger.warning(f"No levels found for stage '{stage}'")
-                continue
+                raise ValueError(f"No levels found for stage '{stage}'")
 
             # Group levels by generator type
             for level_data in all_levels[stage]:
@@ -249,9 +248,11 @@ class CurriculumManager:
 
                 levels_by_stage_and_generator[stage][generator_type].append(level_data)
 
-            # Log warning if any stage has no generator types
+            # Raise error if any stage has no generator types
             if not levels_by_stage_and_generator[stage]:
-                logger.warning(f"Stage '{stage}' has no levels with generator metadata")
+                raise ValueError(
+                    f"Stage '{stage}' has no levels with generator metadata"
+                )
 
         return levels_by_stage_and_generator
 
@@ -343,23 +344,17 @@ class CurriculumManager:
         generators = self.levels_by_stage_and_generator.get(sample_stage, {})
 
         if not generators:
-            logger.warning(f"No generator types available for stage '{sample_stage}'")
-            return None
+            raise RuntimeError(
+                f"No generator types available for stage '{sample_stage}'"
+            )
 
         # Stratified sampling: find least-sampled generator type(s)
         generator_counts = self.generator_sample_counts.get(sample_stage, {})
 
         if not generator_counts:
-            # Fallback: uniform sampling if no counts tracked
-            logger.warning(
+            raise RuntimeError(
                 f"No generator counts for stage '{sample_stage}', using uniform sampling"
             )
-            all_levels = []
-            for gen_levels in generators.values():
-                all_levels.extend(gen_levels)
-            if not all_levels:
-                return None
-            return np.random.choice(all_levels)
 
         # Find minimum sample count
         min_count = min(generator_counts.values())
@@ -376,10 +371,9 @@ class CurriculumManager:
         generator_levels = generators.get(selected_generator, [])
 
         if not generator_levels:
-            logger.warning(
+            raise RuntimeError(
                 f"No levels for generator '{selected_generator}' in stage '{sample_stage}'"
             )
-            return None
 
         # Sample random level from selected generator
         level = np.random.choice(generator_levels)
@@ -409,8 +403,7 @@ class CurriculumManager:
             frames: Number of frames elapsed during the episode (optional)
         """
         if stage not in self.stage_performance:
-            logger.warning(f"Unknown stage '{stage}', ignoring episode")
-            return
+            raise ValueError(f"Unknown stage '{stage}', ignoring episode")
 
         logger.debug(
             f"Recording episode for stage: {stage}, generator: {generator_type}, "
@@ -420,7 +413,7 @@ class CurriculumManager:
 
         # Defensive: ensure stage exists in episode counts
         if stage not in self.stage_episode_counts:
-            logger.warning(f"Stage '{stage}' not in episode counts, initializing to 0")
+            print(f"Stage '{stage}' not in episode counts, initializing to 0")
             self.stage_episode_counts[stage] = 0
 
         self.stage_episode_counts[stage] += 1
@@ -491,6 +484,8 @@ class CurriculumManager:
                 "advancement_threshold": stage_threshold,
                 "trend": 0.0,
                 "can_early_advance": False,
+                "trend_bonus": False,
+                "adaptive_mixing_ratio": self.base_mixing_ratio,
             }
 
         success_rate = np.mean(results)
@@ -596,7 +591,7 @@ class CurriculumManager:
             )
 
             if new_threshold < current_threshold:
-                logger.warning(
+                print(
                     f"📉 Auto-adjusting curriculum threshold for '{current_stage}': "
                     f"{current_threshold:.1%} → {new_threshold:.1%} "
                     f"(current: {perf['success_rate']:.1%}, episodes: {perf['episodes']})"
@@ -708,7 +703,7 @@ class CurriculumManager:
             prev_stage_idx = self.current_stage_idx - 1
             prev_stage = self.CURRICULUM_ORDER[prev_stage_idx]
 
-            logger.warning(
+            print(
                 f"Curriculum regression: {current_stage} ({success_rate:.1%}) → {prev_stage} "
                 f"(threshold: {regression_threshold:.1%}, episodes: {len(results)})"
             )
@@ -1012,5 +1007,5 @@ def create_curriculum_manager(
         )
         return manager
     except Exception as e:
-        logger.error(f"Failed to create curriculum manager: {e}")
+        print(f"Failed to create curriculum manager: {e}")
         raise

@@ -20,7 +20,7 @@ Usage:
     python -m npp_rl.agents.training --architecture gat --num_envs 32
 
     # MLP baseline (no graph processing)
-    python -m npp_rl.agents.training --architecture mlp_baseline
+    python -m npp_rl.agents.training --architecture mlp_cnn
 """
 
 import argparse
@@ -404,7 +404,7 @@ def train_agent(
         eval_freq: Frequency of evaluation
         log_interval: Logging interval
         extractor_type: [LEGACY] Type of feature extractor (use architecture instead)
-        architecture: Architecture variant (full_hgt, gat, gcn, mlp_baseline, etc.)
+        architecture: Architecture variant (full_hgt, gat, gcn, mlp_cnn, etc.)
     """
 
     # Force single environment for human rendering
@@ -447,35 +447,15 @@ def train_agent(
     else:
         print("Adaptive exploration disabled")
 
-    # Select architecture configuration
-    # Use architecture parameter if provided, otherwise map legacy extractor_type
-    if architecture:
-        architecture_name = architecture
-        print(f"Using architecture: {architecture_name}")
-    else:
-        # Map legacy extractor_type to architecture configs
-        architecture_map = {
-            "vision_free": "vision_free",
-            "minimal": "mlp_baseline",
-            "hgt": "full_hgt",
-            "3d": "full_hgt",
-        }
-        architecture_name = architecture_map.get(extractor_type, "full_hgt")
-        print(
-            f"Using architecture (mapped from extractor_type={extractor_type}): {architecture_name}"
-        )
-
     # Get architecture configuration
-    architecture_config = get_architecture_config(architecture_name)
+    architecture_config = get_architecture_config(architecture)
 
-    # Use ConfigurableMultimodalExtractor
-    extractor_class = ConfigurableMultimodalExtractor
     extractor_kwargs = {
         "config": architecture_config,
     }
 
     policy_kwargs = {
-        "features_extractor_class": extractor_class,
+        "features_extractor_class": ConfigurableMultimodalExtractor,
         "features_extractor_kwargs": extractor_kwargs,
         "net_arch": dict(pi=NET_ARCH_SIZE, vf=NET_ARCH_SIZE),
         "activation_fn": torch.nn.ReLU,
@@ -647,7 +627,7 @@ def main():
         type=str,
         default="hgt",
         choices=["hgt", "hierarchical", "vision_free", "minimal", "3d"],
-        help="[LEGACY] Feature extractor type (use --architecture instead). Maps to: hgt→full_hgt, vision_free→vision_free, minimal→mlp_baseline",
+        help="[LEGACY] Feature extractor type (use --architecture instead). Maps to: hgt→full_hgt, vision_free→vision_free, minimal→mlp_cnn",
     )
     parser.add_argument(
         "--architecture",
@@ -658,11 +638,12 @@ def main():
             "simplified_hgt",
             "gat",
             "gcn",
-            "mlp_baseline",
+            "mlp_cnn",
             "vision_free",
             "no_global_view",
+            "attention",
         ],
-        help="Architecture variant to use (overrides --extractor_type). Options: full_hgt, simplified_hgt, gat, gcn, mlp_baseline, vision_free, no_global_view, local_frames_only",
+        help="Architecture variant to use (overrides --extractor_type). Options: full_hgt, simplified_hgt, gat, gcn, mlp_cnn, vision_free, no_global_view, local_frames_only",
     )
     parser.add_argument(
         "--disable_reachability",

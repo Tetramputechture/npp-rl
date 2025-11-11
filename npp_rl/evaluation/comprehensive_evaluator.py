@@ -107,7 +107,7 @@ class ComprehensiveEvaluator:
             return None
 
         except Exception as e:
-            logger.warning(f"Could not detect frame stacking from model: {e}")
+            print(f"Could not detect frame stacking from model: {e}")
             return None
 
     def _validate_frame_stack_config(
@@ -207,7 +207,7 @@ class ComprehensiveEvaluator:
                         )
                     )
                     if visual_stack_enabled:
-                        logger.warning(
+                        print(
                             f"⚠️  Model expects single frame in '{key}' (shape: {expected_shape}), "
                             f"but frame_stack_config has visual stacking enabled. "
                             f"This may cause shape mismatch! "
@@ -244,7 +244,7 @@ class ComprehensiveEvaluator:
                         )
 
         except Exception as e:
-            logger.warning(
+            print(
                 f"Could not validate frame stacking configuration: {e}. "
                 f"Proceeding with evaluation, but this may cause errors if "
                 f"frame_stack_config doesn't match training configuration."
@@ -320,7 +320,7 @@ class ComprehensiveEvaluator:
         # Evaluate each category
         for category, levels in self.test_levels.items():
             if not levels:
-                logger.warning(f"No levels in category '{category}', skipping")
+                print(f"No levels in category '{category}', skipping")
                 continue
 
             # Determine how many episodes to run
@@ -519,7 +519,7 @@ class ComprehensiveEvaluator:
                             if hasattr(frame, "ndim") and frame.ndim == 3:
                                 video_recorder.record_frame(frame)
                             else:
-                                logger.warning(
+                                print(
                                     f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
                                 )
 
@@ -528,7 +528,7 @@ class ComprehensiveEvaluator:
                     # Check timeout
                     elapsed_time = time.time() - start_time
                     if elapsed_time > timeout:
-                        logger.warning(
+                        print(
                             f"Level {level_id} timed out after {elapsed_time:.1f}s (timeout={timeout}s, steps={steps})"
                         )
                         break
@@ -560,7 +560,7 @@ class ComprehensiveEvaluator:
                             if hasattr(frame, "ndim") and frame.ndim == 3:
                                 video_recorder.record_frame(frame)
                             else:
-                                logger.warning(
+                                print(
                                     f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
                                 )
 
@@ -620,9 +620,7 @@ class ComprehensiveEvaluator:
                         video_recorder.stop_recording(save=False)  # Discard on error
                         logger.debug("Cleaned up video recorder after error")
                     except Exception as cleanup_error:
-                        logger.warning(
-                            f"Error cleaning up video recorder: {cleanup_error}"
-                        )
+                        print(f"Error cleaning up video recorder: {cleanup_error}")
 
                 if env is not None:
                     try:
@@ -631,7 +629,7 @@ class ComprehensiveEvaluator:
                             f"Ensured environment closed for level: {level_id}"
                         )
                     except Exception as cleanup_error:
-                        logger.warning(f"Error closing environment: {cleanup_error}")
+                        print(f"Error closing environment: {cleanup_error}")
 
         # Calculate metrics
         success_rate = np.mean(successes)

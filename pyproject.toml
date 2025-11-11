@@ -32,6 +32,9 @@ dependencies = [
     "torchvision>=0.19.0",
     "torchaudio>=2.4.0",
     "torch_geometric>=2.3.0",
+    # torch-scatter requires PyTorch version-specific wheels from PyG
+    # Install via: pip install torch-scatter -f https://data.pyg.org/whl/torch-{VERSION}+{CUDA}.html
+    # See environment.sh install_torch_scatter() for automatic installation
     "opencv-python>=4.8.0",
     "pillow>=10.0.0",
     "gymnasium>=1.0.0",

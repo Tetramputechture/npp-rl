@@ -20,7 +20,7 @@ The script trains and evaluates these 11 architectures:
 2. `simplified_hgt` - Reduced HGT with lower complexity
 3. `gat` - Graph Attention Network
 4. `gcn` - Graph Convolutional Network
-5. `mlp_baseline` - MLP without graph processing
+5. `mlp_cnn` - MLP without graph processing
 6. `vision_free` - Graph + state only (no vision)
 7. `vision_free_gat` - Vision-free with GAT
 8. `vision_free_gcn` - Vision-free with GCN

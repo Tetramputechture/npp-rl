@@ -6,12 +6,21 @@ from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 import torch
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+    VecNormalize,
+    VecCheckNan,
+)
 
-from nclone.gym_environment.npp_environment import NppEnvironment
 from nclone.gym_environment.config import EnvironmentConfig
+from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+from nclone.gym_environment.npp_environment import NppEnvironment
 from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
 from npp_rl.wrappers.gpu_observation_wrapper import GPUObservationWrapper
+from npp_rl.wrappers.reward_diagnostic_wrapper import RewardDiagnosticWrapper
+from npp_rl.wrappers.position_tracking_wrapper import PositionTrackingWrapper
+from npp_rl.wrappers.hierarchical_reward_wrapper import HierarchicalRewardWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +107,7 @@ class EnvironmentFactory:
         use_subproc = num_envs > 4 and not enable_visualization
 
         if num_envs > 4 and enable_visualization:
-            logger.warning(
+            print(
                 "Visualization enabled with >4 environments. "
                 "Forcing DummyVecEnv (single-process) for reliable pygame rendering. "
                 "This may be slower than SubprocVecEnv. "
@@ -126,6 +135,11 @@ class EnvironmentFactory:
             env = DummyVecEnv(env_fns)
             logger.info("DummyVecEnv initialization complete")
 
+        # Add reward diagnostic wrapper BEFORE VecNormalize to catch NaN rewards
+        logger.info("Applying RewardDiagnosticWrapper to detect NaN rewards...")
+        env = RewardDiagnosticWrapper(env)
+        logger.info("✓ RewardDiagnosticWrapper applied")
+
         # Apply VecNormalize for reward normalization only
         # Observation normalization handled separately via BC stats
         logger.info("Applying VecNormalize wrapper for reward normalization...")
@@ -141,6 +155,16 @@ class EnvironmentFactory:
         )
         self.vec_normalize_wrapper = env
         logger.info("✓ VecNormalize wrapper applied (reward normalization only)")
+
+        # Add NaN/Inf checking wrapper for early detection and detailed diagnostics
+        # Reference: https://stable-baselines3.readthedocs.io/en/master/_modules/stable_baselines3/common/vec_env/vec_check_nan.html
+        env = VecCheckNan(
+            env,
+            raise_exception=True,  # Fail fast on NaN/inf detection
+            check_inf=True,  # Check for infinity values too
+            warn_once=False,  # Log every occurrence for complete diagnostics
+        )
+        logger.info("✓ VecCheckNan wrapper added for NaN/inf detection")
 
         # Apply BC observation normalization if pretrained checkpoint is used
         if self.pretrained_checkpoint and self.output_dir:
@@ -173,7 +197,7 @@ class EnvironmentFactory:
                 env = self.icm_integration.wrap_environment(env, policy=None)
                 logger.info("✓ ICM wrapper applied - intrinsic rewards enabled")
             else:
-                logger.warning("⚠ ICM integration failed - continuing without ICM")
+                print("⚠ ICM integration failed - continuing without ICM")
 
         # Wrap with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
@@ -202,7 +226,6 @@ class EnvironmentFactory:
             env_config = EnvironmentConfig.for_training(
                 test_dataset_path=self.test_dataset_path
             )
-            env_config.graph.enable_graph_for_observations = False
 
             env = NppEnvironment(config=env_config)
 
@@ -211,8 +234,6 @@ class EnvironmentFactory:
                 self.frame_stack_config.get("enable_visual_frame_stacking", False)
                 or self.frame_stack_config.get("enable_state_stacking", False)
             ):
-                from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
-
                 env = FrameStackWrapper(
                     env,
                     visual_stack_size=self.frame_stack_config.get(
@@ -255,10 +276,6 @@ class EnvironmentFactory:
                 test_dataset_path=self.test_dataset_path
             )
 
-            # Graph observations remain False by default for performance
-            # They can be enabled separately if architecture uses graph modality
-            env_config.graph.enable_graph_for_observations = False
-
             # Enable human rendering for visualization
             if visualize:
                 env_config.render.render_mode = "human"
@@ -271,8 +288,6 @@ class EnvironmentFactory:
                 self.frame_stack_config.get("enable_visual_frame_stacking", False)
                 or self.frame_stack_config.get("enable_state_stacking", False)
             ):
-                from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
-
                 env = FrameStackWrapper(
                     env,
                     visual_stack_size=self.frame_stack_config.get(
@@ -291,14 +306,10 @@ class EnvironmentFactory:
                     logger.info("✓ FrameStackWrapper applied to environment")
 
             # Wrap with position tracking for route visualization
-            from npp_rl.wrappers import PositionTrackingWrapper
-
             env = PositionTrackingWrapper(env)
 
-            # Always wrap with hierarchical reward (subtask milestones + mine avoidance)
+            # Wrap with hierarchical reward (subtask milestones + mine avoidance)
             # PBRS itself is handled by base environment (nclone)
-            from npp_rl.wrappers import HierarchicalRewardWrapper
-
             env = HierarchicalRewardWrapper(
                 env,
                 enable_mine_avoidance=self.enable_mine_avoidance_reward,
@@ -337,8 +348,8 @@ class EnvironmentFactory:
         )
 
         if not bc_norm_stats_path.exists():
-            logger.warning(f"BC normalization stats not found at {bc_norm_stats_path}")
-            logger.warning(
+            print(f"BC normalization stats not found at {bc_norm_stats_path}")
+            print(
                 "Continuing without BC observation normalization - transfer learning may be degraded"
             )
             self.bc_normalization_applied = False
@@ -427,13 +438,33 @@ class EnvironmentFactory:
 
                             # If reshaping didn't work (incompatible sizes), skip this key
                             if not reshaped:
-                                logger.warning(
+                                print(
                                     f"  ⚠️  Skipping '{key}': BC stats shape {bc_stats[mean_key].shape} "
                                     f"doesn't match current observation shape {expected_shape} "
                                     f"(total size mismatch: {mean.size} vs {np.prod(expected_shape)}). "
                                     f"This may indicate incompatible frame stacking configurations."
                                 )
                                 continue
+
+                    # Validate BC stats for inf/NaN before using
+                    if np.any(np.isinf(mean)) or np.any(np.isnan(mean)):
+                        print(
+                            f"  ⚠️  BC stats for '{key}' contain inf/NaN in mean, skipping"
+                        )
+                        continue
+
+                    if np.any(np.isinf(std)) or np.any(np.isnan(std)):
+                        print(
+                            f"  ⚠️  BC stats for '{key}' contain inf/NaN in std, skipping"
+                        )
+                        continue
+
+                    # Additional check: ensure std is not zero (would cause division by zero)
+                    if np.any(std == 0.0):
+                        print(
+                            f"  ⚠️  BC stats for '{key}' contain zero std, replacing with 1.0"
+                        )
+                        std = np.where(std == 0.0, 1.0, std)
 
                     # Initialize RunningMeanStd for this observation key
                     rms = RunningMeanStd(shape=mean.shape)
@@ -459,7 +490,7 @@ class EnvironmentFactory:
                 )
 
             if initialized_count == 0:
-                logger.warning(
+                print(
                     "  WARNING: No observation normalization statistics were initialized! "
                     "Check BC stats file format."
                 )
@@ -474,14 +505,14 @@ class EnvironmentFactory:
             logger.info("=" * 60)
 
         except Exception as e:
-            logger.error("!" * 60)
-            logger.error("Failed to apply BC observation normalization!")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Error message: {str(e)}")
-            logger.error(f"BC stats path: {bc_norm_stats_path}")
-            logger.error("Full traceback:", exc_info=True)
-            logger.error("!" * 60)
-            logger.warning(
+            print("!" * 60)
+            print("Failed to apply BC observation normalization!")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            print(f"BC stats path: {bc_norm_stats_path}")
+            # print("Full traceback:", exc_info=True)
+            print("!" * 60)
+            print(
                 "⚠️  Continuing without BC observation normalization - transfer learning may be degraded"
             )
             self.bc_normalization_applied = False

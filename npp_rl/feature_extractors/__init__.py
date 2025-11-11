@@ -9,7 +9,7 @@ multimodal feature extraction with 8 validated architecture variants.
 **ConfigurableMultimodalExtractor** - Unified feature extraction system
 - Supports 8 validated architectures
 - Use with ArchitectureTrainer or directly with PPO
-- Architectures: full_hgt, simplified_hgt, gat, gcn, mlp_baseline,
+- Architectures: full_hgt, simplified_hgt, gat, gcn, mlp_cnn,
                  vision_free, no_global_view, local_frames_only
 
 ## Usage Examples
@@ -24,7 +24,7 @@ multimodal feature extraction with 8 validated architecture variants.
     extractor = ConfigurableMultimodalExtractor(observation_space, config)
 
     # Example: MLP baseline (no graph processing)
-    config = get_architecture_config("mlp_baseline")
+    config = get_architecture_config("mlp_cnn")
     extractor = ConfigurableMultimodalExtractor(observation_space, config)
 
     # Example: Vision-free (no visual processing)
@@ -62,7 +62,7 @@ have been removed and replaced by ConfigurableMultimodalExtractor:
 
     - HGTMultimodalExtractor → Use get_architecture_config("full_hgt")
     - VisionFreeExtractor → Use get_architecture_config("vision_free")
-    - MinimalStateExtractor → Use get_architecture_config("mlp_baseline")
+    - MinimalStateExtractor → Use get_architecture_config("mlp_cnn")
 
 All training scripts have been updated to use the unified system.
 """

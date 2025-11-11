@@ -46,7 +46,6 @@ from npp_rl.intrinsic.utils import extract_reachability_info_from_observations
 icm = ICMNetwork(
     feature_dim=512,
     action_dim=6,
-    enable_reachability_awareness=True,
     reachability_dim=8,
 )
 
@@ -85,7 +84,6 @@ from npp_rl.intrinsic.utils import create_reachability_aware_icm_config
 config = create_reachability_aware_icm_config(
     feature_dim=512,
     action_dim=6,
-    enable_reachability_awareness=True,
     reachability_scale_factor=2.0,      # Boost for reachable areas
     frontier_boost_factor=3.0,          # Extra boost for newly accessible areas
     strategic_weight_factor=1.5,        # Weight for objective-proximate areas
@@ -233,7 +231,6 @@ Enable detailed logging:
 
 ```python
 icm = ICMNetwork(
-    enable_reachability_awareness=True,
     debug_mode=True,  # Enable detailed logging
 )
 ```

@@ -30,6 +30,7 @@ from npp_rl.training.policy_utils import (
 )
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class BCTrainer:
@@ -177,8 +178,23 @@ class BCTrainer:
         Returns:
             Dictionary containing loss and metrics
         """
+        # Log observation shapes for debugging
+        logger.debug(f"BC Loss - Batch size: {actions.shape[0]}")
+        for key, value in observations.items():
+            if isinstance(value, torch.Tensor):
+                logger.debug(f"  {key}: {value.shape}")
+
         # Forward pass through policy
-        logits = self.policy(observations)
+        try:
+            logits = self.policy(observations)
+            logger.debug(f"  logits shape: {logits.shape}")
+        except Exception as e:
+            logger.error(f"Failed forward pass through policy: {e}")
+            logger.error(f"Observation keys: {list(observations.keys())}")
+            for key, value in observations.items():
+                if isinstance(value, torch.Tensor):
+                    logger.error(f"  {key}: shape={value.shape}, dtype={value.dtype}")
+            raise
 
         # Compute cross-entropy loss (negative log-likelihood)
         loss = F.cross_entropy(logits, actions)
@@ -423,11 +439,14 @@ class BCTrainer:
 
         pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")
 
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
+            logger.debug(f"Processing batch {batch_idx}")
             observations, actions = self._prepare_batch(batch)
+            logger.debug("Batch prepared, computing loss...")
 
             # Compute loss
             metrics = self.compute_bc_loss(observations, actions)
+            logger.debug(f"Loss computed: {metrics['loss'].item()}")
             loss = metrics["loss"]
 
             # Backward pass

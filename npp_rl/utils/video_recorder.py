@@ -54,11 +54,11 @@ class VideoRecorder:
             frame: RGB frame as numpy array (H, W, 3)
         """
         if not self.is_recording:
-            logger.warning("Attempted to record frame but recording not started")
+            print("Attempted to record frame but recording not started")
             return
 
         if frame is None:
-            logger.warning("Received None frame, skipping")
+            print("Received None frame, skipping")
             return
 
         # Make a copy and handle transposition if needed
@@ -103,7 +103,7 @@ class VideoRecorder:
             True if successful, False otherwise
         """
         if len(self.frames) == 0:
-            logger.warning("No frames to save")
+            print("No frames to save")
             return False
 
         try:
@@ -133,7 +133,7 @@ class VideoRecorder:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to save video {self.output_path}: {e}")
+            print(f"Failed to save video {self.output_path}: {e}")
             self.frames = []
             return False
 
@@ -174,5 +174,5 @@ def create_video_recorder(
             quality=quality,
         )
     except Exception as e:
-        logger.error(f"Failed to create video recorder: {e}")
+        print(f"Failed to create video recorder: {e}")
         return None

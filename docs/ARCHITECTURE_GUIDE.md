@@ -8,7 +8,7 @@ This guide documents the available architectures in NPP-RL and how to use them e
 
 ### MLP Baseline (Recommended for Week 3-4)
 
-The `mlp_baseline` architecture combines CNN visual processing with MLP state processing:
+The `mlp_cnn` architecture combines CNN visual processing with MLP state processing:
 
 **Components**:
 - **PlayerFrameCNN**: Processes 84x84x1 grayscale frames (local view)
@@ -31,8 +31,8 @@ use_reachability=True   # Enable reachability MLP
 
 ```bash
 python scripts/train_and_compare.py \
-    --experiment-name mlp_baseline_basic \
-    --architectures mlp_baseline \
+    --experiment-name mlp_cnn_basic \
+    --architectures mlp_cnn \
     --train-dataset ~/datasets/train \
     --test-dataset ~/datasets/test \
     --use-curriculum \
@@ -46,8 +46,8 @@ State stacking provides temporal information (velocity, acceleration) without vi
 
 ```bash
 python scripts/train_and_compare.py \
-    --experiment-name mlp_baseline_state_stacked \
-    --architectures mlp_baseline \
+    --experiment-name mlp_cnn_state_stacked \
+    --architectures mlp_cnn \
     --train-dataset ~/datasets/train \
     --test-dataset ~/datasets/test \
     --use-curriculum \
@@ -64,8 +64,8 @@ For tasks requiring motion understanding (jumping, navigation timing):
 
 ```bash
 python scripts/train_and_compare.py \
-    --experiment-name mlp_baseline_full_stacked \
-    --architectures mlp_baseline \
+    --experiment-name mlp_cnn_full_stacked \
+    --architectures mlp_cnn \
     --train-dataset ~/datasets/train \
     --test-dataset ~/datasets/test \
     --use-curriculum \
@@ -84,8 +84,8 @@ All new features enabled:
 
 ```bash
 python scripts/train_and_compare.py \
-    --experiment-name mlp_baseline_week3_enhanced \
-    --architectures mlp_baseline \
+    --experiment-name mlp_cnn_week3_enhanced \
+    --architectures mlp_cnn \
     --train-dataset ~/datasets/train \
     --test-dataset ~/datasets/test \
     --use-curriculum \
@@ -180,7 +180,7 @@ Test that player_frame CNN is active:
 ```bash
 python scripts/train_and_compare.py \
     --experiment-name mlp_validation \
-    --architectures mlp_baseline \
+    --architectures mlp_cnn \
     --train-dataset ~/datasets/train \
     --test-dataset ~/datasets/test \
     --total-timesteps 10000 \
@@ -189,7 +189,7 @@ python scripts/train_and_compare.py \
 ```
 
 Check TensorBoard logs for:
-- `architecture/mlp_baseline/player_frame_active: 1`
+- `architecture/mlp_cnn/player_frame_active: 1`
 - `feature_extractor/player_frame_input_shape: [4, 84, 84, 1]` (or `[4, 84, 84, 4]` if stacked)
 - `feature_extractor/state_input_shape: [4, 29]` (or `[4, 116]` if 4x stacked)
 

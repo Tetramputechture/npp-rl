@@ -33,8 +33,8 @@ def test_video_recording():
         logger.info(f"  ✓ imageio version: {imageio.__version__}")
         logger.info(f"  ✓ imageio-ffmpeg version: {imageio_ffmpeg.__version__}")
     except ImportError as e:
-        logger.error(f"  ✗ Import failed: {e}")
-        logger.error("Install with: pip install imageio>=2.31.0 imageio-ffmpeg>=0.4.8")
+        print(f"  ✗ Import failed: {e}")
+        print("Install with: pip install imageio>=2.31.0 imageio-ffmpeg>=0.4.8")
         return False
 
     # Test VideoRecorder import
@@ -43,7 +43,7 @@ def test_video_recording():
 
         logger.info("  ✓ VideoRecorder imported successfully")
     except ImportError as e:
-        logger.error(f"  ✗ Failed to import VideoRecorder: {e}")
+        print(f"  ✗ Failed to import VideoRecorder: {e}")
         return False
 
     # Create test output directory
@@ -58,7 +58,7 @@ def test_video_recording():
     try:
         recorder = create_video_recorder(str(video_path), fps=30)
         if recorder is None:
-            logger.error("  ✗ Failed to create video recorder")
+            print("  ✗ Failed to create video recorder")
             return False
 
         logger.info("  ✓ VideoRecorder initialized")
@@ -101,11 +101,11 @@ def test_video_recording():
             logger.info(f"    Duration: {num_frames / 30:.1f} seconds")
             return True
         else:
-            logger.error("  ✗ Failed to save video")
+            print("  ✗ Failed to save video")
             return False
 
     except Exception as e:
-        logger.error(f"  ✗ Video recording failed: {e}")
+        print(f"  ✗ Video recording failed: {e}")
         import traceback
 
         traceback.print_exc()
@@ -132,12 +132,12 @@ def test_evaluation_video_integration():
             if param in params:
                 logger.info(f"    ✓ Parameter '{param}' available")
             else:
-                logger.warning(f"    ⚠ Parameter '{param}' not found")
+                print(f"    ⚠ Parameter '{param}' not found")
 
         return True
 
     except Exception as e:
-        logger.error(f"  ✗ Integration test failed: {e}")
+        print(f"  ✗ Integration test failed: {e}")
         return False
 
 
@@ -153,8 +153,12 @@ def main():
     logger.info("\n" + "=" * 70)
     logger.info("Test Summary")
     logger.info("=" * 70)
-    logger.info(f"Video Recording Test:     {'✓ PASSED' if test1_passed else '✗ FAILED'}")
-    logger.info(f"Evaluation Integration:   {'✓ PASSED' if test2_passed else '✗ FAILED'}")
+    logger.info(
+        f"Video Recording Test:     {'✓ PASSED' if test1_passed else '✗ FAILED'}"
+    )
+    logger.info(
+        f"Evaluation Integration:   {'✓ PASSED' if test2_passed else '✗ FAILED'}"
+    )
 
     if test1_passed and test2_passed:
         logger.info("\n✓ All tests passed!")
@@ -163,7 +167,7 @@ def main():
         )
         return 0
     else:
-        logger.error("\n✗ Some tests failed. Please fix issues before training.")
+        print("\n✗ Some tests failed. Please fix issues before training.")
         return 1
 
 

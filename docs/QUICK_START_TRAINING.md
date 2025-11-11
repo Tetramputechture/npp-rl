@@ -30,7 +30,7 @@ cd /path/to/npp-rl
 
 python scripts/train_and_compare.py \
     --experiment-name "quick_test" \
-    --architectures mlp_baseline \
+    --architectures mlp_cnn \
     --no-pretraining \
     --train-dataset ../nclone/datasets/train \
     --test-dataset ../nclone/datasets/test \
@@ -190,7 +190,7 @@ print(list(ARCHITECTURE_REGISTRY.keys()))
 - `gat`: Graph Attention Network variant
 - `gcn`: Graph Convolutional Network variant
 - `simplified_hgt`: Reduced HGT complexity
-- `mlp_baseline`: Simple MLP (state only)
+- `mlp_cnn`: Simple MLP (state only)
 
 ## Command-Line Arguments Reference
 

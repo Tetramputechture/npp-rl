@@ -265,7 +265,7 @@ python scripts/list_architectures.py
 # Run comparison
 python scripts/train_and_compare.py \
     --experiment-name "arch_ablation_$(date +%Y%m%d)" \
-    --architectures full_hgt simplified_hgt gat gcn vision_free mlp_baseline \
+    --architectures full_hgt simplified_hgt gat gcn vision_free mlp_cnn \
     --use-curriculum \
     --train-dataset ../nclone/datasets/train \
     --test-dataset ../nclone/datasets/test \
@@ -281,7 +281,7 @@ python scripts/train_and_compare.py \
 - `gat`: Graph Attention Network
 - `gcn`: Graph Convolutional Network
 - `vision_free`: Physics-state only (baseline, fastest)
-- `mlp_baseline`: Simple MLP (minimal baseline)
+- `mlp_cnn`: Simple MLP
 
 Results saved to `experiments/ablation/comparison_TIMESTAMP.md` with:
 - Training curves

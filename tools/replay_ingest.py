@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 
 from nclone.gym_environment.npp_environment import NppEnvironment
+from nclone.gym_environment.constants import GAME_STATE_CHANNELS
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,7 @@ class ObservationProcessor:
             return ProcessedSample(observation=observation, action=action, meta=meta)
 
         except Exception as e:
-            logger.error(f"Failed to process frame {frame.frame_number}: {e}")
+            print(f"Failed to process frame {frame.frame_number}: {e}")
             return None
 
     def _create_mock_observation(self, frame: ReplayFrame) -> Dict[str, np.ndarray]:
@@ -327,11 +328,8 @@ class ObservationProcessor:
         # Mock global view (128x128x3)
         global_view = np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
 
-        # Mock game state vector
-        game_state_dim = 31
-
-        # Create realistic game state based on available frame data
-        game_state = np.zeros(game_state_dim, dtype=np.float32)
+        # Mock game state vector (uses actual dimension from environment)
+        game_state = np.zeros(GAME_STATE_CHANNELS, dtype=np.float32)
 
         # Fill in known values from frame data
         pos = frame.player_position
@@ -406,7 +404,7 @@ class ReplayIngester:
                         # Validate frame
                         is_valid, errors = self.validator.validate_frame(frame_data)
                         if not is_valid:
-                            logger.warning(
+                            print(
                                 f"{file_path}:{line_num} - Validation errors: {errors}"
                             )
                             self.stats["frames_invalid"] += 1
@@ -436,16 +434,16 @@ class ReplayIngester:
                         self.stats["frames_valid"] += 1
 
                     except json.JSONDecodeError as e:
-                        logger.error(f"{file_path}:{line_num} - JSON decode error: {e}")
+                        print(f"{file_path}:{line_num} - JSON decode error: {e}")
                         self.stats["frames_invalid"] += 1
                     except Exception as e:
-                        logger.error(f"{file_path}:{line_num} - Processing error: {e}")
+                        print(f"{file_path}:{line_num} - Processing error: {e}")
                         self.stats["frames_invalid"] += 1
 
                 self.stats["frames_processed"] += len(frames)
 
         except Exception as e:
-            logger.error(f"Failed to load replay file {file_path}: {e}")
+            print(f"Failed to load replay file {file_path}: {e}")
 
         return frames
 
@@ -462,7 +460,7 @@ class ReplayIngester:
         # Validate trajectory
         is_valid, errors = self.validator.validate_trajectory(frames)
         if not is_valid:
-            logger.warning(f"Trajectory validation failed: {errors}")
+            print(f"Trajectory validation failed: {errors}")
             return []
 
         samples = []
@@ -479,7 +477,7 @@ class ReplayIngester:
     def save_samples_npz(self, samples: List[ProcessedSample], output_path: Path):
         """Save processed samples to NPZ format."""
         if not samples:
-            logger.warning("No samples to save")
+            print("No samples to save")
             return
 
         # Separate observations, actions, and metadata
@@ -525,7 +523,7 @@ class ReplayIngester:
     def save_samples_parquet(self, samples: List[ProcessedSample], output_path: Path):
         """Save processed samples to Parquet format."""
         # TODO: Implement Parquet saving for large datasets
-        logger.warning("Parquet format not yet implemented, falling back to NPZ")
+        print("Parquet format not yet implemented, falling back to NPZ")
         npz_path = output_path.with_suffix(".npz")
         self.save_samples_npz(samples, npz_path)
 

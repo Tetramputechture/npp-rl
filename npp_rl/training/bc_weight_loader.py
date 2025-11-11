@@ -54,7 +54,7 @@ class BCWeightLoader:
         )
 
         if "policy_state_dict" not in checkpoint:
-            logger.warning(
+            print(
                 f"Checkpoint does not contain 'policy_state_dict'. "
                 f"Found keys: {list(checkpoint.keys())}"
             )
@@ -75,7 +75,7 @@ class BCWeightLoader:
         mapped_state_dict = self._map_bc_weights(bc_state_dict, extractor_config)
 
         if not mapped_state_dict:
-            logger.warning("No feature extractor weights found in BC checkpoint")
+            print("No feature extractor weights found in BC checkpoint")
             return
 
         # Load weights and verify transfer
@@ -93,14 +93,12 @@ class BCWeightLoader:
             rl_arch = self.architecture_name
 
             if bc_arch != rl_arch:
-                logger.warning("=" * 60)
-                logger.warning("ARCHITECTURE MISMATCH DETECTED")
-                logger.warning(f"  BC checkpoint architecture: {bc_arch}")
-                logger.warning(f"  RL training architecture:   {rl_arch}")
-                logger.warning(
-                    "  Some weights may not transfer. Missing keys are expected."
-                )
-                logger.warning("=" * 60)
+                print("=" * 60)
+                print("ARCHITECTURE MISMATCH DETECTED")
+                print(f"  BC checkpoint architecture: {bc_arch}")
+                print(f"  RL training architecture:   {rl_arch}")
+                print("  Some weights may not transfer. Missing keys are expected.")
+                print("=" * 60)
             else:
                 logger.info(f"✓ Architecture match: {bc_arch}")
 
@@ -209,7 +207,7 @@ class BCWeightLoader:
             and not uses_separate_extractors
             and not uses_hierarchical_extractor
         ):
-            logger.warning(
+            print(
                 "PPO model has no recognizable feature extractor keys! "
                 "Cannot load BC weights."
             )
@@ -381,9 +379,7 @@ class BCWeightLoader:
                 if changed:
                     logger.info("✓ BC weights successfully transferred to PPO policy")
                 else:
-                    logger.error(
-                        "✗ BUG DETECTED: BC weights not loaded (transfer failed!)"
-                    )
+                    print("✗ BUG DETECTED: BC weights not loaded (transfer failed!)")
 
             # Calculate transfer percentage
             total_ppo_params = sum(p.numel() for p in self.model.policy.parameters())
@@ -406,7 +402,7 @@ class BCWeightLoader:
                 )
 
             if transfer_pct < 5:
-                logger.warning(
+                print(
                     f"  WARNING: Very low transfer rate ({transfer_pct:.1f}%). "
                     f"Most of the model is randomly initialized!"
                 )
@@ -415,15 +411,13 @@ class BCWeightLoader:
             self._log_missing_keys(missing_keys, extractor_config)
 
             if unexpected_keys:
-                logger.warning(
-                    f"  Unexpected keys in checkpoint: {len(unexpected_keys)}"
-                )
+                print(f"  Unexpected keys in checkpoint: {len(unexpected_keys)}")
 
             # Log what was actually loaded
             self._log_loaded_extractors(extractor_type)
 
         except Exception as e:
-            logger.error(f"Failed to load mapped weights: {e}")
+            print(f"Failed to load mapped weights: {e}")
             raise
 
     def _log_missing_keys(

@@ -10,6 +10,7 @@ from typing import Dict, Any
 import gymnasium as gym
 import numpy as np
 from stable_baselines3.common.vec_env import VecEnvWrapper
+from npp_rl.training.curriculum_manager import CurriculumManager
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class CurriculumEnv(gym.Wrapper):
                     f"Curriculum stage updated to: {stage} (index: {stage_idx})"
                 )
             except ValueError:
-                logger.warning(f"Unknown curriculum stage: {stage}")
+                print(f"Unknown curriculum stage: {stage}")
 
     def set_adaptive_mixing_ratio(self, stage: str, ratio: float):
         """Set the adaptive mixing ratio for a stage.
@@ -114,7 +115,7 @@ class CurriculumEnv(gym.Wrapper):
 
         if level_data is None:
             # Fallback to default reset if no curriculum level available
-            logger.warning("No curriculum level available, using default reset")
+            print("No curriculum level available, using default reset")
             return self.env.reset(**kwargs)
 
         # Store current level info
@@ -135,8 +136,7 @@ class CurriculumEnv(gym.Wrapper):
             self.current_level_stage = level_data["metadata"].get("category", "unknown")
         else:
             # ERROR: No stage information available
-            self.current_level_stage = "unknown"
-            logger.error(
+            raise ValueError(
                 f"NO STAGE INFO for level {level_data.get('level_id', 'unknown')}! "
                 f"This will prevent curriculum tracking. Level data keys: {list(level_data.keys())}"
             )
@@ -151,27 +151,21 @@ class CurriculumEnv(gym.Wrapper):
         if "map_data" in level_data:
             # Access the unwrapped environment to load the map
             base_env = self.env.unwrapped
-            if hasattr(base_env, "nplay_headless"):
-                logger.debug(
-                    f"Loading curriculum level: {level_data.get('level_id', 'unknown')} "
-                    f"from stage: {self.current_level_stage}"
-                )
-                base_env.nplay_headless.load_map_from_map_data(level_data["map_data"])
+            logger.debug(
+                f"Loading curriculum level: {level_data.get('level_id', 'unknown')} "
+                f"from stage: {self.current_level_stage}"
+            )
+            base_env.nplay_headless.load_map_from_map_data(level_data["map_data"])
 
-                # Pass skip_map_load=True to prevent overwriting curriculum map
-                # Merge with existing options if provided
-                reset_options = kwargs.get("options", {})
-                if reset_options is None:
-                    reset_options = {}
-                reset_options["skip_map_load"] = True
-                kwargs["options"] = reset_options
-            else:
-                logger.warning(
-                    "Environment does not have nplay_headless attribute, "
-                    "cannot load map data"
-                )
+            # Pass skip_map_load=True to prevent overwriting curriculum map
+            # Merge with existing options if provided
+            reset_options = kwargs.get("options", {})
+            if reset_options is None:
+                reset_options = {}
+            reset_options["skip_map_load"] = True
+            kwargs["options"] = reset_options
         else:
-            logger.warning(
+            raise ValueError(
                 f"Level data missing 'map_data' key for level: "
                 f"{level_data.get('level_id', 'unknown')}"
             )
@@ -203,7 +197,7 @@ class CurriculumEnv(gym.Wrapper):
             info["curriculum_stage"] = self.current_level_stage
         else:
             info["curriculum_stage"] = "unknown"
-            logger.warning("current_level_stage not set, using 'unknown'")
+            print("current_level_stage not set, using 'unknown'")
 
         # Add generator type if available
         if hasattr(self, "current_generator_type"):
@@ -305,7 +299,12 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
     disabled to avoid duplicate tracking.
     """
 
-    def __init__(self, venv, curriculum_manager, check_advancement_freq: int = 10):
+    def __init__(
+        self,
+        venv,
+        curriculum_manager: CurriculumManager,
+        check_advancement_freq: int = 10,
+    ):
         """Initialize vectorized curriculum wrapper.
 
         Args:
@@ -375,12 +374,12 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                             f"stage={stage}, generator={generator_type}, success={success}, total_episodes={self.total_episodes}"
                         )
                     except Exception as e:
-                        logger.error(
+                        print(
                             f"[VecEnv] Error recording episode for env {i}: {e}",
-                            exc_info=True,
+                            # exc_info=True,
                         )
                 else:
-                    logger.warning(
+                    print(
                         f"[VecEnv] Env {i} completed episode without curriculum stage info"
                     )
 
@@ -425,9 +424,9 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                 elif self.total_episodes % 50 == 0:
                     self._sync_mixing_ratios()
             except Exception as e:
-                logger.error(
+                print(
                     f"[VecEnv] Error during advancement check at episode {self.total_episodes}: {e}",
-                    exc_info=True,
+                    # exc_info=True,
                 )
 
         return obs, rewards, dones, infos
@@ -457,7 +456,7 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                         f"[VecEnv] Successfully synced stage '{stage}' to {len(stage_results)} environments"
                     )
                 else:
-                    logger.warning(
+                    print(
                         f"[VecEnv] Stage sync may have failed - expected {self.num_envs} results, "
                         f"got {len(stage_results) if stage_results else 0}"
                     )
@@ -481,17 +480,17 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                             f"for stage '{stage}' to {len(mixing_results)} environments"
                         )
                     else:
-                        logger.warning(
+                        print(
                             f"[VecEnv] Mixing ratio sync may have failed - expected {self.num_envs} results, "
                             f"got {len(mixing_results) if mixing_results else 0}"
                         )
             else:
-                logger.error(
+                print(
                     "[VecEnv] VecEnv does not support env_method, cannot sync curriculum stage! "
                     "Stage advancement will not work correctly. This is a critical error."
                 )
         except Exception as e:
-            logger.error(f"[VecEnv] Failed to sync curriculum: {e}", exc_info=True)
+            print(f"[VecEnv] Failed to sync curriculum: {e}")
 
     def _sync_mixing_ratios(self):
         """Sync current adaptive mixing ratios to all subprocesses.
@@ -516,7 +515,7 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
                     f"[VecEnv] Synced mixing ratio for '{current_stage}': {mixing_ratio:.1%}"
                 )
         except Exception as e:
-            logger.error(f"[VecEnv] Failed to sync mixing ratios: {e}", exc_info=True)
+            print(f"[VecEnv] Failed to sync mixing ratios: {e}", exc_info=True)
 
     def reset(self):
         """Reset all environments."""

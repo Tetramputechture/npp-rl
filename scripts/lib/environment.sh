@@ -333,6 +333,179 @@ except Exception as e:
     fi
 }
 
+install_torch_scatter() {
+    log INFO "Installing torch-scatter (PyTorch extension for efficient scatter operations)..."
+    
+    # Check if torch-scatter is already installed and working
+    if ssh_cmd "python3 -c 'import torch_scatter' 2>/dev/null"; then
+        local scatter_version=$(ssh_cmd "python3 -c 'import torch_scatter; print(getattr(torch_scatter, \"__version__\", \"unknown\"))' 2>/dev/null" || echo "unknown")
+        log SUCCESS "torch-scatter is already installed (version: ${scatter_version})"
+        
+        # Verify it has CUDA support if PyTorch has CUDA
+        local cuda_check=$(ssh_cmd "python3 -c '
+import torch
+import torch_scatter
+if torch.cuda.is_available():
+    try:
+        from torch_scatter import scatter
+        src = torch.tensor([1.0, 2.0]).cuda()
+        idx = torch.tensor([0, 0]).cuda()
+        out = scatter(src, idx, dim=0, reduce=\"sum\")
+        print(\"CUDA_OK\")
+    except Exception as e:
+        print(f\"CUDA_FAIL: {e}\")
+else:
+    print(\"NO_CUDA\")
+' 2>&1" || echo "ERROR")
+        
+        if echo "$cuda_check" | grep -q "CUDA_FAIL"; then
+            log WARNING "torch-scatter lacks CUDA support, reinstalling..."
+        elif echo "$cuda_check" | grep -q "CUDA_OK"; then
+            log SUCCESS "✓ torch-scatter has CUDA support"
+            return 0
+        elif echo "$cuda_check" | grep -q "NO_CUDA"; then
+            log INFO "PyTorch is CPU-only, CUDA check skipped"
+            return 0
+        else
+            log WARNING "Could not verify CUDA support: $cuda_check"
+            return 0  # Assume it's OK if we can't check
+        fi
+    fi
+    
+    # Get PyTorch version and CUDA info
+    local torch_info=$(ssh_cmd "python3 -c '
+import torch
+import re
+
+torch_version = torch.__version__
+cuda_available = torch.cuda.is_available()
+
+# Extract version components
+version_match = re.match(r\"(\d+)\.(\d+)\.(\d+)\", torch_version)
+if version_match:
+    major = version_match.group(1)
+    minor = version_match.group(2)
+    patch = version_match.group(3)
+    torch_version_full = f\"{major}.{minor}.{patch}\"
+    torch_version_minor = f\"{major}.{minor}.0\"
+else:
+    # Fallback: try to get major.minor
+    version_match = re.match(r\"(\d+)\.(\d+)\", torch_version)
+    if version_match:
+        major = version_match.group(1)
+        minor = version_match.group(2)
+        torch_version_full = f\"{major}.{minor}.0\"
+        torch_version_minor = f\"{major}.{minor}.0\"
+    else:
+        torch_version_full = \"2.4.0\"
+        torch_version_minor = \"2.4.0\"
+
+# Determine CUDA suffix
+if \"+cpu\" in torch_version:
+    cuda_suffix = \"cpu\"
+elif cuda_available:
+    # Try to detect CUDA version from torch
+    cuda_version = torch.version.cuda
+    if cuda_version:
+        # Map CUDA version to suffix (e.g., 12.1 -> cu121, 12.4 -> cu124)
+        version_parts = cuda_version.split(\".\")
+        if len(version_parts) >= 2:
+            major = version_parts[0]
+            minor = version_parts[1]
+            cuda_suffix = f\"cu{major}{minor}\"
+        else:
+            cuda_suffix = \"cu121\"
+    else:
+        # Check version string for CUDA hint (e.g., +cu121)
+        cuda_match = re.search(r\"\+cu(\d+)\", torch_version)
+        if cuda_match:
+            cuda_suffix = f\"cu{cuda_match.group(1)}\"
+        else:
+            cuda_suffix = \"cu121\"
+else:
+    cuda_suffix = \"cpu\"
+
+print(f\"{torch_version_full} {torch_version_minor} {cuda_suffix}\")
+' 2>/dev/null" || echo "2.4.0 2.4.0 cpu")
+    
+    local torch_version_full=$(echo $torch_info | awk '{print $1}')
+    local torch_version_minor=$(echo $torch_info | awk '{print $2}')
+    local cuda_suffix=$(echo $torch_info | awk '{print $3}')
+    
+    log INFO "Detected PyTorch version: ${torch_version_full}"
+    log INFO "Detected CUDA suffix: ${cuda_suffix}"
+    
+    # Try multiple wheel URLs (PyG may not have wheels for every patch version)
+    # Try in order: full version, minor version
+    local wheel_urls=(
+        "https://data.pyg.org/whl/torch-${torch_version_full}+${cuda_suffix}.html"
+        "https://data.pyg.org/whl/torch-${torch_version_minor}+${cuda_suffix}.html"
+    )
+    
+    local installed=false
+    for wheel_url in "${wheel_urls[@]}"; do
+        log INFO "Attempting installation from: ${wheel_url}"
+        
+        if ssh_cmd "python3 -m pip install --user torch-scatter -f ${wheel_url}" > /dev/null 2>&1; then
+            # Verify installation
+            if ssh_cmd "python3 -c 'import torch_scatter; from torch_scatter import scatter, scatter_softmax' 2>/dev/null"; then
+                log SUCCESS "✓ torch-scatter installed successfully from: ${wheel_url}"
+                
+                # Test basic functionality
+                local test_result=$(ssh_cmd "python3 -c '
+import torch
+import torch_scatter
+from torch_scatter import scatter
+
+src = torch.tensor([2.0, 0.0, 1.0, 4.0, 3.0])
+index = torch.tensor([0, 1, 0, 1, 2])
+out = scatter(src, index, dim=0, reduce=\"sum\")
+expected = torch.tensor([3.0, 4.0, 3.0])
+if torch.allclose(out, expected):
+    print(\"SUCCESS\")
+else:
+    print(\"FAILED\")
+' 2>&1")
+                
+                if echo "$test_result" | grep -q "SUCCESS"; then
+                    log SUCCESS "✓ torch-scatter functionality verified"
+                    installed=true
+                    break
+                else
+                    log WARNING "torch-scatter installed but test failed: $test_result"
+                    installed=true
+                    break
+                fi
+            else
+                log WARNING "Installation succeeded but import failed, trying next URL..."
+            fi
+        else
+            log WARNING "Failed to install from ${wheel_url}, trying next option..."
+        fi
+    done
+    
+    if [ "$installed" = true ]; then
+        return 0
+    fi
+    
+    # Final fallback: try installing from PyPI (may compile from source)
+    log INFO "Attempting final fallback: installing from PyPI (may require compilation)..."
+    
+    if ssh_cmd "python3 -m pip install --user torch-scatter" > /dev/null 2>&1; then
+        if ssh_cmd "python3 -c 'import torch_scatter' 2>/dev/null"; then
+            log SUCCESS "✓ torch-scatter installed from PyPI (may have compiled from source)"
+            return 0
+        else
+            log ERROR "torch-scatter installation from PyPI failed"
+            return 1
+        fi
+    else
+        log ERROR "All torch-scatter installation methods failed"
+        log WARNING "GAT model will use slower fallback operations"
+        return 1
+    fi
+}
+
 verify_pytorch_cuda_compatibility() {
     log INFO "Verifying PyTorch CUDA compatibility..."
     
@@ -348,6 +521,9 @@ verify_pytorch_cuda_compatibility() {
     # Check if nvidia-smi is available
     if ! ssh_cmd "which nvidia-smi" > /dev/null 2>&1; then
         log WARNING "No GPU detected (nvidia-smi not found). Skipping CUDA verification."
+        # Still install torch-scatter for CPU builds
+        log INFO ""
+        install_torch_scatter
         return 0
     fi
     
@@ -374,6 +550,10 @@ verify_pytorch_cuda_compatibility() {
         # Show GPU details
         ssh_cmd "python3 -c 'import torch; [print(f\"  - GPU {i}: {torch.cuda.get_device_name(i)} ({torch.cuda.get_device_properties(i).total_memory/1e9:.1f} GB)\") for i in range(torch.cuda.device_count())]'" 2>/dev/null
         
+        # Install torch-scatter after verifying PyTorch CUDA
+        log INFO ""
+        install_torch_scatter
+        
         return 0
     else
         log ERROR "✗ PyTorch CUDA is NOT available!"
@@ -396,6 +576,11 @@ verify_pytorch_cuda_compatibility() {
                 # Try to fix automatically
                 if fix_pytorch_cuda_arm64; then
                     log SUCCESS "PyTorch CUDA has been fixed automatically!"
+                    
+                    # Install torch-scatter after fixing PyTorch
+                    log INFO ""
+                    install_torch_scatter
+                    
                     return 0
                 else
                     log ERROR ""

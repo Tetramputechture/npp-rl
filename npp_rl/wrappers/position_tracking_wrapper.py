@@ -102,8 +102,8 @@ class PositionTrackingWrapper(gym.Wrapper):
 
         except Exception as e:
             if not self._warned_about_position:
-                logger.warning(f"Could not get player position: {e}")
-                logger.warning("Route visualization may not work correctly")
+                print(f"Could not get player position: {e}")
+                print("Route visualization may not work correctly")
                 self._warned_about_position = True
             print(f"Could not get position: {e}")
 
