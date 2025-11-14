@@ -372,6 +372,7 @@ def _process_observation_worker(obs: Dict, architecture_config: Optional[Any]) -
         "game_state": "game_state",
         "reachability_features": "reachability_features",
         "entity_positions": "entity_positions",
+        "death_context": "death_context",  # Death context for auxiliary learning
         "graph_node_feats": "graph_node_feats",
         "graph_edge_index": "graph_edge_index",
         "graph_edge_feats": "graph_edge_feats",
@@ -406,6 +407,8 @@ def _process_observation_worker(obs: Dict, architecture_config: Optional[Any]) -
                     "graph_edge_types",
                 ]
             )
+        # Always include death_context (part of observation space, not filtered by architecture)
+        required_keys.append("death_context")
     else:
         required_keys = list(all_keys.keys())
 
@@ -459,12 +462,14 @@ def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
         samples = []
         for i in range(num_samples):
             obs = {}
+            # Try to load all possible keys (some may not exist if architecture doesn't use visual)
             for key in [
                 "game_state",
                 "global_view",
                 "reachability_features",
                 "player_frame",
                 "entity_positions",
+                "death_context",
                 "graph_node_feats",
                 "graph_edge_index",
                 "graph_edge_feats",
@@ -476,6 +481,9 @@ def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
                 cache_key = f"obs_{i}_{key}"
                 if cache_key in data:
                     obs[key] = data[cache_key]
+
+            # Note: architecture_config filtering is handled at dataset level, not in worker
+            # Worker loads all available keys, filtering happens in _process_observation_worker
 
             action = int(data[f"action_{i}"])
             samples.append((obs, action))
@@ -1017,6 +1025,7 @@ class BCReplayDataset(Dataset):
             "game_state": "game_state",
             "reachability_features": "reachability_features",
             "entity_positions": "entity_positions",
+            "death_context": "death_context",  # Death context for auxiliary learning
             "graph_node_feats": "graph_node_feats",
             "graph_edge_index": "graph_edge_index",
             "graph_edge_feats": "graph_edge_feats",
@@ -1054,6 +1063,8 @@ class BCReplayDataset(Dataset):
                         "graph_edge_types",
                     ]
                 )
+            # Always include death_context (part of observation space, not filtered by architecture)
+            required_keys.append("death_context")
         else:
             # Include all available keys if no architecture config provided
             required_keys = list(all_keys.keys())
@@ -1119,6 +1130,7 @@ class BCReplayDataset(Dataset):
                     "reachability_features",
                     "player_frame",
                     "entity_positions",
+                    "death_context",
                     "graph_node_feats",
                     "graph_edge_index",
                     "graph_edge_feats",

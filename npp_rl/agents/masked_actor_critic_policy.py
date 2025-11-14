@@ -45,15 +45,12 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             Predicted action tensor
         """
         # Extract action mask before feature extraction (if present)
-        action_mask = None
-        if isinstance(observation, dict):
-            action_mask = observation.get("action_mask", None)
-            # Create a copy without action_mask for feature extraction
-            obs_for_features = {
-                k: v for k, v in observation.items() if k != "action_mask"
-            }
-        else:
-            obs_for_features = observation
+        action_mask = observation.get("action_mask", None)
+        if action_mask is None:
+            raise ValueError("Action mask not found in observation")
+
+        # Create a copy without action_mask for feature extraction
+        obs_for_features = {k: v for k, v in observation.items() if k != "action_mask"}
 
         # Get device from model parameters
         device = next(self.parameters()).device
@@ -86,15 +83,14 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         # Get action logits
         action_logits = self.action_net(latent_pi)
 
-        # Apply action mask if present
-        if action_mask is not None:
-            # Convert mask to tensor if needed
-            if isinstance(action_mask, np.ndarray):
-                action_mask = torch.as_tensor(action_mask, device=device)
-            elif not isinstance(action_mask, torch.Tensor):
-                action_mask = torch.tensor(action_mask, device=device)
+        # Apply action mask
+        # Convert mask to tensor if needed
+        if isinstance(action_mask, np.ndarray):
+            action_mask = torch.as_tensor(action_mask, device=device)
+        elif not isinstance(action_mask, torch.Tensor):
+            action_mask = torch.tensor(action_mask, device=device)
 
-            action_logits = self._apply_action_mask(action_logits, action_mask)
+        action_logits = self._apply_action_mask(action_logits, action_mask)
 
         # Create distribution and sample action
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -147,6 +143,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         action_mask = None
         if isinstance(obs, dict):
             action_mask = obs.get("action_mask", None)
+            # VALIDATION: action_mask must be present in dictionary observations
+            if action_mask is None:
+                raise ValueError(
+                    "action_mask not found in observation dictionary! "
+                    "This is required for masked action selection. "
+                    f"Available keys: {list(obs.keys())}"
+                )
             # Create a copy without action_mask for feature extraction
             # to avoid issues if feature extractor expects certain keys
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
@@ -163,20 +166,6 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         else:
             features_pi = features_vf = features
 
-        # Validate features after extraction
-        if torch.isnan(features_pi).any():
-            nan_mask = torch.isnan(features_pi)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_FWD] NaN in policy features from extract_features in batch indices: {batch_indices.tolist()}"
-            )
-        if torch.isnan(features_vf).any():
-            nan_mask = torch.isnan(features_vf)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_FWD] NaN in value features from extract_features in batch indices: {batch_indices.tolist()}"
-            )
-
         # Extract latents using separate forward methods if available (DeepResNet), otherwise use standard approach
         if hasattr(self.mlp_extractor, "forward_policy") and hasattr(
             self.mlp_extractor, "forward_value"
@@ -188,39 +177,12 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             latent_pi, _ = self.mlp_extractor(features_pi)
             _, latent_vf = self.mlp_extractor(features_vf)
 
-        # Validate latent after MLP extractor
-        if torch.isnan(latent_pi).any():
-            nan_mask = torch.isnan(latent_pi)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_FWD] NaN in latent_pi from mlp_extractor in batch indices: {batch_indices.tolist()}"
-            )
-
         # Get action logits
         action_logits = self.action_net(latent_pi)
-
-        # Validate action logits before masking
-        if torch.isnan(action_logits).any():
-            nan_mask = torch.isnan(action_logits)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_FWD] NaN in action_logits BEFORE masking in batch indices: {batch_indices.tolist()}. "
-                f"Logits shape: {action_logits.shape}, range: [{action_logits[~nan_mask].min():.4f}, {action_logits[~nan_mask].max():.4f}]"
-            )
 
         # Apply action mask if present
         if action_mask is not None:
             action_logits = self._apply_action_mask(action_logits, action_mask)
-
-            # Validate action logits after masking
-            if torch.isnan(action_logits).any():
-                nan_mask = torch.isnan(action_logits)
-                batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                raise ValueError(
-                    f"[POLICY_FWD] NaN in action_logits AFTER masking in batch indices: {batch_indices.tolist()}. "
-                    f"Logits shape: {action_logits.shape}. "
-                    f"Action mask for failed batches: {action_mask[batch_indices].cpu().numpy()}"
-                )
 
         # Create distribution and sample
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -252,6 +214,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         action_mask = None
         if isinstance(obs, dict):
             action_mask = obs.get("action_mask", None)
+            # VALIDATION: action_mask must be present in dictionary observations
+            if action_mask is None:
+                raise ValueError(
+                    "action_mask not found in observation dictionary during evaluate_actions! "
+                    "This is required for masked action selection. "
+                    f"Available keys: {list(obs.keys())}"
+                )
             # Create a copy without action_mask for feature extraction
             # to avoid issues if feature extractor expects certain keys
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
@@ -268,20 +237,6 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         else:
             features_pi = features_vf = features
 
-        # Validate features after extraction
-        if torch.isnan(features_pi).any():
-            nan_mask = torch.isnan(features_pi)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_EVAL] NaN in policy features from extract_features in batch indices: {batch_indices.tolist()}"
-            )
-        if torch.isnan(features_vf).any():
-            nan_mask = torch.isnan(features_vf)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_EVAL] NaN in value features from extract_features in batch indices: {batch_indices.tolist()}"
-            )
-
         # Extract latents using separate forward methods if available (DeepResNet), otherwise use standard approach
         if hasattr(self.mlp_extractor, "forward_policy") and hasattr(
             self.mlp_extractor, "forward_value"
@@ -293,37 +248,12 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             latent_pi, _ = self.mlp_extractor(features_pi)
             _, latent_vf = self.mlp_extractor(features_vf)
 
-        # Validate latent after MLP extractor
-        if torch.isnan(latent_pi).any():
-            nan_mask = torch.isnan(latent_pi)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_EVAL] NaN in latent_pi from mlp_extractor in batch indices: {batch_indices.tolist()}"
-            )
-
         # Get action logits
         action_logits = self.action_net(latent_pi)
-
-        # Validate action logits before masking
-        if torch.isnan(action_logits).any():
-            nan_mask = torch.isnan(action_logits)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_EVAL] NaN in action_logits BEFORE masking in batch indices: {batch_indices.tolist()}"
-            )
 
         # Apply action mask if present
         if action_mask is not None:
             action_logits = self._apply_action_mask(action_logits, action_mask)
-
-            # Validate action logits after masking
-            if torch.isnan(action_logits).any():
-                nan_mask = torch.isnan(action_logits)
-                batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                raise ValueError(
-                    f"[POLICY_EVAL] NaN in action_logits AFTER masking in batch indices: {batch_indices.tolist()}. "
-                    f"Action mask for failed batches: {action_mask[batch_indices].cpu().numpy()}"
-                )
 
         # Create distribution and evaluate
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -349,6 +279,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         Returns:
             Masked action logits
         """
+        # VALIDATION: Check that action_mask is provided
+        if action_mask is None:
+            raise ValueError(
+                "action_mask is None! Action masking must always be applied during training. "
+                "This indicates a bug in observation preparation."
+            )
+
         # Convert mask to tensor if needed
         if not isinstance(action_mask, torch.Tensor):
             action_mask = torch.tensor(action_mask)
@@ -360,39 +297,42 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
         # Ensure mask is on the same device as logits
         action_mask = action_mask.to(action_logits.device)
 
+        # VALIDATION: Check action mask has correct number of actions
+        if action_mask.shape[-1] != 6:
+            raise ValueError(
+                f"action_mask has wrong shape! Expected 6 actions, got {action_mask.shape[-1]}. "
+                f"Full mask shape: {action_mask.shape}, logits shape: {action_logits.shape}"
+            )
+
+        # VALIDATION: Check that each sample has at least one valid action
+        if action_mask.dim() == 1:
+            if not action_mask.any():
+                raise ValueError(
+                    "action_mask has no valid actions! This should never happen. "
+                    f"Mask: {action_mask}"
+                )
+        else:
+            has_valid = action_mask.any(dim=-1)
+            if not has_valid.all():
+                invalid_indices = (~has_valid).nonzero(as_tuple=True)[0]
+                raise ValueError(
+                    f"action_mask has samples with no valid actions at indices {invalid_indices}! "
+                    f"This should never happen. Mask shape: {action_mask.shape}"
+                )
+
         # Handle batch dimension - mask might be (batch, actions) or just (actions,)
         if action_mask.dim() == 1:
             # Single mask for all batch elements, expand it
+            # VALIDATION: This should only happen during inference, not training
             action_mask = action_mask.unsqueeze(0).expand_as(action_logits)
-
-        # Validate action mask - check for NaN and ensure at least one valid action per batch
-        if torch.isnan(action_mask.float()).any():
-            nan_mask = torch.isnan(action_mask.float())
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[POLICY_MASK] NaN detected in action_mask for batch indices: {batch_indices.tolist()}"
-            )
-
-        # Check if any batch has all actions masked (would lead to all -inf logits)
-        valid_actions_per_batch = action_mask.sum(dim=1)
-        all_masked_batches = torch.where(valid_actions_per_batch == 0)[0]
-        if len(all_masked_batches) > 0:
-            import sys
-
-            print(
-                f"\n{'=' * 60}\n"
-                f"[POLICY_MASK_CRITICAL] All actions masked for batch indices: {all_masked_batches.tolist()}!\n"
-                f"This should never happen due to ninja.py fallback.\n"
-                f"Action masks: {action_mask[all_masked_batches].cpu().numpy()}\n"
-                f"{'=' * 60}\n",
-                file=sys.stderr,
-            )
-            raise ValueError(
-                f"[POLICY_MASK] All actions masked for batch indices: {all_masked_batches.tolist()}. "
-                f"This would create all -inf logits leading to NaN in distribution. "
-                f"Action masks: {action_mask[all_masked_batches].cpu().numpy()}. "
-                f"This indicates a bug in ninja.get_valid_action_mask() - the fallback should prevent this!"
-            )
+        else:
+            # VALIDATION: Batch dimensions must match
+            if action_mask.shape[0] != action_logits.shape[0]:
+                raise ValueError(
+                    f"Batch size mismatch! action_mask batch: {action_mask.shape[0]}, "
+                    f"logits batch: {action_logits.shape[0]}. This indicates a bug in "
+                    f"vectorized environment handling or observation batching."
+                )
 
         # Set masked actions to -inf (will have zero probability after softmax)
         masked_logits = torch.where(
@@ -402,5 +342,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
                 float("-inf"), dtype=action_logits.dtype, device=action_logits.device
             ),
         )
+
+        # VALIDATION: Check that masked logits don't contain NaN
+        if torch.isnan(masked_logits).any():
+            raise ValueError(
+                "masked_logits contains NaN after applying mask! "
+                f"Original logits had NaN: {torch.isnan(action_logits).any()}, "
+                f"Mask: {action_mask}"
+            )
 
         return masked_logits

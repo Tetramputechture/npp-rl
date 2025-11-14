@@ -41,6 +41,12 @@ def create_observation_space_from_config(
 
     # Create environment
     config = EnvironmentConfig.for_training(test_dataset_path=test_dataset_path)
+    
+    # Disable visual observations if architecture doesn't use visual modalities
+    modalities = architecture_config.modalities
+    if not modalities.use_player_frame and not modalities.use_global_view:
+        config.enable_visual_observations = False
+    
     env = NppEnvironment(config=config)
 
     # Apply FrameStackWrapper if frame stacking is enabled

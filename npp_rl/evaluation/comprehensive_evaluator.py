@@ -78,12 +78,17 @@ class ComprehensiveEvaluator:
             if not isinstance(obs_space, gym.spaces.Dict):
                 return None
 
-            # Check for visual frame stacking
+            # Check for visual frame stacking (only if visual keys exist)
             visual_stack_size = None
             for key in ["player_frame", "global_view"]:
                 if key in obs_space.spaces:
                     shape = obs_space.spaces[key].shape
-                    if len(shape) == 3 and shape[2] > 1:
+                    # Check for 4D shape indicating frame stacking: (stack_size, H, W, C)
+                    if len(shape) == 4 and 2 <= shape[0] <= 12:
+                        visual_stack_size = shape[0]
+                        break
+                    # Legacy check: 3D shape with multiple channels (unlikely but possible)
+                    elif len(shape) == 3 and shape[2] > 1:
                         visual_stack_size = shape[2]
                         break
 
@@ -110,6 +115,53 @@ class ComprehensiveEvaluator:
             print(f"Could not detect frame stacking from model: {e}")
             return None
 
+    @staticmethod
+    def detect_visual_modalities(model) -> Dict[str, bool]:
+        """Detect if model uses visual modalities from observation space.
+
+        Args:
+            model: Trained model
+
+        Returns:
+            Dict with 'uses_player_frame' and 'uses_global_view' keys
+        """
+        obs_space = model.observation_space
+        if not isinstance(obs_space, gym.spaces.Dict):
+            return {"uses_player_frame": False, "uses_global_view": False}
+
+        return {
+            "uses_player_frame": "player_frame" in obs_space.spaces,
+            "uses_global_view": "global_view" in obs_space.spaces,
+        }
+
+    @staticmethod
+    def _filter_observation_for_model(obs: Dict, model) -> Dict:
+        """Filter observation dict to only include keys expected by model.
+
+        This is needed when video recording is enabled (which requires rendering),
+        but the model doesn't use visual modalities. The environment will include
+        visual keys in observations, but we must filter them out before inference.
+
+        Args:
+            obs: Observation dict from environment (may be vectorized)
+            model: Trained model with observation_space attribute
+
+        Returns:
+            Filtered observation dict matching model's observation space
+        """
+        if not isinstance(model.observation_space, gym.spaces.Dict):
+            return obs
+
+        expected_keys = set(model.observation_space.spaces.keys())
+
+        # Handle vectorized observations (DummyVecEnv wraps dict values in arrays)
+        filtered_obs = {}
+        for key in expected_keys:
+            if key in obs:
+                filtered_obs[key] = obs[key]
+
+        return filtered_obs
+
     def _validate_frame_stack_config(
         self, model, frame_stack_config: Optional[Dict[str, Any]]
     ) -> None:
@@ -130,7 +182,7 @@ class ComprehensiveEvaluator:
             if not isinstance(obs_space, gym.spaces.Dict):
                 return  # Can't validate non-dict spaces
 
-            # Check player_frame and global_view for frame stacking
+            # Check player_frame and global_view for frame stacking (only if they exist)
             key = "player_frame"
             if key in obs_space.spaces:
                 expected_shape = obs_space.spaces[key].shape
@@ -427,6 +479,13 @@ class ComprehensiveEvaluator:
             video_recorder = None
 
             try:
+                # Detect if model uses visual modalities
+                visual_modalities = self.detect_visual_modalities(model)
+                uses_visual = (
+                    visual_modalities["uses_player_frame"]
+                    or visual_modalities["uses_global_view"]
+                )
+
                 # Create environment factory function to avoid closure issues
                 def make_env(lvl_data=level_data):
                     logger.debug(f"Creating environment for level: {level_id}")
@@ -434,9 +493,28 @@ class ComprehensiveEvaluator:
                         test_dataset_path=str(self.test_dataset_path)
                     )
 
+                    # Disable visual observations if model doesn't use visual modalities
+                    # (unless we need rendering for video recording)
+                    if not uses_visual and not should_record:
+                        config.enable_visual_observations = False
+                        logger.debug(
+                            f"Model doesn't use visual modalities - disabling rendering for level: {level_id}"
+                        )
+                    elif not uses_visual and should_record:
+                        # Need rendering for video, but model doesn't use visual observations
+                        # Enable rendering - we'll filter out visual keys before model.predict()
+                        config.enable_visual_observations = True
+                        logger.debug(
+                            f"Model doesn't use visual modalities but video recording enabled - "
+                            f"enabling rendering for video only: {level_id}"
+                        )
+
                     # Override render mode for video recording (RGB instead of grayscale)
                     if should_record:
                         config.render.render_mode = "rgb_array"
+                        config.enable_visual_observations = (
+                            True  # Always enable for video
+                        )
                         logger.debug("Set render_mode=rgb_array for video recording")
 
                     env = NppEnvironment(config=config)
@@ -489,6 +567,7 @@ class ComprehensiveEvaluator:
                 # Note: Map already loaded in make_env, no options needed
                 # DummyVecEnv.reset() doesn't accept options parameter (VecEnv API)
                 obs = env.reset()
+                obs = self._filter_observation_for_model(obs, model)
                 logger.debug(
                     f"Environment reset complete for level: {level_id}, obs keys: {obs.keys() if isinstance(obs, dict) else type(obs)}"
                 )
@@ -500,6 +579,8 @@ class ComprehensiveEvaluator:
 
                 # Initialize video recorder if needed
                 if should_record:
+                    # Note: Rendering is always enabled when should_record=True (see make_env above)
+                    # So we can proceed with video recording
                     # We'll determine success/failure after episode, so use placeholder
                     video_filename = f"{category}_{level_idx:03d}_temp.mp4"
                     video_path = Path(video_output_dir) / category / video_filename
@@ -519,9 +600,14 @@ class ComprehensiveEvaluator:
                             if hasattr(frame, "ndim") and frame.ndim == 3:
                                 video_recorder.record_frame(frame)
                             else:
-                                print(
+                                logger.debug(
                                     f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
                                 )
+                        else:
+                            logger.warning(
+                                f"env.render() returned None for level {level_id}, "
+                                f"video recording may fail"
+                            )
 
                 logger.debug(f"Starting episode loop for level: {level_id}")
                 while not done and steps < max_steps:
@@ -544,6 +630,7 @@ class ComprehensiveEvaluator:
                     # Note: DummyVecEnv returns 4 values (old gym API) even though
                     # the underlying environment uses the new Gymnasium API (5 values)
                     obs, reward, done, info = env.step(action)
+                    obs = self._filter_observation_for_model(obs, model)
                     # DummyVecEnv returns arrays, so extract the first element
                     done = done[0]
                     reward = reward[0]
@@ -551,18 +638,30 @@ class ComprehensiveEvaluator:
 
                     # Record frame if video recording is enabled
                     if video_recorder and video_recorder.is_recording:
-                        frame = env.render()
-                        if frame is not None:
-                            # DummyVecEnv may return list of frames or single frame
-                            if isinstance(frame, (list, tuple)):
-                                frame = frame[0]
-                            # Handle both grayscale (H,W,1) and RGB (H,W,3)
-                            if hasattr(frame, "ndim") and frame.ndim == 3:
-                                video_recorder.record_frame(frame)
+                        try:
+                            frame = env.render()
+                            if frame is not None:
+                                # DummyVecEnv may return list of frames or single frame
+                                if isinstance(frame, (list, tuple)):
+                                    frame = frame[0]
+                                # Handle both grayscale (H,W,1) and RGB (H,W,3)
+                                if hasattr(frame, "ndim") and frame.ndim == 3:
+                                    video_recorder.record_frame(frame)
+                                else:
+                                    logger.debug(
+                                        f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
+                                    )
                             else:
-                                print(
-                                    f"Unexpected frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}, skipping"
+                                # Rendering disabled or failed - skip this frame
+                                logger.debug(
+                                    f"env.render() returned None at step {steps}"
                                 )
+                        except Exception as render_error:
+                            # Rendering might fail if visual observations are disabled
+                            logger.debug(
+                                f"Failed to render frame at step {steps}: {render_error}"
+                            )
+                            # Continue without recording this frame
 
                     episode_reward += reward
                     steps += 1

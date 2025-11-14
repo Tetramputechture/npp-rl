@@ -26,6 +26,8 @@ from .frame_stack_logging import (
     log_state_stack_statistics,
 )
 
+from .memory_profiler import MemoryProfiler
+
 __all__ = [
     "PerformanceMonitor",
     "TimingContext",
@@ -46,4 +48,5 @@ __all__ = [
     "visualize_stacked_frames",
     "log_stacked_observations",
     "log_state_stack_statistics",
+    "MemoryProfiler",
 ]

@@ -3,9 +3,9 @@
 This callback provides detailed logging of training metrics, including:
 - Episode statistics (rewards, lengths, success rates)
 - Agent behavior metrics (action distributions, value estimates)
-- Learning progress indicators (loss components, gradient norms)
+- Learning progress indicators (loss components)
 - Environment interaction statistics
-- Performance metrics (FPS, rollout time)
+- Performance metrics (FPS)
 """
 
 import logging
@@ -24,12 +24,12 @@ class EnhancedTensorBoardCallback(BaseCallback):
     """Enhanced TensorBoard callback with comprehensive metrics logging.
 
     This callback logs detailed metrics to TensorBoard including:
-    - Episode statistics (rewards, lengths, success rates, completion times)
-    - Action distribution histograms
-    - Value function estimates and advantages
+    - Episode statistics (rewards, lengths, success rates)
+    - Action frequency distribution and entropy
+    - Value function estimates
     - Policy and value loss components
     - Learning rate schedule
-    - Gradient norms and clip ratios
+    - Clip ratios and explained variance
     - Environment statistics
     - FPS and performance metrics
     """
@@ -37,25 +37,16 @@ class EnhancedTensorBoardCallback(BaseCallback):
     def __init__(
         self,
         log_freq: int = 200,
-        histogram_freq: int = 5000,
         verbose: int = 0,
-        log_gradients: bool = False,
-        log_weights: bool = False,
     ):
         """Initialize enhanced TensorBoard callback.
 
         Args:
             log_freq: Frequency (in steps) to log scalar metrics
-            histogram_freq: Frequency (in steps) to log histograms (more expensive)
             verbose: Verbosity level
-            log_gradients: Whether to log gradient norms
-            log_weights: Whether to log model weight histograms (very expensive)
         """
         super().__init__(verbose)
         self.log_freq = log_freq
-        self.histogram_freq = histogram_freq
-        self.log_gradients = log_gradients
-        self.log_weights = log_weights
 
         # TensorBoard writer
         self.tb_writer = None
@@ -64,7 +55,6 @@ class EnhancedTensorBoardCallback(BaseCallback):
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
         self.episode_successes = deque(maxlen=100)
-        self.episode_completion_times = deque(maxlen=100)
 
         # Reward component tracking (for intrinsic/hierarchical rewards)
         self.episode_intrinsic_rewards = deque(maxlen=100)
@@ -97,28 +87,15 @@ class EnhancedTensorBoardCallback(BaseCallback):
             5: "Jump+Right",
         }
 
-        # Action transition tracking (for behavior analysis)
-        self.last_actions = None  # Track previous actions per environment
-        self.action_transitions = defaultdict(
-            lambda: defaultdict(int)
-        )  # [prev_action][next_action] = count
-
         # Value function tracking
         self.value_estimates = deque(maxlen=1000)
-        self.advantages = deque(maxlen=1000)
 
         # Performance tracking
-        self.rollout_times = deque(maxlen=10)
-        self.update_times = deque(maxlen=10)
         self.fps_history = deque(maxlen=100)
 
         # Training progress
         self.last_log_step = 0
-        self.last_histogram_step = 0
         self.start_time = None
-
-        # Episode tracking for detailed metrics
-        self.current_episode_data = defaultdict(list)
 
         # Curriculum tracking
         self.current_curriculum_stage = None
@@ -170,12 +147,8 @@ class EnhancedTensorBoardCallback(BaseCallback):
         if "actions" in self.locals:
             actions = self.locals["actions"]
 
-            # Initialize last_actions on first step
-            if self.last_actions is None:
-                self.last_actions = np.zeros(len(actions), dtype=int)
-
-            # Track action counts and transitions
-            for env_idx, action in enumerate(actions):
+            # Track action counts
+            for action in actions:
                 action_idx = (
                     int(action)
                     if isinstance(action, (int, np.integer))
@@ -183,11 +156,6 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 )
                 self.action_counts[action_idx] += 1
                 self.total_actions += 1
-
-                # Track action transitions
-                prev_action = int(self.last_actions[env_idx])
-                self.action_transitions[prev_action][action_idx] += 1
-                self.last_actions[env_idx] = action_idx
 
         # Track value estimates from rollout buffer (more reliable than trying to access obs_tensor)
         # Note: This captures values after they've been computed during rollout collection
@@ -213,11 +181,6 @@ class EnhancedTensorBoardCallback(BaseCallback):
         if self.num_timesteps - self.last_log_step >= self.log_freq:
             self._log_scalar_metrics()
             self.last_log_step = self.num_timesteps
-
-        # Log histograms at regular intervals
-        if self.num_timesteps - self.last_histogram_step >= self.histogram_freq:
-            self._log_histogram_metrics()
-            self.last_histogram_step = self.num_timesteps
 
         return True
 
@@ -687,123 +650,3 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 logger.debug(f"Could not compute FPS: {e}")
 
         self.tb_writer.flush()
-
-    def _log_histogram_metrics(self) -> None:
-        """Log histogram metrics to TensorBoard (more expensive)."""
-        step = self.num_timesteps
-
-        # Episode reward distribution
-        if self.episode_rewards:
-            self.tb_writer.add_histogram(
-                "episode/reward_distribution", np.array(self.episode_rewards), step
-            )
-
-        # Episode length distribution
-        if self.episode_lengths:
-            self.tb_writer.add_histogram(
-                "episode/length_distribution", np.array(self.episode_lengths), step
-            )
-
-        # Value estimates distribution
-        if self.value_estimates:
-            self.tb_writer.add_histogram(
-                "value/estimate_distribution", np.array(self.value_estimates), step
-            )
-
-        # Action distribution histogram
-        if self.total_actions > 0:
-            n_actions = (
-                self.model.action_space.n
-                if hasattr(self.model.action_space, "n")
-                else 6
-            )
-            action_dist = np.array(
-                [self.action_counts.get(i, 0) for i in range(n_actions)]
-            )
-            self.tb_writer.add_histogram("actions/distribution", action_dist, step)
-
-            # Action transition matrix visualization
-            # This shows patterns like "after moving left, what action is most common?"
-            if self.action_transitions:
-                # Create transition matrix
-                transition_matrix = np.zeros((n_actions, n_actions))
-                for prev_action in range(n_actions):
-                    total_from_prev = sum(self.action_transitions[prev_action].values())
-                    if total_from_prev > 0:
-                        for next_action in range(n_actions):
-                            count = self.action_transitions[prev_action][next_action]
-                            transition_matrix[prev_action, next_action] = (
-                                count / total_from_prev
-                            )
-
-                # Log most common transitions as scalars (easier to track)
-                for prev_action in range(n_actions):
-                    for next_action in range(n_actions):
-                        prob = transition_matrix[prev_action, next_action]
-                        if prob > 0.01:  # Only log significant transitions
-                            prev_name = self.action_names.get(
-                                prev_action, f"A{prev_action}"
-                            )
-                            next_name = self.action_names.get(
-                                next_action, f"A{next_action}"
-                            )
-                            self.tb_writer.add_scalar(
-                                f"actions/transitions/{prev_name}_to_{next_name}",
-                                prob,
-                                step,
-                            )
-
-        # Gradient norms (if enabled)
-        if self.log_gradients and hasattr(self.model, "policy"):
-            try:
-                total_norm = 0.0
-                for name, param in self.model.policy.named_parameters():
-                    if param.grad is not None:
-                        param_norm = param.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-
-                        # Log individual layer gradient norms (sample)
-                        if "features_extractor" in name or "mlp" in name:
-                            self.tb_writer.add_scalar(
-                                f"gradients/{name}_norm", param_norm.item(), step
-                            )
-
-                total_norm = total_norm**0.5
-                self.tb_writer.add_scalar("gradients/total_norm", total_norm, step)
-            except Exception as e:
-                logger.debug(f"Could not log gradient norms: {e}")
-
-        # Model weight distributions (if enabled, very expensive)
-        if self.log_weights and hasattr(self.model, "policy"):
-            try:
-                for name, param in self.model.policy.named_parameters():
-                    if "weight" in name:
-                        self.tb_writer.add_histogram(
-                            f"weights/{name}", param.data.cpu().numpy(), step
-                        )
-            except Exception as e:
-                logger.debug(f"Could not log weight histograms: {e}")
-
-        self.tb_writer.flush()
-
-    def _on_rollout_end(self) -> None:
-        """Called at the end of each rollout."""
-        # Track rollout time
-        if hasattr(self, "_rollout_start_time"):
-            rollout_time = time.time() - self._rollout_start_time
-            self.rollout_times.append(rollout_time)
-
-            if self.tb_writer is not None:
-                self.tb_writer.add_scalar(
-                    "performance/rollout_time_seconds", rollout_time, self.num_timesteps
-                )
-                if len(self.rollout_times) > 1:
-                    self.tb_writer.add_scalar(
-                        "performance/rollout_time_mean",
-                        np.mean(self.rollout_times),
-                        self.num_timesteps,
-                    )
-
-    def _on_rollout_start(self) -> None:
-        """Called at the start of each rollout."""
-        self._rollout_start_time = time.time()

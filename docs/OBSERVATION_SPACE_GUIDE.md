@@ -9,7 +9,7 @@ This guide explains how the NPP-RL project integrates with the comprehensive obs
 The nclone environment provides 5 observation modalities:
 
 1. **Visual**: Player-centered frame (84×84×1 grayscale) and global view (176×100×1 grayscale)
-2. **Game State**: Physics vector (58 features total: 29 ninja state + 15 path-aware + 8 mine + 3 progress + 3 sequential goal)
+2. **Game State**: Physics vector (64 features total: 29 ninja state + 15 path-aware + 8 mine + 3 progress + 3 sequential goal + 6 death probabilities)
 3. **Reachability**: Path planning features (8 dimensions)
 4. **Graph**: GNN-compatible structure (nodes, edges, masks)
 5. **Entity Positions**: Direct position information (6 dimensions)
@@ -22,7 +22,7 @@ See [nclone/OBSERVATION_SPACE_README.md](../../nclone/OBSERVATION_SPACE_README.m
 
 ### `game_state` - Complete Feature Breakdown
 
-The `game_state` vector contains **58 features** total, organized into 5 sections:
+The `game_state` vector contains **64 features** total, organized into 6 sections:
 
 **Note on Distance Normalization**: All distance-based features (path distances, relative positions) are normalized using **reachable area scale** (`sqrt(reachable_surface_area) * SUB_NODE_SIZE`) instead of `LEVEL_DIAGONAL`. This provides level-adaptive scaling that accounts for the actual navigable space in each level, resulting in more uniform feature distributions across different level sizes and improving learning stability. The reachable area is computed via flood-fill from the start position and cached per level ID for performance.
 
@@ -318,6 +318,90 @@ All features normalized to range `[-1, 1]` or `[0, 1]` as specified. Encodes hie
   - Value: `1.0` if switch collected, else `0.0`
   - Indicates door should be prioritized after switch collection
   - Note: `switch_priority + door_priority = 1.0` (mutually exclusive priorities)
+
+#### Indices 58-63: Mine Death Probabilities (6 features)
+
+Privileged information from physics simulation - probability of mine collision for each action.
+
+All features in range `[0.0, 1.0]` where:
+- `0.0` = safe action (no collision detected)
+- `1.0` = deadly action (certain collision)
+- Intermediate values = probabilistic death over 10-frame simulation
+
+**Per-Action Probabilities:**
+
+- `[58]` **NOOP mine death probability**: Probability of mine death if no input applied
+  - Action 0: Stand still
+  
+- `[59]` **LEFT mine death probability**: Probability of mine death if moving left
+  - Action 1: Move left only
+
+- `[60]` **RIGHT mine death probability**: Probability of mine death if moving right
+  - Action 2: Move right only
+
+- `[61]` **JUMP mine death probability**: Probability of mine death if jumping
+  - Action 3: Jump only (no horizontal input)
+
+- `[62]` **JUMP+LEFT mine death probability**: Probability of mine death if jumping left
+  - Action 4: Jump while moving left
+
+- `[63]` **JUMP+RIGHT mine death probability**: Probability of mine death if jumping right
+  - Action 5: Jump while moving right
+
+**Implementation Details:**
+- Computed via `MineDeathPredictor.calculate_death_probability(frames_to_simulate=10)`
+- Uses 3-tier hybrid approach: spatial filter → distance check → physics simulation
+- Cached for performance (expires after 100ms)
+- Only computed when mine predictor is available, otherwise defaults to 0.0
+
+**Usage Notes:**
+- This is privileged/oracle information not available in real deployment
+- Intended to help critic learn better value estimates during training
+- Policy should still learn from visual/spatial cues for generalization
+- Actions with probability 1.0 are already masked via action masking
+
+#### Indices 64-69: Terminal Velocity Death Probabilities (6 features)
+
+Privileged information from physics simulation - probability of terminal velocity death (lethal floor/ceiling impact) for each action.
+
+All features in range `[0.0, 1.0]` where:
+- `0.0` = safe action (no terminal impact detected)
+- `1.0` = deadly action (certain terminal impact)
+- Intermediate values = probabilistic death over 10-frame simulation
+
+**Per-Action Probabilities:**
+
+- `[64]` **NOOP terminal velocity death probability**: Probability of terminal impact if no input applied
+  - Action 0: Stand still
+  
+- `[65]` **LEFT terminal velocity death probability**: Probability of terminal impact if moving left
+  - Action 1: Move left only
+
+- `[66]` **RIGHT terminal velocity death probability**: Probability of terminal impact if moving right
+  - Action 2: Move right only
+
+- `[67]` **JUMP terminal velocity death probability**: Probability of terminal impact if jumping
+  - Action 3: Jump only (no horizontal input)
+
+- `[68]` **JUMP+LEFT terminal velocity death probability**: Probability of terminal impact if jumping left
+  - Action 4: Jump while moving left
+
+- `[69]` **JUMP+RIGHT terminal velocity death probability**: Probability of terminal impact if jumping right
+  - Action 5: Jump while moving right
+
+**Implementation Details:**
+- Computed via `TerminalVelocityPredictor.calculate_death_probability(frames_to_simulate=10)`
+- Uses graph-optimized 3-tier hybrid approach: velocity filter + reachability check → lookup table → physics simulation
+- Graph reachability constrains search space for 50-75% faster performance
+- Only computed when terminal velocity predictor is available, otherwise defaults to 0.0
+- Terminal impact = collision with floor/ceiling at speeds exceeding `MAX_SURVIVABLE_IMPACT` threshold
+
+**Usage Notes:**
+- This is privileged/oracle information not available in real deployment
+- Complements mine death probabilities to cover all major death scenarios
+- Intended to help critic learn better value estimates during training
+- Policy should still learn from visual/spatial cues for generalization
+- Actions with probability 1.0 are already masked via action masking
 
 ### `reachability_features` - Complete Feature Breakdown
 

@@ -45,11 +45,13 @@ class PlayerFrameCNN(nn.Module):
     Supports dynamic rebuilding if input channels change (e.g., frame stacking configuration).
     """
 
-    def __init__(self, visual_config, default_in_channels: int = 1):
+    def __init__(
+        self, visual_config, default_in_channels: int = 1, debug_mode: bool = False
+    ):
         super().__init__()
         self.visual_config = visual_config
         self.current_in_channels = default_in_channels
-
+        self.debug_mode = debug_mode
         # Build layers immediately during initialization
         self._build_layers(default_in_channels)
 
@@ -128,19 +130,6 @@ class PlayerFrameCNN(nn.Module):
         Returns:
             Extracted features [batch, player_frame_output_dim]
         """
-        # Validate input
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = (
-                torch.where(nan_mask.any(dim=1))[0]
-                if x.dim() > 1
-                else torch.tensor([0])
-            )
-            raise ValueError(
-                f"[PlayerFrameCNN] NaN in input in batch indices: {batch_indices.tolist()}. "
-                f"Shape: {x.shape}, range: [{x.min():.4f}, {x.max():.4f}]"
-            )
-
         # Handle different input shapes from environment
         if x.dim() == 4:
             # Single frame: [batch, H, W, 1] -> [batch, 1, H, W]
@@ -182,28 +171,7 @@ class PlayerFrameCNN(nn.Module):
             self.fc = self.fc.to(x.device)
 
         x = self.conv_layers(x)
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = (
-                torch.where(nan_mask.any(dim=1))[0]
-                if x.dim() > 1
-                else torch.tensor([0])
-            )
-            raise ValueError(
-                f"[PlayerFrameCNN] NaN after conv_layers in batch indices: {batch_indices.tolist()}"
-            )
-
         x = self.fc(x)
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = (
-                torch.where(nan_mask.any(dim=1))[0]
-                if x.dim() > 1
-                else torch.tensor([0])
-            )
-            raise ValueError(
-                f"[PlayerFrameCNN] NaN after fc in batch indices: {batch_indices.tolist()}"
-            )
 
         return x
 
@@ -214,10 +182,13 @@ class GlobalViewCNN(nn.Module):
     Uses eager initialization to ensure layers exist when loading pretrained weights.
     """
 
-    def __init__(self, visual_config, default_in_channels: int = 1):
+    def __init__(
+        self, visual_config, default_in_channels: int = 1, debug_mode: bool = False
+    ):
         super().__init__()
         self.visual_config = visual_config
         self.current_in_channels = default_in_channels
+        self.debug_mode = debug_mode
 
         # Build layers immediately during initialization
         self._build_layers(default_in_channels)
@@ -291,19 +262,6 @@ class GlobalViewCNN(nn.Module):
         Returns:
             Extracted features [batch, global_output_dim]
         """
-        # Validate input
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = (
-                torch.where(nan_mask.any(dim=1))[0]
-                if x.dim() > 1
-                else torch.tensor([0])
-            )
-            raise ValueError(
-                f"[GlobalViewCNN] NaN in input in batch indices: {batch_indices.tolist()}. "
-                f"Shape: {x.shape}, range: [{x.min():.4f}, {x.max():.4f}]"
-            )
-
         # Handle single frame input (global view is never stacked)
         if x.dim() == 4 and x.shape[-1] == 1:
             # [batch, H, W, 1] -> [batch, 1, H, W]
@@ -323,19 +281,9 @@ class GlobalViewCNN(nn.Module):
             self.fc = self.fc.to(x.device)
 
         x = self.conv_layers(x)
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = (
-                torch.where(nan_mask.any(dim=1))[0]
-                if x.dim() > 1
-                else torch.tensor([0])
-            )
-            raise ValueError(
-                f"[GlobalViewCNN] NaN after conv_layers in batch indices: {batch_indices.tolist()}"
-            )
 
         x = self.fc(x)
-        if torch.isnan(x).any():
+        if self.debug_mode and torch.isnan(x).any():
             nan_mask = torch.isnan(x)
             batch_indices = (
                 torch.where(nan_mask.any(dim=1))[0]
@@ -362,11 +310,13 @@ class StateMLP(nn.Module):
         hidden_dim: int,
         output_dim: int,
         default_input_dim: Optional[int] = None,
+        debug_mode: bool = False,
     ):
         super().__init__()
         self.base_input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
+        self.debug_mode = debug_mode
 
         # Use provided default or compute from config
         actual_input_dim = (
@@ -454,6 +404,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         observation_space: gym.spaces.Dict,
         config: ArchitectureConfig,
         frame_stack_config: Optional[Dict[str, Any]] = None,
+        debug_mode: bool = False,
     ):
         """
         Args:
@@ -465,6 +416,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str ('zero' or 'repeat')
+            debug_mode: Enable expensive NaN validation checks (default: False for performance)
         """
         # Initialize with final features dimension
         super().__init__(observation_space, config.features_dim)
@@ -472,6 +424,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self.config = config
         self.modalities = config.modalities
         self.frame_stack_config = frame_stack_config or {}
+        self.debug_mode = debug_mode
 
         # Log frame stacking configuration for debugging
         if self.frame_stack_config:
@@ -580,11 +533,20 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         if self.frame_stack_config.get("enable_visual_frame_stacking", False):
             default_in_channels = self.frame_stack_config.get("visual_stack_size", 4)
 
-        return PlayerFrameCNN(visual_config, default_in_channels=default_in_channels)
+        return PlayerFrameCNN(
+            visual_config,
+            default_in_channels=default_in_channels,
+            debug_mode=self.debug_mode,
+        )
 
     def _create_global_cnn(self, visual_config) -> nn.Module:
         """Create 2D CNN for global view processing (single frame only, not stacked)."""
-        return GlobalViewCNN(visual_config)
+        default_in_channels = 1
+        return GlobalViewCNN(
+            visual_config,
+            default_in_channels=default_in_channels,
+            debug_mode=self.debug_mode,
+        )
 
     def _create_graph_encoder(self, graph_config) -> nn.Module:
         """Create graph encoder based on architecture type."""
@@ -649,6 +611,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 output_dim=output_dim,
                 num_heads=4,
                 dropout=0.1,
+                debug_mode=self.debug_mode,
             )
         else:
             # Fallback to original StateMLP
@@ -658,7 +621,11 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 default_input_dim = input_dim * stack_size
 
             return StateMLP(
-                input_dim, hidden_dim, output_dim, default_input_dim=default_input_dim
+                input_dim,
+                hidden_dim,
+                output_dim,
+                default_input_dim=default_input_dim,
+                debug_mode=self.debug_mode,
             )
 
     def _create_reachability_mlp(
@@ -764,7 +731,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             player_frame_features = self.player_frame_cnn(
                 player_frame_obs.float() / 255.0
             )
-            if torch.isnan(player_frame_features).any():
+            if self.debug_mode and torch.isnan(player_frame_features).any():
                 nan_mask = torch.isnan(player_frame_features)
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
@@ -778,7 +745,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             # Global view should always be a single frame: [batch, H, W, C] or [batch, H, W]
             # The GlobalViewCNN will handle the channel dimension conversion
             global_features = self.global_cnn(global_obs.float() / 255.0)
-            if torch.isnan(global_features).any():
+            if self.debug_mode and torch.isnan(global_features).any():
                 nan_mask = torch.isnan(global_features)
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
@@ -812,7 +779,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                     hgt_graph_obs["graph_edge_types"] = observations["graph_edge_types"]
 
                 graph_features = self.graph_encoder(hgt_graph_obs)
-                if torch.isnan(graph_features).any():
+                if self.debug_mode and torch.isnan(graph_features).any():
                     nan_mask = torch.isnan(graph_features)
                     batch_indices = torch.where(nan_mask.any(dim=1))[0]
                     raise ValueError(
@@ -836,7 +803,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 _, graph_features = self.graph_encoder(
                     node_features, edge_index, node_types, node_mask
                 )
-                if torch.isnan(graph_features).any():
+                if self.debug_mode and torch.isnan(graph_features).any():
                     nan_mask = torch.isnan(graph_features)
                     batch_indices = torch.where(nan_mask.any(dim=1))[0]
                     raise ValueError(
@@ -899,7 +866,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                     f"[EXTRACTOR] Graph encoder completed, output shape: {graph_features.shape}"
                 )
 
-            if torch.isnan(graph_features).any():
+            if self.debug_mode and torch.isnan(graph_features).any():
                 nan_mask = torch.isnan(graph_features)
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
@@ -911,7 +878,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Process game state
         if self.state_mlp is not None and "game_state" in observations:
             state_features = self.state_mlp(observations["game_state"].float())
-            if torch.isnan(state_features).any():
+            if self.debug_mode and torch.isnan(state_features).any():
                 nan_mask = torch.isnan(state_features)
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
@@ -927,7 +894,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             reach_features = self.reachability_mlp(
                 observations["reachability_features"].float()
             )
-            if torch.isnan(reach_features).any():
+            if self.debug_mode and torch.isnan(reach_features).any():
                 nan_mask = torch.isnan(reach_features)
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
@@ -942,7 +909,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             )
 
         combined_features = torch.cat(features, dim=1)
-        if torch.isnan(combined_features).any():
+        if self.debug_mode and torch.isnan(combined_features).any():
             nan_mask = torch.isnan(combined_features)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -951,7 +918,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
 
         # Apply fusion
         output = self.fusion(combined_features)
-        if torch.isnan(output).any():
+        if self.debug_mode and torch.isnan(output).any():
             nan_mask = torch.isnan(output)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -1053,9 +1020,10 @@ class MultiHeadFusion(nn.Module):
         num_heads: int = 8,
         modality_dims: Optional[list] = None,  # NEW: track modality dimensions
         dropout: float = 0.1,
+        debug_mode: bool = False,
     ):
         super().__init__()
-
+        self.debug_mode = debug_mode
         # Modality dimensions (default assumes 5 equal-sized modalities)
         if modality_dims is None:
             # Fallback: assume equal split (for backward compatibility)
@@ -1118,29 +1086,12 @@ class MultiHeadFusion(nn.Module):
         Returns:
             Fused features [batch, output_dim]
         """
-        # CHECK 1: Validate input
-        if torch.isnan(x).any():
-            nan_mask = torch.isnan(x)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ENHANCED_FUSION] NaN in input in batch indices: {batch_indices.tolist()}. "
-                f"Shape: {x.shape}, range: [{x.min():.4f}, {x.max():.4f}]"
-            )
-
         # Split concatenated features back into separate modalities
         modality_features = []
         start_idx = 0
         for i, modality_dim in enumerate(self.modality_dims):
             end_idx = start_idx + modality_dim
             modality_feat = x[:, start_idx:end_idx]  # [batch, modality_dim]
-
-            # CHECK 2: Validate each modality after split
-            if torch.isnan(modality_feat).any():
-                nan_mask = torch.isnan(modality_feat)
-                batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                raise ValueError(
-                    f"[ENHANCED_FUSION] NaN in modality {i} after split in batch indices: {batch_indices.tolist()}"
-                )
 
             modality_features.append(modality_feat)
             start_idx = end_idx
@@ -1157,49 +1108,15 @@ class MultiHeadFusion(nn.Module):
         ):
             uniform_feat = proj(feat)  # [batch, uniform_dim]
 
-            # CHECK 3: After each modality projection
-            if torch.isnan(uniform_feat).any():
-                nan_mask = torch.isnan(uniform_feat)
-                batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                raise ValueError(
-                    f"[ENHANCED_FUSION] NaN after modality projection {i} in batch indices: {batch_indices.tolist()}. "
-                    f"Input range: [{feat.min():.4f}, {feat.max():.4f}]"
-                )
-
             uniform_features.append(uniform_feat)
 
         # Stack into modality sequence: [batch, num_modalities, uniform_dim]
         modality_tokens = torch.stack(uniform_features, dim=1)
 
-        # CHECK 4: After stacking
-        if torch.isnan(modality_tokens).any():
-            nan_mask = torch.isnan(modality_tokens)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ENHANCED_FUSION] NaN after stacking modality tokens in batch indices: {batch_indices.tolist()}"
-            )
-
         # Add learned modality embeddings (like positional encoding)
         # self.modality_embeddings: [num_modalities, uniform_dim]
         # Broadcast to batch: [1, num_modalities, uniform_dim]
         modality_tokens = modality_tokens + self.modality_embeddings.unsqueeze(0)
-
-        # CHECK 5: After adding embeddings
-        if torch.isnan(modality_tokens).any():
-            nan_mask = torch.isnan(modality_tokens)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ENHANCED_FUSION] NaN after adding modality embeddings in batch indices: {batch_indices.tolist()}"
-            )
-
-        # CHECK 6: Check for degenerate tokens before attention
-        token_std = modality_tokens.std(dim=-1)
-        if (token_std < 1e-8).any():
-            degenerate_batches = torch.where((token_std < 1e-8).any(dim=1))[0]
-            raise ValueError(
-                f"[ENHANCED_FUSION] Degenerate tokens (near-zero std) in batch indices: {degenerate_batches.tolist()}. "
-                f"Std range: [{token_std.min():.4e}, {token_std.max():.4e}]"
-            )
 
         # Multi-head cross-modal attention
         # Each modality can attend to all others
@@ -1211,20 +1128,11 @@ class MultiHeadFusion(nn.Module):
         )
         # attn_out: [batch, num_modalities, uniform_dim]
 
-        # CHECK 7: After attention
-        if torch.isnan(attn_out).any():
-            nan_mask = torch.isnan(attn_out)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ENHANCED_FUSION] NaN after attention in batch indices: {batch_indices.tolist()}. "
-                f"Input range: [{modality_tokens.min():.4f}, {modality_tokens.max():.4f}]"
-            )
-
         # Residual + norm
         modality_tokens = self.norm1(modality_tokens + attn_out)
 
         # CHECK 8: After first residual + norm
-        if torch.isnan(modality_tokens).any():
+        if self.debug_mode and torch.isnan(modality_tokens).any():
             nan_mask = torch.isnan(modality_tokens)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -1235,7 +1143,7 @@ class MultiHeadFusion(nn.Module):
         ffn_out = self.ffn(modality_tokens)
 
         # CHECK 9: After FFN
-        if torch.isnan(ffn_out).any():
+        if self.debug_mode and torch.isnan(ffn_out).any():
             nan_mask = torch.isnan(ffn_out)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -1246,7 +1154,7 @@ class MultiHeadFusion(nn.Module):
         # Shape: [batch, num_modalities, uniform_dim]
 
         # CHECK 10: After second residual + norm
-        if torch.isnan(modality_tokens).any():
+        if self.debug_mode and torch.isnan(modality_tokens).any():
             nan_mask = torch.isnan(modality_tokens)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -1258,7 +1166,7 @@ class MultiHeadFusion(nn.Module):
         fused = modality_tokens.mean(dim=1)  # [batch, uniform_dim]
 
         # CHECK 11: After pooling
-        if torch.isnan(fused).any():
+        if self.debug_mode and torch.isnan(fused).any():
             nan_mask = torch.isnan(fused)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -1269,7 +1177,7 @@ class MultiHeadFusion(nn.Module):
         output = self.output_proj(fused)  # [batch, output_dim]
 
         # CHECK 12: After output projection
-        if torch.isnan(output).any():
+        if self.debug_mode and torch.isnan(output).any():
             nan_mask = torch.isnan(output)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(

@@ -43,6 +43,12 @@ from npp_rl.training.distributed_utils import (
     configure_cuda_for_training,
     barrier,
 )
+from npp_rl.training.runtime_profiler import create_profiler
+from npp_rl.training.profiling_callback import RuntimeProfilingCallback
+from stable_baselines3.common.callbacks import BaseCallback
+import traceback
+import gc
+import os
 
 
 def parse_args():
@@ -414,6 +420,56 @@ def parse_args():
     # Debugging
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
+    # Runtime profiling options
+    parser.add_argument(
+        "--enable-profiling",
+        action="store_true",
+        help="Enable comprehensive runtime profiling",
+    )
+    parser.add_argument(
+        "--enable-pytorch-profiler",
+        action="store_true",
+        default=True,
+        help="Enable PyTorch profiler for detailed GPU/CPU traces (default: True if profiling enabled)",
+    )
+    parser.add_argument(
+        "--profiler-wait",
+        type=int,
+        default=1,
+        help="PyTorch profiler: steps to wait before profiling",
+    )
+    parser.add_argument(
+        "--profiler-warmup",
+        type=int,
+        default=1,
+        help="PyTorch profiler: steps to warmup before profiling",
+    )
+    parser.add_argument(
+        "--profiler-active",
+        type=int,
+        default=3,
+        help="PyTorch profiler: steps to actively profile",
+    )
+    parser.add_argument(
+        "--profiler-repeat",
+        type=int,
+        default=1,
+        help="PyTorch profiler: number of profiling cycles",
+    )
+
+    # Memory profiling options
+    parser.add_argument(
+        "--enable-memory-profiling",
+        action="store_true",
+        help="Enable comprehensive memory profiling (CPU + GPU tracking)",
+    )
+    parser.add_argument(
+        "--memory-snapshot-freq",
+        type=int,
+        default=10000,
+        help="Frequency of memory snapshots during training (in timesteps)",
+    )
+
     return parser.parse_args()
 
 
@@ -529,6 +585,15 @@ def upload_training_artifacts(
         )
         logger.info(f"  ✓ Uploaded {state_file.name}")
 
+    # 9. Upload profiling results if available
+    profiling_dir = output_dir / "profiling"
+    if profiling_dir.exists() and profiling_dir.is_dir():
+        count = s3_uploader.upload_directory(
+            str(profiling_dir),
+            f"{s3_prefix}/profiling",
+        )
+        logger.info(f"  ✓ Uploaded {count} profiling files")
+
     logger.info(f"S3 upload complete for {s3_prefix}")
 
 
@@ -623,6 +688,45 @@ def upload_experiment_level_artifacts(
     logger.info("  ✓ Uploaded S3 manifest")
 
 
+class MemorySnapshotCallback(BaseCallback):
+    """Periodic memory snapshots during training.
+
+    Takes memory snapshots at regular intervals and compares them
+    to detect memory leaks during training.
+    """
+
+    def __init__(self, profiler, freq=10000, verbose=0):
+        """Initialize memory snapshot callback.
+
+        Args:
+            profiler: MemoryProfiler instance
+            freq: Frequency of snapshots in timesteps
+            verbose: Verbosity level
+        """
+        super().__init__(verbose)
+        self.profiler = profiler
+        self.freq = freq
+
+    def _on_step(self) -> bool:
+        """Take snapshot if frequency reached."""
+        if self.n_calls % self.freq == 0:
+            self.profiler.snapshot(f"training_step_{self.n_calls}")
+
+            # Force garbage collection
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # Compare to previous snapshot if available
+            if len(self.profiler.snapshots) >= 2:
+                self.profiler.compare_snapshots(
+                    self.profiler.snapshots[-2]["label"],
+                    self.profiler.snapshots[-1]["label"],
+                    top_n=10,
+                )
+        return True
+
+
 def train_architecture(
     architecture_name: str,
     architecture_config,
@@ -633,6 +737,7 @@ def train_architecture(
     device_id: int = 0,
     hardware_profile=None,
     use_distributed: bool = False,
+    profiler=None,
 ) -> dict:
     """Train a single architecture configuration.
 
@@ -675,6 +780,34 @@ def train_architecture(
         arch_output_dir = output_dir / architecture_name
 
     arch_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create profiler for this architecture if enabled
+    arch_profiler = None
+    if profiler is None and args.enable_profiling:
+        profiler_output_dir = arch_output_dir / "profiling"
+        arch_profiler = create_profiler(
+            output_dir=profiler_output_dir,
+            enable=True,
+            enable_pytorch_profiler=args.enable_pytorch_profiler,
+            pytorch_profiler_wait=args.profiler_wait,
+            pytorch_profiler_warmup=args.profiler_warmup,
+            pytorch_profiler_active=args.profiler_active,
+            pytorch_profiler_repeat=args.profiler_repeat,
+        )
+        logger.info(f"Runtime profiler enabled: output_dir={profiler_output_dir}")
+    elif profiler is not None:
+        arch_profiler = profiler
+
+    # Create memory profiler if enabled
+    mem_profiler = None
+    if args.enable_memory_profiling:
+        from npp_rl.utils.memory_profiler import MemoryProfiler
+
+        mem_profiler = MemoryProfiler(
+            output_dir=arch_output_dir,
+            enable=True,
+        )
+        logger.info("Memory profiler enabled")
 
     # Create TensorBoard writer (only on rank 0 to avoid conflicts)
     tb_writer = None
@@ -735,6 +868,7 @@ def train_architecture(
             enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
             enable_early_stopping=args.enable_early_stopping,
             early_stopping_patience=args.early_stopping_patience,
+            debug_mode=args.debug,
         )
 
         # Build PPO hyperparameters from hardware profile
@@ -783,19 +917,50 @@ def train_architecture(
                 logger.info("Deep ResNet policy enabled:")
                 logger.info(f"  Residual connections: {args.deep_resnet_use_residual}")
                 logger.info(f"  LayerNorm: {args.deep_resnet_use_layer_norm}")
-                logger.info("  Dueling architecture: True (always enabled)")
                 logger.info(f"  Dropout: {args.deep_resnet_dropout}")
 
-        # Setup model
-        trainer.setup_model(pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs)
+        # Setup model (with profiling)
+        if mem_profiler:
+            mem_profiler.snapshot("before_model_setup")
+        if arch_profiler:
+            arch_profiler.record_memory_snapshot("before_model_setup")
+            with arch_profiler.phase(
+                "model_setup", {"architecture": architecture_name}
+            ):
+                trainer.setup_model(
+                    pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs
+                )
+            arch_profiler.record_memory_snapshot("after_model_setup")
+        else:
+            trainer.setup_model(
+                pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs
+            )
+        if mem_profiler:
+            mem_profiler.snapshot("after_model_setup")
+            mem_profiler.compare_snapshots("before_model_setup", "after_model_setup")
 
         # Setup environments (use per-GPU environment count)
-        trainer.setup_environments(
-            num_envs=envs_per_gpu,
-            total_timesteps=args.total_timesteps,
-            enable_visualization=args.visualize_training,
-            vis_env_idx=args.vis_env_idx,
-        )
+        if mem_profiler:
+            mem_profiler.snapshot("before_env_setup")
+        if arch_profiler:
+            with arch_profiler.phase("environment_setup", {"num_envs": envs_per_gpu}):
+                trainer.setup_environments(
+                    num_envs=envs_per_gpu,
+                    total_timesteps=args.total_timesteps,
+                    enable_visualization=args.visualize_training,
+                    vis_env_idx=args.vis_env_idx,
+                )
+            arch_profiler.record_memory_snapshot("after_env_setup")
+        else:
+            trainer.setup_environments(
+                num_envs=envs_per_gpu,
+                total_timesteps=args.total_timesteps,
+                enable_visualization=args.visualize_training,
+                vis_env_idx=args.vis_env_idx,
+            )
+        if mem_profiler:
+            mem_profiler.snapshot("after_env_setup")
+            mem_profiler.compare_snapshots("before_env_setup", "after_env_setup")
 
         # Create visualization callback if enabled
         vis_callback = None
@@ -815,13 +980,82 @@ def train_architecture(
                 f"every {args.vis_render_freq} timesteps at {args.vis_fps} FPS"
             )
 
-        # Train
-        training_results = trainer.train(
-            total_timesteps=args.total_timesteps,
-            eval_freq=args.eval_freq,
-            save_freq=args.save_freq,
-            callback_fn=vis_callback,
+        # Create profiling callback if enabled
+        profiling_callback = None
+        if arch_profiler:
+            profiling_callback = RuntimeProfilingCallback(
+                profiler=arch_profiler,
+                log_freq=1000,
+                verbose=1 if args.debug else 0,
+            )
+            logger.info("Runtime profiling callback enabled")
+
+        # Combine callbacks (profiling callback should be first to track everything)
+        combined_callback = None
+        if profiling_callback and vis_callback:
+            # Use profiling callback as base, it will handle both
+            combined_callback = profiling_callback
+            # Note: We can't easily chain callbacks, so we'll pass profiling
+            # and let the callback factory handle visualization
+            # For now, prioritize profiling
+            combined_callback = profiling_callback
+        elif profiling_callback:
+            combined_callback = profiling_callback
+        elif vis_callback:
+            combined_callback = vis_callback
+
+        # Add memory snapshot callback if enabled
+        callbacks_list = [combined_callback] if combined_callback else []
+        if mem_profiler:
+            mem_callback = MemorySnapshotCallback(
+                mem_profiler,
+                freq=args.memory_snapshot_freq,
+                verbose=1 if args.debug else 0,
+            )
+            callbacks_list.append(mem_callback)
+            logger.info(
+                f"Memory snapshot callback enabled (freq={args.memory_snapshot_freq})"
+            )
+
+        # Use CallbackList if multiple callbacks, otherwise single callback
+        from stable_baselines3.common.callbacks import CallbackList
+
+        final_callback = (
+            CallbackList(callbacks_list)
+            if len(callbacks_list) > 1
+            else (callbacks_list[0] if callbacks_list else None)
         )
+
+        # Train (with profiling)
+        if mem_profiler:
+            mem_profiler.snapshot("before_training")
+        if arch_profiler:
+            arch_profiler.record_memory_snapshot("before_training")
+            with arch_profiler.phase(
+                "training",
+                {
+                    "total_timesteps": args.total_timesteps,
+                    "eval_freq": args.eval_freq,
+                    "num_envs": envs_per_gpu,
+                },
+            ):
+                training_results = trainer.train(
+                    total_timesteps=args.total_timesteps,
+                    eval_freq=args.eval_freq,
+                    save_freq=args.save_freq,
+                    callback_fn=final_callback,
+                )
+            arch_profiler.record_memory_snapshot("after_training")
+        else:
+            training_results = trainer.train(
+                total_timesteps=args.total_timesteps,
+                eval_freq=args.eval_freq,
+                save_freq=args.save_freq,
+                callback_fn=final_callback,
+            )
+        if mem_profiler:
+            mem_profiler.snapshot("after_training")
+            mem_profiler.compare_snapshots("before_training", "after_training")
 
         # Evaluate (skip if requested, or only run on rank 0 for multi-GPU)
         if args.skip_final_eval:
@@ -836,13 +1070,27 @@ def train_architecture(
                 video_output_dir = str(arch_output_dir / "videos")
                 logger.info(f"Video recording enabled: {video_output_dir}")
 
-            eval_results = trainer.evaluate(
-                num_episodes=args.num_eval_episodes,
-                record_videos=args.record_eval_videos,
-                video_output_dir=video_output_dir,
-                max_videos_per_category=args.max_videos_per_category,
-                video_fps=args.video_fps,
-            )
+            if arch_profiler:
+                arch_profiler.record_memory_snapshot("before_evaluation")
+                with arch_profiler.phase(
+                    "evaluation", {"num_episodes": args.num_eval_episodes}
+                ):
+                    eval_results = trainer.evaluate(
+                        num_episodes=args.num_eval_episodes,
+                        record_videos=args.record_eval_videos,
+                        video_output_dir=video_output_dir,
+                        max_videos_per_category=args.max_videos_per_category,
+                        video_fps=args.video_fps,
+                    )
+                arch_profiler.record_memory_snapshot("after_evaluation")
+            else:
+                eval_results = trainer.evaluate(
+                    num_episodes=args.num_eval_episodes,
+                    record_videos=args.record_eval_videos,
+                    video_output_dir=video_output_dir,
+                    max_videos_per_category=args.max_videos_per_category,
+                    video_fps=args.video_fps,
+                )
         else:
             logger.info(f"GPU {device_id}: Skipping evaluation (handled by rank 0)")
             eval_results = {
@@ -850,6 +1098,21 @@ def train_architecture(
                 "level_types": {},
                 "skipped_on_worker": True,
             }
+
+        # Save profiling results
+        if arch_profiler:
+            arch_profiler.print_summary()
+            summary_path = arch_profiler.save_summary()
+            logger.info(f"Profiling summary saved to {summary_path}")
+            trace_path = arch_profiler.export_trace("training_trace")
+            if trace_path:
+                logger.info(f"PyTorch trace available in {trace_path}")
+
+        # Save memory profiling results
+        if mem_profiler:
+            report_path = mem_profiler.save_report()
+            logger.info(f"Memory profiling report saved to {report_path}")
+            mem_profiler.cleanup()
 
         # Clean up environments
         trainer.cleanup()
@@ -864,8 +1127,37 @@ def train_architecture(
             "output_dir": str(arch_output_dir),
         }
 
+    except KeyboardInterrupt:
+        logger.warning("Training interrupted by user (KeyboardInterrupt)")
+        # Save profiling data before exiting
+        if arch_profiler:
+            logger.info("Saving profiling data before exit...")
+            try:
+                arch_profiler.save_summary(force=True)
+                if arch_profiler.enable_pytorch_profiler:
+                    arch_profiler.stop_pytorch_profiler()
+                logger.info("Profiling data saved successfully")
+            except Exception as save_error:
+                logger.error(f"Failed to save profiling data: {save_error}")
+        # Clean up environments
+        if "trainer" in locals():
+            trainer.cleanup()
+        if tb_writer:
+            tb_writer.close_all()
+        # Re-raise to allow normal cleanup
+        raise
     except Exception as e:
-        print(f"Training failed for {architecture_name}{condition_suffix}: {e}")
+        logger.error(f"Training failed for {architecture_name}{condition_suffix}: {e}")
+        logger.error(traceback.format_exc())
+        # Save profiling data even on failure
+        if arch_profiler:
+            logger.info("Saving profiling data after failure...")
+            try:
+                arch_profiler.save_summary(force=True)
+                if arch_profiler.enable_pytorch_profiler:
+                    arch_profiler.stop_pytorch_profiler()
+            except Exception as save_error:
+                logger.error(f"Failed to save profiling data: {save_error}")
         # Clean up environments even on failure (if trainer was initialized)
         if "trainer" in locals():
             trainer.cleanup()
@@ -878,6 +1170,15 @@ def train_architecture(
             "status": "failed",
             "error": str(e),
         }
+    finally:
+        # Ensure profiling data is saved even if something goes wrong
+        if arch_profiler:
+            try:
+                if not arch_profiler._saved:
+                    logger.info("Saving profiling data in finally block...")
+                    arch_profiler.save_summary(force=True)
+            except Exception as save_error:
+                logger.error(f"Failed to save profiling data in finally: {save_error}")
 
 
 def train_worker(
@@ -962,42 +1263,106 @@ def train_worker(
                     "padding_type": args.frame_stack_padding,
                 }
 
+            # Create profiler for pretraining if enabled
+            pretrain_profiler = None
+            if args.enable_profiling and is_main_process():
+                pretrain_output_dir = exp_dir / arch_name / "pretrain" / "profiling"
+                pretrain_profiler = create_profiler(
+                    output_dir=pretrain_output_dir,
+                    enable=True,
+                    enable_pytorch_profiler=False,  # Disable PyTorch profiler for pretraining
+                )
+
             # Determine pretraining conditions (only on rank 0 to avoid conflicts)
             if is_main_process():
                 if args.no_pretraining:
                     conditions = [("no_pretrain", None)]
                 elif args.test_pretraining:
-                    pretrained_ckpt = run_bc_pretraining_if_available(
-                        replay_data_dir=args.replay_data_dir,
-                        architecture_config=arch_config,
-                        output_dir=exp_dir / arch_name / "pretrain",
-                        epochs=args.bc_epochs,
-                        batch_size=args.bc_batch_size,
-                        frame_stack_config=bc_frame_stack_config,
-                        tensorboard_writer=TensorBoardManager(
-                            exp_dir / arch_name / "pretrain" / "tensorboard"
-                        ),
-                        test_dataset_path=str(args.test_dataset),
-                        dataset_num_workers=args.bc_num_workers,
-                    )
+                    if pretrain_profiler:
+                        pretrain_profiler.record_memory_snapshot("before_pretraining")
+                        with pretrain_profiler.phase(
+                            "bc_pretraining",
+                            {
+                                "epochs": args.bc_epochs,
+                                "batch_size": args.bc_batch_size,
+                            },
+                        ):
+                            pretrained_ckpt = run_bc_pretraining_if_available(
+                                replay_data_dir=args.replay_data_dir,
+                                architecture_config=arch_config,
+                                output_dir=exp_dir / arch_name / "pretrain",
+                                epochs=args.bc_epochs,
+                                batch_size=args.bc_batch_size,
+                                frame_stack_config=bc_frame_stack_config,
+                                tensorboard_writer=TensorBoardManager(
+                                    exp_dir / arch_name / "pretrain" / "tensorboard"
+                                ),
+                                test_dataset_path=str(args.test_dataset),
+                                dataset_num_workers=args.bc_num_workers,
+                            )
+                        pretrain_profiler.record_memory_snapshot("after_pretraining")
+                        if pretrain_profiler:
+                            pretrain_profiler.print_summary()
+                            pretrain_profiler.save_summary()
+                    else:
+                        pretrained_ckpt = run_bc_pretraining_if_available(
+                            replay_data_dir=args.replay_data_dir,
+                            architecture_config=arch_config,
+                            output_dir=exp_dir / arch_name / "pretrain",
+                            epochs=args.bc_epochs,
+                            batch_size=args.bc_batch_size,
+                            frame_stack_config=bc_frame_stack_config,
+                            tensorboard_writer=TensorBoardManager(
+                                exp_dir / arch_name / "pretrain" / "tensorboard"
+                            ),
+                            test_dataset_path=str(args.test_dataset),
+                            dataset_num_workers=args.bc_num_workers,
+                        )
                     conditions = [
                         ("no_pretrain", None),
                         ("with_pretrain", pretrained_ckpt),
                     ]
                 else:
-                    pretrained_ckpt = run_bc_pretraining_if_available(
-                        replay_data_dir=args.replay_data_dir,
-                        architecture_config=arch_config,
-                        output_dir=exp_dir / arch_name / "pretrain",
-                        epochs=args.bc_epochs,
-                        batch_size=args.bc_batch_size,
-                        frame_stack_config=bc_frame_stack_config,
-                        tensorboard_writer=TensorBoardManager(
-                            exp_dir / arch_name / "pretrain" / "tensorboard"
-                        ),
-                        test_dataset_path=str(args.test_dataset),
-                        dataset_num_workers=args.bc_num_workers,
-                    )
+                    if pretrain_profiler:
+                        pretrain_profiler.record_memory_snapshot("before_pretraining")
+                        with pretrain_profiler.phase(
+                            "bc_pretraining",
+                            {
+                                "epochs": args.bc_epochs,
+                                "batch_size": args.bc_batch_size,
+                            },
+                        ):
+                            pretrained_ckpt = run_bc_pretraining_if_available(
+                                replay_data_dir=args.replay_data_dir,
+                                architecture_config=arch_config,
+                                output_dir=exp_dir / arch_name / "pretrain",
+                                epochs=args.bc_epochs,
+                                batch_size=args.bc_batch_size,
+                                frame_stack_config=bc_frame_stack_config,
+                                tensorboard_writer=TensorBoardManager(
+                                    exp_dir / arch_name / "pretrain" / "tensorboard"
+                                ),
+                                test_dataset_path=str(args.test_dataset),
+                                dataset_num_workers=args.bc_num_workers,
+                            )
+                        pretrain_profiler.record_memory_snapshot("after_pretraining")
+                        if pretrain_profiler:
+                            pretrain_profiler.print_summary()
+                            pretrain_profiler.save_summary()
+                    else:
+                        pretrained_ckpt = run_bc_pretraining_if_available(
+                            replay_data_dir=args.replay_data_dir,
+                            architecture_config=arch_config,
+                            output_dir=exp_dir / arch_name / "pretrain",
+                            epochs=args.bc_epochs,
+                            batch_size=args.bc_batch_size,
+                            frame_stack_config=bc_frame_stack_config,
+                            tensorboard_writer=TensorBoardManager(
+                                exp_dir / arch_name / "pretrain" / "tensorboard"
+                            ),
+                            test_dataset_path=str(args.test_dataset),
+                            dataset_num_workers=args.bc_num_workers,
+                        )
                     if pretrained_ckpt:
                         conditions = [("with_pretrain", pretrained_ckpt)]
                     else:
@@ -1144,6 +1509,15 @@ def main():
             gpu_memory = gpu_props.total_memory / 1e9
             logger.info(f"  GPU {i}: {gpu_name} ({gpu_memory:.1f} GB)")
             logger.info(f"    Compute capability: {gpu_props.major}.{gpu_props.minor}")
+
+        # Configure GPU memory allocator to reduce fragmentation
+        if "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+            logger.info("Configured PyTorch CUDA allocator: max_split_size_mb=512")
+
+        # Clear GPU cache before training
+        torch.cuda.empty_cache()
+        logger.info("Cleared GPU cache")
 
         # Validate num_gpus argument
         if args.num_gpus > num_gpus:
@@ -1294,6 +1668,16 @@ def main():
                 "padding_type": args.frame_stack_padding,
             }
 
+        # Create profiler for pretraining if enabled
+        pretrain_profiler = None
+        if args.enable_profiling:
+            pretrain_output_dir = exp_dir / arch_name / "pretrain" / "profiling"
+            pretrain_profiler = create_profiler(
+                output_dir=pretrain_output_dir,
+                enable=True,
+                enable_pytorch_profiler=False,  # Disable PyTorch profiler for pretraining
+            )
+
         # Determine pretraining conditions
         if args.no_pretraining:
             # No pretraining at all
@@ -1301,29 +1685,71 @@ def main():
         elif args.test_pretraining:
             # Test both conditions
             # Try to get pretrained checkpoint
-            pretrained_ckpt = run_bc_pretraining_if_available(
-                replay_data_dir=args.replay_data_dir,
-                architecture_config=arch_config,
-                output_dir=exp_dir / arch_name / "pretrain",
-                epochs=args.bc_epochs,
-                batch_size=args.bc_batch_size,
-                frame_stack_config=bc_frame_stack_config,
-                test_dataset_path=str(args.test_dataset),
-                dataset_num_workers=args.bc_num_workers,
-            )
+            if pretrain_profiler:
+                pretrain_profiler.record_memory_snapshot("before_pretraining")
+                with pretrain_profiler.phase(
+                    "bc_pretraining",
+                    {"epochs": args.bc_epochs, "batch_size": args.bc_batch_size},
+                ):
+                    pretrained_ckpt = run_bc_pretraining_if_available(
+                        replay_data_dir=args.replay_data_dir,
+                        architecture_config=arch_config,
+                        output_dir=exp_dir / arch_name / "pretrain",
+                        epochs=args.bc_epochs,
+                        batch_size=args.bc_batch_size,
+                        frame_stack_config=bc_frame_stack_config,
+                        test_dataset_path=str(args.test_dataset),
+                        dataset_num_workers=args.bc_num_workers,
+                    )
+                pretrain_profiler.record_memory_snapshot("after_pretraining")
+                if pretrain_profiler:
+                    pretrain_profiler.print_summary()
+                    pretrain_profiler.save_summary()
+            else:
+                pretrained_ckpt = run_bc_pretraining_if_available(
+                    replay_data_dir=args.replay_data_dir,
+                    architecture_config=arch_config,
+                    output_dir=exp_dir / arch_name / "pretrain",
+                    epochs=args.bc_epochs,
+                    batch_size=args.bc_batch_size,
+                    frame_stack_config=bc_frame_stack_config,
+                    test_dataset_path=str(args.test_dataset),
+                    dataset_num_workers=args.bc_num_workers,
+                )
             conditions = [("no_pretrain", None), ("with_pretrain", pretrained_ckpt)]
         else:
             # Try pretraining, use if available
-            pretrained_ckpt = run_bc_pretraining_if_available(
-                replay_data_dir=args.replay_data_dir,
-                architecture_config=arch_config,
-                output_dir=exp_dir / arch_name / "pretrain",
-                epochs=args.bc_epochs,
-                batch_size=args.bc_batch_size,
-                frame_stack_config=bc_frame_stack_config,
-                test_dataset_path=str(args.test_dataset),
-                dataset_num_workers=args.bc_num_workers,
-            )
+            if pretrain_profiler:
+                pretrain_profiler.record_memory_snapshot("before_pretraining")
+                with pretrain_profiler.phase(
+                    "bc_pretraining",
+                    {"epochs": args.bc_epochs, "batch_size": args.bc_batch_size},
+                ):
+                    pretrained_ckpt = run_bc_pretraining_if_available(
+                        replay_data_dir=args.replay_data_dir,
+                        architecture_config=arch_config,
+                        output_dir=exp_dir / arch_name / "pretrain",
+                        epochs=args.bc_epochs,
+                        batch_size=args.bc_batch_size,
+                        frame_stack_config=bc_frame_stack_config,
+                        test_dataset_path=str(args.test_dataset),
+                        dataset_num_workers=args.bc_num_workers,
+                    )
+                pretrain_profiler.record_memory_snapshot("after_pretraining")
+                if pretrain_profiler:
+                    pretrain_profiler.print_summary()
+                    pretrain_profiler.save_summary()
+            else:
+                pretrained_ckpt = run_bc_pretraining_if_available(
+                    replay_data_dir=args.replay_data_dir,
+                    architecture_config=arch_config,
+                    output_dir=exp_dir / arch_name / "pretrain",
+                    epochs=args.bc_epochs,
+                    batch_size=args.bc_batch_size,
+                    frame_stack_config=bc_frame_stack_config,
+                    test_dataset_path=str(args.test_dataset),
+                    dataset_num_workers=args.bc_num_workers,
+                )
             if pretrained_ckpt:
                 conditions = [("with_pretrain", pretrained_ckpt)]
             else:

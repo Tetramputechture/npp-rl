@@ -26,8 +26,7 @@ flowchart TB
     
     %% Data Layer
     subgraph DataLayer["Data Layer"]
-        TrainData["Training Dataset<br/>N++ levels"]
-        TestData["Test Dataset<br/>Evaluation levels"]
+        TestData["Train Dataset<br/>Curriculum-selected levels"]
         MapLoader["Map Loader<br/>Tiles, entities, spawn"]
     end
     
@@ -48,13 +47,13 @@ flowchart TB
     %% Per-Step Execution Flow (HIGHLIGHTED)
     subgraph StepFlow["PER-STEP FLOW #40;env.step#41;"]
         direction TB
-        Step1["1. Action Selection<br/>Policy outputs action"]
-        Step2["2. Physics Update<br/>Simulate timestep"]
-        Step3["3. Graph Rebuild<br/>If switches changed"]
-        Step4["4. Observation Collection<br/>Render & extract"]
-        Step5["5. Reward Computation<br/>PBRS + terminals"]
-        Step6["6. Termination Check<br/>Done or truncated?"]
-        Step7["7. Return<br/>obs, reward, done, info"]
+        Step1["Action Selection<br/>Policy outputs action"]
+        Step2["Physics Update<br/>Simulate timestep"]
+        Step3["Graph Rebuild<br/>If switches changed"]
+        Step4["Observation Collection<br/>Render & extract"]
+        Step5["Reward Computation<br/>PBRS + terminals"]
+        Step6["Termination Check<br/>Done or truncated?"]
+        Step7["Return<br/>obs, reward, done, info"]
         
         Step1 --> Step2
         Step2 --> Step3
@@ -65,7 +64,7 @@ flowchart TB
     end
     
     %% Observation Space
-    subgraph ObsSpace["Observation Space #40;5 Modalities#41;"]
+    subgraph ObsSpace["Observation Space"]
         direction TB
         PlayerView["Player View<br/>84x84 local vision"]
         GlobalView["Global View<br/>176x100 full level"]
@@ -137,7 +136,6 @@ flowchart TB
     end
     
     %% Main Flow Connections
-    TrainData --> MapLoader
     TestData --> MapLoader
     MapLoader --> Physics
     MapLoader --> EntityMgr
@@ -184,7 +182,7 @@ flowchart TB
     Curriculum -.->|Level selection| MapLoader
     
     %% Apply Styles
-    class DataLayer,TrainData,TestData,MapLoader dataLayer
+    class DataLayer,TestData,MapLoader dataLayer
     class SimLayer,Physics,Renderer,EntityMgr simLayer
     class EnvLayer,NavGraph,Reachability,ObsAssembly envLayer
     class ObsSpace,PlayerView,GlobalView,SpatialGraph,GameState,ReachVec obsLayer

@@ -17,6 +17,7 @@ from .hierarchical_callbacks import (
 from .visualization_callback import TrainingVisualizationCallback
 from .enhanced_tensorboard_callback import EnhancedTensorBoardCallback
 from .route_visualization_callback import RouteVisualizationCallback
+from .auxiliary_loss_callback import AuxiliaryLossCallback
 
 __all__ = [
     "DistributedProgressCallback",
@@ -29,4 +30,5 @@ __all__ = [
     "TrainingVisualizationCallback",
     "EnhancedTensorBoardCallback",
     "RouteVisualizationCallback",
+    "AuxiliaryLossCallback",
 ]

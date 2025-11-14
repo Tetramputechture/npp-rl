@@ -19,9 +19,6 @@ import numpy as np
 from typing import Dict, Any, Optional, Tuple
 
 from npp_rl.hrl.high_level_policy import Subtask
-from nclone.gym_environment.observation_processor import (
-    compute_hazard_from_entity_states,
-)
 
 
 class SubtaskEmbedding(nn.Module):
@@ -541,23 +538,6 @@ class SubtaskSpecificFeatures:
             nearest_hazard_norm = game_state[23]
             nearest_hazard_01 = (nearest_hazard_norm + 1.0) / 2.0
             return float(nearest_hazard_01)
-
-        # Fallback: use entity_states if available
-        entity_states = obs.get("entity_states", None)
-        if entity_states is not None and len(entity_states) > 0:
-            player_x = obs.get("player_x", 0.0)
-            player_y = obs.get("player_y", 0.0)
-
-            try:
-                nearest_dist, _ = compute_hazard_from_entity_states(
-                    entity_states, player_x, player_y
-                )
-
-                # Normalize to screen diagonal
-                screen_diagonal = (1056**2 + 600**2) ** 0.5
-                return min(1.0, nearest_dist / screen_diagonal)
-            except ImportError:
-                pass
 
         # Safe fallback: assume no nearby mines
         return 1.0

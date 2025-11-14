@@ -8,6 +8,7 @@ from nclone.gym_environment.constants import (
     MINE_FEATURES_DIM,
     PROGRESS_FEATURES_DIM,
     SEQUENTIAL_GOAL_DIM,
+    ACTION_DEATH_PROBABILITIES_DIM,
 )
 
 
@@ -17,12 +18,13 @@ class AttentiveStateMLP(nn.Module):
     Separates game state into semantic components (physics, objectives, mines)
     and applies cross-attention to learn inter-component relationships.
 
-    State breakdown (58 dims):
+    State breakdown (64 dims):
     - Physics (ninja): 29 dims
     - Objectives: 15 dims
     - Mines: 8 dims
     - Progress: 3 dims
     - Sequential: 3 dims
+    - Mine death probabilities: 6 dims
 
     Architecture:
     1. Component-specific encoders project to hidden_dim
@@ -36,8 +38,10 @@ class AttentiveStateMLP(nn.Module):
         output_dim: int = 128,
         num_heads: int = 4,
         dropout: float = 0.1,
+        debug_mode: bool = False,
     ):
         super().__init__()
+        self.debug_mode = debug_mode
         self.physics_encoder = nn.Sequential(
             nn.Linear(NINJA_STATE_DIM, hidden_dim // 2),
             nn.ReLU(),
@@ -68,6 +72,12 @@ class AttentiveStateMLP(nn.Module):
             nn.Dropout(dropout),
         )
 
+        self.death_prob_encoder = nn.Sequential(
+            nn.Linear(ACTION_DEATH_PROBABILITIES_DIM, hidden_dim // 8),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
         # Uniform dimension for attention (must be divisible by num_heads)
         # Use 64 for hidden_dim=128 (64 / 4 heads = 16 per head)
         self.uniform_dim = hidden_dim // 2  # 64
@@ -81,6 +91,7 @@ class AttentiveStateMLP(nn.Module):
         self.mine_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
         self.progress_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
         self.sequential_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
+        self.death_prob_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
 
         # Multi-head attention across components
         self.attention = nn.MultiheadAttention(
@@ -93,7 +104,7 @@ class AttentiveStateMLP(nn.Module):
         # Layer norm for uniform dim
         self.norm = nn.LayerNorm(self.uniform_dim)
 
-        # Output: pool 5 components and project
+        # Output: pool 6 components and project
         self.pool_proj = nn.Linear(self.uniform_dim, output_dim)
         self.output_activation = nn.ReLU()
         self.output_dropout = nn.Dropout(dropout)
@@ -102,38 +113,39 @@ class AttentiveStateMLP(nn.Module):
         """Forward pass through attentive state encoder.
 
         Args:
-            x: State tensor [batch, 58] or [batch, stack_size * 58] if stacked
+            x: State tensor [batch, 64] or [batch, stack_size * 64] if stacked
 
         Returns:
             Encoded features [batch, output_dim]
         """
-        # Validate input tensor for NaN/Inf
-        if torch.isnan(x).any():
-            nan_count = torch.isnan(x).sum().item()
-            nan_indices = torch.where(torch.isnan(x.view(-1)))[0][:10].tolist()
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN in input tensor. "
-                f"Shape: {x.shape}, NaN count: {nan_count}, "
-                f"First NaN indices (flattened): {nan_indices}"
-            )
-        if torch.isinf(x).any():
-            inf_count = torch.isinf(x).sum().item()
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] Inf in input tensor. "
-                f"Shape: {x.shape}, Inf count: {inf_count}"
-            )
+        # Validate input tensor for NaN/Inf (only if debug mode enabled)
+        if self.debug_mode:
+            if torch.isnan(x).any():
+                nan_count = torch.isnan(x).sum().item()
+                nan_indices = torch.where(torch.isnan(x.view(-1)))[0][:10].tolist()
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] NaN in input tensor. "
+                    f"Shape: {x.shape}, NaN count: {nan_count}, "
+                    f"First NaN indices (flattened): {nan_indices}"
+                )
+            if torch.isinf(x).any():
+                inf_count = torch.isinf(x).sum().item()
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] Inf in input tensor. "
+                    f"Shape: {x.shape}, Inf count: {inf_count}"
+                )
 
         # Handle frame stacking: extract most recent frame
         if x.dim() == 2:
-            if x.shape[1] % 58 == 0 and x.shape[1] > 58:
-                # Stacked states: [batch, stack_size * 58] → take last 58
-                x = x[:, -58:]  # Most recent frame
-            elif x.shape[1] != 58:
+            if x.shape[1] % 64 == 0 and x.shape[1] > 64:
+                # Stacked states: [batch, stack_size * 64] → take last 64
+                x = x[:, -64:]  # Most recent frame
+            elif x.shape[1] != 64:
                 raise ValueError(
-                    f"Expected state dim 58 or multiple of 58, got {x.shape[1]}"
+                    f"Expected state dim 64 or multiple of 64, got {x.shape[1]}"
                 )
         elif x.dim() == 3:
-            # [batch, stack_size, 58] → take last frame
+            # [batch, stack_size, 64] → take last frame
             x = x[:, -1, :]
 
         # Split into components (must match state dimensions exactly)
@@ -144,33 +156,35 @@ class AttentiveStateMLP(nn.Module):
         ]  # Enhanced mine features (8) - MINE FEATURES - critical for NaN diagnosis
         progress = x[:, 52:55]  # Progress tracking (3)
         sequential = x[:, 55:58]  # Sequential goal features (3)
+        death_probs = x[:, 58:64]  # Mine death probabilities (6)
 
-        # Validate mine features specifically (most likely source of NaN)
-        if torch.isnan(mines).any():
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN in mine features (indices 44-52). "
-                f"Mine values: {mines[torch.isnan(mines).any(dim=1)].cpu().numpy()}"
-            )
+        # Validate mine features specifically (most likely source of NaN) - only if debug mode
+        if self.debug_mode:
+            if torch.isnan(mines).any():
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] NaN in mine features (indices 44-52). "
+                    f"Mine values: {mines[torch.isnan(mines).any(dim=1)].cpu().numpy()}"
+                )
 
-        # Check for degenerate inputs (all-zero physics or extreme values)
-        # Note: Mines, objectives, progress, and sequential can legitimately be all-zero
-        # (e.g., levels without mines, no active objectives, start of level, no sequential goals)
-        if physics.abs().max() < 1e-8:
-            raise ValueError("[ATTENTIVE_STATE_MLP] All-zero physics input")
+            # Check for degenerate inputs (all-zero physics or extreme values)
+            # Note: Mines, objectives, progress, and sequential can legitimately be all-zero
+            # (e.g., levels without mines, no active objectives, start of level, no sequential goals)
+            if physics.abs().max() < 1e-8:
+                raise ValueError("[ATTENTIVE_STATE_MLP] All-zero physics input")
 
-        # Check for extreme values (potential overflow/underflow issues)
-        if physics.abs().max() > 1e6:
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] Extreme physics values: {physics.abs().max()}"
-            )
-        if mines.abs().max() > 1e6:
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] Extreme mines values: {mines.abs().max()}"
-            )
+            # Check for extreme values (potential overflow/underflow issues)
+            if physics.abs().max() > 1e6:
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] Extreme physics values: {physics.abs().max()}"
+                )
+            if mines.abs().max() > 1e6:
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] Extreme mines values: {mines.abs().max()}"
+                )
 
         # Encode each component
         phys_feat = self.physics_encoder(physics)  # [batch, 64]
-        if torch.isnan(phys_feat).any():
+        if self.debug_mode and torch.isnan(phys_feat).any():
             nan_mask = torch.isnan(phys_feat)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -179,7 +193,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         obj_feat = self.objectives_encoder(objectives)  # [batch, 32]
-        if torch.isnan(obj_feat).any():
+        if self.debug_mode and torch.isnan(obj_feat).any():
             nan_mask = torch.isnan(obj_feat)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -188,7 +202,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         mine_feat = self.mine_encoder(mines)  # [batch, 16]
-        if torch.isnan(mine_feat).any():
+        if self.debug_mode and torch.isnan(mine_feat).any():
             nan_mask = torch.isnan(mine_feat)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -197,7 +211,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         prog_feat = self.progress_encoder(progress)  # [batch, 16]
-        if torch.isnan(prog_feat).any():
+        if self.debug_mode and torch.isnan(prog_feat).any():
             nan_mask = torch.isnan(prog_feat)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -206,7 +220,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         seq_feat = self.sequential_encoder(sequential)  # [batch, 16]
-        if torch.isnan(seq_feat).any():
+        if self.debug_mode and torch.isnan(seq_feat).any():
             nan_mask = torch.isnan(seq_feat)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -214,9 +228,25 @@ class AttentiveStateMLP(nn.Module):
                 f"Input sequential range: [{sequential.min():.4f}, {sequential.max():.4f}]"
             )
 
+        # Validate mine death probability features (only if debug mode)
+        if self.debug_mode and torch.isnan(death_probs).any():
+            raise ValueError(
+                f"[ATTENTIVE_STATE_MLP] NaN in mine death_probs (indices 58-64). "
+                f"Death prob values: {death_probs[torch.isnan(death_probs).any(dim=1)].cpu().numpy()}"
+            )
+
+        death_prob_feat = self.death_prob_encoder(death_probs)  # [batch, 16]
+        if self.debug_mode and torch.isnan(death_prob_feat).any():
+            nan_mask = torch.isnan(death_prob_feat)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[ATTENTIVE_STATE_MLP] NaN after death_prob_encoder in batch indices: {batch_indices.tolist()}. "
+                f"Input death_probs range: [{death_probs.min():.4f}, {death_probs.max():.4f}]"
+            )
+
         # Project to uniform dimension
         phys_token = self.physics_proj(phys_feat)  # [batch, 64]
-        if torch.isnan(phys_token).any():
+        if self.debug_mode and torch.isnan(phys_token).any():
             nan_mask = torch.isnan(phys_token)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -224,7 +254,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         obj_token = self.objectives_proj(obj_feat)  # [batch, 64]
-        if torch.isnan(obj_token).any():
+        if self.debug_mode and torch.isnan(obj_token).any():
             nan_mask = torch.isnan(obj_token)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -232,7 +262,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         mine_token = self.mine_proj(mine_feat)  # [batch, 64]
-        if torch.isnan(mine_token).any():
+        if self.debug_mode and torch.isnan(mine_token).any():
             nan_mask = torch.isnan(mine_token)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -240,7 +270,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         prog_token = self.progress_proj(prog_feat)  # [batch, 64]
-        if torch.isnan(prog_token).any():
+        if self.debug_mode and torch.isnan(prog_token).any():
             nan_mask = torch.isnan(prog_token)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -248,33 +278,50 @@ class AttentiveStateMLP(nn.Module):
             )
 
         seq_token = self.sequential_proj(seq_feat)  # [batch, 64]
-        if torch.isnan(seq_token).any():
+        if self.debug_mode and torch.isnan(seq_token).any():
             nan_mask = torch.isnan(seq_token)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
                 f"[ATTENTIVE_STATE_MLP] NaN after sequential_proj in batch indices: {batch_indices.tolist()}"
             )
 
+        death_prob_token = self.death_prob_proj(death_prob_feat)  # [batch, 64]
+        if self.debug_mode and torch.isnan(death_prob_token).any():
+            nan_mask = torch.isnan(death_prob_token)
+            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+            raise ValueError(
+                f"[ATTENTIVE_STATE_MLP] NaN after death_prob_proj in batch indices: {batch_indices.tolist()}"
+            )
+
         # Stack into component sequence for attention
-        # Shape: [batch, 5, 64] - 5 component tokens
+        # Shape: [batch, 6, 64] - 6 component tokens
         component_tokens = torch.stack(
-            [phys_token, obj_token, mine_token, prog_token, seq_token], dim=1
+            [
+                phys_token,
+                obj_token,
+                mine_token,
+                prog_token,
+                seq_token,
+                death_prob_token,
+            ],
+            dim=1,
         )
-        if torch.isnan(component_tokens).any():
+        if self.debug_mode and torch.isnan(component_tokens).any():
             nan_mask = torch.isnan(component_tokens)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
                 f"[ATTENTIVE_STATE_MLP] NaN after stacking tokens in batch indices: {batch_indices.tolist()}"
             )
 
-        # Check for degenerate tokens before attention
-        token_std = component_tokens.std(dim=-1)
-        if (token_std < 1e-8).any():
-            degenerate_batches = torch.where((token_std < 1e-8).any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] Degenerate tokens (near-zero std) in batch indices: {degenerate_batches.tolist()}. "
-                f"Token std range: [{token_std.min():.4e}, {token_std.max():.4e}]"
-            )
+        # Check for degenerate tokens before attention (only if debug mode)
+        if self.debug_mode:
+            token_std = component_tokens.std(dim=-1)
+            if (token_std < 1e-8).any():
+                degenerate_batches = torch.where((token_std < 1e-8).any(dim=1))[0]
+                raise ValueError(
+                    f"[ATTENTIVE_STATE_MLP] Degenerate tokens (near-zero std) in batch indices: {degenerate_batches.tolist()}. "
+                    f"Token std range: [{token_std.min():.4e}, {token_std.max():.4e}]"
+                )
 
         # Multi-head cross-component attention
         # Each component can attend to all others
@@ -285,8 +332,8 @@ class AttentiveStateMLP(nn.Module):
             component_tokens,
             need_weights=False,  # Set True for debugging/visualization
         )
-        # attn_out shape: [batch, 5, 64]
-        if torch.isnan(attn_out).any():
+        # attn_out shape: [batch, 6, 64]
+        if self.debug_mode and torch.isnan(attn_out).any():
             nan_mask = torch.isnan(attn_out)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -296,7 +343,7 @@ class AttentiveStateMLP(nn.Module):
 
         # Residual connection + layer norm
         component_tokens = self.norm(component_tokens + attn_out)
-        if torch.isnan(component_tokens).any():
+        if self.debug_mode and torch.isnan(component_tokens).any():
             nan_mask = torch.isnan(component_tokens)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -304,9 +351,9 @@ class AttentiveStateMLP(nn.Module):
             )
 
         # Pool across components (mean pooling)
-        # Shape: [batch, 5, 64] → [batch, 64]
+        # Shape: [batch, 6, 64] → [batch, 64]
         pooled = component_tokens.mean(dim=1)
-        if torch.isnan(pooled).any():
+        if self.debug_mode and torch.isnan(pooled).any():
             nan_mask = torch.isnan(pooled)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -315,7 +362,7 @@ class AttentiveStateMLP(nn.Module):
 
         # Project to output dimension with activation
         output = self.pool_proj(pooled)  # [batch, output_dim]
-        if torch.isnan(output).any():
+        if self.debug_mode and torch.isnan(output).any():
             nan_mask = torch.isnan(output)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -323,7 +370,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         output = self.output_activation(output)
-        if torch.isnan(output).any():
+        if self.debug_mode and torch.isnan(output).any():
             nan_mask = torch.isnan(output)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
@@ -331,7 +378,7 @@ class AttentiveStateMLP(nn.Module):
             )
 
         output = self.output_dropout(output)
-        if torch.isnan(output).any():
+        if self.debug_mode and torch.isnan(output).any():
             nan_mask = torch.isnan(output)
             batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(

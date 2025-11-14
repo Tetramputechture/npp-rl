@@ -112,10 +112,7 @@ train_single_architecture() {
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
-            --enable-visual-frame-stacking \
-            --visual-stack-size 2 \
-            --enable-lr-annealing \
-            --debug"
+            --enable-lr-annealing"
 
     echo $train_cmd
     return 0

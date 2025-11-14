@@ -41,11 +41,11 @@ class FusionType(Enum):
 class ModalityConfig:
     """Configuration for which input modalities to use."""
 
-    use_player_frame: bool = True  # 2D CNN on 84x84x1 single grayscale frame
-    use_global_view: bool = True  # 2D CNN on 176x100x1 grayscale global view
+    use_player_frame: bool = False  # 2D CNN on 84x84x1 single grayscale frame
+    use_global_view: bool = False  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
-        True  # Game state vector (GAME_STATE_CHANNELS features, currently 52)
+        True  # Game state vector (GAME_STATE_CHANNELS features, currently 70)
     )
     use_reachability: bool = True  # Reachability features (8 features)
 
@@ -830,18 +830,13 @@ def create_attention_config() -> ArchitectureConfig:
         Best for: Generalization across 1-16 doors with sequential goal structure
         """,
         modalities=ModalityConfig(
-            use_player_frame=True,
-            use_global_view=True,
+            use_player_frame=False,
+            use_global_view=False,
             use_graph=True,
             use_game_state=True,
             use_reachability=True,
         ),
-        visual=VisualConfig(
-            player_frame_channels=[32, 64, 64],
-            player_frame_output_dim=256,
-            global_channels=[16, 32, 64],
-            global_output_dim=128,
-        ),
+        visual=VisualConfig(),
         graph=GraphConfig(
             architecture=GraphArchitectureType.GAT,
             hidden_dim=128,

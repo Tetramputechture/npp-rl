@@ -18,9 +18,8 @@ from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
 from nclone.gym_environment.npp_environment import NppEnvironment
 from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
 from npp_rl.wrappers.gpu_observation_wrapper import GPUObservationWrapper
-from npp_rl.wrappers.reward_diagnostic_wrapper import RewardDiagnosticWrapper
 from npp_rl.wrappers.position_tracking_wrapper import PositionTrackingWrapper
-from npp_rl.wrappers.hierarchical_reward_wrapper import HierarchicalRewardWrapper
+from npp_rl.training.architecture_configs import ArchitectureConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,7 @@ class EnvironmentFactory:
         enable_icm: bool = False,
         icm_config: Optional[Dict[str, Any]] = None,
         test_dataset_path: Optional[str] = None,
+        architecture_config: Optional[ArchitectureConfig] = None,
     ):
         """Initialize environment factory.
 
@@ -57,6 +57,7 @@ class EnvironmentFactory:
             enable_icm: Enable Intrinsic Curiosity Module (ICM)
             icm_config: ICM configuration dict (eta, alpha, etc.)
             test_dataset_path: Path to test dataset (for evaluation environments)
+            architecture_config: Architecture configuration (used to disable rendering if visual modalities not used)
         """
         self.use_curriculum = use_curriculum
         self.test_dataset_path = test_dataset_path
@@ -68,6 +69,7 @@ class EnvironmentFactory:
         self.pretrained_checkpoint = pretrained_checkpoint
         self.bc_normalization_applied = False
         self.vec_normalize_wrapper = None
+        self.architecture_config = architecture_config
 
         # ICM integration
         self.enable_icm = enable_icm
@@ -134,11 +136,6 @@ class EnvironmentFactory:
             ]
             env = DummyVecEnv(env_fns)
             logger.info("DummyVecEnv initialization complete")
-
-        # Add reward diagnostic wrapper BEFORE VecNormalize to catch NaN rewards
-        logger.info("Applying RewardDiagnosticWrapper to detect NaN rewards...")
-        env = RewardDiagnosticWrapper(env)
-        logger.info("✓ RewardDiagnosticWrapper applied")
 
         # Apply VecNormalize for reward normalization only
         # Observation normalization handled separately via BC stats
@@ -227,6 +224,16 @@ class EnvironmentFactory:
                 test_dataset_path=self.test_dataset_path
             )
 
+            # Disable visual observations if architecture doesn't use visual modalities
+            if self.architecture_config is not None:
+                modalities = self.architecture_config.modalities
+                if not modalities.use_player_frame and not modalities.use_global_view:
+                    env_config.enable_visual_observations = False
+                    logger.info(
+                        f"Architecture '{self.architecture_config.name}' doesn't use visual modalities - "
+                        "disabling rendering for maximum performance"
+                    )
+
             env = NppEnvironment(config=env_config)
 
             # Apply FrameStackWrapper if frame stacking is enabled
@@ -276,9 +283,24 @@ class EnvironmentFactory:
                 test_dataset_path=self.test_dataset_path
             )
 
-            # Enable human rendering for visualization
+            # Disable visual observations if architecture doesn't use visual modalities
+            # (unless visualization is explicitly requested)
+            if not visualize and self.architecture_config is not None:
+                modalities = self.architecture_config.modalities
+                if not modalities.use_player_frame and not modalities.use_global_view:
+                    env_config.enable_visual_observations = False
+                    if rank == 0:
+                        logger.info(
+                            f"Architecture '{self.architecture_config.name}' doesn't use visual modalities - "
+                            "disabling rendering for maximum performance"
+                        )
+
+            # Enable human rendering for visualization (overrides disable above)
             if visualize:
                 env_config.render.render_mode = "human"
+                env_config.enable_visual_observations = (
+                    True  # Re-enable for visualization
+                )
                 logger.info(f"[Env {rank}] Rendering enabled for visualization")
 
             env = NppEnvironment(config=env_config)
@@ -307,19 +329,6 @@ class EnvironmentFactory:
 
             # Wrap with position tracking for route visualization
             env = PositionTrackingWrapper(env)
-
-            # Wrap with hierarchical reward (subtask milestones + mine avoidance)
-            # PBRS itself is handled by base environment (nclone)
-            env = HierarchicalRewardWrapper(
-                env,
-                enable_mine_avoidance=self.enable_mine_avoidance_reward,
-                log_reward_components=True,
-            )
-            if rank == 0:
-                logger.info(
-                    f"✓ Hierarchical rewards enabled (mine_avoidance={self.enable_mine_avoidance_reward})"
-                )
-                logger.info("✓ PBRS always enabled in base environment (nclone)")
 
             # Wrap with curriculum if enabled
             if include_curriculum and self.curriculum_manager:

@@ -13,6 +13,7 @@ The implementation is designed to be performant and avoid memory bloat by:
 """
 
 import logging
+import random
 import threading
 from collections import defaultdict, deque
 from pathlib import Path
@@ -57,6 +58,7 @@ class RouteVisualizationCallback(BaseCallback):
         max_stored_routes: int = 100,
         async_save: bool = True,
         image_size: Tuple[int, int] = (800, 600),
+        episode_sampling_rate: float = 1.0,
         verbose: int = 0,
     ):
         """Initialize route visualization callback.
@@ -68,6 +70,9 @@ class RouteVisualizationCallback(BaseCallback):
             max_stored_routes: Maximum number of route images to keep (oldest deleted)
             async_save: If True, save images asynchronously to avoid blocking training
             image_size: Size of output images (width, height)
+            episode_sampling_rate: Fraction of episodes to track (0.0 to 1.0).
+                Reduces overhead by only tracking a percentage of episodes.
+                Default 1.0 tracks all episodes. Use 0.1 to track 10% of episodes.
             verbose: Verbosity level
         """
         super().__init__(verbose)
@@ -78,14 +83,27 @@ class RouteVisualizationCallback(BaseCallback):
         self.max_stored_routes = max_stored_routes
         self.async_save = async_save
         self.image_size = image_size
+        self.episode_sampling_rate = max(
+            0.0, min(1.0, episode_sampling_rate)
+        )  # Clamp to [0, 1]
 
         # Create save directory
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
+        # Track which environments are currently being sampled for this episode
+        # Maps env_idx -> bool indicating if we're tracking this episode
+        self.tracking_episode = defaultdict(bool)
+
+        # Episode counter per environment for consistent sampling
+        self.episode_counters = defaultdict(int)
+
         # Route tracking per environment
+        # Use deque with maxlen to prevent unbounded memory growth
+        # Max episode length is typically <10000 steps, so 20000 is safe
+        MAX_POSITIONS_PER_ROUTE = 20000
         self.env_routes = defaultdict(
             lambda: {
-                "positions": [],
+                "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
                 "level_id": None,
                 "start_time": 0,
                 "tiles": None,
@@ -173,7 +191,7 @@ class RouteVisualizationCallback(BaseCallback):
         Returns:
             bool: If False, training will be stopped
         """
-        # Track positions for all environments
+        # Track positions for sampled environments only
         if "dones" in self.locals and "infos" in self.locals:
             dones = self.locals["dones"]
             infos = self.locals["infos"]
@@ -181,8 +199,21 @@ class RouteVisualizationCallback(BaseCallback):
             # Try to get positions from the environment directly
             # This is more reliable than trying to parse observations
             for env_idx, (done, info) in enumerate(zip(dones, infos)):
-                # Track position for this environment
-                self._track_position_from_env(env_idx, info)
+                # Check if we should start tracking a new episode
+                # This happens when positions list is empty (new episode starting)
+                # and we haven't already decided to track this episode
+                if (
+                    len(self.env_routes[env_idx]["positions"]) == 0
+                    and not self.tracking_episode[env_idx]
+                ):
+                    # Decide whether to track this episode based on sampling rate
+                    self.episode_counters[env_idx] += 1
+                    should_track = random.random() < self.episode_sampling_rate
+                    self.tracking_episode[env_idx] = should_track
+
+                # Only track position if we're sampling this episode
+                if self.tracking_episode[env_idx]:
+                    self._track_position_from_env(env_idx, info)
 
                 # Check for episode completion
                 if done:
@@ -239,7 +270,27 @@ class RouteVisualizationCallback(BaseCallback):
             env_idx: Environment index
             info: Episode info dictionary
         """
-        route_positions = info["episode_route"]
+        # Only process routes if we were tracking this episode
+        if not self.tracking_episode[env_idx]:
+            # Clear tracking flag for next episode
+            self.tracking_episode[env_idx] = False
+            # Still need to clear route data structure
+            MAX_POSITIONS_PER_ROUTE = 20000
+            self.env_routes[env_idx] = {
+                "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
+                "level_id": info.get("level_id", None),
+                "start_time": self.num_timesteps,
+                "tiles": None,
+                "mines": None,
+                "locked_doors": None,
+            }
+            return
+
+        route_positions = info.get("episode_route", None)
+
+        # Fallback to stored positions if episode_route not in info
+        if not route_positions or len(route_positions) == 0:
+            route_positions = list(self.env_routes[env_idx]["positions"])
 
         # Only save routes for successful completions with valid position data
         if route_positions and len(route_positions) > 0:
@@ -249,14 +300,18 @@ class RouteVisualizationCallback(BaseCallback):
                 self.routes_saved_this_checkpoint += 1
 
         # Clear route data for this environment
+        MAX_POSITIONS_PER_ROUTE = 20000
         self.env_routes[env_idx] = {
-            "positions": [],
+            "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
             "level_id": info.get("level_id", None),
             "start_time": self.num_timesteps,
             "tiles": None,
             "mines": None,
             "locked_doors": None,
         }
+
+        # Reset tracking flag for next episode
+        self.tracking_episode[env_idx] = False
 
     def _queue_route_save(
         self,
@@ -532,7 +587,7 @@ class RouteVisualizationCallback(BaseCallback):
                     fill=False,
                     linestyle=":",
                     linewidth=1,
-                    alpha=0.5,
+                    alpha=0.8,
                     zorder=2,
                 )
                 ax.add_patch(switch_circle)
@@ -547,8 +602,8 @@ class RouteVisualizationCallback(BaseCallback):
                 positions[i : i + 2, 0],
                 positions[i : i + 2, 1],
                 color=colors[i],
-                linewidth=2,
-                alpha=0.7,
+                linewidth=1,
+                alpha=0.8,
                 zorder=2,  # Above tiles (1) but below mines (3) and markers (5+)
             )
 
@@ -557,12 +612,12 @@ class RouteVisualizationCallback(BaseCallback):
             positions[0, 0],
             positions[0, 1],
             c="blue",
-            s=200,
+            s=100,
             marker="o",
             label="Start",
             zorder=5,
             edgecolors="white",
-            linewidths=2,
+            linewidths=1,
         )
 
         # Mark agent's final position (where they actually ended)
@@ -571,12 +626,12 @@ class RouteVisualizationCallback(BaseCallback):
             agent_end_x,
             agent_end_y,
             c="green",
-            s=200,
+            s=100,
             marker="o",
             label="Agent End",
             zorder=5,
             edgecolors="white",
-            linewidths=2,
+            linewidths=1,
         )
 
         # Draw agent radius circle at end position to show overlap zone
@@ -588,7 +643,7 @@ class RouteVisualizationCallback(BaseCallback):
             fill=False,
             linestyle="--",
             linewidth=1.5,
-            alpha=0.5,
+            alpha=0.8,
             zorder=4,
         )
         ax.add_patch(agent_circle)

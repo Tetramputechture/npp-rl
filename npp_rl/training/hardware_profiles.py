@@ -225,7 +225,7 @@ def get_hardware_profile(name: str) -> HardwareProfile:
 #
 # Updated estimates for n_steps=1024 (50% reduction from previous n_steps=2048):
 ARCHITECTURE_MEMORY_PROFILES: Dict[str, float] = {
-    "attention": 1.25,  # REDUCED from 2.5 (50% savings)
+    "attention": 0.75,  # REDUCED from 2.5 (50% savings)
     "mlp_cnn": 0.75,  # REDUCED from 1.5
     # GNN variants - graph processing adds memory overhead
     # Estimate ~2x MLP baseline for graph data structures (nodes/edges)
@@ -299,7 +299,7 @@ def estimate_rollout_buffer_memory_gb(
     # Observation size per step (excluding graph data):
     # - player_frame: 84×84×1 uint8 = 7,056 bytes
     # - global_view: 176×100×1 uint8 = 17,600 bytes
-    # - game_state: GAME_STATE_CHANNELS float32 (52 features * 4 bytes = 208 bytes)
+    # - game_state: GAME_STATE_CHANNELS float32 (70 features * 4 bytes = 280 bytes)
     # - reachability_features: 8 float32 = 32 bytes
     # - entity_positions: 6 float32 = 24 bytes
     # - switch_states: 25 float32 = 100 bytes
@@ -389,33 +389,66 @@ def auto_detect_profile(
     else:
         n_steps = 1024  # Standard for single GPU
 
-    # Calculate rollout buffer memory overhead
-    # Start with initial estimate for max envs per GPU
-    initial_max_envs_per_gpu = max(
-        8, min(256, int((gpu_memory_gb) / memory_per_env_gb))
-    )
-
-    # Estimate rollout buffer memory for this configuration
-    rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
-        num_envs=initial_max_envs_per_gpu * num_gpus,
-        n_steps=n_steps,
-        architecture_name=architecture_name,
-    )
-
     # Reserve memory for rollout buffers and model overhead
-    # Total memory needed = (env memory × num_envs) + rollout buffers + model overhead
     # Model overhead: ~10% of GPU memory for weights, gradients, optimizer states
     model_overhead_gb = gpu_memory_gb * 0.1
 
-    # Available memory for environments = total - rollout buffers - model overhead
-    available_for_envs_gb = rollout_buffer_memory_gb - model_overhead_gb
+    # Iteratively solve for maximum environments that fit in memory per GPU
+    # We need: (env_memory × envs_per_gpu) + rollout_buffer_memory + model_overhead <= gpu_memory
+    # Since rollout_buffer_memory depends on envs_per_gpu, we iterate to convergence
+    # Start with initial estimate based on environment memory only
+    initial_max_envs_per_gpu = max(
+        8, min(256, int((gpu_memory_gb - model_overhead_gb) / memory_per_env_gb))
+    )
 
-    # Recalculate max envs with rollout buffer consideration
-    if available_for_envs_gb > 0:
-        envs_per_gpu = max(8, min(256, int(available_for_envs_gb / memory_per_env_gb)))
-    else:
-        # Fallback: use conservative estimate
-        envs_per_gpu = max(8, min(256, int(gpu_memory_gb / memory_per_env_gb)))
+    max_iterations = 10
+    envs_per_gpu = initial_max_envs_per_gpu
+
+    for iteration in range(max_iterations):
+        # Calculate rollout buffer memory per GPU for current env count
+        # Each GPU handles envs_per_gpu environments, so rollout buffer is per-GPU
+        rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
+            num_envs=envs_per_gpu,  # Per-GPU, not total
+            n_steps=n_steps,
+            architecture_name=architecture_name,
+        )
+
+        # Calculate available memory per GPU
+        available_memory_per_gpu_gb = gpu_memory_gb - model_overhead_gb
+
+        # Calculate how many environments we can fit accounting for rollout buffers
+        # Available = GPU memory - model overhead
+        # We need: envs_per_gpu * memory_per_env + rollout_buffer <= available
+        # Rollout buffer scales linearly with envs_per_gpu, so:
+        # envs_per_gpu * (memory_per_env + rollout_buffer_per_env) <= available
+        rollout_buffer_per_env_gb = (
+            rollout_buffer_memory_gb / envs_per_gpu if envs_per_gpu > 0 else 0
+        )
+        total_memory_per_env_gb = memory_per_env_gb + rollout_buffer_per_env_gb
+
+        if total_memory_per_env_gb > 0:
+            new_envs_per_gpu = max(
+                8, min(256, int(available_memory_per_gpu_gb / total_memory_per_env_gb))
+            )
+        else:
+            # Fallback: use conservative estimate
+            new_envs_per_gpu = max(
+                8, min(256, int(available_memory_per_gpu_gb / memory_per_env_gb))
+            )
+
+        # Check if converged (within 1 environment)
+        if abs(new_envs_per_gpu - envs_per_gpu) <= 1:
+            envs_per_gpu = new_envs_per_gpu
+            break
+
+        envs_per_gpu = new_envs_per_gpu
+
+    # Final calculation for the converged value
+    rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
+        num_envs=envs_per_gpu,  # Per-GPU
+        n_steps=n_steps,
+        architecture_name=architecture_name,
+    )
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4

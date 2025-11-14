@@ -15,6 +15,7 @@ from npp_rl.models.objective_attention import (
     ObjectiveAttentionPolicy,
     ObjectiveFeatureExtractor,
 )
+from npp_rl.models.auxiliary_tasks import AuxiliaryTaskHeads
 
 
 class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
@@ -52,14 +53,16 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
         self,
         *args,
         use_objective_attention: bool = True,
+        use_auxiliary_death_head: bool = True,
         **kwargs,
     ):
-        """Initialize policy with deep ResNet, objective attention, and dueling.
+        """Initialize policy with deep ResNet, objective attention, dueling, and auxiliary death head.
 
         Note: Dueling is always enabled (dueling=True forced).
 
         Args:
             use_objective_attention: Whether to use objective attention for policy head
+            use_auxiliary_death_head: Whether to enable auxiliary death prediction head
             *args, **kwargs: Arguments passed to DeepResNetActorCriticPolicy
                 - Most notably: use_residual, use_layer_norm, dropout
                 - Also: net_arch, activation_fn, share_features_extractor, etc.
@@ -76,6 +79,7 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
         super().__init__(*args, **kwargs)
 
         self.use_objective_attention = use_objective_attention
+        self.use_auxiliary_death_head = use_auxiliary_death_head
 
         # Replace action_net with objective attention module
         # The parent's action_net is a simple Linear layer, we replace it with attention
@@ -90,6 +94,17 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
                 num_actions=self.action_space.n,
             )
             self.objective_extractor = ObjectiveFeatureExtractor(max_locked_doors=16)
+
+        # Add auxiliary death prediction head for multi-task learning
+        # Uses policy latent features to predict death probability
+        if use_auxiliary_death_head:
+            policy_latent_dim = self._get_policy_latent_dim()
+            self.auxiliary_heads = AuxiliaryTaskHeads(
+                feature_dim=policy_latent_dim,
+                max_objectives=34,  # 1 exit + 16 locked doors + 16 switches
+            )
+        else:
+            self.auxiliary_heads = None
 
         # Note: Dueling value head is handled by parent's DeepResNetMLPExtractor (always enabled).
         # The parent's mlp_extractor has built-in dueling support integrated with ResNet layers.
@@ -137,6 +152,13 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
         action_mask = None
         if isinstance(obs, dict):
             action_mask = obs.get("action_mask", None)
+            # VALIDATION: action_mask must be present in dictionary observations
+            if action_mask is None:
+                raise ValueError(
+                    "action_mask not found in observation dictionary! "
+                    "This is required for masked action selection. "
+                    f"Available keys: {list(obs.keys())}"
+                )
             # Create a copy without action_mask for feature extraction
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
         else:
@@ -171,9 +193,17 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
         else:
             action_logits = self.action_net(latent_pi)
 
-        # Apply action masking (if present)
-        if action_mask is not None:
-            action_logits = self._apply_action_mask(action_logits, action_mask)
+        # Compute auxiliary death predictions if enabled
+        if self.use_auxiliary_death_head and self.auxiliary_heads is not None:
+            auxiliary_predictions = self.auxiliary_heads(latent_pi)
+            # Store for loss computation during training
+            self._last_auxiliary_predictions = auxiliary_predictions
+        else:
+            self._last_auxiliary_predictions = None
+
+        # Apply action masking (REQUIRED - validated above)
+        # action_mask is guaranteed to be present by validation above
+        action_logits = self._apply_action_mask(action_logits, action_mask)
 
         # Create distribution and sample
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -203,6 +233,13 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
         action_mask = None
         if isinstance(obs, dict):
             action_mask = obs.get("action_mask", None)
+            # VALIDATION: action_mask must be present in dictionary observations
+            if action_mask is None:
+                raise ValueError(
+                    "action_mask not found in observation dictionary during evaluate_actions! "
+                    "This is required for masked action selection. "
+                    f"Available keys: {list(obs.keys())}"
+                )
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
         else:
             obs_for_features = obs
@@ -231,6 +268,14 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
             action_logits, _ = self.action_net(latent_pi, objective_features)
         else:
             action_logits = self.action_net(latent_pi)
+
+        # Compute auxiliary death predictions if enabled
+        if self.use_auxiliary_death_head and self.auxiliary_heads is not None:
+            auxiliary_predictions = self.auxiliary_heads(latent_pi)
+            # Store for loss computation during training
+            self._last_auxiliary_predictions = auxiliary_predictions
+        else:
+            self._last_auxiliary_predictions = None
 
         # Apply action masking (if present)
         if action_mask is not None:
@@ -362,3 +407,12 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
             Attention weights [batch, num_heads, 1, num_objectives] or None
         """
         return getattr(self, "_last_attn_weights", None)
+
+    def get_auxiliary_predictions(self) -> Optional[Dict[str, torch.Tensor]]:
+        """Get last auxiliary predictions for loss computation.
+
+        Returns:
+            Dictionary with auxiliary predictions (death_prob, time_to_goal, next_subgoal_logits)
+            or None if auxiliary heads not enabled
+        """
+        return getattr(self, "_last_auxiliary_predictions", None)

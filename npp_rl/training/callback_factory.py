@@ -7,8 +7,11 @@ from typing import List, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
 from npp_rl.training.training_callbacks import VerboseTrainingCallback
-from npp_rl.training.callbacks import DiagnosticLoggingCallback
-from npp_rl.callbacks import RouteVisualizationCallback, EnhancedTensorBoardCallback
+from npp_rl.callbacks import (
+    RouteVisualizationCallback,
+    EnhancedTensorBoardCallback,
+    AuxiliaryLossCallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ class CallbackFactory:
         world_size: int = 1,
         enable_early_stopping: bool = False,
         early_stopping_patience: int = 10,
+        use_objective_attention_policy: bool = False,
     ):
         """Initialize callback factory.
 
@@ -47,6 +51,7 @@ class CallbackFactory:
         self.world_size = world_size
         self.enable_early_stopping = enable_early_stopping
         self.early_stopping_patience = early_stopping_patience
+        self.use_objective_attention_policy = use_objective_attention_policy
 
     def create_callbacks(
         self, user_callback: Optional[BaseCallback] = None
@@ -54,40 +59,41 @@ class CallbackFactory:
         """Create list of training callbacks.
 
         Args:
-            user_callback: Optional user-provided callback
+            user_callback: Optional user-provided callback (profiling callback
+                should be passed here to be added first)
 
         Returns:
             List of configured callbacks
         """
         callbacks = []
 
+        # Add user callback first (typically profiling callback)
+        # This ensures it tracks all other callbacks
+        if user_callback is not None:
+            callbacks.append(user_callback)
+            logger.info("Added user-provided callback (first in chain)")
+
         # Add verbose callback for training progress monitoring
         verbose_callback = VerboseTrainingCallback(log_freq=1)
         callbacks.append(verbose_callback)
         logger.info("Added verbose training callback")
 
-        # Add comprehensive diagnostic logging callback (100+ metrics)
-        diagnostic_callback = DiagnosticLoggingCallback(
-            log_freq=1000,  # Log every 1000 steps
-            verbose=1,
-        )
-        callbacks.append(diagnostic_callback)
-        logger.info(
-            "Added comprehensive diagnostic logging callback (distance/, pbrs/, reward_components/)"
-        )
+        # Add auxiliary loss callback if using ObjectiveAttentionActorCriticPolicy
+        if self.use_objective_attention_policy:
+            auxiliary_callback = AuxiliaryLossCallback(
+                log_freq=100,
+                verbose=1,
+                auxiliary_weight=0.1,
+            )
+            callbacks.append(auxiliary_callback)
+            logger.info("Added auxiliary death prediction loss callback")
 
-        # Add user callback if provided
-        if user_callback is not None:
-            callbacks.append(user_callback)
-            logger.info("Added user-provided callback")
+        # User callback already added at the beginning
 
         # Add enhanced TensorBoard metrics callback
         enhanced_tb_callback = EnhancedTensorBoardCallback(
             log_freq=200,  # Log scalars every 200 steps (reduced overhead)
-            histogram_freq=5000,  # Log histograms every 5000 steps (expensive operation)
             verbose=1,
-            log_gradients=False,  # Gradient logging disabled by default
-            log_weights=False,  # Weight logging disabled by default (expensive)
         )
         callbacks.append(enhanced_tb_callback)
         logger.info(
@@ -95,17 +101,24 @@ class CallbackFactory:
         )
 
         routes_dir = self.output_dir / "route_visualizations"
+        # Sample 10% of episodes by default to reduce overhead
+        # This significantly reduces per-step overhead while still providing useful visualizations
+        episode_sampling_rate = getattr(self, "route_episode_sampling_rate", 0.1)
         route_callback = RouteVisualizationCallback(
             save_dir=str(routes_dir),
             max_routes_per_checkpoint=50,
             visualization_freq=50000,
-            max_stored_routes=100,
+            max_stored_routes=200,
             async_save=True,
             image_size=(800, 600),
+            episode_sampling_rate=0.2,
             verbose=2,
         )
         callbacks.append(route_callback)
-        logger.info(f"Added route visualization callback (saving to {routes_dir})")
+        logger.info(
+            f"Added route visualization callback (saving to {routes_dir}, "
+            f"sampling {episode_sampling_rate * 100:.1f}% of episodes)"
+        )
 
         # Add hierarchical PPO callbacks if using hierarchical training
         if self.use_hierarchical_ppo:
@@ -114,11 +127,13 @@ class CallbackFactory:
         # Add curriculum progression callback if curriculum learning is enabled
         if self.use_curriculum and self.curriculum_manager is not None:
             self._add_curriculum_callback(callbacks)
-            
+
             # Add early stopping if enabled (Week 3-4)
             if self.enable_early_stopping:
-                from npp_rl.callbacks.early_stopping import CurriculumEarlyStoppingCallback
-                
+                from npp_rl.callbacks.early_stopping import (
+                    CurriculumEarlyStoppingCallback,
+                )
+
                 early_stop_callback = CurriculumEarlyStoppingCallback(
                     patience=self.early_stopping_patience,
                     min_delta=0.01,  # 1% improvement required

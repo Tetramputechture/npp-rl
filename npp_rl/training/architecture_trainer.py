@@ -52,6 +52,7 @@ class ArchitectureTrainer:
         icm_config: Optional[Dict[str, Any]] = None,
         enable_early_stopping: bool = False,
         early_stopping_patience: int = 10,
+        debug_mode: bool = False,
     ):
         """Initialize architecture trainer.
 
@@ -108,6 +109,7 @@ class ArchitectureTrainer:
         self.icm_config = icm_config or {}
         self.enable_early_stopping = enable_early_stopping
         self.early_stopping_patience = early_stopping_patience
+        self.debug_mode = debug_mode
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Training state
@@ -214,11 +216,15 @@ class ArchitectureTrainer:
         else:
             default_net_arch = {"pi": [256, 256, 128], "vf": [256, 256, 128]}
 
+        # Get debug_mode from kwargs if available (passed from ArchitectureTrainer)
+        debug_mode = getattr(self, "debug_mode", False)
+
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
             "features_extractor_kwargs": {
                 "config": self.architecture_config,
                 "frame_stack_config": self.frame_stack_config,
+                "debug_mode": debug_mode,
             },
             "net_arch": default_net_arch,
             "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
@@ -285,17 +291,21 @@ class ArchitectureTrainer:
                     "use_layer_norm": ppo_kwargs.pop("use_layer_norm", True),
                     "dropout": ppo_kwargs.pop("dropout", 0.1),
                     "use_objective_attention": True,  # Enable objective attention
+                    "use_auxiliary_death_head": True,  # Enable auxiliary death prediction head
                     # Note: dueling is always enabled in ObjectiveAttentionActorCriticPolicy
                 }
             )
             logger.info(
-                "Using ObjectiveAttentionActorCriticPolicy (Deep ResNet + Objective Attention + Dueling)"
+                "Using ObjectiveAttentionActorCriticPolicy (Deep ResNet + Objective Attention + Dueling + Auxiliary Death Head)"
             )
             logger.info("  - Deep ResNet MLP: 5-layer policy, 3-layer value")
             logger.info(
                 "  - Objective-specific attention over variable locked doors (1-16)"
             )
             logger.info("  - Dueling architecture (always enabled)")
+            logger.info(
+                "  - Auxiliary death prediction head (learns from death_context)"
+            )
             logger.info(
                 f"  - Residual connections: {self.policy_kwargs['use_residual']}"
             )
@@ -514,11 +524,27 @@ class ArchitectureTrainer:
         }
 
         # Learning rate warmup for deep attention architectures
+        # Store schedule separately to apply AFTER model creation
+        # (SB3 has issues logging callable learning rates during __init__)
+        self._lr_schedule = None
         if self.architecture_config.name == "attention":
-            # Warmup: 0.1x LR for first 50k steps, then decay to 1e-5
-            warmup_steps = 50000
-            total_steps = 500000  # Default training length for attention
-            base_lr = default_hyperparams["learning_rate"]
+            # Warmup: 0.1x LR for first 500k steps, then decay to 1e-5
+            warmup_steps = 500000
+            total_steps = 2000000  # Default training length for attention
+
+            # Extract base learning rate (might already be callable from hardware profile)
+            lr_value = default_hyperparams["learning_rate"]
+            if callable(lr_value):
+                # Already a schedule - extract initial value
+                try:
+                    base_lr = lr_value(1.0)  # Get LR at start (progress_remaining=1.0)
+                except Exception:
+                    base_lr = 3e-4  # Fallback default
+                logger.info(
+                    "Attention architecture: Replacing existing LR schedule with warmup schedule"
+                )
+            else:
+                base_lr = lr_value
 
             def warmup_lr_schedule(progress_remaining: float) -> float:
                 """Custom LR schedule with warmup then linear decay.
@@ -544,7 +570,10 @@ class ArchitectureTrainer:
                     )
                     return base_lr * (1.0 - decay_progress) + 1e-5 * decay_progress
 
-            default_hyperparams["learning_rate"] = warmup_lr_schedule
+            # Store schedule to apply after model creation
+            self._lr_schedule = warmup_lr_schedule
+            # Set base_lr back to numeric for model initialization
+            default_hyperparams["learning_rate"] = base_lr
             logger.info(
                 f"Using LR warmup schedule for attention architecture: "
                 f"warmup {warmup_steps} steps, base_lr={base_lr:.2e}"
@@ -576,19 +605,57 @@ class ArchitectureTrainer:
                 if optuna_params["lr_schedule"] == "linear":
                     from stable_baselines3.common.utils import get_linear_fn
 
-                    base_lr = default_hyperparams["learning_rate"]
-                    default_hyperparams["learning_rate"] = get_linear_fn(
-                        base_lr, 1e-6, 1.0
-                    )
+                    # Extract base learning rate (might already be callable)
+                    lr_value = default_hyperparams["learning_rate"]
+                    if callable(lr_value):
+                        try:
+                            base_lr = lr_value(1.0)
+                        except Exception:
+                            base_lr = 3e-4
+                    else:
+                        base_lr = lr_value
+
+                    # Store schedule to apply after model creation
+                    self._lr_schedule = get_linear_fn(base_lr, 1e-6, 1.0)
+                    # Set base_lr back to numeric for initialization
+                    default_hyperparams["learning_rate"] = base_lr
                     logger.info(f"Using linear LR schedule: {base_lr:.2e} -> 1e-6")
+
+        # Handle callable learning rate from ppo_kwargs (e.g., from hardware profile)
+        # Extract it before merging to avoid SB3 format errors
+        if "learning_rate" in ppo_kwargs and callable(ppo_kwargs["learning_rate"]):
+            lr_callable = ppo_kwargs["learning_rate"]
+            # Extract numeric base value
+            try:
+                base_lr_from_kwargs = lr_callable(1.0)
+            except Exception:
+                base_lr_from_kwargs = 3e-4
+
+            # If we don't already have a custom schedule (warmup/optuna), use this one
+            if self._lr_schedule is None:
+                self._lr_schedule = lr_callable
+                logger.info(
+                    f"Using LR schedule from ppo_kwargs (initial={base_lr_from_kwargs:.2e})"
+                )
+            else:
+                logger.info(
+                    "Custom LR schedule already set, ignoring ppo_kwargs schedule"
+                )
+
+            # Replace callable with numeric value for model initialization
+            ppo_kwargs = {**ppo_kwargs, "learning_rate": base_lr_from_kwargs}
 
         # Merge with provided hyperparameters (ppo_kwargs takes precedence)
         self.hyperparams = {**default_hyperparams, **ppo_kwargs}
 
         # Log final hyperparameters
         logger.info("Final PPO hyperparameters:")
-        lr = self.hyperparams["learning_rate"]
-        lr_str = self._format_learning_rate_for_logging(lr)
+        # Check if we have a stored LR schedule (will be applied after model creation)
+        if hasattr(self, "_lr_schedule") and self._lr_schedule is not None:
+            lr_str = self._format_learning_rate_for_logging(self._lr_schedule)
+        else:
+            lr = self.hyperparams["learning_rate"]
+            lr_str = self._format_learning_rate_for_logging(lr)
         logger.info(f"  Learning rate: {lr_str}")
         logger.info(f"  Batch size: {self.hyperparams['batch_size']}")
         logger.info(f"  N steps: {self.hyperparams['n_steps']}")
@@ -669,6 +736,7 @@ class ArchitectureTrainer:
                 enable_icm=self.use_icm,
                 icm_config=self.icm_config,
                 test_dataset_path=str(self.test_dataset_path),
+                architecture_config=self.architecture_config,
             )
 
             # Create training environment
@@ -697,6 +765,7 @@ class ArchitectureTrainer:
                 world_size=self.world_size,
                 enable_early_stopping=self.enable_early_stopping,
                 early_stopping_patience=self.early_stopping_patience,
+                use_objective_attention_policy=self.use_objective_attention_policy,
             )
 
             # Create the model with the environment
@@ -831,6 +900,12 @@ class ArchitectureTrainer:
 
         logger.info("✓ HierarchicalPPO model created successfully")
 
+        # Apply learning rate schedule if one was configured
+        # (must be done AFTER model creation to avoid SB3 format errors)
+        if hasattr(self, "_lr_schedule") and self._lr_schedule is not None:
+            self.model.learning_rate = self._lr_schedule
+            logger.info("✓ Applied custom learning rate schedule to model")
+
     def _create_standard_model(self) -> None:
         """Create standard PPO model."""
         logger.info("Creating PPO model with training environment...")
@@ -857,6 +932,12 @@ class ArchitectureTrainer:
                 **self.hyperparams,
             )
         logger.info("✓ PPO model created successfully")
+
+        # Apply learning rate schedule if one was configured
+        # (must be done AFTER model creation to avoid SB3 format errors)
+        if hasattr(self, "_lr_schedule") and self._lr_schedule is not None:
+            self.model.learning_rate = self._lr_schedule
+            logger.info("✓ Applied custom learning rate schedule to model")
 
         # Note: Mixed precision training (use_mixed_precision flag) is not yet
         # supported by stable-baselines3 PPO. To enable it, would require custom
@@ -976,6 +1057,8 @@ class ArchitectureTrainer:
             return {"status": "completed", "total_timesteps": total_timesteps}
 
         except Exception as e:
+            import traceback
+
             # print(f"Training failed: {e}", exc_info=True)
             print("=" * 60)
             print("TRAINING FAILURE DETAILS:")
@@ -984,6 +1067,8 @@ class ArchitectureTrainer:
             print(f"  Total timesteps attempted: {total_timesteps}")
             print(f"  Model device: {self.model.device if self.model else 'N/A'}")
             print(f"  Num environments: {self.env.num_envs if self.env else 'N/A'}")
+            print("\n  Stack trace:")
+            print("  " + "  ".join(traceback.format_exc().splitlines(True)))
             print("=" * 60)
             return {"status": "failed", "error": str(e), "error_type": type(e).__name__}
 
@@ -1024,9 +1109,13 @@ class ArchitectureTrainer:
         logger.info(f"Model device: {self.model.device}")
         logger.info(f"Number of environments: {self.env.num_envs}")
         logger.info(f"Policy architecture: {self.policy_class}")
-        lr_str = self._format_learning_rate_for_logging(
-            self.hyperparams.get("learning_rate")
-        )
+        # Get effective learning rate (schedule or numeric)
+        if hasattr(self, "_lr_schedule") and self._lr_schedule is not None:
+            lr_str = self._format_learning_rate_for_logging(self._lr_schedule)
+        else:
+            lr_str = self._format_learning_rate_for_logging(
+                self.hyperparams.get("learning_rate")
+            )
         logger.info(
             f"PPO hyperparameters: n_steps={self.hyperparams.get('n_steps')}, "
             f"batch_size={self.hyperparams.get('batch_size')}, "
