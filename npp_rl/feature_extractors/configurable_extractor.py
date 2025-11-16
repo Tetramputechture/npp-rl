@@ -13,8 +13,9 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
 import logging
 
-# Import nclone constants for graph dimensions
+# Import nclone constants for observation space dimensions
 from nclone.graph.common import NODE_FEATURE_DIM, EDGE_FEATURE_DIM
+from nclone.gym_environment.constants import NINJA_STATE_DIM, REACHABILITY_FEATURES_DIM
 
 from npp_rl.training.architecture_configs import (
     ArchitectureConfig,
@@ -392,9 +393,9 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
     Allows selective enabling/disabling of modalities:
     - Player frame (2D CNN on 84x84x1 grayscale)
     - Global view (2D CNN on 176x100x1 grayscale)
-    - Graph (HGT/GAT/GCN/None)
-    - Game state (26-dim vector, ninja_state only)
-    - Reachability (8-dim vector)
+    - Graph (HGT/GAT/GCN/None) with NODE_FEATURE_DIM=21, EDGE_FEATURE_DIM=14
+    - Game state (NINJA_STATE_DIM=29, ninja physics only)
+    - Reachability (REACHABILITY_FEATURES_DIM=6, base features + mine context)
 
     This enables systematic comparison of architecture variants.
     """
@@ -601,11 +602,19 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self, input_dim: int, hidden_dim: int, output_dim: int
     ) -> nn.Module:
         """Create MLP for game state processing with optional attention."""
+        # Validate input dimension matches NINJA_STATE_DIM
+        if input_dim != NINJA_STATE_DIM:
+            logger.warning(
+                f"State MLP input_dim ({input_dim}) doesn't match NINJA_STATE_DIM ({NINJA_STATE_DIM}). "
+                f"Using NINJA_STATE_DIM from nclone constants."
+            )
+            input_dim = NINJA_STATE_DIM
+
         # Check if attentive version should be used
         use_attentive = getattr(self.config.state, "use_attentive_state_mlp", False)
 
         if use_attentive:
-            # Use attention-based encoder (ignores input_dim, uses hardcoded 58)
+            # Use attention-based encoder (processes NINJA_STATE_DIM=29 features)
             return AttentiveStateMLP(
                 hidden_dim=hidden_dim,
                 output_dim=output_dim,
@@ -632,6 +641,14 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         self, input_dim: int, hidden_dim: int, output_dim: int
     ) -> nn.Module:
         """Create MLP for reachability feature processing."""
+        # Validate input dimension matches REACHABILITY_FEATURES_DIM
+        if input_dim != REACHABILITY_FEATURES_DIM:
+            logger.warning(
+                f"Reachability MLP input_dim ({input_dim}) doesn't match REACHABILITY_FEATURES_DIM ({REACHABILITY_FEATURES_DIM}). "
+                f"Using REACHABILITY_FEATURES_DIM from nclone constants."
+            )
+            input_dim = REACHABILITY_FEATURES_DIM
+
         return nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),

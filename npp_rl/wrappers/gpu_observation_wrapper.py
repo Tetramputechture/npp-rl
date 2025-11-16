@@ -60,6 +60,18 @@ class GPUObservationWrapper(VecEnvWrapper):
         self.use_pinned_memory = use_pinned_memory and self.device.type == "cuda"
         self.use_gpu = self.device.type == "cuda"
 
+        # Initialize debug flag - try to get from wrapped environments
+        self.debug = False
+        try:
+            if hasattr(venv, "envs") and len(venv.envs) > 0:
+                first_env = venv.envs[0]
+                if hasattr(first_env, "unwrapped") and hasattr(
+                    first_env.unwrapped, "nplay_headless"
+                ):
+                    self.debug = first_env.unwrapped.nplay_headless.sim.sim_config.debug
+        except Exception:
+            pass
+
         if not self.use_gpu:
             logger.info(
                 "GPU not available - GPUObservationWrapper will pass through observations unchanged"
@@ -73,6 +85,7 @@ class GPUObservationWrapper(VecEnvWrapper):
             "Note: Observations passed through unchanged for VecTransposeImage compatibility. "
             "Pinned memory benefit comes from DataLoader/batch processing."
         )
+        logger.info(f"Debug mode: {self.debug}")
 
     def _transfer_to_gpu(self, obs: Any) -> Any:
         """Pass through observations unchanged.
@@ -88,6 +101,26 @@ class GPUObservationWrapper(VecEnvWrapper):
         Returns:
             Observation unchanged (numpy arrays)
         """
+        # Validate action_mask is NOT transferred to GPU (should stay numpy)
+        if isinstance(obs, dict) and "action_mask" in obs:
+            if self.debug:
+                mask = obs["action_mask"]
+                logger.debug(
+                    f"[GPUObservationWrapper] action_mask type={type(mask)}, "
+                    f"shape={getattr(mask, 'shape', 'N/A')}"
+                )
+
+            # CRITICAL: action_mask must stay as numpy array, not tensor
+            if isinstance(obs["action_mask"], torch.Tensor):
+                logger.error(
+                    "[GPUObservationWrapper] action_mask was converted to tensor! "
+                    "This breaks compatibility. Converting back to numpy."
+                )
+                obs["action_mask"] = obs["action_mask"].cpu().numpy()
+
+            # Force copy to prevent reference bugs
+            obs["action_mask"] = obs["action_mask"].copy()
+
         # Pass through unchanged - pinned memory benefit comes from DataLoader/batch processing
         return obs
 
@@ -108,5 +141,17 @@ class GPUObservationWrapper(VecEnvWrapper):
             Observations are on GPU, rewards/dones/infos remain on CPU
         """
         obs, rewards, dones, infos = self.venv.step_wait()
+
+        # DEFENSIVE FIX: Force deep copy of action_mask before GPU transfer
+        # This prevents CPU-GPU memory aliasing issues and ensures mask independence
+        if isinstance(obs, dict) and "action_mask" in obs:
+            mask = obs["action_mask"]
+            # Force deep copy with proper memory ownership
+            mask = np.array(mask, copy=True)
+            # Ensure C-contiguous layout
+            if not mask.flags["C_CONTIGUOUS"]:
+                mask = np.ascontiguousarray(mask)
+            obs["action_mask"] = mask
+
         gpu_obs = self._transfer_to_gpu(obs)
         return gpu_obs, rewards, dones, infos

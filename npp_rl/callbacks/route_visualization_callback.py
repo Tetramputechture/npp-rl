@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from npp_rl.rendering import render_tiles_to_axis, render_mines_to_axis
-from nclone.gym_environment.constants import MAX_TIME_IN_FRAMES
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +366,7 @@ class RouteVisualizationCallback(BaseCallback):
             "locked_doors": locked_doors,
             "is_success": is_success,
             "terminal_impact": terminal_impact,
+            "truncated": info.get("truncated", False),
         }
 
         self.save_queue.append(route_data)
@@ -728,10 +728,10 @@ class RouteVisualizationCallback(BaseCallback):
         # Show terminal impact info for failed routes only
         if not is_success:
             terminal_impact = route_data.get("terminal_impact", False)
-            episode_length = route_data.get("episode_length", 0)
+            was_truncated = route_data.get("truncated", False)
 
-            if not terminal_impact and episode_length == MAX_TIME_IN_FRAMES:
-                title_parts.append("T: truncation")
+            if was_truncated:
+                title_parts.append("T: timeout")
             elif not terminal_impact:
                 title_parts.append("T: mines")
             else:

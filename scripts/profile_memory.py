@@ -184,7 +184,6 @@ def profile_architecture_memory(
             env = env_factory.create_training_env(
                 num_envs=num_envs,
                 gamma=0.99,
-                enable_visualization=False,
             )
 
             gc.collect()  # Force garbage collection before measurement
@@ -243,7 +242,6 @@ def profile_architecture_memory(
                 device_id=0,
                 world_size=1,
                 use_mixed_precision=False,
-                use_hierarchical_ppo=False,
                 use_curriculum=False,
                 use_distributed=False,
                 frame_stack_config=None,

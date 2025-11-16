@@ -251,7 +251,7 @@ class ObjectiveAttentionPolicy(nn.Module):
             dim=1,
         )
 
-        # 5. Create attention mask for variable number of doors
+        # 5. Create attention mask for variable number of doors (VECTORIZED)
         # Mask shape: [batch, 1 + 2*max_doors]
         num_locked_doors = objective_features["num_locked_doors"]
 
@@ -260,13 +260,24 @@ class ObjectiveAttentionPolicy(nn.Module):
             batch_size, 1 + 2 * self.max_locked_doors, dtype=torch.bool, device=device
         )
 
-        # Mask out doors beyond actual count
-        for i in range(batch_size):
-            num_doors = int(num_locked_doors[i].item())
-            # Doors: positions 1 to max_doors
-            mask[i, 1 + num_doors : 1 + self.max_locked_doors] = True
-            # Switches: positions 1+max_doors to 1+2*max_doors
-            mask[i, 1 + self.max_locked_doors + num_doors :] = True
+        # Vectorized mask creation (no Python loop, no .item() CPU-GPU syncs)
+        # Create position indices for broadcasting
+        door_range = torch.arange(self.max_locked_doors, device=device).unsqueeze(
+            0
+        )  # [1, max_doors]
+        num_doors_expanded = num_locked_doors.unsqueeze(1)  # [batch, 1]
+
+        # Vectorized comparison: mask positions beyond actual door count
+        door_mask = door_range >= num_doors_expanded  # [batch, max_doors]
+        switch_mask = (
+            door_range >= num_doors_expanded
+        )  # [batch, max_doors] (same logic)
+
+        # Assign masks to appropriate positions
+        # Doors: positions 1 to 1+max_doors
+        mask[:, 1 : 1 + self.max_locked_doors] = door_mask
+        # Switches: positions 1+max_doors to 1+2*max_doors
+        mask[:, 1 + self.max_locked_doors :] = switch_mask
 
         # 6. Project objectives to attention dimension
         all_objectives_proj = self.key_value_proj(all_objectives)
@@ -295,6 +306,9 @@ class ObjectiveAttentionPolicy(nn.Module):
         # 10. Output action logits
         action_logits = self.action_head(fused)  # [batch, num_actions]
 
+        # Store mask for entropy computation
+        self._last_attention_mask = mask
+
         return action_logits, attention_weights
 
     def get_attention_weights(
@@ -313,6 +327,47 @@ class ObjectiveAttentionPolicy(nn.Module):
             attention_weights shape: [batch, num_heads, 1, num_objectives]
         """
         return self.forward(policy_features, objective_features)
+
+    def compute_attention_entropy(
+        self, attention_weights: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute entropy of attention distribution over objectives.
+
+        Higher entropy indicates more diverse attention across objectives,
+        which is desirable for robust policy learning. This regularization
+        prevents the policy from degenerately focusing on a single objective.
+
+        Args:
+            attention_weights: [batch, num_heads, 1, num_objectives]
+                Attention probabilities from multi-head attention
+            mask: [batch, num_objectives]
+                Boolean mask where True indicates invalid/padded positions
+
+        Returns:
+            Scalar tensor with mean entropy across batch and heads
+
+        Example:
+            - Entropy ≈ 0: Attention focused on single objective (degenerate)
+            - Entropy ≈ log(num_valid_objectives): Uniform attention (healthy)
+        """
+        # Squeeze query dimension: [batch, num_heads, num_objectives]
+        attn_probs = attention_weights.squeeze(2)
+
+        # Apply mask: set masked (invalid) positions to 0 probability
+        mask_expanded = mask.unsqueeze(1)  # [batch, 1, num_objectives]
+        attn_probs = attn_probs.masked_fill(mask_expanded, 0.0)
+
+        # Renormalize after masking to ensure probabilities sum to 1
+        attn_probs = attn_probs / (attn_probs.sum(dim=-1, keepdim=True) + 1e-8)
+
+        # Compute entropy: H = -sum(p * log(p))
+        # Add small epsilon to prevent log(0)
+        entropy = -(attn_probs * torch.log(attn_probs + 1e-8)).sum(
+            dim=-1
+        )  # [batch, num_heads]
+
+        # Average over heads and batch for scalar loss term
+        return entropy.mean()
 
 
 class ObjectiveFeatureExtractor(nn.Module):
@@ -343,19 +398,18 @@ class ObjectiveFeatureExtractor(nn.Module):
         Returns:
             Dictionary of objective features suitable for ObjectiveAttentionPolicy
         """
-        # Extract from game_state (indices 29-36 for exit)
-        game_state = obs["game_state"]
+        # Extract exit features from dedicated observation key
+        # exit_features: [batch, 7] = [switch_x, switch_y, switch_activated, switch_path_dist, door_x, door_y, door_path_dist]
+        exit_features = obs["exit_features"]  # [batch, 7]
 
-        # Exit switch: indices 29-33 [collected, rel_x, rel_y, path_dist]
-        exit_switch_activated = game_state[:, 29:30]
-        exit_switch_pos = game_state[:, 30:32]  # Already relative & normalized
-        exit_switch_path_dist = game_state[:, 32:33]
+        # Split exit features
+        exit_switch_pos = exit_features[:, 0:2]  # [batch, 2] - relative x, y
+        exit_switch_activated = exit_features[:, 2:3]  # [batch, 1] - 0.0 or 1.0
+        exit_switch_path_dist = exit_features[:, 3:4]  # [batch, 1]
+        exit_door_pos = exit_features[:, 4:6]  # [batch, 2] - relative x, y
+        exit_door_path_dist = exit_features[:, 6:7]  # [batch, 1]
 
-        # Exit door: indices 33-36 [rel_x, rel_y, path_dist]
-        exit_door_pos = game_state[:, 33:35]
-        exit_door_path_dist = game_state[:, 35:36]
-
-        # Locked doors: from new observation
+        # Locked doors: from locked_door_features observation
         locked_door_array = obs["locked_door_features"]  # [batch, 16, 8]
         num_locked_doors = obs["num_locked_doors"]  # [batch, 1]
 

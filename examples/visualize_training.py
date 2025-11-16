@@ -66,7 +66,6 @@ def train_with_visualization(
         device_id=0,
         world_size=1,
         use_mixed_precision=False,
-        use_hierarchical_ppo=False,
         use_curriculum=False,
     )
 

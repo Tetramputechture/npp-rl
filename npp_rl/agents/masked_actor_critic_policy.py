@@ -4,11 +4,15 @@ This policy applies action masks during both action selection and policy evaluat
 ensuring masked actions have zero probability of being selected.
 """
 
+import logging
+
 import torch
 import numpy as np
 from typing import Dict, Optional, Tuple, Union
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.distributions import CategoricalDistribution
+
+logger = logging.getLogger(__name__)
 
 
 class MaskedActorCriticPolicy(ActorCriticPolicy):
@@ -150,6 +154,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
                     "This is required for masked action selection. "
                     f"Available keys: {list(obs.keys())}"
                 )
+            # Debug logging for action_mask extraction
+            logger.debug(
+                f"[forward] Extracted action_mask from observation dict. "
+                f"Mask type: {type(action_mask)}, "
+                f"Mask shape: {getattr(action_mask, 'shape', 'N/A')}, "
+                f"Mask dtype: {getattr(action_mask, 'dtype', 'N/A')}"
+            )
             # Create a copy without action_mask for feature extraction
             # to avoid issues if feature extractor expects certain keys
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
@@ -182,11 +193,27 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
 
         # Apply action mask if present
         if action_mask is not None:
+            # Validate action_mask freshness and correctness before applying
+            self._validate_action_mask_freshness(obs, action_mask)
+            logger.debug(
+                f"[forward] Applying action_mask to logits. "
+                f"Logits shape: {action_logits.shape}, "
+                f"Mask shape: {getattr(action_mask, 'shape', 'N/A')}"
+            )
             action_logits = self._apply_action_mask(action_logits, action_mask)
+            logger.debug(
+                f"[forward] Action mask applied. "
+                f"Masked logits shape: {action_logits.shape}, "
+                f"Valid actions per sample: {action_mask.sum(dim=-1) if hasattr(action_mask, 'sum') and action_mask.dim() > 1 else 'N/A'}"
+            )
 
         # Create distribution and sample
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
         actions = distribution.get_actions(deterministic=deterministic)
+        logger.debug(
+            f"[forward] Sampled actions: {actions.cpu().numpy() if isinstance(actions, torch.Tensor) else actions}, "
+            f"Deterministic: {deterministic}"
+        )
         log_prob = distribution.log_prob(actions)
 
         # Get values
@@ -221,6 +248,13 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
                     "This is required for masked action selection. "
                     f"Available keys: {list(obs.keys())}"
                 )
+            # Debug logging for action_mask extraction
+            logger.debug(
+                f"[evaluate_actions] Extracted action_mask from observation dict. "
+                f"Mask type: {type(action_mask)}, "
+                f"Mask shape: {getattr(action_mask, 'shape', 'N/A')}, "
+                f"Actions to evaluate: {actions.cpu().numpy() if isinstance(actions, torch.Tensor) else actions}"
+            )
             # Create a copy without action_mask for feature extraction
             # to avoid issues if feature extractor expects certain keys
             obs_for_features = {k: v for k, v in obs.items() if k != "action_mask"}
@@ -253,7 +287,18 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
 
         # Apply action mask if present
         if action_mask is not None:
+            # Validate action_mask freshness and correctness before applying
+            self._validate_action_mask_freshness(obs, action_mask)
+            logger.debug(
+                f"[evaluate_actions] Applying action_mask to logits. "
+                f"Logits shape: {action_logits.shape}, "
+                f"Mask shape: {getattr(action_mask, 'shape', 'N/A')}"
+            )
             action_logits = self._apply_action_mask(action_logits, action_mask)
+            logger.debug(
+                f"[evaluate_actions] Action mask applied. "
+                f"Evaluating actions: {actions.cpu().numpy() if isinstance(actions, torch.Tensor) else actions}"
+            )
 
         # Create distribution and evaluate
         distribution = self.action_dist.proba_distribution(action_logits=action_logits)
@@ -320,6 +365,15 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
                     f"This should never happen. Mask shape: {action_mask.shape}"
                 )
 
+        # CRITICAL: Validate batch sizes match BEFORE attempting any broadcasting
+        if action_mask.dim() > 1 and action_logits.dim() > 1:
+            if action_mask.shape[0] != action_logits.shape[0]:
+                raise ValueError(
+                    f"BATCH SIZE MISMATCH: action_mask batch {action_mask.shape[0]} != "
+                    f"logits batch {action_logits.shape[0]}. Shape mismatch indicates "
+                    f"mask wasn't properly preserved from environment observations."
+                )
+
         # Handle batch dimension - mask might be (batch, actions) or just (actions,)
         if action_mask.dim() == 1:
             # Single mask for all batch elements, expand it
@@ -352,3 +406,102 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             )
 
         return masked_logits
+
+    def _validate_action_mask_freshness(
+        self, obs: Union[torch.Tensor, Dict[str, torch.Tensor]], action_mask: Union[torch.Tensor, np.ndarray]
+    ) -> None:
+        """
+        Validate that action_mask matches current observation state.
+
+        This method performs comprehensive validation to detect when action_mask
+        is stale, incorrect, or mismatched with the observation batch.
+
+        Args:
+            obs: Observation (dict or tensor)
+            action_mask: Action mask to validate
+
+        Raises:
+            ValueError: If action_mask is invalid, stale, or mismatched
+        """
+        if action_mask is None:
+            raise ValueError(
+                "action_mask is None during validation! "
+                "This indicates action_mask was not provided in the observation."
+            )
+
+        # Convert to tensor for validation if needed
+        if not isinstance(action_mask, torch.Tensor):
+            if isinstance(action_mask, np.ndarray):
+                action_mask_tensor = torch.from_numpy(action_mask)
+            else:
+                action_mask_tensor = torch.tensor(action_mask)
+        else:
+            action_mask_tensor = action_mask
+
+        # Ensure boolean dtype
+        if action_mask_tensor.dtype != torch.bool:
+            action_mask_tensor = action_mask_tensor.bool()
+
+        # Validate shape
+        if action_mask_tensor.dim() == 1:
+            # Single mask - should have 6 actions
+            if action_mask_tensor.shape[0] != 6:
+                raise ValueError(
+                    f"action_mask has wrong shape for single mask! "
+                    f"Expected (6,), got {action_mask_tensor.shape}"
+                )
+        elif action_mask_tensor.dim() == 2:
+            # Batched masks - should be (batch_size, 6)
+            if action_mask_tensor.shape[1] != 6:
+                raise ValueError(
+                    f"action_mask has wrong shape for batched masks! "
+                    f"Expected (batch_size, 6), got {action_mask_tensor.shape}"
+                )
+
+            # Check batch size matches observation batch size
+            if isinstance(obs, dict):
+                # Try to infer batch size from observation dict
+                batch_size = None
+                for key, value in obs.items():
+                    if key != "action_mask" and isinstance(value, torch.Tensor):
+                        if value.dim() > 0:
+                            batch_size = value.shape[0]
+                            break
+
+                if batch_size is not None and action_mask_tensor.shape[0] != batch_size:
+                    raise ValueError(
+                        f"action_mask batch size mismatch! "
+                        f"Mask batch: {action_mask_tensor.shape[0]}, "
+                        f"Observation batch: {batch_size}. "
+                        f"This indicates a synchronization bug between environments."
+                    )
+        else:
+            raise ValueError(
+                f"action_mask has invalid number of dimensions! "
+                f"Expected 1 or 2, got {action_mask_tensor.dim()}"
+            )
+
+        # Validate that each sample has at least one valid action
+        if action_mask_tensor.dim() == 1:
+            if not action_mask_tensor.any():
+                raise ValueError(
+                    "action_mask has no valid actions! "
+                    f"Mask: {action_mask_tensor}. "
+                    "This should never happen - at least one action must be valid."
+                )
+        else:
+            has_valid = action_mask_tensor.any(dim=1)
+            if not has_valid.all():
+                invalid_indices = (~has_valid).nonzero(as_tuple=True)[0].tolist()
+                raise ValueError(
+                    f"action_mask has samples with no valid actions at indices {invalid_indices}! "
+                    f"Mask shape: {action_mask_tensor.shape}. "
+                    "This indicates corrupted or stale action masks."
+                )
+
+        # Log validation success at debug level
+        logger.debug(
+            f"action_mask validation passed. "
+            f"Shape: {action_mask_tensor.shape}, "
+            f"Valid actions per sample: {action_mask_tensor.sum(dim=-1) if action_mask_tensor.dim() > 1 else action_mask_tensor.sum()}"
+        )

@@ -1,34 +1,27 @@
-"""Attention-based state encoder for enhanced feature learning."""
+"""Attention-based state encoder for ninja physics feature learning."""
 
 import torch
 import torch.nn as nn
-from nclone.gym_environment.constants import (
-    NINJA_STATE_DIM,
-    PATH_AWARE_OBJECTIVES_DIM,
-    MINE_FEATURES_DIM,
-    PROGRESS_FEATURES_DIM,
-    SEQUENTIAL_GOAL_DIM,
-    ACTION_DEATH_PROBABILITIES_DIM,
-)
+from nclone.gym_environment.constants import NINJA_STATE_DIM
 
 
 class AttentiveStateMLP(nn.Module):
-    """State encoder with multi-head attention over state components.
+    """State encoder with multi-head attention over ninja physics components.
 
-    Separates game state into semantic components (physics, objectives, mines)
-    and applies cross-attention to learn inter-component relationships.
+    Separates 29-dim ninja physics state into semantic components and applies
+    cross-attention to learn inter-component relationships for low-level control.
 
-    State breakdown (64 dims):
-    - Physics (ninja): 29 dims
-    - Objectives: 15 dims
-    - Mines: 8 dims
-    - Progress: 3 dims
-    - Sequential: 3 dims
-    - Mine death probabilities: 6 dims
+    Physics component breakdown (29 dims total):
+    - Velocity (3): magnitude, direction_x, direction_y
+    - Movement states (5): ground/air/wall/special, airborne
+    - Input (2): horizontal, jump
+    - Buffers (3): jump/floor/wall timing buffers
+    - Contact (6): floor/wall/ceiling contact, normals, slope, wall direction
+    - Forces (10): acceleration, gravity, jump duration, walled, drag, friction
 
     Architecture:
-    1. Component-specific encoders project to hidden_dim
-    2. Multi-head attention fuses components
+    1. Component-specific encoders project to uniform dimension
+    2. Multi-head attention fuses physics components
     3. Output projection to output_dim
     """
 
@@ -42,38 +35,41 @@ class AttentiveStateMLP(nn.Module):
     ):
         super().__init__()
         self.debug_mode = debug_mode
-        self.physics_encoder = nn.Sequential(
-            nn.Linear(NINJA_STATE_DIM, hidden_dim // 2),
+
+        # Component-specific encoders for each physics group
+        # Use different hidden dims based on component importance/size
+        self.velocity_encoder = nn.Sequential(
+            nn.Linear(3, hidden_dim // 4),  # 3 → 32
             nn.ReLU(),
             nn.Dropout(dropout),
         )
 
-        self.objectives_encoder = nn.Sequential(
-            nn.Linear(PATH_AWARE_OBJECTIVES_DIM, hidden_dim // 4),
+        self.movement_encoder = nn.Sequential(
+            nn.Linear(5, hidden_dim // 4),  # 5 → 32
             nn.ReLU(),
             nn.Dropout(dropout),
         )
 
-        self.mine_encoder = nn.Sequential(
-            nn.Linear(MINE_FEATURES_DIM, hidden_dim // 8),
+        self.input_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim // 8),  # 2 → 16
             nn.ReLU(),
             nn.Dropout(dropout),
         )
 
-        self.progress_encoder = nn.Sequential(
-            nn.Linear(PROGRESS_FEATURES_DIM, hidden_dim // 8),
+        self.buffer_encoder = nn.Sequential(
+            nn.Linear(3, hidden_dim // 8),  # 3 → 16
             nn.ReLU(),
             nn.Dropout(dropout),
         )
 
-        self.sequential_encoder = nn.Sequential(
-            nn.Linear(SEQUENTIAL_GOAL_DIM, hidden_dim // 8),
+        self.contact_encoder = nn.Sequential(
+            nn.Linear(6, hidden_dim // 4),  # 6 → 32
             nn.ReLU(),
             nn.Dropout(dropout),
         )
 
-        self.death_prob_encoder = nn.Sequential(
-            nn.Linear(ACTION_DEATH_PROBABILITIES_DIM, hidden_dim // 8),
+        self.forces_encoder = nn.Sequential(
+            nn.Linear(10, hidden_dim // 2),  # 10 → 64
             nn.ReLU(),
             nn.Dropout(dropout),
         )
@@ -86,16 +82,16 @@ class AttentiveStateMLP(nn.Module):
         )
 
         # Project each component to uniform dimension for attention
-        self.physics_proj = nn.Linear(hidden_dim // 2, self.uniform_dim)  # 64 → 64
-        self.objectives_proj = nn.Linear(hidden_dim // 4, self.uniform_dim)  # 32 → 64
-        self.mine_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
-        self.progress_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
-        self.sequential_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
-        self.death_prob_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
+        self.velocity_proj = nn.Linear(hidden_dim // 4, self.uniform_dim)  # 32 → 64
+        self.movement_proj = nn.Linear(hidden_dim // 4, self.uniform_dim)  # 32 → 64
+        self.input_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
+        self.buffer_proj = nn.Linear(hidden_dim // 8, self.uniform_dim)  # 16 → 64
+        self.contact_proj = nn.Linear(hidden_dim // 4, self.uniform_dim)  # 32 → 64
+        self.forces_proj = nn.Linear(hidden_dim // 2, self.uniform_dim)  # 64 → 64
 
-        # Multi-head attention across components
+        # Multi-head attention across physics components
         self.attention = nn.MultiheadAttention(
-            embed_dim=self.uniform_dim,  # Changed from encoded_dim
+            embed_dim=self.uniform_dim,
             num_heads=num_heads,
             dropout=dropout,
             batch_first=True,
@@ -104,16 +100,16 @@ class AttentiveStateMLP(nn.Module):
         # Layer norm for uniform dim
         self.norm = nn.LayerNorm(self.uniform_dim)
 
-        # Output: pool 6 components and project
+        # Output: pool 6 physics components and project
         self.pool_proj = nn.Linear(self.uniform_dim, output_dim)
         self.output_activation = nn.ReLU()
         self.output_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through attentive state encoder.
+        """Forward pass through attentive physics state encoder.
 
         Args:
-            x: State tensor [batch, 64] or [batch, stack_size * 64] if stacked
+            x: State tensor [batch, 29] or [batch, stack_size * 29] if stacked
 
         Returns:
             Encoded features [batch, output_dim]
@@ -137,252 +133,167 @@ class AttentiveStateMLP(nn.Module):
 
         # Handle frame stacking: extract most recent frame
         if x.dim() == 2:
-            if x.shape[1] % 64 == 0 and x.shape[1] > 64:
-                # Stacked states: [batch, stack_size * 64] → take last 64
-                x = x[:, -64:]  # Most recent frame
-            elif x.shape[1] != 64:
+            if x.shape[1] % NINJA_STATE_DIM == 0 and x.shape[1] > NINJA_STATE_DIM:
+                # Stacked states: [batch, stack_size * 29] → take last 29
+                x = x[:, -NINJA_STATE_DIM:]  # Most recent frame
+            elif x.shape[1] != NINJA_STATE_DIM:
                 raise ValueError(
-                    f"Expected state dim 64 or multiple of 64, got {x.shape[1]}"
+                    f"Expected state dim {NINJA_STATE_DIM} or multiple of {NINJA_STATE_DIM}, got {x.shape[1]}"
                 )
         elif x.dim() == 3:
-            # [batch, stack_size, 64] → take last frame
+            # [batch, stack_size, 29] → take last frame
             x = x[:, -1, :]
 
-        # Split into components (must match state dimensions exactly)
-        physics = x[:, :29]  # Ninja physics state
-        objectives = x[:, 29:44]  # Path-aware objective features (15)
-        mines = x[
-            :, 44:52
-        ]  # Enhanced mine features (8) - MINE FEATURES - critical for NaN diagnosis
-        progress = x[:, 52:55]  # Progress tracking (3)
-        sequential = x[:, 55:58]  # Sequential goal features (3)
-        death_probs = x[:, 58:64]  # Mine death probabilities (6)
+        # Split into physics components (indices from OBSERVATION_SPACE_README.md)
+        velocity = x[:, 0:3]  # [0-2]: vel_mag, vel_dir_x, vel_dir_y
+        movement = x[:, 3:8]  # [3-7]: movement categories, airborne
+        input_state = x[:, 8:10]  # [8-9]: horizontal input, jump input
+        buffers = x[:, 10:13]  # [10-12]: jump/floor/wall buffers
+        contact = x[:, 13:19]  # [13-18]: contact strength, normals, slope, wall dir
+        forces = x[
+            :, 19:29
+        ]  # [19-28]: acceleration, gravity, jump duration, walled, drag, friction
 
-        # Validate mine features specifically (most likely source of NaN) - only if debug mode
+        # Validate physics components (only if debug mode)
         if self.debug_mode:
-            if torch.isnan(mines).any():
-                raise ValueError(
-                    f"[ATTENTIVE_STATE_MLP] NaN in mine features (indices 44-52). "
-                    f"Mine values: {mines[torch.isnan(mines).any(dim=1)].cpu().numpy()}"
-                )
-
-            # Check for degenerate inputs (all-zero physics or extreme values)
-            # Note: Mines, objectives, progress, and sequential can legitimately be all-zero
-            # (e.g., levels without mines, no active objectives, start of level, no sequential goals)
-            if physics.abs().max() < 1e-8:
+            # Check for all-zero physics (suspicious)
+            if x.abs().max() < 1e-8:
                 raise ValueError("[ATTENTIVE_STATE_MLP] All-zero physics input")
 
             # Check for extreme values (potential overflow/underflow issues)
-            if physics.abs().max() > 1e6:
+            if x.abs().max() > 1e6:
                 raise ValueError(
-                    f"[ATTENTIVE_STATE_MLP] Extreme physics values: {physics.abs().max()}"
-                )
-            if mines.abs().max() > 1e6:
-                raise ValueError(
-                    f"[ATTENTIVE_STATE_MLP] Extreme mines values: {mines.abs().max()}"
+                    f"[ATTENTIVE_STATE_MLP] Extreme physics values: {x.abs().max()}"
                 )
 
         # Encode each component
-        phys_feat = self.physics_encoder(physics)  # [batch, 64]
-        if self.debug_mode and torch.isnan(phys_feat).any():
-            nan_mask = torch.isnan(phys_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+        vel_feat = self.velocity_encoder(velocity)  # [batch, 32]
+        if self.debug_mode and torch.isnan(vel_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after physics_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input physics range: [{physics.min():.4f}, {physics.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after velocity_encoder. "
+                f"Input range: [{velocity.min():.4f}, {velocity.max():.4f}]"
             )
 
-        obj_feat = self.objectives_encoder(objectives)  # [batch, 32]
-        if self.debug_mode and torch.isnan(obj_feat).any():
-            nan_mask = torch.isnan(obj_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+        move_feat = self.movement_encoder(movement)  # [batch, 32]
+        if self.debug_mode and torch.isnan(move_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after objectives_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input objectives range: [{objectives.min():.4f}, {objectives.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after movement_encoder. "
+                f"Input range: [{movement.min():.4f}, {movement.max():.4f}]"
             )
 
-        mine_feat = self.mine_encoder(mines)  # [batch, 16]
-        if self.debug_mode and torch.isnan(mine_feat).any():
-            nan_mask = torch.isnan(mine_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+        input_feat = self.input_encoder(input_state)  # [batch, 16]
+        if self.debug_mode and torch.isnan(input_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after mine_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input mines range: [{mines.min():.4f}, {mines.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after input_encoder. "
+                f"Input range: [{input_state.min():.4f}, {input_state.max():.4f}]"
             )
 
-        prog_feat = self.progress_encoder(progress)  # [batch, 16]
-        if self.debug_mode and torch.isnan(prog_feat).any():
-            nan_mask = torch.isnan(prog_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+        buffer_feat = self.buffer_encoder(buffers)  # [batch, 16]
+        if self.debug_mode and torch.isnan(buffer_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after progress_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input progress range: [{progress.min():.4f}, {progress.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after buffer_encoder. "
+                f"Input range: [{buffers.min():.4f}, {buffers.max():.4f}]"
             )
 
-        seq_feat = self.sequential_encoder(sequential)  # [batch, 16]
-        if self.debug_mode and torch.isnan(seq_feat).any():
-            nan_mask = torch.isnan(seq_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
+        contact_feat = self.contact_encoder(contact)  # [batch, 32]
+        if self.debug_mode and torch.isnan(contact_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after sequential_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input sequential range: [{sequential.min():.4f}, {sequential.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after contact_encoder. "
+                f"Input range: [{contact.min():.4f}, {contact.max():.4f}]"
             )
 
-        # Validate mine death probability features (only if debug mode)
-        if self.debug_mode and torch.isnan(death_probs).any():
+        forces_feat = self.forces_encoder(forces)  # [batch, 64]
+        if self.debug_mode and torch.isnan(forces_feat).any():
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN in mine death_probs (indices 58-64). "
-                f"Death prob values: {death_probs[torch.isnan(death_probs).any(dim=1)].cpu().numpy()}"
-            )
-
-        death_prob_feat = self.death_prob_encoder(death_probs)  # [batch, 16]
-        if self.debug_mode and torch.isnan(death_prob_feat).any():
-            nan_mask = torch.isnan(death_prob_feat)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after death_prob_encoder in batch indices: {batch_indices.tolist()}. "
-                f"Input death_probs range: [{death_probs.min():.4f}, {death_probs.max():.4f}]"
+                f"[ATTENTIVE_STATE_MLP] NaN after forces_encoder. "
+                f"Input range: [{forces.min():.4f}, {forces.max():.4f}]"
             )
 
         # Project to uniform dimension
-        phys_token = self.physics_proj(phys_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(phys_token).any():
-            nan_mask = torch.isnan(phys_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after physics_proj in batch indices: {batch_indices.tolist()}"
-            )
+        vel_token = self.velocity_proj(vel_feat)  # [batch, 64]
+        move_token = self.movement_proj(move_feat)  # [batch, 64]
+        input_token = self.input_proj(input_feat)  # [batch, 64]
+        buffer_token = self.buffer_proj(buffer_feat)  # [batch, 64]
+        contact_token = self.contact_proj(contact_feat)  # [batch, 64]
+        forces_token = self.forces_proj(forces_feat)  # [batch, 64]
 
-        obj_token = self.objectives_proj(obj_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(obj_token).any():
-            nan_mask = torch.isnan(obj_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after objectives_proj in batch indices: {batch_indices.tolist()}"
-            )
-
-        mine_token = self.mine_proj(mine_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(mine_token).any():
-            nan_mask = torch.isnan(mine_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after mine_proj in batch indices: {batch_indices.tolist()}"
-            )
-
-        prog_token = self.progress_proj(prog_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(prog_token).any():
-            nan_mask = torch.isnan(prog_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after progress_proj in batch indices: {batch_indices.tolist()}"
-            )
-
-        seq_token = self.sequential_proj(seq_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(seq_token).any():
-            nan_mask = torch.isnan(seq_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after sequential_proj in batch indices: {batch_indices.tolist()}"
-            )
-
-        death_prob_token = self.death_prob_proj(death_prob_feat)  # [batch, 64]
-        if self.debug_mode and torch.isnan(death_prob_token).any():
-            nan_mask = torch.isnan(death_prob_token)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after death_prob_proj in batch indices: {batch_indices.tolist()}"
-            )
+        if self.debug_mode:
+            for token_name, token in [
+                ("velocity", vel_token),
+                ("movement", move_token),
+                ("input", input_token),
+                ("buffer", buffer_token),
+                ("contact", contact_token),
+                ("forces", forces_token),
+            ]:
+                if torch.isnan(token).any():
+                    raise ValueError(
+                        f"[ATTENTIVE_STATE_MLP] NaN after {token_name}_proj"
+                    )
 
         # Stack into component sequence for attention
-        # Shape: [batch, 6, 64] - 6 component tokens
+        # Shape: [batch, 6, 64] - 6 physics component tokens
         component_tokens = torch.stack(
             [
-                phys_token,
-                obj_token,
-                mine_token,
-                prog_token,
-                seq_token,
-                death_prob_token,
+                vel_token,
+                move_token,
+                input_token,
+                buffer_token,
+                contact_token,
+                forces_token,
             ],
             dim=1,
         )
         if self.debug_mode and torch.isnan(component_tokens).any():
-            nan_mask = torch.isnan(component_tokens)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after stacking tokens in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after stacking physics tokens")
 
         # Check for degenerate tokens before attention (only if debug mode)
         if self.debug_mode:
             token_std = component_tokens.std(dim=-1)
             if (token_std < 1e-8).any():
-                degenerate_batches = torch.where((token_std < 1e-8).any(dim=1))[0]
                 raise ValueError(
-                    f"[ATTENTIVE_STATE_MLP] Degenerate tokens (near-zero std) in batch indices: {degenerate_batches.tolist()}. "
+                    f"[ATTENTIVE_STATE_MLP] Degenerate tokens (near-zero std). "
                     f"Token std range: [{token_std.min():.4e}, {token_std.max():.4e}]"
                 )
 
         # Multi-head cross-component attention
-        # Each component can attend to all others
-        # Q, K, V all from component_tokens (self-attention across components)
-        attn_out, attn_weights = self.attention(
+        # Each physics component can attend to all others
+        # (e.g., velocity can attend to contact for ground/wall interaction)
+        attn_out, _ = self.attention(
             component_tokens,
             component_tokens,
             component_tokens,
-            need_weights=False,  # Set True for debugging/visualization
+            need_weights=False,
         )
         # attn_out shape: [batch, 6, 64]
         if self.debug_mode and torch.isnan(attn_out).any():
-            nan_mask = torch.isnan(attn_out)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
             raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after attention in batch indices: {batch_indices.tolist()}. "
+                f"[ATTENTIVE_STATE_MLP] NaN after attention. "
                 f"Input tokens range: [{component_tokens.min():.4f}, {component_tokens.max():.4f}]"
             )
 
         # Residual connection + layer norm
         component_tokens = self.norm(component_tokens + attn_out)
         if self.debug_mode and torch.isnan(component_tokens).any():
-            nan_mask = torch.isnan(component_tokens)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after layer norm in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after layer norm")
 
         # Pool across components (mean pooling)
         # Shape: [batch, 6, 64] → [batch, 64]
         pooled = component_tokens.mean(dim=1)
         if self.debug_mode and torch.isnan(pooled).any():
-            nan_mask = torch.isnan(pooled)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after pooling in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after pooling")
 
         # Project to output dimension with activation
         output = self.pool_proj(pooled)  # [batch, output_dim]
         if self.debug_mode and torch.isnan(output).any():
-            nan_mask = torch.isnan(output)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after pool_proj in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after pool_proj")
 
         output = self.output_activation(output)
         if self.debug_mode and torch.isnan(output).any():
-            nan_mask = torch.isnan(output)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after output_activation in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after output_activation")
 
         output = self.output_dropout(output)
         if self.debug_mode and torch.isnan(output).any():
-            nan_mask = torch.isnan(output)
-            batch_indices = torch.where(nan_mask.any(dim=1))[0]
-            raise ValueError(
-                f"[ATTENTIVE_STATE_MLP] NaN after output_dropout in batch indices: {batch_indices.tolist()}"
-            )
+            raise ValueError("[ATTENTIVE_STATE_MLP] NaN after output_dropout")
 
         return output

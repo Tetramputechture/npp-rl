@@ -393,9 +393,6 @@ class NPPRLAnalyzer:
             f"  - PBRS (Potential-Based Reward Shaping): Enabled (gamma = {self.config['pbrs_gamma']})"
         )
         report.append(
-            f"  - Mine Avoidance Reward: {self.config['enable_mine_avoidance_reward']}"
-        )
-        report.append(
             f"  - Visual Frame Stacking: {self.config['enable_visual_frame_stacking']}"
         )
         report.append(f"  - Stack Size: {self.config['visual_stack_size']}")

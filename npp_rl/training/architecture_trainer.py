@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.nn as nn
-from stable_baselines3 import PPO
 from torch.utils.tensorboard import SummaryWriter
 
 from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
@@ -23,6 +22,7 @@ from npp_rl.training.bc_weight_loader import BCWeightLoader
 from npp_rl.training.environment_factory import EnvironmentFactory
 from npp_rl.training.callback_factory import CallbackFactory
 from npp_rl.agents.masked_actor_critic_policy import MaskedActorCriticPolicy
+from npp_rl.agents.masked_ppo import MaskedPPO
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +40,16 @@ class ArchitectureTrainer:
         world_size: int = 1,
         tensorboard_writer: Optional[SummaryWriter] = None,
         use_mixed_precision: bool = False,
-        use_hierarchical_ppo: bool = False,
         use_objective_attention_policy: bool = False,
         use_curriculum: bool = False,
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
         frame_stack_config: Optional[Dict[str, Any]] = None,
         pbrs_gamma: float = 0.99,
-        enable_mine_avoidance_reward: bool = True,
-        use_icm: bool = False,
-        icm_config: Optional[Dict[str, Any]] = None,
         enable_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         debug_mode: bool = False,
+        production_mode: bool = True,
     ):
         """Initialize architecture trainer.
 
@@ -69,7 +66,6 @@ class ArchitectureTrainer:
             tensorboard_writer: DEPRECATED - Not used. SB3's built-in tensorboard
                 logging is used instead. Kept for backward compatibility.
             use_mixed_precision: Enable mixed precision training
-            use_hierarchical_ppo: Use hierarchical PPO instead of standard PPO
             use_objective_attention_policy: Use ObjectiveAttentionActorCriticPolicy
                 (Deep ResNet + Objective Attention + Dueling, automatically enabled for 'attention' architecture)
             use_curriculum: Enable curriculum learning
@@ -82,9 +78,6 @@ class ArchitectureTrainer:
                 - state_stack_size: int
                 - padding_type: str
             pbrs_gamma: Discount factor for PBRS (always enabled)
-            enable_mine_avoidance_reward: Enable mine avoidance component in hierarchical rewards
-            use_icm: Enable Intrinsic Curiosity Module (ICM)
-            icm_config: ICM configuration dict (eta, alpha, etc.)
         """
         self.architecture_config = architecture_config
         # Resolve paths to absolute to ensure consistent resolution regardless of working directory
@@ -97,19 +90,16 @@ class ArchitectureTrainer:
         self.world_size = world_size
         self.tensorboard_writer = tensorboard_writer
         self.use_mixed_precision = use_mixed_precision
-        self.use_hierarchical_ppo = use_hierarchical_ppo
         self.use_objective_attention_policy = use_objective_attention_policy
         self.use_curriculum = use_curriculum
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
         self.frame_stack_config = frame_stack_config or {}
         self.pbrs_gamma = pbrs_gamma
-        self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
-        self.use_icm = use_icm
-        self.icm_config = icm_config or {}
         self.enable_early_stopping = enable_early_stopping
         self.early_stopping_patience = early_stopping_patience
         self.debug_mode = debug_mode
+        self.production_mode = production_mode
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Training state
@@ -129,12 +119,10 @@ class ArchitectureTrainer:
         logger.info(f"Train dataset: {self.train_dataset_path}")
         logger.info(f"Test dataset: {self.test_dataset_path}")
         logger.info(f"Device: cuda:{device_id}")
-        logger.info(f"Hierarchical PPO: {use_hierarchical_ppo}")
         logger.info(f"Objective Attention Policy: {use_objective_attention_policy}")
         logger.info(f"Curriculum learning: {use_curriculum}")
         logger.info("PBRS: ALWAYS ENABLED (mandatory)")
         logger.info(f"  PBRS gamma: {pbrs_gamma}")
-        logger.info(f"  Mine avoidance reward: {enable_mine_avoidance_reward}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
 
@@ -216,15 +204,16 @@ class ArchitectureTrainer:
         else:
             default_net_arch = {"pi": [256, 256, 128], "vf": [256, 256, 128]}
 
-        # Get debug_mode from kwargs if available (passed from ArchitectureTrainer)
+        # Get debug_mode and production_mode from kwargs if available (passed from ArchitectureTrainer)
         debug_mode = getattr(self, "debug_mode", False)
+        production_mode = getattr(self, "production_mode", True)
 
         self.policy_kwargs = {
             "features_extractor_class": ConfigurableMultimodalExtractor,
             "features_extractor_kwargs": {
                 "config": self.architecture_config,
                 "frame_stack_config": self.frame_stack_config,
-                "debug_mode": debug_mode,
+                "debug_mode": debug_mode and not production_mode,
             },
             "net_arch": default_net_arch,
             "optimizer_kwargs": {"eps": 1e-5},  # PPO standard from openai/baselines
@@ -245,28 +234,7 @@ class ArchitectureTrainer:
                     self.architecture_config
                 )
 
-        # Set policy class based on flags
-        if self.use_hierarchical_ppo:
-            from npp_rl.agents.hierarchical_ppo import HierarchicalActorCriticPolicy
-
-            self.policy_class = HierarchicalActorCriticPolicy
-
-            # Add hierarchical PPO specific kwargs
-            self.policy_kwargs.update(
-                {
-                    "high_level_update_frequency": ppo_kwargs.pop(
-                        "high_level_update_frequency", 50
-                    ),
-                    "max_steps_per_subtask": ppo_kwargs.pop(
-                        "max_steps_per_subtask", 500
-                    ),
-                    "use_icm": ppo_kwargs.pop("use_icm", True),
-                }
-            )
-            logger.info(
-                "Using HierarchicalActorCriticPolicy with hierarchical parameters"
-            )
-        elif self.use_objective_attention_policy:
+        if self.use_objective_attention_policy:
             from npp_rl.agents.objective_attention_actor_critic_policy import (
                 ObjectiveAttentionActorCriticPolicy,
             )
@@ -285,7 +253,7 @@ class ArchitectureTrainer:
             # Add ObjectiveAttentionActorCriticPolicy specific kwargs
             self.policy_kwargs.update(
                 {
-                    "share_features_extractor": False,  # CRITICAL: Separate extractors for gradient isolation
+                    "share_features_extractor": True,  # OPTIMIZED: Shared extractors for 1.3-1.5x speedup
                     "activation_fn": nn.SiLU,  # Modern activation
                     "use_residual": ppo_kwargs.pop("use_residual", True),
                     "use_layer_norm": ppo_kwargs.pop("use_layer_norm", True),
@@ -310,7 +278,7 @@ class ArchitectureTrainer:
                 f"  - Residual connections: {self.policy_kwargs['use_residual']}"
             )
             logger.info(f"  - LayerNorm: {self.policy_kwargs['use_layer_norm']}")
-            logger.info("  - Separate feature extractors for policy/value")
+            logger.info("  - Shared feature extractors for policy/value (optimized)")
         else:
             # Use MaskedActorCriticPolicy for action masking support
             self.policy_class = MaskedActorCriticPolicy
@@ -485,11 +453,13 @@ class ArchitectureTrainer:
                 "Using explicitly provided hyperparameters "
                 "(automatic multi-GPU scaling skipped)"
             )
-            default_batch_size = ppo_kwargs.get("batch_size", 128)  # REDUCED from 256
+            default_batch_size = ppo_kwargs.get(
+                "batch_size", 256
+            )  # INCREASED from 128 for better GPU utilization
             default_learning_rate = ppo_kwargs.get("learning_rate", 3e-4)
         else:
             # Apply automatic scaling for multi-GPU DDP training
-            base_batch_size = 128  # REDUCED from 256 for memory efficiency
+            base_batch_size = 256  # INCREASED from 128 for better GPU utilization (after n_steps reduction)
             base_learning_rate = 3e-4
 
             if self.world_size > 1 and self.use_distributed:
@@ -503,13 +473,13 @@ class ArchitectureTrainer:
                 default_batch_size = base_batch_size
                 default_learning_rate = base_learning_rate
 
-        # Default PPO hyperparameters (memory-optimized)
-        # n_steps reduced from 2048 to 1024 for 50% rollout buffer memory savings
-        # batch_size reduced from 256 to 128 for additional memory headroom
+        # Default PPO hyperparameters (memory-optimized for scaling)
+        # n_steps reduced from 1024 to 512 for additional memory savings (allows more envs)
+        # batch_size increased from 128 to 256 for better GPU utilization
         # n_epochs: 10 for standard PPO (deep networks need fewer epochs to avoid overfitting)
         default_hyperparams = {
             "learning_rate": default_learning_rate,
-            "n_steps": 1024,  # REDUCED from 2048 for 50% memory savings
+            "n_steps": 512,  # REDUCED from 1024 for 50% memory savings (allows scaling to 32-64 envs)
             "batch_size": default_batch_size,
             "n_epochs": 10,  # Standard PPO value (4-10 range)
             "gamma": 0.99,
@@ -665,29 +635,18 @@ class ArchitectureTrainer:
 
         # Log memory optimization details
         logger.info("")
-        logger.info("Memory-Optimized Hyperparameters:")
+        logger.info("Memory-Optimized Hyperparameters (for scaling to 32-64 envs):")
         n_steps = self.hyperparams["n_steps"]
         batch_size = self.hyperparams["batch_size"]
         n_epochs = self.hyperparams.get("n_epochs", 10)
         gradient_updates = (n_steps // batch_size) * n_epochs
-        logger.info(f"  Rollout buffer size: {n_steps} steps")
+        logger.info(
+            f"  Rollout buffer size: {n_steps} steps (reduced from 1024 for memory)"
+        )
+        logger.info(
+            f"  Batch size: {batch_size} (increased from 128 for GPU utilization)"
+        )
         logger.info(f"  Gradient updates per rollout: {gradient_updates}")
-
-        # Estimate rollout buffer memory if we have architecture config
-        if hasattr(self, "architecture_config"):
-            from npp_rl.training.hardware_profiles import (
-                estimate_rollout_buffer_memory_gb,
-            )
-
-            # Estimate for a typical number of envs (will be updated when envs are created)
-            estimated_memory = estimate_rollout_buffer_memory_gb(
-                num_envs=128,  # Typical optimized configuration
-                n_steps=n_steps,
-                architecture_name=self.architecture_config.name,
-            )
-            logger.info(
-                f"  Estimated rollout buffer memory (128 envs): {estimated_memory:.2f} GB"
-            )
 
     def setup_environments(
         self,
@@ -730,11 +689,8 @@ class ArchitectureTrainer:
                 curriculum_manager=self.curriculum_manager,
                 frame_stack_config=self.frame_stack_config,
                 pbrs_gamma=self.pbrs_gamma,
-                enable_mine_avoidance_reward=self.enable_mine_avoidance_reward,
                 output_dir=self.output_dir,
                 pretrained_checkpoint=self.pretrained_checkpoint,
-                enable_icm=self.use_icm,
-                icm_config=self.icm_config,
                 test_dataset_path=str(self.test_dataset_path),
                 architecture_config=self.architecture_config,
             )
@@ -744,8 +700,6 @@ class ArchitectureTrainer:
             self.env = self.environment_factory.create_training_env(
                 num_envs=num_envs,
                 gamma=self.hyperparams.get("gamma", 0.99),
-                enable_visualization=enable_visualization,
-                vis_env_idx=vis_env_idx,
             )
             logger.info(f"✓ Training environment created: {type(self.env).__name__}")
 
@@ -758,7 +712,6 @@ class ArchitectureTrainer:
             logger.info("Creating callback factory...")
             self.callback_factory = CallbackFactory(
                 output_dir=self.output_dir,
-                use_hierarchical_ppo=self.use_hierarchical_ppo,
                 use_curriculum=self.use_curriculum,
                 curriculum_manager=self.curriculum_manager,
                 use_distributed=self.use_distributed,
@@ -809,15 +762,12 @@ class ArchitectureTrainer:
             logger.info(f"Adjusted batch_size to {self.hyperparams['batch_size']}")
 
     def _create_model(self) -> None:
-        """Create PPO or HierarchicalPPO model instance."""
+        """Create PPO instance."""
         logger.info("=" * 60)
         logger.info("Creating model...")
 
         try:
-            if self.use_hierarchical_ppo:
-                self._create_hierarchical_model()
-            else:
-                self._create_standard_model()
+            self._create_standard_model()
 
             logger.info(f"✓ Model is on device: {self.model.device}")
             logger.info("=" * 60)
@@ -855,57 +805,6 @@ class ArchitectureTrainer:
             print("!" * 60)
             raise
 
-    def _create_hierarchical_model(self) -> None:
-        """Create HierarchicalPPO model."""
-        from npp_rl.agents.hierarchical_ppo import HierarchicalPPO
-
-        logger.info("Creating HierarchicalPPO model with training environment...")
-        logger.info(f"Policy class: {self.policy_class}")
-        logger.info(f"Device: {self.hyperparams.get('device')}")
-        logger.info("Feature extractor: ConfigurableMultimodalExtractor")
-        logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
-        logger.info(
-            f"High-level update frequency: {self.policy_kwargs.get('high_level_update_frequency')}"
-        )
-        logger.info(
-            f"Max steps per subtask: {self.policy_kwargs.get('max_steps_per_subtask')}"
-        )
-        logger.info(f"Using ICM: {self.policy_kwargs.get('use_icm')}")
-        logger.info("Initializing hierarchical policy networks and moving to device...")
-
-        # Suppress benign SB3 warning about separate feature extractors
-        # When share_features_extractor=False, SB3 warns that "features_extractor will be ignored"
-        # but this is misleading - the features_extractor_class/kwargs ARE used to create
-        # two separate instances (policy and value), which is exactly what we want.
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Provided features_extractor will be ignored because the features extractor is not shared",
-                category=UserWarning,
-            )
-            hierarchical_ppo = HierarchicalPPO(
-                policy_class=self.policy_class,
-                high_level_update_frequency=self.policy_kwargs.get(
-                    "high_level_update_frequency", 50
-                ),
-                max_steps_per_subtask=self.policy_kwargs.get(
-                    "max_steps_per_subtask", 500
-                ),
-                use_icm=self.policy_kwargs.get("use_icm", True),
-                policy_kwargs=self.policy_kwargs,
-                **self.hyperparams,
-            )
-
-            self.model = hierarchical_ppo.create_model(env=self.env)
-
-        logger.info("✓ HierarchicalPPO model created successfully")
-
-        # Apply learning rate schedule if one was configured
-        # (must be done AFTER model creation to avoid SB3 format errors)
-        if hasattr(self, "_lr_schedule") and self._lr_schedule is not None:
-            self.model.learning_rate = self._lr_schedule
-            logger.info("✓ Applied custom learning rate schedule to model")
-
     def _create_standard_model(self) -> None:
         """Create standard PPO model."""
         logger.info("Creating PPO model with training environment...")
@@ -925,10 +824,13 @@ class ArchitectureTrainer:
                 message="Provided features_extractor will be ignored because the features extractor is not shared",
                 category=UserWarning,
             )
-            self.model = PPO(
+            # Use MaskedPPO instead of standard PPO to ensure action_mask is properly preserved
+            # This prevents masked action selection bugs in vectorized environments
+            self.model = MaskedPPO(
                 policy=self.policy_class,
                 env=self.env,
                 policy_kwargs=self.policy_kwargs,
+                debug=self.debug_mode,
                 **self.hyperparams,
             )
         logger.info("✓ PPO model created successfully")

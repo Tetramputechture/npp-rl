@@ -215,10 +215,11 @@ def compute_auxiliary_labels(
     Args:
         trajectory: Dictionary containing:
             - observations: [T, obs_dim] or dict with "death_context"
-            - actions: [T]
-            - rewards: [T]
-            - dones: [T]
-            - infos: List of T info dicts
+            - actions: [T] (optional)
+            - returns: [T] (can be used instead of rewards)
+            - rewards: [T] (optional, returns takes precedence)
+            - dones: [T] (optional)
+            - infos: List of T info dicts (optional)
         death_horizon: Number of steps to look ahead for death prediction
         max_time: Maximum time value for time-to-goal
 
@@ -229,17 +230,52 @@ def compute_auxiliary_labels(
             - subgoal_labels: [T] (optimal next subgoal indices)
     """
     # Get trajectory length - handle both tensor and list cases
-    dones = trajectory["dones"]
-    if isinstance(dones, torch.Tensor):
-        T = dones.shape[0] if dones.dim() > 0 else 1
-        device = dones.device
+    # Try to infer T from available fields
+    if "dones" in trajectory:
+        dones = trajectory["dones"]
+        if isinstance(dones, torch.Tensor):
+            T = dones.shape[0] if dones.dim() > 0 else 1
+            device = dones.device
+        else:
+            T = len(dones)
+            device = (
+                dones[0].device
+                if len(dones) > 0 and isinstance(dones[0], torch.Tensor)
+                else torch.device("cpu")
+            )
+    elif "returns" in trajectory:
+        # Infer from returns if dones not available
+        returns = trajectory["returns"]
+        if isinstance(returns, torch.Tensor):
+            T = returns.shape[0] if returns.dim() > 0 else 1
+            device = returns.device
+        else:
+            T = len(returns)
+            device = torch.device("cpu")
+    elif "observations" in trajectory:
+        # Try to infer from observations
+        obs = trajectory["observations"]
+        if isinstance(obs, dict):
+            # Get any tensor from obs dict
+            for key, val in obs.items():
+                if isinstance(val, torch.Tensor):
+                    T = val.shape[0] if val.dim() > 0 else 1
+                    device = val.device
+                    break
+            else:
+                # No tensor found, default
+                T = 1
+                device = torch.device("cpu")
+        elif isinstance(obs, torch.Tensor):
+            T = obs.shape[0] if obs.dim() > 0 else 1
+            device = obs.device
+        else:
+            T = len(obs) if hasattr(obs, "__len__") else 1
+            device = torch.device("cpu")
     else:
-        T = len(dones)
-        device = (
-            dones[0].device
-            if len(dones) > 0 and isinstance(dones[0], torch.Tensor)
-            else torch.device("cpu")
-        )
+        # Last resort defaults
+        T = 1
+        device = torch.device("cpu")
 
     # 1. Death prediction labels
     # Handle case where observations might be a dict or tensor
@@ -270,12 +306,36 @@ def compute_auxiliary_labels(
 
     # 2. Time-to-goal labels
     # Use hindsight: count steps until next positive reward (goal reached)
+    # Try to use rewards if available, otherwise use returns as proxy
     time_labels = torch.full((T,), max_time, dtype=torch.float32, device=device)
-    for t in range(T):
-        # Find next positive reward (goal/subgoal completion)
-        positive_rewards = (trajectory["rewards"][t:] > 0.5).nonzero(as_tuple=True)[0]
-        if len(positive_rewards) > 0:
-            time_labels[t] = float(positive_rewards[0].item())
+
+    # Check if we have rewards or returns
+    reward_signal = None
+    if "rewards" in trajectory:
+        reward_signal = trajectory["rewards"]
+    elif "returns" in trajectory:
+        # Returns are available from rollout samples
+        # Use return increases as proxy for reward events
+        reward_signal = trajectory["returns"]
+
+    if reward_signal is not None:
+        # Ensure reward_signal is a tensor
+        if not isinstance(reward_signal, torch.Tensor):
+            reward_signal = torch.as_tensor(reward_signal, device=device)
+
+        # Handle shape mismatch - reward_signal might be from a minibatch
+        if reward_signal.shape[0] == T:
+            for t in range(T):
+                # Find next positive reward (goal/subgoal completion)
+                positive_rewards = (reward_signal[t:] > 0.5).nonzero(as_tuple=True)[0]
+                if len(positive_rewards) > 0:
+                    time_labels[t] = float(positive_rewards[0].item())
+        else:
+            # Size mismatch - use conservative default
+            # This happens when processing mini-batches
+            # Set time labels to gradually decreasing values as heuristic
+            for t in range(T):
+                time_labels[t] = float(min(max_time, T - t))
 
     # 3. Next subgoal labels (placeholder - would require A* or expert planning)
     # For now, use a simple heuristic based on switch/door states

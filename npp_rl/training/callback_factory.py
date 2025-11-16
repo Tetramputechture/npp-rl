@@ -22,7 +22,6 @@ class CallbackFactory:
     def __init__(
         self,
         output_dir: Path,
-        use_hierarchical_ppo: bool = False,
         use_curriculum: bool = False,
         curriculum_manager=None,
         use_distributed: bool = False,
@@ -35,7 +34,6 @@ class CallbackFactory:
 
         Args:
             output_dir: Output directory for logs and visualizations
-            use_hierarchical_ppo: Whether using hierarchical PPO
             use_curriculum: Whether using curriculum learning
             curriculum_manager: Curriculum manager instance
             use_distributed: Whether using distributed training
@@ -44,7 +42,6 @@ class CallbackFactory:
             early_stopping_patience: Patience for early stopping (default: 10)
         """
         self.output_dir = Path(output_dir)
-        self.use_hierarchical_ppo = use_hierarchical_ppo
         self.use_curriculum = use_curriculum
         self.curriculum_manager = curriculum_manager
         self.use_distributed = use_distributed
@@ -120,10 +117,6 @@ class CallbackFactory:
             f"sampling {episode_sampling_rate * 100:.1f}% of episodes)"
         )
 
-        # Add hierarchical PPO callbacks if using hierarchical training
-        if self.use_hierarchical_ppo:
-            self._add_hierarchical_callbacks(callbacks)
-
         # Add curriculum progression callback if curriculum learning is enabled
         if self.use_curriculum and self.curriculum_manager is not None:
             self._add_curriculum_callback(callbacks)
@@ -152,37 +145,6 @@ class CallbackFactory:
             self._add_distributed_callback(callbacks)
 
         return callbacks
-
-    def _add_hierarchical_callbacks(self, callbacks: List[BaseCallback]) -> None:
-        """Add hierarchical PPO specific callbacks.
-
-        Args:
-            callbacks: List to add callbacks to
-        """
-        from npp_rl.callbacks.hierarchical_callbacks import (
-            HierarchicalStabilityCallback,
-            SubtaskTransitionCallback,
-        )
-
-        # Add stability monitoring
-        stability_callback = HierarchicalStabilityCallback(
-            instability_window=1000,
-            stagnation_window=10000,
-            gradient_norm_threshold=10.0,
-            value_loss_threshold=5.0,
-            log_freq=100,
-            verbose=1,
-        )
-        callbacks.append(stability_callback)
-        logger.info("Added hierarchical stability callback for training monitoring")
-
-        # Add subtask transition tracking
-        subtask_callback = SubtaskTransitionCallback(
-            log_freq=100,
-            verbose=1,
-        )
-        callbacks.append(subtask_callback)
-        logger.info("Added subtask transition callback for HRL metrics")
 
     def _add_curriculum_callback(self, callbacks: List[BaseCallback]) -> None:
         """Add curriculum progression callback.

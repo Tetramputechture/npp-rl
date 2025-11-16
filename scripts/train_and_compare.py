@@ -178,19 +178,6 @@ def parse_args():
         help="Enable mixed precision training",
     )
 
-    # Hierarchical PPO options
-    parser.add_argument(
-        "--use-hierarchical-ppo",
-        action="store_true",
-        help="Use hierarchical PPO with high/low level policies",
-    )
-    parser.add_argument(
-        "--high-level-update-freq",
-        type=int,
-        default=50,
-        help="High-level policy update frequency (hierarchical PPO)",
-    )
-
     # Deep ResNet policy options (deprecated - automatically enabled for 'attention' architecture)
     parser.add_argument(
         "--use-deep-resnet-policy",
@@ -258,12 +245,6 @@ def parse_args():
         type=float,
         default=0.995,
         help="Discount factor for PBRS (always enabled, must match PPO gamma for policy invariance)",
-    )
-    parser.add_argument(
-        "--enable-mine-avoidance-reward",
-        action="store_true",
-        default=True,
-        help="Enable mine avoidance component in hierarchical rewards (default: True)",
     )
 
     # Curriculum safety options
@@ -858,14 +839,12 @@ def train_architecture(
             world_size=args.num_gpus,
             tensorboard_writer=tb_writer.get_writer("training") if tb_writer else None,
             use_mixed_precision=args.mixed_precision,
-            use_hierarchical_ppo=args.use_hierarchical_ppo,
             use_objective_attention_policy=use_objective_attention_policy,
             use_curriculum=args.use_curriculum,
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
             frame_stack_config=frame_stack_config,
             pbrs_gamma=args.pbrs_gamma,
-            enable_mine_avoidance_reward=args.enable_mine_avoidance_reward,
             enable_early_stopping=args.enable_early_stopping,
             early_stopping_patience=args.early_stopping_patience,
             debug_mode=args.debug,
@@ -1560,14 +1539,6 @@ def main():
         logger.info("=" * 70)
         logger.info("Configuration Validation for MLP Baseline")
         logger.info("=" * 70)
-
-        # Check 1: Warn if hierarchical PPO is enabled
-        if args.use_hierarchical_ppo:
-            print("⚠️  WARNING: Hierarchical PPO enabled for MLP baseline")
-            print(
-                "   This adds 46 random parameters and may cause incomplete weight loading"
-            )
-            print("   Recommendation: Remove --use-hierarchical-ppo flag")
 
         # Check 2: Validate environment count
         if args.num_envs and args.num_envs < 128:

@@ -58,11 +58,17 @@ class CurriculumEnv(gym.Wrapper):
         # For subprocess sync: track what stage we're sampling from
         self._last_known_stage = curriculum_manager.get_current_stage()
 
+        # Initialize debug flag from environment
+        self.debug = False
+        if hasattr(env, "unwrapped") and hasattr(env.unwrapped, "nplay_headless"):
+            self.debug = env.unwrapped.nplay_headless.sim.sim_config.debug
+
         logger.info("Curriculum environment initialized")
         logger.info(f"Starting stage: {self._last_known_stage}")
         logger.info(
             f"Local tracking: {'enabled' if enable_local_tracking else 'disabled (managed by VecEnvWrapper)'}"
         )
+        logger.info(f"Debug mode: {self.debug}")
 
     def set_curriculum_stage(self, stage: str):
         """Update the curriculum stage for this environment.
@@ -191,6 +197,39 @@ class CurriculumEnv(gym.Wrapper):
             observation, reward, terminated, truncated, info
         """
         obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # DEFENSIVE FIX: Force deep copy of action_mask to prevent reference bugs
+        # This ensures curriculum wrapper doesn't modify original mask and prevents
+        # memory sharing issues when passing observations through wrapper layers
+        if isinstance(obs, dict) and "action_mask" in obs:
+            # DIAGNOSTIC: Log mask BEFORE wrapper modification
+            if logger.isEnabledFor(logging.DEBUG):
+                original_mask = obs["action_mask"]
+                import os
+
+                logger.debug(
+                    f"[WRAPPER_BEFORE] CurriculumEnv pid={os.getpid()} "
+                    f"action={action} mask_before={original_mask} "
+                    f"mask_id={id(original_mask)} hash={hash(original_mask.tobytes())}"
+                )
+
+            mask = obs["action_mask"]
+            # Force deep copy with proper memory ownership
+            mask = np.array(mask, copy=True)
+            # Ensure C-contiguous layout to prevent memory aliasing
+            if not mask.flags["C_CONTIGUOUS"]:
+                mask = np.ascontiguousarray(mask)
+            obs["action_mask"] = mask
+
+            # DIAGNOSTIC: Log mask AFTER wrapper modification
+            if logger.isEnabledFor(logging.DEBUG):
+                import os
+
+                logger.debug(
+                    f"[WRAPPER_AFTER] CurriculumEnv pid={os.getpid()} "
+                    f"action={action} mask_after={mask} "
+                    f"mask_id={id(mask)} owns_data={mask.flags['OWNDATA']} hash={hash(mask.tobytes())}"
+                )
 
         # Add curriculum info (defensive: ensure current_level_stage is set)
         if hasattr(self, "current_level_stage") and self.current_level_stage:
@@ -323,10 +362,25 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
         # Track last advancement check to avoid redundant checks
         self.last_advancement_check = 0
 
+        # Initialize debug flag - try to get from wrapped environments
+        self.debug = False
+        try:
+            # For SubprocVecEnv or DummyVecEnv, try to get debug from first environment
+            if hasattr(venv, "envs") and len(venv.envs) > 0:
+                first_env = venv.envs[0]
+                if hasattr(first_env, "unwrapped") and hasattr(
+                    first_env.unwrapped, "nplay_headless"
+                ):
+                    self.debug = first_env.unwrapped.nplay_headless.sim.sim_config.debug
+        except Exception:
+            # If we can't get debug flag, default to False
+            pass
+
         logger.info(f"Curriculum VecEnv wrapper initialized for {self.num_envs} envs")
         logger.info(
             f"Global episode tracking enabled - checking advancement every {check_advancement_freq} episodes"
         )
+        logger.info(f"Debug mode: {self.debug}")
 
         # Sync initial curriculum stage to all environments
         initial_stage = curriculum_manager.get_current_stage()
@@ -342,6 +396,31 @@ class CurriculumVecEnvWrapper(VecEnvWrapper):
         It records all episodes and checks for advancement in the main process.
         """
         obs, rewards, dones, infos = self.venv.step_wait()
+
+        # Force copy of action_mask in batched observations to prevent reference bugs
+        if isinstance(obs, dict) and "action_mask" in obs:
+            obs["action_mask"] = obs["action_mask"].copy()
+
+        # Validate action_mask preservation when debug enabled
+        if self.debug:
+            if isinstance(obs, dict) and "action_mask" in obs:
+                action_mask = obs["action_mask"]
+                logger.debug(
+                    f"[CurriculumVecEnv.step_wait] action_mask after step_wait: "
+                    f"shape={action_mask.shape}, dtype={action_mask.dtype}"
+                )
+
+                # Validate shape
+                if isinstance(action_mask, np.ndarray):
+                    if action_mask.ndim != 2 or action_mask.shape[0] != self.num_envs:
+                        logger.error(
+                            f"[CurriculumVecEnv] Invalid action_mask shape: {action_mask.shape}, "
+                            f"expected ({self.num_envs}, 6)"
+                        )
+            else:
+                logger.warning(
+                    "[CurriculumVecEnv] action_mask missing from observation dict!"
+                )
 
         # Track episode completions across all environments
         episodes_completed_this_step = 0

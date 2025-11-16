@@ -33,7 +33,6 @@ class FusionType(Enum):
     CONCAT = "concat"  # Simple concatenation
     SINGLE_HEAD_ATTENTION = "single_head"  # Single-head cross-modal attention
     MULTI_HEAD_ATTENTION = "multi_head"  # Multi-head cross-modal attention
-    HIERARCHICAL = "hierarchical"  # Hierarchical attention
     ADAPTIVE = "adaptive"  # Adaptive attention with learned gating
 
 
@@ -45,9 +44,9 @@ class ModalityConfig:
     use_global_view: bool = False  # 2D CNN on 176x100x1 grayscale global view
     use_graph: bool = True  # Graph neural network
     use_game_state: bool = (
-        True  # Game state vector (GAME_STATE_CHANNELS features, currently 70)
+        True  # Game state vector (NINJA_STATE_DIM=29, ninja physics only)
     )
-    use_reachability: bool = True  # Reachability features (8 features)
+    use_reachability: bool = True  # Reachability features (6 features)
 
     def get_enabled_modalities(self) -> List[str]:
         """Return list of enabled modality names."""
@@ -83,8 +82,10 @@ class GraphConfig:
     Configuration for graph neural network architecture.
 
     Note: Input dimensions come from nclone:
-    - node_feature_dim = 50 (NODE_FEATURE_DIM from nclone.graph.common)
-    - edge_feature_dim = 6 (EDGE_FEATURE_DIM from nclone.graph.common)
+    - node_feature_dim = 21 (NODE_FEATURE_DIM from nclone.graph.common)
+      21 dims: 2 spatial + 7 type + 3 mine + 2 entity_state + 1 reachability + 6 topological
+    - edge_feature_dim = 14 (EDGE_FEATURE_DIM from nclone.graph.common)
+      14 dims: 4 type + 2 connectivity + 4 geometric + 4 mine_danger
     These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
     """
 
@@ -126,12 +127,14 @@ class StateConfig:
     """Configuration for state vector processing."""
 
     # Dimensions from nclone environment observations
-    # game_state_dim now includes path-aware objectives, enhanced mines, and sequential goals (58 total)
-    game_state_dim: int = 58  # CHANGED from 52: 29 physics + 15 objectives + 8 mines + 3 progress + 3 sequential
-    reachability_dim: int = 8  # Reachability features from nclone
-    hidden_dim: int = (
-        192  # Increased from 128 to handle increased input dimension (58 vs 29)
+    # Phase 4: game_state_dim reduced to only ninja physics (29 dims)
+    # Phase 6: reachability_dim reduced from 8 to 6 (4 base + 2 mine context)
+    # All other features (objectives, mines, progress) now in graph
+    game_state_dim: int = 29  # Only ninja physics state
+    reachability_dim: int = (
+        6  # Reachability features from nclone (4 base + 2 mine context)
     )
+    hidden_dim: int = 128  # Reduced back from 192 since input is smaller
     output_dim: int = 128
     use_attentive_state_mlp: bool = (
         True  # NEW FIELD: Enable attention-based state encoder
@@ -199,8 +202,8 @@ def create_full_hgt_config() -> ArchitectureConfig:
         - Player Frame: 512-dim (84x84x1 single grayscale frame for local spatial awareness)
         - Global View: 256-dim (176x100x1 grayscale full level for strategic planning)
         - Graph (Full HGT): 3 layers, 256 hidden, 8 heads (heterogeneous types)
-        - Game State: 128-dim (position, velocity, physics - velocity satisfies Markov property)
-        - Reachability: 8-dim (navigation planning)
+        - Game State: 128-dim (29-dim ninja physics: position, velocity, normals, etc.)
+        - Reachability: 6-dim (4 base + 2 mine context)
         
         Multi-head cross-modal attention fusion (8 heads) learns complex interactions between modalities.
         Highest capacity but largest computational cost. Feature dim: 512.
@@ -238,8 +241,8 @@ def create_simplified_hgt_config() -> ArchitectureConfig:
         - Player Frame: 256-dim (vs 512, single grayscale)
         - Global View: 128-dim (vs 256)
         - Graph (Simplified HGT): 2 layers (vs 3), 128 hidden (vs 256), 4 heads (vs 8)
-        - Game State: 64-dim (vs 128)
-        - Reachability: 8-dim
+        - Game State: 64-dim (vs 128, from 29-dim ninja physics)
+        - Reachability: 6-dim (4 base + 2 mine context)
         
         Single-head attention fusion (4 heads). Feature dim: 256 (vs 512). Faster training and inference
         with limited resources.
@@ -745,25 +748,26 @@ def create_attention_config() -> ArchitectureConfig:
         Comprehensive attention architecture with five levels of attention for robust generalization:
         
         1. AttentiveStateMLP (State Component Attention):
-           - Processes 58-dim game state split into 5 semantic components
-           - Components: Physics (29), Objectives (15), Mines (8), Progress (3), Sequential (3)
+           - Processes 29-dim game state (ninja physics only) split into 6 semantic physics components
+           - Components: Velocity (3), Movement states (5), Input (2), Buffers (3), Contact (6), Forces (10)
            - Each component encoded separately, then projected to uniform 64-dim space
            - Multi-head cross-component attention (4 heads): each component attends to all others
-           - Enables: physics↔mines (hazard avoidance), objectives<->sequential (goal prioritization)
+           - Enables: velocity↔contact (ground/wall interaction), forces↔movement (physics state coupling)
            - Output: 128-dim state features
         
-        2. GAT Graph Encoder (Spatial Attention):
-           - Graph Attention Network with sparse edge-based attention
-           - Uses proper GAT formula: LeakyReLU(a^T [W h_i || W h_j]) with learnable attention param
-           - Batched operations with torch_scatter for efficient aggregation (fallback if unavailable)
-           - Input: 50-dim node features (NODE_FEATURE_DIM from nclone), 6-dim edge features
-           - 3 layers, 4 heads per layer, 128 hidden dim, 256 output dim
+        2. GCN Graph Encoder (Spatial Aggregation):
+           - Graph Convolutional Network with simple mean aggregation
+           - Uses normalized adjacency for uniform neighbor weighting (aligns with shortest-path objective)
+           - No attention computation - PBRS already provides directional gradients
+           - Input: 21-dim node features (NODE_FEATURE_DIM from nclone)
+           - Edge connectivity only (14-dim edge features not used by GCN)
+           - 3 layers, 128 hidden dim, 256 output dim
            - Handles variable graph sizes (robust to level complexity)
            - Output: 256-dim graph features
         
         3. MultiHeadFusion (Cross-Modal Attention):
            - Splits concatenated modality features into separate tokens
-           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128), Reachability (64)
+           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128, from 29-dim physics), Reachability (64, from 6-dim features)
            - Projects each to uniform 256-dim, adds learned modality embeddings
            - Multi-head cross-modal attention (8 heads): vision<->graph<->state interactions
            - Feed-forward network per token, mean pooling across modalities
@@ -796,9 +800,9 @@ def create_attention_config() -> ArchitectureConfig:
         Feature Dimension Flow:
         - Player Frame CNN: [batch, 84, 84, 1] → 256
         - Global View CNN: [batch, 176, 100, 1] → 128
-        - GAT Encoder: [batch, max_nodes, 50] → 256 (global pooling)
-        - AttentiveStateMLP: [batch, 58] → 128
-        - Reachability MLP: [batch, 8] → 64
+        - GCN Encoder: [batch, max_nodes, 21] → 256 (global pooling)
+        - AttentiveStateMLP: [batch, 29] → 128
+        - Reachability MLP: [batch, 6] → 64
         - Concatenated: 256 + 128 + 256 + 128 + 64 = 832
         - MultiHeadFusion: 832 → 512 (final features_dim)
         
@@ -814,11 +818,13 @@ def create_attention_config() -> ArchitectureConfig:
         Design Rationale:
         - Deep ResNet MLPs: 5-layer policy and 3-layer value networks with residual connections
           enable deep reasoning chains without gradient degradation
-        - GAT instead of HGT: simpler, faster, attention-based. Node features (50 dims) already
-          encode type information, so heterogeneous type processing is redundant.
+        - GCN instead of GAT/HGT: simplest graph encoder with uniform aggregation. Node features 
+          (21 dims) already encode type information. PBRS provides directional gradients, making 
+          learned attention weights redundant. GCN's uniform weighting aligns with shortest-path 
+          navigation objective.
         - Attention at 5 levels enables hierarchical reasoning:
           * Component-level: understand state relationships (AttentiveStateMLP)
-          * Spatial-level: understand graph connectivity (GAT)
+          * Spatial-level: aggregate graph connectivity (GCN)
           * Modality-level: integrate multi-modal information (MultiHeadFusion)
           * Objective-level: prioritize goals dynamically (ObjectiveAttentionPolicy)
           * Value decomposition: separate state quality from action preferences (Dueling)
@@ -838,17 +844,17 @@ def create_attention_config() -> ArchitectureConfig:
         ),
         visual=VisualConfig(),
         graph=GraphConfig(
-            architecture=GraphArchitectureType.GAT,
+            architecture=GraphArchitectureType.GCN,
             hidden_dim=128,
             output_dim=256,
             num_layers=3,
-            num_heads=4,
             dropout=0.1,
             use_type_embeddings=False,
+            use_edge_features=False,  # GCN uses only connectivity, not edge features
         ),
         state=StateConfig(
-            game_state_dim=58,
-            reachability_dim=8,
+            game_state_dim=29,
+            reachability_dim=6,
             hidden_dim=128,
             output_dim=128,
             use_attentive_state_mlp=True,

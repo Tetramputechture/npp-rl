@@ -24,7 +24,7 @@ class BCWeightLoader:
         """Initialize BC weight loader.
 
         Args:
-            model: PPO or HierarchicalPPO model instance
+            model: PPO model instance
             architecture_name: Name of the architecture being trained
             frame_stack_config: Frame stacking configuration dict
         """
@@ -42,7 +42,6 @@ class BCWeightLoader:
         PPO policies can have different feature extractor structures:
         1. Shared: features_extractor.* (share_features_extractor=True, default)
         2. Separate: pi_features_extractor.* and vf_features_extractor.* (share_features_extractor=False)
-        3. Hierarchical: mlp_extractor.features_extractor.* (HierarchicalActorCriticPolicy)
 
         The code automatically detects the structure and maps BC weights accordingly.
 
@@ -187,11 +186,6 @@ class BCWeightLoader:
         """
         policy_keys = list(self.model.policy.state_dict().keys())
 
-        # Check for hierarchical first (HierarchicalActorCriticPolicy)
-        uses_hierarchical_extractor = any(
-            "mlp_extractor.features_extractor." in k for k in policy_keys
-        )
-
         # Check for separate extractors (share_features_extractor=False)
         uses_separate_extractors = any(
             k.startswith("pi_features_extractor.") for k in policy_keys
@@ -202,66 +196,27 @@ class BCWeightLoader:
             k.startswith("features_extractor.") for k in policy_keys
         )
 
-        if (
-            not uses_shared_extractor
-            and not uses_separate_extractors
-            and not uses_hierarchical_extractor
-        ):
+        if not uses_shared_extractor and not uses_separate_extractors:
             print(
                 "PPO model has no recognizable feature extractor keys! "
                 "Cannot load BC weights."
             )
             return {
-                "map_hierarchical": False,
                 "map_shared": False,
                 "map_separate": False,
             }
 
         # Determine which mappings to use
-        map_hierarchical = uses_hierarchical_extractor
         map_shared = False
         map_separate = False
 
-        if uses_hierarchical_extractor:
-            # Check if shared/separate are references or separate objects
-            if (
-                hasattr(self.model.policy, "features_extractor")
-                and hasattr(self.model.policy, "mlp_extractor")
-                and hasattr(self.model.policy.mlp_extractor, "features_extractor")
-            ):
-                is_same_object = (
-                    self.model.policy.features_extractor
-                    is self.model.policy.mlp_extractor.features_extractor
-                )
-                if not is_same_object and uses_shared_extractor:
-                    map_shared = True
-                    logger.info(
-                        "  Note: Model has separate features_extractor and mlp_extractor.features_extractor"
-                    )
-
-            if (
-                hasattr(self.model.policy, "pi_features_extractor")
-                and hasattr(self.model.policy, "mlp_extractor")
-                and hasattr(self.model.policy.mlp_extractor, "features_extractor")
-            ):
-                is_same_pi = (
-                    self.model.policy.pi_features_extractor
-                    is self.model.policy.mlp_extractor.features_extractor
-                )
-                if not is_same_pi and uses_separate_extractors:
-                    map_separate = True
-                    logger.info(
-                        "  Note: Model has separate pi/vf_features_extractor and mlp_extractor.features_extractor"
-                    )
-
-        elif uses_separate_extractors:
+        if uses_separate_extractors:
             map_separate = True
 
         elif uses_shared_extractor:
             map_shared = True
 
         return {
-            "map_hierarchical": map_hierarchical,
             "map_shared": map_shared,
             "map_separate": map_separate,
         }
@@ -284,12 +239,6 @@ class BCWeightLoader:
             if key.startswith("feature_extractor."):
                 # Remove "feature_extractor." prefix to get the sub-key
                 sub_key = key[len("feature_extractor.") :]
-
-                # Map to appropriate target based on determined extractor type
-                if extractor_config["map_hierarchical"]:
-                    hierarchical_key = f"mlp_extractor.features_extractor.{sub_key}"
-                    mapped_state_dict[hierarchical_key] = value
-                    logger.debug(f"Mapped {key} → {hierarchical_key}")
 
                 if extractor_config["map_shared"]:
                     shared_key = f"features_extractor.{sub_key}"
@@ -364,8 +313,6 @@ class BCWeightLoader:
 
             # Determine extractor type for logging
             extractor_types = []
-            if extractor_config["map_hierarchical"]:
-                extractor_types.append("hierarchical")
             if extractor_config["map_shared"]:
                 extractor_types.append("shared")
             if extractor_config["map_separate"]:
@@ -440,11 +387,6 @@ class BCWeightLoader:
             and not k.startswith("pi_features_extractor.")
             and not k.startswith("vf_features_extractor.")
         ]
-        hierarchical_missing = [
-            k
-            for k in missing_keys
-            if "mlp_extractor." in k and "features_extractor" not in k
-        ]
         action_value_missing = [
             k for k in missing_keys if "action_net." in k or "value_net." in k
         ]
@@ -456,15 +398,11 @@ class BCWeightLoader:
             unexpected_missing = [
                 k
                 for k in missing_keys
-                if k not in shared_feature_ext_missing
-                and k not in hierarchical_missing
-                and k not in action_value_missing
+                if k not in shared_feature_ext_missing and k not in action_value_missing
             ]
         else:
             unexpected_missing = [
-                k
-                for k in missing_keys
-                if k not in hierarchical_missing and k not in action_value_missing
+                k for k in missing_keys if k not in action_value_missing
             ]
 
         # Only log if there are truly unexpected missing keys
@@ -485,8 +423,4 @@ class BCWeightLoader:
         elif extractor_type == "shared":
             logger.info(
                 "  → Shared feature extractor loaded, policy/value heads will be trained from scratch"
-            )
-        elif "hierarchical" in extractor_type:
-            logger.info(
-                "  → Hierarchical policy loaded, high-level subtask selection will be trained from scratch"
             )

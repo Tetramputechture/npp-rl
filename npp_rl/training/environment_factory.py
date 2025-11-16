@@ -33,11 +33,8 @@ class EnvironmentFactory:
         curriculum_manager=None,
         frame_stack_config: Optional[Dict[str, Any]] = None,
         pbrs_gamma: float = 0.99,
-        enable_mine_avoidance_reward: bool = True,
         output_dir: Optional[Path] = None,
         pretrained_checkpoint: Optional[str] = None,
-        enable_icm: bool = False,
-        icm_config: Optional[Dict[str, Any]] = None,
         test_dataset_path: Optional[str] = None,
         architecture_config: Optional[ArchitectureConfig] = None,
     ):
@@ -51,11 +48,8 @@ class EnvironmentFactory:
             curriculum_manager: Curriculum manager instance
             frame_stack_config: Frame stacking configuration dict
             pbrs_gamma: Discount factor for PBRS (base environment)
-            enable_mine_avoidance_reward: Enable mine avoidance component in hierarchical rewards
             output_dir: Output directory for BC normalization stats
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
-            enable_icm: Enable Intrinsic Curiosity Module (ICM)
-            icm_config: ICM configuration dict (eta, alpha, etc.)
             test_dataset_path: Path to test dataset (for evaluation environments)
             architecture_config: Architecture configuration (used to disable rendering if visual modalities not used)
         """
@@ -64,25 +58,13 @@ class EnvironmentFactory:
         self.curriculum_manager = curriculum_manager
         self.frame_stack_config = frame_stack_config or {}
         self.pbrs_gamma = pbrs_gamma
-        self.enable_mine_avoidance_reward = enable_mine_avoidance_reward
         self.output_dir = output_dir
         self.pretrained_checkpoint = pretrained_checkpoint
         self.bc_normalization_applied = False
         self.vec_normalize_wrapper = None
         self.architecture_config = architecture_config
 
-        # ICM integration
-        self.enable_icm = enable_icm
-        self.icm_config = icm_config or {}
-        self.icm_integration = None
-
-    def create_training_env(
-        self,
-        num_envs: int,
-        gamma: float = 0.99,
-        enable_visualization: bool = False,
-        vis_env_idx: int = 0,
-    ) -> VecNormalize:
+    def create_training_env(self, num_envs: int, gamma: float = 0.99) -> VecNormalize:
         """Create vectorized training environment.
 
         Args:
@@ -105,37 +87,30 @@ class EnvironmentFactory:
             )
 
         # Create vectorized environment
-        # Force DummyVecEnv when visualization is enabled (pygame doesn't work across processes)
-        use_subproc = num_envs > 4 and not enable_visualization
+        # Use SubprocVecEnv for true multiprocessing (bypasses Python GIL)
+        # NOTE: Visualization is never enabled during training (only for video rendering post-hoc)
+        # SubprocVecEnv has IPC overhead, so only use for 4+ envs where parallelism benefit outweighs it
+        use_subproc = num_envs >= 4
 
-        if num_envs > 4 and enable_visualization:
-            print(
-                "Visualization enabled with >4 environments. "
-                "Forcing DummyVecEnv (single-process) for reliable pygame rendering. "
-                "This may be slower than SubprocVecEnv. "
-                "Consider using --num-envs 4 or less for best performance."
+        if num_envs < 4:
+            logger.info(
+                f"Using DummyVecEnv for {num_envs} environments (SubprocVecEnv IPC overhead not worth it for <4 envs)"
+            )
+        else:
+            logger.info(
+                f"Using SubprocVecEnv for {num_envs} environments (true multiprocessing)"
             )
 
         if use_subproc:
-            logger.info(
-                f"Initializing SubprocVecEnv with {num_envs} worker processes..."
-            )
-            env_fns = [
-                make_env(i, visualize=(enable_visualization and i == vis_env_idx))
-                for i in range(num_envs)
-            ]
-            env = SubprocVecEnv(env_fns)
-            logger.info("SubprocVecEnv initialization complete")
+            # SubprocVecEnv: spawn_context for better compatibility, no visualization
+            env_fns = [make_env(i, visualize=False) for i in range(num_envs)]
+            env = SubprocVecEnv(env_fns, start_method="spawn")
+            logger.info(f"✓ SubprocVecEnv initialized with {num_envs} worker processes")
         else:
-            logger.info(
-                f"Initializing DummyVecEnv with {num_envs} environments (single process)..."
-            )
-            env_fns = [
-                make_env(i, visualize=(enable_visualization and i == vis_env_idx))
-                for i in range(num_envs)
-            ]
+            # DummyVecEnv: single process, sequential execution
+            env_fns = [make_env(i, visualize=False) for i in range(num_envs)]
             env = DummyVecEnv(env_fns)
-            logger.info("DummyVecEnv initialization complete")
+            logger.info(f"✓ DummyVecEnv initialized with {num_envs} environments")
 
         # Apply VecNormalize for reward normalization only
         # Observation normalization handled separately via BC stats
@@ -178,24 +153,6 @@ class EnvironmentFactory:
             env = GPUObservationWrapper(env, use_pinned_memory=True)
             logger.info("✓ GPUObservationWrapper applied (observations will be on GPU)")
 
-        # Wrap with ICM intrinsic rewards if enabled
-        if self.enable_icm:
-            logger.info("ICM enabled - creating intrinsic curiosity module...")
-            from npp_rl.training.icm_integration import create_icm_integration
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            self.icm_integration = create_icm_integration(
-                enable_icm=True,
-                icm_config=self.icm_config,
-                device=device,
-            )
-
-            if self.icm_integration is not None:
-                env = self.icm_integration.wrap_environment(env, policy=None)
-                logger.info("✓ ICM wrapper applied - intrinsic rewards enabled")
-            else:
-                print("⚠ ICM integration failed - continuing without ICM")
-
         # Wrap with curriculum tracking if enabled
         if self.use_curriculum and self.curriculum_manager:
             logger.info("Wrapping environments with global curriculum tracking...")
@@ -204,7 +161,7 @@ class EnvironmentFactory:
             )
 
         logger.info(f"✓ Environments created: {num_envs} training")
-        logger.info(f"✓ Using {'DummyVecEnv' if num_envs <= 4 else 'SubprocVecEnv'}")
+        logger.info(f"✓ Using {'DummyVecEnv' if not use_subproc else 'SubprocVecEnv'}")
 
         if self.use_curriculum:
             logger.info("Curriculum tracking enabled across all environments")

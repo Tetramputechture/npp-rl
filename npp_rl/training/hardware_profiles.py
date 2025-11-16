@@ -225,7 +225,7 @@ def get_hardware_profile(name: str) -> HardwareProfile:
 #
 # Updated estimates for n_steps=1024 (50% reduction from previous n_steps=2048):
 ARCHITECTURE_MEMORY_PROFILES: Dict[str, float] = {
-    "attention": 0.75,  # REDUCED from 2.5 (50% savings)
+    "attention": 0.6,  # REDUCED from 2.5 (50% savings)
     "mlp_cnn": 0.75,  # REDUCED from 1.5
     # GNN variants - graph processing adds memory overhead
     # Estimate ~2x MLP baseline for graph data structures (nodes/edges)
@@ -278,59 +278,6 @@ def get_memory_per_env(architecture_name: str) -> float:
 
     # Default fallback
     return ARCHITECTURE_MEMORY_PROFILES["default"]
-
-
-def estimate_rollout_buffer_memory_gb(
-    num_envs: int, n_steps: int, architecture_name: str = "mlp_cnn"
-) -> float:
-    """Estimate rollout buffer memory usage in GB.
-
-    Rollout buffers store observations, actions, rewards, values, log_probs, etc.
-    for n_steps × num_envs. This is separate from environment object memory.
-
-    Args:
-        num_envs: Number of parallel environments
-        n_steps: Number of steps per rollout
-        architecture_name: Architecture name for observation size estimation
-
-    Returns:
-        Estimated rollout buffer memory in GB
-    """
-    # Observation size per step (excluding graph data):
-    # - player_frame: 84×84×1 uint8 = 7,056 bytes
-    # - global_view: 176×100×1 uint8 = 17,600 bytes
-    # - game_state: GAME_STATE_CHANNELS float32 (70 features * 4 bytes = 280 bytes)
-    # - reachability_features: 8 float32 = 32 bytes
-    # - entity_positions: 6 float32 = 24 bytes
-    # - switch_states: 25 float32 = 100 bytes
-    # Total: ~25.0 KB per observation (rounded to 25 KB for safety)
-
-    # Check if architecture uses visual observations
-    arch_lower = architecture_name.lower()
-    uses_visual = "vision_free" not in arch_lower
-
-    if uses_visual:
-        # With visual observations: ~25 KB per observation
-        obs_size_bytes = 25 * 1024  # 25 KB
-    else:
-        # Vision-free: no visual frames, ~30% smaller
-        obs_size_bytes = 17 * 1024  # 17 KB
-
-    # Rollout buffer stores multiple arrays per step:
-    # - observations (dict of arrays)
-    # - actions (int32)
-    # - rewards (float32)
-    # - values (float32)
-    # - log_probs (float32)
-    # - dones (bool)
-    # Estimate: observation size × 1.5 for other arrays
-    bytes_per_step = obs_size_bytes * 1.5
-
-    # Total buffer size
-    total_bytes = bytes_per_step * num_envs * n_steps
-
-    # Convert to GB
-    return total_bytes / 1e9
 
 
 def auto_detect_profile(
@@ -391,64 +338,13 @@ def auto_detect_profile(
 
     # Reserve memory for rollout buffers and model overhead
     # Model overhead: ~10% of GPU memory for weights, gradients, optimizer states
-    model_overhead_gb = gpu_memory_gb * 0.1
+    model_overhead_gb = gpu_memory_gb * 0.2
 
-    # Iteratively solve for maximum environments that fit in memory per GPU
-    # We need: (env_memory × envs_per_gpu) + rollout_buffer_memory + model_overhead <= gpu_memory
-    # Since rollout_buffer_memory depends on envs_per_gpu, we iterate to convergence
-    # Start with initial estimate based on environment memory only
     initial_max_envs_per_gpu = max(
         8, min(256, int((gpu_memory_gb - model_overhead_gb) / memory_per_env_gb))
     )
 
-    max_iterations = 10
     envs_per_gpu = initial_max_envs_per_gpu
-
-    for iteration in range(max_iterations):
-        # Calculate rollout buffer memory per GPU for current env count
-        # Each GPU handles envs_per_gpu environments, so rollout buffer is per-GPU
-        rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
-            num_envs=envs_per_gpu,  # Per-GPU, not total
-            n_steps=n_steps,
-            architecture_name=architecture_name,
-        )
-
-        # Calculate available memory per GPU
-        available_memory_per_gpu_gb = gpu_memory_gb - model_overhead_gb
-
-        # Calculate how many environments we can fit accounting for rollout buffers
-        # Available = GPU memory - model overhead
-        # We need: envs_per_gpu * memory_per_env + rollout_buffer <= available
-        # Rollout buffer scales linearly with envs_per_gpu, so:
-        # envs_per_gpu * (memory_per_env + rollout_buffer_per_env) <= available
-        rollout_buffer_per_env_gb = (
-            rollout_buffer_memory_gb / envs_per_gpu if envs_per_gpu > 0 else 0
-        )
-        total_memory_per_env_gb = memory_per_env_gb + rollout_buffer_per_env_gb
-
-        if total_memory_per_env_gb > 0:
-            new_envs_per_gpu = max(
-                8, min(256, int(available_memory_per_gpu_gb / total_memory_per_env_gb))
-            )
-        else:
-            # Fallback: use conservative estimate
-            new_envs_per_gpu = max(
-                8, min(256, int(available_memory_per_gpu_gb / memory_per_env_gb))
-            )
-
-        # Check if converged (within 1 environment)
-        if abs(new_envs_per_gpu - envs_per_gpu) <= 1:
-            envs_per_gpu = new_envs_per_gpu
-            break
-
-        envs_per_gpu = new_envs_per_gpu
-
-    # Final calculation for the converged value
-    rollout_buffer_memory_gb = estimate_rollout_buffer_memory_gb(
-        num_envs=envs_per_gpu,  # Per-GPU
-        n_steps=n_steps,
-        architecture_name=architecture_name,
-    )
 
     # Scale learning rate with square root of GPU count (common practice)
     base_lr = 3e-4
@@ -464,8 +360,6 @@ def auto_detect_profile(
         f"Auto-detected profile for {num_gpus}x {gpu_name.upper()} "
         f"({gpu_memory_gb:.0f}GB){arch_desc}. "
         f"Using {memory_per_env_gb:.1f}GB per environment estimate. "
-        f"Rollout buffer overhead: {rollout_buffer_memory_gb:.2f}GB. "
-        f"Optimized settings based on available hardware."
     )
 
     return HardwareProfile(

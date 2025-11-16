@@ -324,7 +324,7 @@ def run_bc_pretraining_if_available(
 
     try:
         # Conditionally disable state stacking for AttentiveStateMLP architectures
-        # AttentiveStateMLP expects single 58-dim states (split into 5 semantic components)
+        # AttentiveStateMLP expects single 29-dim states (split into 6 physics components)
         # and cannot handle stacked states
         bc_frame_stack_config = frame_stack_config
         if frame_stack_config and frame_stack_config.get(
@@ -342,7 +342,7 @@ def run_bc_pretraining_if_available(
                         "disabling state stacking for BC pretraining"
                     )
                     logger.info(
-                        "  AttentiveStateMLP expects single 58-dim states, not stacked states"
+                        "  AttentiveStateMLP expects single 29-dim states, not stacked states"
                     )
                     logger.info(
                         f"  Visual frame stacking remains enabled: "
