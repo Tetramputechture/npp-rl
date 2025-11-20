@@ -16,7 +16,8 @@ from stable_baselines3.common.vec_env import (
 from nclone.gym_environment.config import EnvironmentConfig
 from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
 from nclone.gym_environment.npp_environment import NppEnvironment
-from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper
+
+from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper, CurriculumEnv
 from npp_rl.wrappers.gpu_observation_wrapper import GPUObservationWrapper
 from npp_rl.wrappers.position_tracking_wrapper import PositionTrackingWrapper
 from npp_rl.training.architecture_configs import ArchitectureConfig
@@ -37,6 +38,7 @@ class EnvironmentFactory:
         pretrained_checkpoint: Optional[str] = None,
         test_dataset_path: Optional[str] = None,
         architecture_config: Optional[ArchitectureConfig] = None,
+        reward_config=None,  # RewardConfig for curriculum-aware reward system
     ):
         """Initialize environment factory.
 
@@ -52,6 +54,7 @@ class EnvironmentFactory:
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
             test_dataset_path: Path to test dataset (for evaluation environments)
             architecture_config: Architecture configuration (used to disable rendering if visual modalities not used)
+            reward_config: RewardConfig instance for curriculum-aware reward system
         """
         self.use_curriculum = use_curriculum
         self.test_dataset_path = test_dataset_path
@@ -63,6 +66,7 @@ class EnvironmentFactory:
         self.bc_normalization_applied = False
         self.vec_normalize_wrapper = None
         self.architecture_config = architecture_config
+        self.reward_config = reward_config
 
     def create_training_env(self, num_envs: int, gamma: float = 0.99) -> VecNormalize:
         """Create vectorized training environment.
@@ -239,6 +243,10 @@ class EnvironmentFactory:
             env_config = EnvironmentConfig.for_training(
                 test_dataset_path=self.test_dataset_path
             )
+            
+            # Pass reward_config if available (for curriculum-aware reward system)
+            if self.reward_config is not None:
+                env_config.reward_config = self.reward_config
 
             # Disable visual observations if architecture doesn't use visual modalities
             # (unless visualization is explicitly requested)
@@ -289,8 +297,6 @@ class EnvironmentFactory:
 
             # Wrap with curriculum if enabled
             if include_curriculum and self.curriculum_manager:
-                from npp_rl.wrappers.curriculum_env import CurriculumEnv
-
                 env = CurriculumEnv(
                     env,
                     self.curriculum_manager,

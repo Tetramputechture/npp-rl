@@ -13,6 +13,7 @@ from nclone.graph.common import (
     N_NODE_TYPES,
     N_EDGE_TYPES,
 )
+from nclone.gym_environment.constants import REACHABILITY_FEATURES_DIM
 
 # === Configuration Data Structures ===
 
@@ -79,9 +80,9 @@ class DefaultConfig:
     # State processing defaults
     state_hidden_dim: int = 128
 
-    # Reachability processing defaults (8-dimensional features)
-    reachability_dim: int = 8
-    reachability_hidden_dim: int = 16  # 8 * 2
+    # Reachability processing defaults (from nclone constants)
+    reachability_dim: int = REACHABILITY_FEATURES_DIM
+    reachability_hidden_dim: int = REACHABILITY_FEATURES_DIM * 2
 
     # Spatial attention defaults
     spatial_height: int = 16

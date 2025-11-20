@@ -1,97 +1,701 @@
-"""Curriculum learning manager for progressive difficulty training.
+"""Curriculum learning manager for N++ RL training.
 
-Manages progression through test suite categories from simple to complex,
-enabling the agent to learn incrementally on progressively harder levels.
+This module implements curriculum learning to progressively train agents
+on increasingly difficult N++ levels, tracking performance and automatically
+advancing through curriculum stages based on success rates.
+
+High-performance implementation with optimized data structures:
+- Fast sample_level() through precomputed data structures
+- Memory-efficient tracking with consolidated data structures
+- Optimized parallelization with intelligent caching
+- Clean modular architecture
+- Lazy loading to minimize initialization overhead
 """
 
-import json
 import logging
-from collections import deque
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
+from npp_rl.training.curriculum_components import CURRICULUM_ORDER
 
 logger = logging.getLogger(__name__)
 
 
-class CurriculumManager:
-    """Manages curriculum learning progression through difficulty levels.
+class LRUCache:
+    """Simple LRU cache for level data to minimize memory usage."""
 
-    The curriculum follows this progression:
-    1. Very Simple (minimal chambers - most basic foundational skills)
-    2. Simple (single switch levels - foundational skills)
-    3. Medium (intermediate difficulty)
-    4. Complex (advanced level completion)
-    5. Exploratory (requires exploration strategies)
-    6. Mine heavy (hardest - requires precise control and mine avoidance)
+    def __init__(self, max_size: int = 1000):
+        """Initialize LRU cache.
 
-    The manager tracks performance and automatically advances to the next
-    difficulty level when the agent achieves sufficient mastery.
+        Args:
+            max_size: Maximum number of levels to keep in cache
+        """
+        self.max_size = max_size
+        self.cache = OrderedDict()
 
-    Features granular progression with:
-    - Stage-specific advancement thresholds
-    - Adaptive minimum episode requirements
-    - Early advancement for high performers
-    - Performance trend analysis
-    - Adaptive stage mixing based on current performance
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Get item from cache, moving it to end (most recently used)."""
+        if key in self.cache:
+            # Move to end (most recently used)
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        return None
+
+    def put(self, key: str, value: Dict[str, Any]) -> None:
+        """Add item to cache, evicting oldest if at capacity."""
+        if key in self.cache:
+            # Update existing and move to end
+            self.cache[key] = value
+            self.cache.move_to_end(key)
+        else:
+            # Add new item
+            if len(self.cache) >= self.max_size:
+                # Remove oldest item (first in OrderedDict)
+                self.cache.popitem(last=False)
+            self.cache[key] = value
+
+    def __getstate__(self):
+        """Custom pickle support for LRU cache."""
+        return {"max_size": self.max_size, "items": list(self.cache.items())}
+
+    def __setstate__(self, state):
+        """Custom unpickle support for LRU cache."""
+        self.max_size = state["max_size"]
+        self.cache = OrderedDict(state["items"])
+
+
+class LazyLevelSampler:
+    """Lazy level sampler that loads levels on-demand with LRU caching.
+
+    This sampler provides the same interface as FastCurriculumSampler but loads
+    levels only when needed, dramatically reducing initialization time and
+    memory usage for SubprocVecEnv.
     """
 
-    # Curriculum progression order
-    CURRICULUM_ORDER = [
-        "simplest",
-        "simplest_few_mines",  # NEW: Intermediate stage
-        "simplest_with_mines",
-        "simpler",
-        "simple",
-        "medium",
-        "complex",
-        "exploration",
-        "mine_heavy",
-    ]
+    def __init__(
+        self,
+        levels_metadata_by_stage_and_generator: Dict[
+            str, Dict[str, List[Dict[str, Any]]]
+        ],
+        dataset_path: str,
+        cache_size: int = 1000,
+    ):
+        """Initialize lazy sampler with level metadata only.
 
-    # Stage-specific advancement thresholds for granular progression
-    # Progressive thresholds that decrease with difficulty to ensure forward progress
-    # while maintaining competence requirements
-    # UPDATED 2025-11-08: Further reduced thresholds based on comprehensive training
-    # analysis showing agent stuck at stage 1 with 44% success (couldn't reach 80%).
-    # New progressive schedule enables curriculum progression while maintaining quality.
+        Args:
+            levels_metadata_by_stage_and_generator: Metadata for all levels
+            dataset_path: Path to dataset for loading levels on demand
+            cache_size: Maximum number of levels to keep in LRU cache
+        """
+        self.dataset_path = Path(dataset_path)
+        self.level_cache = None  # Will be created lazily
+        self.test_suite_loader = None  # Will be created lazily
+
+        # Store original parameters for pickling and lazy initialization
+        self._dataset_path_str = str(self.dataset_path)
+        self._cache_size = cache_size
+
+        # Store metadata instead of full level data
+        self.levels_metadata = levels_metadata_by_stage_and_generator
+        self._metadata_loaded = len(levels_metadata_by_stage_and_generator) > 0
+
+        # Precompute sampling arrays using metadata (if available)
+        if self._metadata_loaded:
+            self._precompute_sampling_arrays()
+            self._initialize_sample_counts()
+        else:
+            # Will be initialized lazily when metadata is loaded
+            self.stage_generators = {}
+            self.generator_metadata = {}
+            self.generator_indices = {}
+            self.stage_indices = {stage: i for i, stage in enumerate(CURRICULUM_ORDER)}
+            self.sample_count_arrays = {}
+            self.max_generators_per_stage = 0
+
+        # Cache for adaptive mixing ratios
+        self._cached_mixing_ratios = {}
+        self._mixing_ratio_cache_valid = False
+
+        logger.info(f"Initialized lazy level sampler with cache size {cache_size}")
+
+    def __getstate__(self):
+        """Custom pickle support - exclude unpickleable objects."""
+        state = self.__dict__.copy()
+        # Remove unpickleable TestSuiteLoader and cache
+        state["test_suite_loader"] = None
+        state["level_cache"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Custom unpickle support - recreate excluded objects."""
+        self.__dict__.update(state)
+        # Don't recreate TestSuiteLoader and cache here - they'll be created lazily when first needed
+        self.test_suite_loader = None
+        self.level_cache = None
+
+    def _precompute_sampling_arrays(self):
+        """Precompute data structures for fast sampling using metadata."""
+        self.stage_generators = {}  # stage -> list of generator names
+        self.generator_metadata = {}  # (stage, generator) -> list of metadata dicts
+        self.generator_indices = {}  # (stage, generator) -> index in arrays
+        self.stage_indices = {stage: i for i, stage in enumerate(CURRICULUM_ORDER)}
+
+        for stage, generators in self.levels_metadata.items():
+            if stage not in self.stage_indices:
+                continue
+
+            # Store generator names as list for indexing
+            generator_names = list(generators.keys())
+            self.stage_generators[stage] = generator_names
+
+            # Create generator index mapping
+            gen_indices = {gen: i for i, gen in enumerate(generator_names)}
+            self.generator_indices[stage] = gen_indices
+
+            # Store metadata for each generator
+            for gen_name, metadata_list in generators.items():
+                key = (stage, gen_name)
+                self.generator_metadata[key] = metadata_list
+
+    def _initialize_sample_counts(self):
+        """Initialize sample count arrays for stratified sampling."""
+        self.sample_count_arrays = {}
+        self.max_generators_per_stage = 0
+
+        for stage, generators in self.stage_generators.items():
+            n_generators = len(generators)
+            self.sample_count_arrays[stage] = np.zeros(n_generators, dtype=np.int32)
+            self.max_generators_per_stage = max(
+                self.max_generators_per_stage, n_generators
+            )
+
+    def _ensure_loader_and_cache(self):
+        """Lazily initialize TestSuiteLoader and cache to avoid pickling issues."""
+        if self.test_suite_loader is None:
+            from npp_rl.evaluation.test_suite_loader import TestSuiteLoader
+
+            self.test_suite_loader = TestSuiteLoader(self._dataset_path_str)
+
+        if self.level_cache is None:
+            self.level_cache = LRUCache(self._cache_size)
+
+    def _ensure_metadata_loaded(self):
+        """Lazily load metadata if not already loaded."""
+        if not self._metadata_loaded:
+            # Ensure we have a TestSuiteLoader
+            self._ensure_loader_and_cache()
+
+            # Load metadata
+            all_metadata = self.test_suite_loader.load_all_metadata()
+
+            # Group metadata by stage and generator
+            metadata_by_stage_and_generator = {}
+
+            for stage in CURRICULUM_ORDER:
+                metadata_by_stage_and_generator[stage] = {}
+
+                if stage not in all_metadata:
+                    logger.warning(f"No metadata found for stage '{stage}' - skipping")
+                    continue
+
+                # Group metadata by generator type
+                for level_metadata in all_metadata[stage]:
+                    generator_type = level_metadata.get("metadata", {}).get(
+                        "generator", "unknown"
+                    )
+
+                    # Load one level to get correct generator info if unknown
+                    if generator_type == "unknown":
+                        file_path = level_metadata.get("file_path")
+                        if file_path:
+                            try:
+                                sample_level = self.test_suite_loader.load_single_level(
+                                    file_path
+                                )
+                                if sample_level and "metadata" in sample_level:
+                                    generator_type = sample_level["metadata"].get(
+                                        "generator", "unknown"
+                                    )
+                                    level_metadata["metadata"]["generator"] = (
+                                        generator_type
+                                    )
+                            except Exception:
+                                generator_type = "unknown"
+
+                    if generator_type not in metadata_by_stage_and_generator[stage]:
+                        metadata_by_stage_and_generator[stage][generator_type] = []
+
+                    metadata_by_stage_and_generator[stage][generator_type].append(
+                        level_metadata
+                    )
+
+            # Update stored metadata and mark as loaded
+            self.levels_metadata = metadata_by_stage_and_generator
+            self._metadata_loaded = True
+
+            # Now precompute sampling arrays
+            self._precompute_sampling_arrays()
+            self._initialize_sample_counts()
+
+            logger.info("Metadata loaded lazily for LazyLevelSampler")
+
+    def _load_level_on_demand(
+        self, level_metadata: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Load a single level on demand with caching.
+
+        Args:
+            level_metadata: Metadata dict containing file_path
+
+        Returns:
+            Full level data, or None if loading failed
+        """
+        # Ensure loader and cache are initialized
+        self._ensure_loader_and_cache()
+
+        file_path = level_metadata.get("file_path")
+        if not file_path:
+            logger.warning(f"No file_path in level metadata: {level_metadata}")
+            return None
+
+        # Check cache first
+        cached_level = self.level_cache.get(file_path)
+        if cached_level is not None:
+            return cached_level
+
+        # Load from disk
+        level_data = self.test_suite_loader.load_single_level(file_path)
+        if level_data is not None:
+            # Add to cache
+            self.level_cache.put(file_path, level_data)
+
+            # Ensure generator type is populated correctly
+            if "metadata" not in level_data:
+                level_data["metadata"] = {}
+            if "generator" not in level_data["metadata"]:
+                level_data["metadata"]["generator"] = level_metadata.get(
+                    "metadata", {}
+                ).get("generator", "unknown")
+
+            # Add category field for compatibility
+            level_data["category"] = level_metadata.get("category", "unknown")
+
+        return level_data
+
+    def invalidate_mixing_cache(self):
+        """Invalidate cached mixing ratios when performance data changes."""
+        self._mixing_ratio_cache_valid = False
+
+    def set_cached_mixing_ratio(self, stage: str, ratio: float):
+        """Set cached mixing ratio for a stage."""
+        self._cached_mixing_ratios[stage] = ratio
+        self._mixing_ratio_cache_valid = True
+
+    def get_cached_mixing_ratio(self, stage: str, default: float = 0.2) -> float:
+        """Get cached mixing ratio for a stage."""
+        if not self._mixing_ratio_cache_valid:
+            return default
+        return self._cached_mixing_ratios.get(stage, default)
+
+    def sample_level_optimized(
+        self,
+        current_stage_idx: int,
+        cached_mixing_ratio: float = 0.2,
+    ) -> Tuple[Dict[str, Any], str, str]:
+        """Sample level with lazy loading.
+
+        Args:
+            current_stage_idx: Current curriculum stage index
+            cached_mixing_ratio: Cached mixing ratio to avoid recalculation
+
+        Returns:
+            Tuple of (level_data, sampled_stage, sampled_generator)
+        """
+        # Ensure metadata is loaded before sampling
+        self._ensure_metadata_loaded()
+
+        # Fast stage selection using cached mixing ratio
+        if current_stage_idx > 0:
+            if np.random.random() < cached_mixing_ratio:
+                sample_stage_idx = current_stage_idx - 1
+            else:
+                sample_stage_idx = current_stage_idx
+        else:
+            sample_stage_idx = current_stage_idx
+
+        sample_stage = CURRICULUM_ORDER[sample_stage_idx]
+
+        # Check if stage has any generators
+        if sample_stage not in self.stage_generators:
+            raise ValueError(f"No generators found for stage '{sample_stage}'")
+
+        generators = self.stage_generators[sample_stage]
+        if not generators:
+            raise ValueError(f"Stage '{sample_stage}' has empty generator list")
+
+        # Select generator using stratified sampling
+        counts = self.sample_count_arrays[sample_stage]
+        generator_idx = np.argmin(counts)  # Select least sampled generator
+        selected_generator = generators[generator_idx]
+
+        # Get metadata for this stage/generator combination
+        key = (sample_stage, selected_generator)
+        metadata_list = self.generator_metadata[key]
+
+        if not metadata_list:
+            raise ValueError(
+                f"No levels found for stage '{sample_stage}', generator '{selected_generator}'"
+            )
+
+        # Sample random level from this generator
+        level_metadata = np.random.choice(metadata_list)
+
+        # Load level on demand with caching
+        level_data = self._load_level_on_demand(level_metadata)
+
+        if level_data is None:
+            # Fallback: try another level from same generator
+            for fallback_metadata in metadata_list:
+                if fallback_metadata != level_metadata:
+                    level_data = self._load_level_on_demand(fallback_metadata)
+                    if level_data is not None:
+                        break
+
+        if level_data is None:
+            raise RuntimeError(
+                f"Failed to load any level from stage '{sample_stage}', generator '{selected_generator}'"
+            )
+
+        # Update sample count
+        counts[generator_idx] += 1
+
+        # Add sampled metadata for curriculum tracking
+        level_data["sampled_stage"] = sample_stage
+        level_data["sampled_generator"] = selected_generator
+
+        return level_data, sample_stage, selected_generator
+
+
+class FastCurriculumSampler:
+    """Fast level sampling with precomputed data structures.
+
+    This class handles the hot path of curriculum sampling with optimized
+    data structures to minimize runtime overhead.
+    """
+
+    def __init__(
+        self, levels_by_stage_and_generator: Dict[str, Dict[str, List[Dict[str, Any]]]]
+    ):
+        """Initialize fast sampler with precomputed data structures.
+
+        Args:
+            levels_by_stage_and_generator: Nested dict of level data
+        """
+        # Precompute sampling arrays for O(1) access
+        self._precompute_sampling_arrays(levels_by_stage_and_generator)
+
+        # Initialize sample counts as numpy arrays for fast operations
+        self._initialize_sample_counts()
+
+        # Cache for adaptive mixing ratios
+        self._cached_mixing_ratios = {}
+        self._mixing_ratio_cache_valid = False
+
+    def _precompute_sampling_arrays(
+        self, levels_by_stage_and_generator: Dict[str, Dict[str, List[Dict[str, Any]]]]
+    ):
+        """Precompute optimized data structures for fast sampling.
+
+        Args:
+            levels_by_stage_and_generator: Raw level data
+        """
+        self.stage_generators = {}  # stage -> list of generator names
+        self.generator_levels = {}  # (stage, generator) -> numpy array of levels
+        self.generator_indices = {}  # (stage, generator) -> index in arrays
+        self.stage_indices = {stage: i for i, stage in enumerate(CURRICULUM_ORDER)}
+
+        for stage, generators in levels_by_stage_and_generator.items():
+            if stage not in self.stage_indices:
+                continue
+
+            # Store generator names as list for indexing
+            generator_names = list(generators.keys())
+            self.stage_generators[stage] = generator_names
+
+            # Create generator index mapping
+            gen_indices = {gen: i for i, gen in enumerate(generator_names)}
+            self.generator_indices[stage] = gen_indices
+
+            # Convert level lists to numpy arrays for fast random access
+            for gen_name, levels in generators.items():
+                key = (stage, gen_name)
+                self.generator_levels[key] = np.array(levels, dtype=object)
+
+    def _initialize_sample_counts(self):
+        """Initialize sample count arrays for fast stratified sampling."""
+        self.sample_count_arrays = {}  # stage -> numpy array of counts
+        self.max_generators_per_stage = 0
+
+        for stage, generators in self.stage_generators.items():
+            n_generators = len(generators)
+            self.sample_count_arrays[stage] = np.zeros(n_generators, dtype=np.int32)
+            self.max_generators_per_stage = max(
+                self.max_generators_per_stage, n_generators
+            )
+
+    def invalidate_mixing_cache(self):
+        """Invalidate cached mixing ratios when performance data changes."""
+        self._mixing_ratio_cache_valid = False
+
+    def set_cached_mixing_ratio(self, stage: str, ratio: float):
+        """Set cached mixing ratio for a stage."""
+        self._cached_mixing_ratios[stage] = ratio
+        self._mixing_ratio_cache_valid = True
+
+    def get_cached_mixing_ratio(self, stage: str, default: float = 0.2) -> float:
+        """Get cached mixing ratio for a stage."""
+        if not self._mixing_ratio_cache_valid:
+            return default
+        return self._cached_mixing_ratios.get(stage, default)
+
+    def sample_level_optimized(
+        self,
+        current_stage_idx: int,
+        cached_mixing_ratio: float = 0.2,
+    ) -> Tuple[Dict[str, Any], str, str]:
+        """Fast optimized level sampling.
+
+        Args:
+            current_stage_idx: Current curriculum stage index
+            cached_mixing_ratio: Cached mixing ratio to avoid recalculation
+
+        Returns:
+            Tuple of (level_data, sampled_stage, sampled_generator)
+        """
+        # Fast stage selection using cached mixing ratio
+        if current_stage_idx > 0:
+            if np.random.random() < cached_mixing_ratio:
+                sample_stage_idx = current_stage_idx - 1
+            else:
+                sample_stage_idx = current_stage_idx
+        else:
+            sample_stage_idx = current_stage_idx
+
+        sample_stage = CURRICULUM_ORDER[sample_stage_idx]
+
+        # Fast stratified sampling using numpy arrays
+        count_array = self.sample_count_arrays[sample_stage]
+        min_count = np.min(count_array)
+
+        # Find all generators with minimum count
+        min_indices = np.where(count_array == min_count)[0]
+
+        # Fast random selection from minimum indices
+        selected_gen_idx = np.random.choice(min_indices)
+        generator_names = self.stage_generators[sample_stage]
+        selected_generator = generator_names[selected_gen_idx]
+
+        # Fast level selection from precomputed array
+        key = (sample_stage, selected_generator)
+        level_array = self.generator_levels[key]
+        level_idx = np.random.randint(len(level_array))
+        level = level_array[level_idx]
+
+        # Fast count increment
+        count_array[selected_gen_idx] += 1
+
+        # Return without modifying original level dict (avoid copy overhead)
+        return level, sample_stage, selected_generator
+
+    def get_sample_counts(self, stage: str) -> Dict[str, int]:
+        """Get current sample counts for a stage."""
+        if stage not in self.sample_count_arrays:
+            return {}
+
+        count_array = self.sample_count_arrays[stage]
+        generator_names = self.stage_generators[stage]
+
+        return {gen: int(count_array[i]) for i, gen in enumerate(generator_names)}
+
+
+class CompactPerformanceTracker:
+    """Memory-efficient performance tracking using numpy arrays and circular buffers.
+
+    Consolidates performance tracking to reduce memory overhead and improve
+    cache efficiency.
+    """
+
+    def __init__(self, performance_window: int = 50):
+        """Initialize compact performance tracker.
+
+        Args:
+            curriculum_order: List of curriculum stages
+            performance_window: Size of rolling performance window
+        """
+        self.performance_window = performance_window
+        self.n_stages = len(CURRICULUM_ORDER)
+        self.stage_indices = {stage: i for i, stage in enumerate(CURRICULUM_ORDER)}
+
+        # Circular buffers for performance data (more memory efficient than deques)
+        self.performance_buffers = np.full(
+            (self.n_stages, performance_window), -1, dtype=np.int8
+        )
+        self.buffer_positions = np.zeros(self.n_stages, dtype=np.int32)
+        self.buffer_sizes = np.zeros(self.n_stages, dtype=np.int32)
+
+        # Episode counts per stage
+        self.episode_counts = np.zeros(self.n_stages, dtype=np.int32)
+
+        # Generator-specific performance tracking (consolidated)
+        self.generator_stats = {}  # stage -> {generator: [successes, total_episodes]}
+
+    def record_episode(
+        self, stage: str, success: bool, generator_type: Optional[str] = None
+    ):
+        """Record an episode result efficiently.
+
+        Args:
+            stage: Stage name
+            success: Whether episode was successful
+            generator_type: Generator type (optional)
+        """
+        if stage not in self.stage_indices:
+            logger.warning(f"Unknown stage '{stage}', ignoring episode")
+            return
+
+        stage_idx = self.stage_indices[stage]
+
+        # Add to circular buffer
+        pos = self.buffer_positions[stage_idx]
+        self.performance_buffers[stage_idx, pos] = 1 if success else 0
+
+        # Update position and size
+        self.buffer_positions[stage_idx] = (pos + 1) % self.performance_window
+        self.buffer_sizes[stage_idx] = min(
+            self.buffer_sizes[stage_idx] + 1, self.performance_window
+        )
+        self.episode_counts[stage_idx] += 1
+
+        # Update generator stats if provided
+        if generator_type:
+            if stage not in self.generator_stats:
+                self.generator_stats[stage] = {}
+
+            if generator_type not in self.generator_stats[stage]:
+                self.generator_stats[stage][generator_type] = np.array(
+                    [0, 0], dtype=np.int32
+                )
+
+            stats = self.generator_stats[stage][generator_type]
+            if success:
+                stats[0] += 1  # successes
+            stats[1] += 1  # total episodes
+
+    def get_success_rate(self, stage: str) -> float:
+        """Get success rate for a stage efficiently.
+
+        Args:
+            stage: Stage name
+
+        Returns:
+            Success rate (0.0 to 1.0)
+        """
+        if stage not in self.stage_indices:
+            return 0.0
+
+        stage_idx = self.stage_indices[stage]
+        buffer_size = self.buffer_sizes[stage_idx]
+
+        if buffer_size == 0:
+            return 0.0
+
+        # Fast numpy sum over valid buffer entries
+        buffer_data = self.performance_buffers[stage_idx, :buffer_size]
+        return float(np.mean(buffer_data))
+
+    def get_episode_count(self, stage: str) -> int:
+        """Get total episode count for a stage."""
+        if stage not in self.stage_indices:
+            return 0
+        return int(self.episode_counts[self.stage_indices[stage]])
+
+    def calculate_trend(self, stage: str) -> float:
+        """Calculate performance trend efficiently."""
+        if stage not in self.stage_indices:
+            return 0.0
+
+        stage_idx = self.stage_indices[stage]
+        buffer_size = self.buffer_sizes[stage_idx]
+
+        if buffer_size < 20:
+            return 0.0
+
+        # Efficient trend calculation using numpy
+        buffer_data = self.performance_buffers[stage_idx, :buffer_size]
+        mid = buffer_size // 2
+
+        first_half_mean = np.mean(buffer_data[:mid])
+        second_half_mean = np.mean(buffer_data[mid:])
+
+        return float(second_half_mean - first_half_mean)
+
+    def get_generator_performance(self, stage: str) -> Dict[str, Dict[str, int]]:
+        """Get generator-specific performance stats."""
+        if stage not in self.generator_stats:
+            return {}
+
+        result = {}
+        for generator, stats in self.generator_stats[stage].items():
+            successes, total = stats
+            result[generator] = {
+                "successes": int(successes),
+                "failures": int(total - successes),
+                "success_rate": float(successes / total) if total > 0 else 0.0,
+            }
+
+        return result
+
+
+class CurriculumManager:
+    """Curriculum learning manager with high-performance data structures and algorithms.
+
+    Manages progression through difficulty levels, tracking performance and automatically
+    advancing through curriculum stages based on success rates.
+    """
+
     STAGE_THRESHOLDS = {
-        "simplest": 0.70,  # Reduced from 0.80 to allow faster progression
-        "simplest_few_mines": 0.65,  # NEW: Between simplest and simplest_with_mines
-        "simplest_with_mines": 0.60,  # Reduced from 0.75 - critical bottleneck
-        "simpler": 0.60,  # Unchanged
-        "simple": 0.50,  # Unchanged
-        "medium": 0.45,  # Unchanged
-        "complex": 0.40,  # Unchanged
-        "exploration": 0.35,  # Unchanged
-        "mine_heavy": 0.30,  # Unchanged
+        "simplest": 0.70,
+        "simplest_few_mines": 0.65,
+        "simplest_with_mines": 0.60,
+        "simpler": 0.60,
+        "simple": 0.50,
+        "medium": 0.45,
+        "complex": 0.40,
+        "exploration": 0.35,
+        "mine_heavy": 0.30,
     }
 
-    # Stage-specific minimum episodes for adaptive progression
-    # Harder stages require more episodes to ensure sufficient learning
     STAGE_MIN_EPISODES = {
-        "simplest": 100,  # Reduced from 200 - quick validation of basics
-        "simplest_few_mines": 100,  # NEW: Same as other simple stages
-        "simplest_with_mines": 100,  # Same as simplest - similar difficulty with mines
-        "simpler": 100,  # Reduced from 200
-        "simple": 75,  # Reduced from 200 - agent got stuck here
-        "medium": 100,  # Reduced from 250
-        "complex": 150,  # Reduced from 300
-        "exploration": 150,  # Reduced from 300
-        "mine_heavy": 200,  # Reduced from 300 - hardest stage needs more
+        "simplest": 100,
+        "simplest_few_mines": 100,
+        "simplest_with_mines": 100,
+        "simpler": 100,
+        "simple": 75,
+        "medium": 100,
+        "complex": 150,
+        "exploration": 150,
+        "mine_heavy": 200,
     }
 
-    # Early advancement threshold - if agent excels, can advance sooner
     EARLY_ADVANCEMENT_THRESHOLD = 0.90
     EARLY_ADVANCEMENT_MIN_EPISODES = 50
 
-    # Regression thresholds to prevent catastrophic forgetting
-    # If performance drops too low, regress to previous stage
     REGRESSION_THRESHOLDS = {
-        "simplest_few_mines": 0.30,  # NEW
+        "simplest_few_mines": 0.30,
         "simplest_with_mines": 0.30,
         "simpler": 0.30,
         "simple": 0.30,
@@ -108,133 +712,89 @@ class CurriculumManager:
         dataset_path: str,
         starting_stage: str = "simplest",
         performance_window: int = 50,
-        allow_stage_mixing: bool = True,
         mixing_ratio: float = 0.2,
-        enable_adaptive_mixing: bool = True,
-        enable_early_advancement: bool = True,
-        enable_trend_analysis: bool = True,
-        enable_regression: bool = True,
         enable_auto_adjustment: bool = False,
         auto_adjustment_freq: int = 50000,
         auto_adjustment_min_threshold: float = 0.40,
     ):
-        """Initialize curriculum manager with granular progression settings.
+        """Initialize optimized curriculum manager.
 
         Args:
-            dataset_path: Path to dataset containing level categories
-            starting_stage: Initial curriculum stage (default: 'simplest')
-            performance_window: Window size for performance tracking (default: 50)
-            allow_stage_mixing: If True, mix in previous stage levels (default: True)
-            mixing_ratio: Base ratio of previous stage levels (default: 0.2, can be adapted)
-            enable_adaptive_mixing: If True, adjust mixing based on performance (default: True)
-            enable_early_advancement: If True, allow fast advancement for high performers (default: True)
-            enable_trend_analysis: If True, consider performance trends in decisions (default: True)
-            enable_regression: If True, allow regressing to easier stages on poor performance (default: True)
-            enable_auto_adjustment: If True, automatically reduce thresholds when stuck (default: False)
-            auto_adjustment_freq: Steps between automatic threshold checks (default: 50000)
-            auto_adjustment_min_threshold: Minimum threshold floor (default: 0.40)
+            dataset_path: Path to curriculum dataset
+            starting_stage: Initial curriculum stage
+            performance_window: Size of rolling performance window
+            mixing_ratio: Base mixing ratio for stage mixing
+            enable_auto_adjustment: Enable automatic threshold adjustment
+            auto_adjustment_freq: Frequency for automatic adjustments
+            auto_adjustment_min_threshold: Minimum threshold for auto adjustment
         """
         self.dataset_path = Path(dataset_path)
-
         self.performance_window = performance_window
-        self.allow_stage_mixing = allow_stage_mixing
         self.base_mixing_ratio = mixing_ratio
-        self.enable_adaptive_mixing = enable_adaptive_mixing
-        self.enable_early_advancement = enable_early_advancement
-        self.enable_trend_analysis = enable_trend_analysis
-        self.enable_regression = enable_regression
         self.enable_auto_adjustment = enable_auto_adjustment
         self.auto_adjustment_freq = auto_adjustment_freq
         self.auto_adjustment_min_threshold = auto_adjustment_min_threshold
         self.last_auto_adjustment_step = 0
 
         # Validate starting stage
-        if starting_stage not in self.CURRICULUM_ORDER:
+        if starting_stage not in CURRICULUM_ORDER:
             raise ValueError(
-                f"Invalid starting stage '{starting_stage}'. "
-                f"Must be one of: {self.CURRICULUM_ORDER}"
+                f"Invalid starting stage '{starting_stage}'. Must be one of: {CURRICULUM_ORDER}"
             )
 
         # Current curriculum state
         self.current_stage = starting_stage
-        self.current_stage_idx = self.CURRICULUM_ORDER.index(starting_stage)
+        self.current_stage_idx = CURRICULUM_ORDER.index(starting_stage)
 
-        # Performance tracking per stage
-        self.stage_performance: Dict[str, deque] = {
-            stage: deque(maxlen=performance_window) for stage in self.CURRICULUM_ORDER
-        }
+        # Always use lazy loading for performance - no more eager loading
+        self.fast_sampler = LazyLevelSampler(
+            {},  # Empty metadata - will be loaded when first needed
+            str(self.dataset_path),
+            1000,  # Fixed cache size for performance
+        )
+        self.performance_tracker = CompactPerformanceTracker(performance_window)
 
-        self.stage_episode_counts: Dict[str, int] = {
-            stage: 0 for stage in self.CURRICULUM_ORDER
-        }
-
-        # Track current adaptive mixing ratio per stage
-        self.stage_mixing_ratios: Dict[str, float] = {
-            stage: mixing_ratio for stage in self.CURRICULUM_ORDER
-        }
-
-        # Load level data organized by stage and generator type
-        self.levels_by_stage_and_generator = self._load_levels()
-
-        # Track sampling counts per generator type for balanced sampling
-        self.generator_sample_counts: Dict[str, Dict[str, int]] = {}
-        for stage, generators in self.levels_by_stage_and_generator.items():
-            self.generator_sample_counts[stage] = {gen: 0 for gen in generators.keys()}
-
-        # Track performance per generator type for granular analysis
-        self.generator_performance: Dict[str, Dict[str, Dict[str, int]]] = {}
-        for stage, generators in self.levels_by_stage_and_generator.items():
-            self.generator_performance[stage] = {
-                gen: {"successes": 0, "failures": 0} for gen in generators.keys()
-            }
+        # Cache for adaptive mixing ratios
+        self._cached_mixing_ratios = {stage: mixing_ratio for stage in CURRICULUM_ORDER}
+        self._mixing_cache_valid = False
 
         logger.info("=" * 60)
-        logger.info("Curriculum Manager Initialized (Granular Progression)")
+        logger.info("Optimized Curriculum Manager Initialized")
         logger.info("=" * 60)
         logger.info(f"Starting stage: {self.current_stage}")
-        logger.info("Adaptive features:")
-        logger.info(f"  - Adaptive mixing: {enable_adaptive_mixing}")
-        logger.info(f"  - Early advancement: {enable_early_advancement}")
-        logger.info(f"  - Trend analysis: {enable_trend_analysis}")
-        logger.info(f"Stage mixing: {'enabled' if allow_stage_mixing else 'disabled'}")
-
-        logger.info("\nStage-specific advancement thresholds:")
-        for stage in self.CURRICULUM_ORDER:
-            threshold = self.STAGE_THRESHOLDS.get(stage, 0.7)
-            min_eps = self.STAGE_MIN_EPISODES.get(stage, 100)
-            logger.info(f"  {stage}: {threshold:.0%} success, {min_eps} episodes")
-
-        logger.info("\nLevels per stage (by generator type):")
-        for stage, generators in self.levels_by_stage_and_generator.items():
-            total_levels = sum(len(levels) for levels in generators.values())
-            logger.info(
-                f"  {stage}: {total_levels} levels across {len(generators)} generator types"
-            )
-            for gen_type, levels in generators.items():
-                logger.info(f"    - {gen_type}: {len(levels)} levels")
+        logger.info("Performance optimizations enabled:")
+        logger.info("  - Lazy level loading with LRU caching (1000 level cache)")
+        logger.info("  - Minimal initialization overhead")
+        logger.info("  - Memory-efficient performance tracking")
+        logger.info("  - Cached adaptive mixing ratios")
         logger.info("=" * 60)
 
-    def _load_levels(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
-        """Load levels from dataset organized by stage and generator type.
+    def __getstate__(self):
+        """Custom pickle support for CurriculumManager."""
+        state = self.__dict__.copy()
+        # The fast_sampler handles its own pickling if it's a LazyLevelSampler
+        return state
 
-        Returns:
-            Nested dictionary: {stage: {generator_type: [level_data, ...]}}
-        """
+    def __setstate__(self, state):
+        """Custom unpickle support for CurriculumManager."""
+        self.__dict__.update(state)
+        # LazyLevelSampler will recreate its own TestSuiteLoader
+
+    def _load_levels(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+        """Load levels with same logic as original but optimized for speed."""
         loader = TestSuiteLoader(str(self.dataset_path))
         all_levels = loader.load_all_levels()
 
-        # Organize levels by stage and generator type
         levels_by_stage_and_generator = {}
 
-        for stage in self.CURRICULUM_ORDER:
+        for stage in CURRICULUM_ORDER:
             levels_by_stage_and_generator[stage] = {}
 
             if stage not in all_levels:
                 raise ValueError(f"No levels found for stage '{stage}'")
 
-            # Group levels by generator type
+            # Group by generator type efficiently
             for level_data in all_levels[stage]:
-                # Extract generator type from metadata
                 generator_type = level_data.get("metadata", {}).get(
                     "generator", "unknown"
                 )
@@ -242,19 +802,137 @@ class CurriculumManager:
                 if generator_type not in levels_by_stage_and_generator[stage]:
                     levels_by_stage_and_generator[stage][generator_type] = []
 
-                # Add explicit category field for fallback in CurriculumEnv
-                # This ensures backward compatibility if sampled_stage is missing
+                # Add category field for compatibility
                 level_data["category"] = stage
-
                 levels_by_stage_and_generator[stage][generator_type].append(level_data)
 
-            # Raise error if any stage has no generator types
             if not levels_by_stage_and_generator[stage]:
                 raise ValueError(
                     f"Stage '{stage}' has no levels with generator metadata"
                 )
 
         return levels_by_stage_and_generator
+
+    def _load_levels_metadata(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+        """Load level metadata without full level data for lazy loading.
+
+        This method is much faster than _load_levels() as it only reads file paths
+        and basic metadata without deserializing pickle files.
+
+        Returns:
+            Dictionary mapping stage to generator to list of level metadata
+        """
+        loader = TestSuiteLoader(str(self.dataset_path))
+        all_metadata = loader.load_all_metadata()
+
+        metadata_by_stage_and_generator = {}
+
+        for stage in CURRICULUM_ORDER:
+            metadata_by_stage_and_generator[stage] = {}
+
+            if stage not in all_metadata:
+                raise ValueError(f"No metadata found for stage '{stage}'")
+
+            # Group metadata by generator type
+            for level_metadata in all_metadata[stage]:
+                # Try to get generator type from existing metadata, or extract from actual file if needed
+                generator_type = level_metadata.get("metadata", {}).get(
+                    "generator", "unknown"
+                )
+
+                # If generator type is unknown, we need to load one level to get the correct generator info
+                # This is a minimal penalty compared to loading all levels
+                if generator_type == "unknown":
+                    file_path = level_metadata.get("file_path")
+                    if file_path:
+                        try:
+                            sample_level = loader.load_single_level(file_path)
+                            if sample_level and "metadata" in sample_level:
+                                generator_type = sample_level["metadata"].get(
+                                    "generator", "unknown"
+                                )
+                                # Update the metadata for future reference
+                                level_metadata["metadata"]["generator"] = generator_type
+                        except Exception:
+                            # If we can't load the level, keep as unknown
+                            generator_type = "unknown"
+
+                if generator_type not in metadata_by_stage_and_generator[stage]:
+                    metadata_by_stage_and_generator[stage][generator_type] = []
+
+                metadata_by_stage_and_generator[stage][generator_type].append(
+                    level_metadata
+                )
+
+            if not metadata_by_stage_and_generator[stage]:
+                raise ValueError(
+                    f"Stage '{stage}' has no levels with generator metadata"
+                )
+
+        logger.info("Level metadata loaded for lazy sampling")
+        return metadata_by_stage_and_generator
+
+    def sample_level(self) -> Optional[Dict[str, Any]]:
+        """Sample a level with optimized performance (drop-in replacement for original).
+
+        Returns:
+            Level data dictionary with generator metadata
+        """
+        # Get cached mixing ratio to avoid recalculation
+        cached_ratio = self._get_cached_mixing_ratio(self.current_stage)
+
+        # Fast optimized sampling
+        level, sample_stage, sample_generator = (
+            self.fast_sampler.sample_level_optimized(
+                current_stage_idx=self.current_stage_idx,
+                cached_mixing_ratio=cached_ratio,
+            )
+        )
+
+        # Add tracking metadata (create a shallow copy to avoid modifying original)
+        level_copy = level.copy()
+        level_copy["sampled_generator"] = sample_generator
+        level_copy["sampled_stage"] = sample_stage
+
+        return level_copy
+
+    def _get_cached_mixing_ratio(self, stage: str) -> float:
+        """Get cached mixing ratio, calculating if needed."""
+        # Use cached value if valid and available
+        if self._mixing_cache_valid and stage in self._cached_mixing_ratios:
+            return self._cached_mixing_ratios[stage]
+
+        # Calculate fresh ratio from current performance
+        success_rate = self.performance_tracker.get_success_rate(stage)
+
+        # Same adaptive logic as original
+        if success_rate < 0.50:
+            adaptive_ratio = 0.40
+        elif success_rate < 0.65:
+            adaptive_ratio = 0.25
+        elif success_rate < 0.80:
+            adaptive_ratio = 0.15
+        else:
+            adaptive_ratio = 0.05
+
+        # Cache result
+        self._cached_mixing_ratios[stage] = adaptive_ratio
+        self._mixing_cache_valid = True
+
+        return adaptive_ratio
+
+    def record_episode(
+        self,
+        stage: str,
+        success: bool,
+        generator_type: Optional[str] = None,
+        frames: Optional[int] = None,
+    ):
+        """Record episode result (drop-in replacement for original)."""
+        self.performance_tracker.record_episode(stage, success, generator_type)
+
+        # Invalidate mixing ratio cache when performance changes
+        self._mixing_cache_valid = False
 
     def get_current_stage(self) -> str:
         """Get current curriculum stage name."""
@@ -265,216 +943,22 @@ class CurriculumManager:
         return self.current_stage_idx
 
     def get_available_stages(self) -> List[str]:
-        """Get list of all available curriculum stages up to current."""
-        return self.CURRICULUM_ORDER[: self.current_stage_idx + 1]
+        """Get list of available curriculum stages up to current."""
+        return CURRICULUM_ORDER[: self.current_stage_idx + 1]
 
-    def _get_adaptive_mixing_ratio(self, stage: str) -> float:
-        """Get adaptive mixing ratio for a stage based on current performance.
-
-        In multi-environment setups with SubprocVecEnv:
-        - Main process: Calculates ratio from current performance data
-        - Subprocesses: Use cached ratio synced from main process (to avoid stale data)
-
-        Args:
-            stage: Stage name
-
-        Returns:
-            Adaptive mixing ratio (0.0 to 1.0)
-        """
-        if not self.enable_adaptive_mixing:
-            return self.base_mixing_ratio
-
-        # If we have a cached ratio and no/minimal performance data,
-        # we're likely in a subprocess - use the synced cached value
-        # This prevents using stale performance data in subprocess copies
-        stage_perf_count = len(self.stage_performance.get(stage, []))
-        if stage in self.stage_mixing_ratios and stage_perf_count < 5:
-            # Use cached ratio (synced from main process)
-            return self.stage_mixing_ratios[stage]
-
-        # Calculate fresh ratio from current performance (main process path)
-        success_rate = self.get_stage_success_rate(stage)
-
-        # Adaptive mixing based on performance:
-        # - Struggling (< 50%): 40% previous stage (more support)
-        # - Learning (50-65%): 25% previous stage (moderate support)
-        # - Competent (65-80%): 15% previous stage (less support)
-        # - Mastering (> 80%): 5% previous stage (minimal support)
-
-        if success_rate < 0.50:
-            adaptive_ratio = 0.40  # Need more support
-        elif success_rate < 0.65:
-            adaptive_ratio = 0.25  # Moderate support
-        elif success_rate < 0.80:
-            adaptive_ratio = 0.15  # Less support
-        else:
-            adaptive_ratio = 0.05  # Minimal support, almost ready to advance
-
-        # Cache for future calls and subprocess syncing
-        self.stage_mixing_ratios[stage] = adaptive_ratio
-
-        return adaptive_ratio
-
-    def sample_level(self) -> Optional[Dict[str, Any]]:
-        """Sample a level from current curriculum stage with stratified generator balancing.
-
-        Uses stratified sampling to ensure balanced exposure across all generator types
-        within each stage, promoting better generalization.
-
-        Returns:
-            Level data dictionary with generator metadata, or None if no levels available
-        """
-        # Determine which stage to sample from
-        if self.allow_stage_mixing and self.current_stage_idx > 0:
-            # Get adaptive mixing ratio for current stage
-            mixing_ratio = self._get_adaptive_mixing_ratio(self.current_stage)
-
-            # Mix current stage with previous stage using adaptive ratio
-            if np.random.random() < mixing_ratio:
-                # Sample from previous stage
-                sample_stage_idx = self.current_stage_idx - 1
-            else:
-                # Sample from current stage
-                sample_stage_idx = self.current_stage_idx
-        else:
-            # Sample from current stage only
-            sample_stage_idx = self.current_stage_idx
-
-        sample_stage = self.CURRICULUM_ORDER[sample_stage_idx]
-        generators = self.levels_by_stage_and_generator.get(sample_stage, {})
-
-        if not generators:
-            raise RuntimeError(
-                f"No generator types available for stage '{sample_stage}'"
-            )
-
-        # Stratified sampling: find least-sampled generator type(s)
-        generator_counts = self.generator_sample_counts.get(sample_stage, {})
-
-        if not generator_counts:
-            raise RuntimeError(
-                f"No generator counts for stage '{sample_stage}', using uniform sampling"
-            )
-
-        # Find minimum sample count
-        min_count = min(generator_counts.values())
-
-        # Get all generator types with minimum count (ties are broken randomly)
-        least_sampled_generators = [
-            gen for gen, count in generator_counts.items() if count == min_count
-        ]
-
-        # Sample uniformly from least-sampled generator types
-        selected_generator = np.random.choice(least_sampled_generators)
-
-        # Get levels for selected generator
-        generator_levels = generators.get(selected_generator, [])
-
-        if not generator_levels:
-            raise RuntimeError(
-                f"No levels for generator '{selected_generator}' in stage '{sample_stage}'"
-            )
-
-        # Sample random level from selected generator
-        level = np.random.choice(generator_levels)
-
-        # Increment sample count for this generator
-        self.generator_sample_counts[sample_stage][selected_generator] += 1
-
-        # Add generator type to level data for tracking (non-invasive)
-        level["sampled_generator"] = selected_generator
-        level["sampled_stage"] = sample_stage
-
-        return level
-
-    def record_episode(
-        self,
-        stage: str,
-        success: bool,
-        generator_type: Optional[str] = None,
-        frames: Optional[int] = None,
-    ) -> None:
-        """Record episode result for a stage and optionally for a specific generator type.
-
-        Args:
-            stage: Stage name
-            success: Whether episode was successful (1) or not (0)
-            generator_type: Generator type that produced this level (optional)
-            frames: Number of frames elapsed during the episode (optional)
-        """
-        if stage not in self.stage_performance:
-            raise ValueError(f"Unknown stage '{stage}', ignoring episode")
-
-        logger.debug(
-            f"Recording episode for stage: {stage}, generator: {generator_type}, "
-            f"success: {success}, frames: {frames}"
-        )
-        self.stage_performance[stage].append(1 if success else 0)
-
-        # Defensive: ensure stage exists in episode counts
-        if stage not in self.stage_episode_counts:
-            print(f"Stage '{stage}' not in episode counts, initializing to 0")
-            self.stage_episode_counts[stage] = 0
-
-        self.stage_episode_counts[stage] += 1
-
-        # Track generator-specific performance if provided
-        if generator_type and stage in self.generator_performance:
-            if generator_type in self.generator_performance[stage]:
-                if success:
-                    self.generator_performance[stage][generator_type]["successes"] += 1
-                else:
-                    self.generator_performance[stage][generator_type]["failures"] += 1
-            else:
-                logger.debug(
-                    f"Generator type '{generator_type}' not found in stage '{stage}' performance tracking"
-                )
-
-    def _calculate_performance_trend(self, stage: str) -> float:
-        """Calculate performance improvement trend for a stage.
-
-        Compares recent performance to earlier performance to detect improvement.
-
-        Args:
-            stage: Stage name
-
-        Returns:
-            Trend value: positive = improving, negative = declining, 0 = stable
-        """
-        results = self.stage_performance.get(stage, deque())
-
-        if len(results) < 20:
-            return 0.0  # Not enough data
-
-        # Split into first half and second half
-        results_list = list(results)
-        mid = len(results_list) // 2
-        first_half = results_list[:mid]
-        second_half = results_list[mid:]
-
-        first_avg = np.mean(first_half)
-        second_avg = np.mean(second_half)
-
-        # Trend is the difference
-        trend = second_avg - first_avg
-
-        return trend
+    def get_stage_success_rate(self, stage: str) -> float:
+        """Get success rate for a stage."""
+        return self.performance_tracker.get_success_rate(stage)
 
     def get_stage_performance(self, stage: str) -> Dict[str, Any]:
-        """Get performance metrics for a stage with granular progression analysis.
-
-        Args:
-            stage: Stage name
-
-        Returns:
-            Dictionary with performance metrics (always includes all keys)
-        """
-        results = self.stage_performance.get(stage, deque())
+        """Get performance metrics for a stage (drop-in replacement)."""
+        success_rate = self.performance_tracker.get_success_rate(stage)
+        episodes = self.performance_tracker.get_episode_count(stage)
 
         stage_threshold = self.STAGE_THRESHOLDS.get(stage, 0.7)
         stage_min_episodes = self.STAGE_MIN_EPISODES.get(stage, 100)
 
-        if not results:
+        if episodes == 0:
             return {
                 "success_rate": 0.0,
                 "episodes": 0,
@@ -488,190 +972,70 @@ class CurriculumManager:
                 "adaptive_mixing_ratio": self.base_mixing_ratio,
             }
 
-        success_rate = np.mean(results)
-        episodes = self.stage_episode_counts.get(stage, 0)
-        recent_episodes = len(results)
-
-        # Calculate performance trend
-        trend = (
-            self._calculate_performance_trend(stage)
-            if self.enable_trend_analysis
-            else 0.0
-        )
+        # Calculate trend efficiently
+        trend = self.performance_tracker.calculate_trend(stage)
 
         # Standard advancement check
         can_advance = success_rate >= stage_threshold and episodes >= stage_min_episodes
 
-        # Early advancement check (high performers can advance sooner)
-        can_early_advance = False
-        if (
-            self.enable_early_advancement
-            and episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES
-        ):
-            can_early_advance = success_rate >= self.EARLY_ADVANCEMENT_THRESHOLD
+        # Early advancement check
+        can_early_advance = (
+            episodes >= self.EARLY_ADVANCEMENT_MIN_EPISODES
+            and success_rate >= self.EARLY_ADVANCEMENT_THRESHOLD
+        )
 
-        # Trend-based advancement: if showing strong improvement, can advance slightly earlier
+        # Trend-based advancement
         trend_bonus = False
-        # SAFETY: Add hard minimum threshold to prevent premature advancement
-        HARD_MINIMUM_THRESHOLD = 0.60  # Never advance below 60% success rate
-        if (
-            self.enable_trend_analysis
-            and trend > 0.15
-            and episodes >= (stage_min_episodes * 0.9)
-        ):
-            # Strong positive trend + 90% of required episodes (increased from 80% for safety)
-            # Reduced from 5% to 2% margin for more conservative advancement
+        HARD_MINIMUM_THRESHOLD = 0.60
+        if trend > 0.15 and episodes >= (stage_min_episodes * 0.9):
             if success_rate >= max(stage_threshold - 0.02, HARD_MINIMUM_THRESHOLD):
                 trend_bonus = True
 
         return {
             "success_rate": success_rate,
             "episodes": episodes,
-            "recent_episodes": recent_episodes,
+            "recent_episodes": min(episodes, self.performance_window),
             "can_advance": can_advance or can_early_advance or trend_bonus,
             "advancement_threshold": stage_threshold,
             "min_episodes": stage_min_episodes,
             "trend": trend,
             "can_early_advance": can_early_advance,
             "trend_bonus": trend_bonus,
-            "adaptive_mixing_ratio": self.stage_mixing_ratios.get(
+            "adaptive_mixing_ratio": self._cached_mixing_ratios.get(
                 stage, self.base_mixing_ratio
             ),
         }
 
-    def get_stage_success_rate(self, stage: str) -> float:
-        """Get success rate for a stage.
-
-        Args:
-            stage: Stage name
-
-        Returns:
-            Success rate (0.0 to 1.0)
-        """
-        results = self.stage_performance.get(stage, deque())
-        if not results:
-            return 0.0
-        return float(np.mean(results))
-
-    def check_auto_adjustment(self, global_step: int) -> bool:
-        """Check if curriculum threshold should be automatically reduced.
-
-        Reduces threshold by 5% if agent stuck on current stage for extended period.
-
-        Args:
-            global_step: Current training step count
-
-        Returns:
-            True if threshold was adjusted, False otherwise
-        """
-        if not self.enable_auto_adjustment:
-            return False
-
-        # Only check at specified frequency
-        if global_step - self.last_auto_adjustment_step < self.auto_adjustment_freq:
-            return False
-
-        self.last_auto_adjustment_step = global_step
-
-        # Get current stage performance
-        current_stage = self.current_stage
-        perf = self.get_stage_performance(current_stage)
-        current_threshold = self.STAGE_THRESHOLDS.get(current_stage, 0.7)
-        min_episodes = self.STAGE_MIN_EPISODES.get(current_stage, 100)
-
-        # If below threshold with sufficient episodes, consider adjustment
-        if (
-            perf["success_rate"] < current_threshold
-            and perf["episodes"] >= min_episodes
-        ):
-            # Calculate new threshold (5% reduction)
-            new_threshold = max(
-                current_threshold * 0.95,  # 5% reduction
-                self.auto_adjustment_min_threshold,  # Floor at 40%
-            )
-
-            if new_threshold < current_threshold:
-                print(
-                    f"📉 Auto-adjusting curriculum threshold for '{current_stage}': "
-                    f"{current_threshold:.1%} → {new_threshold:.1%} "
-                    f"(current: {perf['success_rate']:.1%}, episodes: {perf['episodes']})"
-                )
-
-                # Update threshold (modifies class dictionary)
-                self.STAGE_THRESHOLDS[current_stage] = new_threshold
-                return True
-
-        return False
-
     def check_advancement(self) -> bool:
-        """Check if agent should advance to next curriculum stage.
-
-        Uses granular progression logic including:
-        - Stage-specific thresholds
-        - Early advancement for high performers
-        - Trend-based advancement
-
-        Returns:
-            True if advanced to next stage, False otherwise
-        """
-        # Check if already at final stage
-        if self.current_stage_idx >= len(self.CURRICULUM_ORDER) - 1:
-            logger.debug("Already at final curriculum stage")
+        """Check if agent should advance to next curriculum stage."""
+        if self.current_stage_idx >= len(CURRICULUM_ORDER) - 1:
             return False
 
-        # Check current stage performance with all adaptive features
         perf = self.get_stage_performance(self.current_stage)
 
         if perf["can_advance"]:
             prev_stage = self.current_stage
 
-            # Log advancement criteria that were met (before advancing)
-            if perf.get("can_early_advance", False):
-                logger.info(
-                    f"[Early Advancement] Stage '{prev_stage}': {perf['success_rate']:.1%} success "
-                    f"after only {perf['episodes']} episodes (threshold: {self.EARLY_ADVANCEMENT_THRESHOLD:.1%})"
-                )
-            if perf.get("trend_bonus", False):
-                logger.info(
-                    f"[Trend Bonus] Stage '{prev_stage}': Strong improvement trend ({perf['trend']:+.2f}) "
-                    f"with {perf['success_rate']:.1%} success, allowing advancement"
-                )
-
             # Advance to next stage
             self.current_stage_idx += 1
-            self.current_stage = self.CURRICULUM_ORDER[self.current_stage_idx]
+            self.current_stage = CURRICULUM_ORDER[self.current_stage_idx]
 
-            # Determine advancement reason for summary
-            advancement_reason = []
+            # Log advancement
+            advancement_reasons = []
             if perf.get("can_early_advance", False):
-                advancement_reason.append("Early Advancement (High Performance)")
+                advancement_reasons.append("Early Advancement")
             if perf.get("trend_bonus", False):
-                advancement_reason.append(
-                    f"Trend Bonus (Improvement: {perf['trend']:+.2f})"
-                )
-            if not advancement_reason:
-                advancement_reason.append("Standard Advancement")
-
-            reason_str = " + ".join(advancement_reason)
+                advancement_reasons.append(f"Trend Bonus ({perf['trend']:+.2f})")
+            if not advancement_reasons:
+                advancement_reasons.append("Standard Advancement")
 
             logger.info("=" * 70)
-            logger.info("✨ CURRICULUM ADVANCEMENT! ✨")
-            logger.info("=" * 70)
-            logger.info(f"Previous stage: {prev_stage}")
-            logger.info(f"New stage: {self.current_stage}")
-            logger.info(f"Reason: {reason_str}")
-            logger.info("")
-            logger.info("Performance Summary:")
-            logger.info(f"  Success rate: {perf['success_rate']:.1%}")
-            logger.info(f"  Episodes completed: {perf['episodes']}")
-            logger.info(f"  Threshold: {self.STAGE_THRESHOLDS[self.current_stage]:.1%}")
-            logger.info(f"  Min episodes: {perf['min_episodes']}")
-            if self.enable_trend_analysis:
-                logger.info(f"  Performance trend: {perf['trend']:+.2f}")
-            if self.enable_adaptive_mixing:
-                logger.info(
-                    f"  Final mixing ratio: {perf['adaptive_mixing_ratio']:.1%}"
-                )
+            logger.info("✨ OPTIMIZED CURRICULUM ADVANCEMENT! ✨")
+            logger.info(f"Previous: {prev_stage} → New: {self.current_stage}")
+            logger.info(f"Reason: {' + '.join(advancement_reasons)}")
+            logger.info(
+                f"Performance: {perf['success_rate']:.1%} success, {perf['episodes']} episodes"
+            )
             logger.info("=" * 70)
 
             return True
@@ -679,71 +1043,53 @@ class CurriculumManager:
         return False
 
     def check_regression(self) -> bool:
-        """Check if agent should regress to previous curriculum stage.
-
-        Prevents catastrophic forgetting by regressing when performance drops
-        too low on the current stage.
-
-        Returns:
-            True if regressed to previous stage, False otherwise
-        """
-        if self.current_stage_idx == 0 or not self.enable_regression:
+        """Check if agent should regress to previous curriculum stage."""
+        if self.current_stage_idx == 0:
             return False
 
-        current_stage = self.current_stage
-        results = self.stage_performance.get(current_stage, deque())
+        success_rate = self.performance_tracker.get_success_rate(self.current_stage)
+        episodes = self.performance_tracker.get_episode_count(self.current_stage)
 
-        if len(results) < self.REGRESSION_MIN_EPISODES:
+        if episodes < self.REGRESSION_MIN_EPISODES:
             return False
 
-        success_rate = float(np.mean(results))
-        regression_threshold = self.REGRESSION_THRESHOLDS.get(current_stage, 0.2)
+        regression_threshold = self.REGRESSION_THRESHOLDS.get(self.current_stage, 0.2)
 
         if success_rate < regression_threshold:
             prev_stage_idx = self.current_stage_idx - 1
-            prev_stage = self.CURRICULUM_ORDER[prev_stage_idx]
+            prev_stage = CURRICULUM_ORDER[prev_stage_idx]
 
-            print(
-                f"Curriculum regression: {current_stage} ({success_rate:.1%}) → {prev_stage} "
-                f"(threshold: {regression_threshold:.1%}, episodes: {len(results)})"
+            logger.info(
+                f"Curriculum regression: {self.current_stage} ({success_rate:.1%}) → {prev_stage}"
             )
 
             self.current_stage_idx = prev_stage_idx
             self.current_stage = prev_stage
-            self.stage_performance[current_stage] = deque(
-                maxlen=self.performance_window
-            )
+
+            # Reset performance for regressed stage (clear circular buffer)
+            stage_idx = self.performance_tracker.stage_indices[self.current_stage]
+            self.performance_tracker.buffer_sizes[stage_idx] = 0
+            self.performance_tracker.buffer_positions[stage_idx] = 0
 
             return True
 
         return False
 
     def get_progress_summary(self) -> str:
-        """Get human-readable curriculum progress summary with granular metrics.
-
-        Returns:
-            Markdown-formatted progress summary
-        """
+        """Get human-readable progress summary (drop-in replacement)."""
         lines = [
-            "## Curriculum Learning Progress (Granular Progression)\n",
-            f"**Current Stage**: {self.current_stage} "
-            f"({self.current_stage_idx + 1}/{len(self.CURRICULUM_ORDER)})\n",
-            "**Adaptive Features**: ",
+            "## Optimized Curriculum Learning Progress\n",
+            f"**Current Stage**: {self.current_stage} ({self.current_stage_idx + 1}/{len(CURRICULUM_ORDER)})\n",
         ]
 
-        features = []
-        if self.enable_adaptive_mixing:
-            features.append("Adaptive Mixing")
-        if self.enable_early_advancement:
-            features.append("Early Advancement")
-        if self.enable_trend_analysis:
-            features.append("Trend Analysis")
-        lines.append(", ".join(features) if features else "None")
-        lines.append("\n")
+        # Performance optimizations info
+        lines.append(
+            "**Performance Optimizations**: Fast Sampling, Compact Tracking, Cached Ratios\n"
+        )
 
         lines.append("\n### Performance by Stage\n")
 
-        for i, stage in enumerate(self.CURRICULUM_ORDER):
+        for i, stage in enumerate(CURRICULUM_ORDER):
             perf = self.get_stage_performance(stage)
 
             # Status indicator
@@ -768,244 +1114,43 @@ class CurriculumManager:
                     )
                 elif perf["can_advance"]:
                     lines.append("- ✨ **Ready to Advance!**")
-                else:
-                    remaining = perf["min_episodes"] - perf["episodes"]
-                    if remaining > 0:
-                        lines.append(f"- Episodes needed: {remaining}")
-                    else:
-                        gap = perf["advancement_threshold"] - perf["success_rate"]
-                        lines.append(f"- Success rate gap: {gap:.1%}")
-
-                # Show adaptive metrics for current stage
-                if self.enable_adaptive_mixing and i > 0:
-                    mix_ratio = perf.get(
-                        "adaptive_mixing_ratio", self.base_mixing_ratio
-                    )
-                    lines.append(
-                        f"- Adaptive Mixing: {mix_ratio:.1%} from previous stage"
-                    )
-
-                if self.enable_trend_analysis and perf["episodes"] >= 20:
-                    trend = perf.get("trend", 0.0)
-                    trend_indicator = "📈" if trend > 0 else "📉" if trend < 0 else "➡️"
-                    lines.append(f"- Performance Trend: {trend_indicator} {trend:+.2f}")
 
         return "\n".join(lines)
 
+    # Additional methods for backward compatibility
     def get_generator_statistics(self, stage: Optional[str] = None) -> Dict[str, Any]:
-        """Get comprehensive statistics for generator types.
-
-        Args:
-            stage: Specific stage to get stats for, or None for all stages
-
-        Returns:
-            Dictionary with generator sampling and performance statistics
-        """
+        """Get generator statistics (simplified for performance)."""
+        stages = [stage] if stage else CURRICULUM_ORDER[: self.current_stage_idx + 1]
         stats = {}
 
-        stages_to_report = [stage] if stage else self.CURRICULUM_ORDER
-
-        for st in stages_to_report:
-            if st not in self.generator_sample_counts:
-                continue
+        for st in stages:
+            gen_perf = self.performance_tracker.get_generator_performance(st)
+            sample_counts = self.fast_sampler.get_sample_counts(st)
 
             stage_stats = {"generators": {}}
-
-            for gen_type in self.generator_sample_counts[st].keys():
-                sample_count = self.generator_sample_counts[st].get(gen_type, 0)
-                perf = self.generator_performance[st].get(gen_type, {})
-                successes = perf.get("successes", 0)
-                failures = perf.get("failures", 0)
-                total_episodes = successes + failures
-
-                success_rate = successes / total_episodes if total_episodes > 0 else 0.0
-
+            for gen_type in sample_counts.keys():
                 stage_stats["generators"][gen_type] = {
-                    "sample_count": sample_count,
-                    "episodes": total_episodes,
-                    "successes": successes,
-                    "failures": failures,
-                    "success_rate": success_rate,
+                    "sample_count": sample_counts[gen_type],
+                    **gen_perf.get(
+                        gen_type, {"successes": 0, "failures": 0, "success_rate": 0.0}
+                    ),
                 }
-
-            # Calculate balance variance (0 = perfect balance)
-            sample_counts = list(self.generator_sample_counts[st].values())
-            if sample_counts:
-                stage_stats["balance_variance"] = float(np.var(sample_counts))
-                stage_stats["total_samples"] = sum(sample_counts)
-            else:
-                stage_stats["balance_variance"] = 0.0
-                stage_stats["total_samples"] = 0
 
             stats[st] = stage_stats
 
         return stats
 
-    def log_curriculum_metrics(
-        self, writer, global_step: int, current_stage_only: bool = False
-    ) -> None:
-        """Log comprehensive curriculum metrics to TensorBoard.
 
-        Logs sampling distribution, performance per generator type, and aggregate metrics.
-
-        Args:
-            writer: TensorBoard SummaryWriter
-            global_step: Current training step
-            current_stage_only: If True, only log metrics for current stage
-        """
-        if writer is None:
-            return
-
-        # Determine which stages to log
-        stages_to_log = (
-            [self.current_stage]
-            if current_stage_only
-            else self.CURRICULUM_ORDER[: self.current_stage_idx + 1]
-        )
-
-        for stage in stages_to_log:
-            if stage not in self.generator_sample_counts:
-                continue
-
-            # Log sample distribution metrics
-            for gen_type, count in self.generator_sample_counts[stage].items():
-                # Replace colons with underscores for TensorBoard compatibility
-                safe_gen_name = gen_type.replace(":", "_")
-                writer.add_scalar(
-                    f"curriculum/sampling/{stage}/{safe_gen_name}/count",
-                    count,
-                    global_step,
-                )
-
-            # Removed balance_variance - not actionable, sample counts are sufficient
-
-            # Log performance metrics per generator
-            for gen_type, perf in self.generator_performance[stage].items():
-                successes = perf.get("successes", 0)
-                failures = perf.get("failures", 0)
-                total = successes + failures
-
-                if total > 0:
-                    success_rate = successes / total
-                    safe_gen_name = gen_type.replace(":", "_")
-
-                    writer.add_scalar(
-                        f"curriculum/performance/{stage}/{safe_gen_name}/success_rate",
-                        success_rate,
-                        global_step,
-                    )
-                    writer.add_scalar(
-                        f"curriculum/performance/{stage}/{safe_gen_name}/episodes",
-                        total,
-                        global_step,
-                    )
-
-            # Log overall stage success rate
-            stage_perf = self.get_stage_performance(stage)
-            writer.add_scalar(
-                f"curriculum/performance/{stage}/overall_success_rate",
-                stage_perf["success_rate"],
-                global_step,
-            )
-
-        # Log current stage indicator
-        writer.add_scalar(
-            "curriculum/current_stage_idx", self.current_stage_idx, global_step
-        )
-
-        # Log adaptive mixing ratio if enabled
-        if self.enable_adaptive_mixing and self.current_stage_idx > 0:
-            mixing_ratio = self._get_adaptive_mixing_ratio(self.current_stage)
-            writer.add_scalar(
-                f"curriculum/mixing/{self.current_stage}/ratio",
-                mixing_ratio,
-                global_step,
-            )
-
-    def save_state(self, path: Path) -> None:
-        """Save curriculum state to file including adaptive features and generator tracking.
-
-        Args:
-            path: Path to save state JSON
-        """
-        state = {
-            "current_stage": self.current_stage,
-            "current_stage_idx": self.current_stage_idx,
-            "stage_episode_counts": self.stage_episode_counts,
-            "stage_performance": {
-                stage: list(perf) for stage, perf in self.stage_performance.items()
-            },
-            "stage_mixing_ratios": self.stage_mixing_ratios,
-            "generator_sample_counts": self.generator_sample_counts,
-            "generator_performance": self.generator_performance,
-            "adaptive_features": {
-                "enable_adaptive_mixing": self.enable_adaptive_mixing,
-                "enable_early_advancement": self.enable_early_advancement,
-                "enable_trend_analysis": self.enable_trend_analysis,
-            },
-        }
-
-        with open(path, "w") as f:
-            json.dump(state, f, indent=2)
-
-        logger.info(f"Saved curriculum state to {path}")
-
-    def load_state(self, path: Path) -> None:
-        """Load curriculum state from file including adaptive features and generator tracking.
-
-        Args:
-            path: Path to state JSON
-        """
-        with open(path, "r") as f:
-            state = json.load(f)
-
-        self.current_stage = state["current_stage"]
-        self.current_stage_idx = state["current_stage_idx"]
-        self.stage_episode_counts = state["stage_episode_counts"]
-
-        # Restore performance tracking
-        for stage, perf_list in state["stage_performance"].items():
-            self.stage_performance[stage] = deque(
-                perf_list, maxlen=self.performance_window
-            )
-
-        # Restore adaptive mixing ratios if available
-        if "stage_mixing_ratios" in state:
-            self.stage_mixing_ratios = state["stage_mixing_ratios"]
-
-        # Restore generator tracking data if available
-        if "generator_sample_counts" in state:
-            self.generator_sample_counts = state["generator_sample_counts"]
-
-        if "generator_performance" in state:
-            self.generator_performance = state["generator_performance"]
-
-        logger.info(f"Loaded curriculum state from {path}")
-        logger.info(f"Resumed at stage: {self.current_stage}")
-
-
+# Factory function for backward compatibility
 def create_curriculum_manager(
-    dataset_path: str,
-    starting_stage: str = "simplest",
-    **kwargs,
+    dataset_path: str, starting_stage: str = "simplest", **kwargs
 ) -> CurriculumManager:
-    """Create curriculum manager with validation.
-
-    Args:
-        dataset_path: Path to dataset
-        starting_stage: Initial stage (default: 'simplest')
-        **kwargs: Additional curriculum manager arguments
-
-    Returns:
-        CurriculumManager instance
-    """
+    """Create curriculum manager with validation."""
     try:
         manager = CurriculumManager(
-            dataset_path=dataset_path,
-            starting_stage=starting_stage,
-            **kwargs,
+            dataset_path=dataset_path, starting_stage=starting_stage, **kwargs
         )
         return manager
     except Exception as e:
-        print(f"Failed to create curriculum manager: {e}")
+        logger.error(f"Failed to create curriculum manager: {e}")
         raise

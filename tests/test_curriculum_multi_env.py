@@ -107,7 +107,6 @@ def create_mock_curriculum_manager():
             dataset_path=str(test_suite_dir),
             starting_stage="simplest",
             performance_window=10,
-            allow_stage_mixing=False,
         )
 
         yield manager

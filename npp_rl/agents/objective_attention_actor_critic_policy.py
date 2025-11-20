@@ -567,6 +567,10 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
             Can be added to PPO loss as a regularization term:
             loss = policy_loss + vf_coef * value_loss - attention_entropy_coef * entropy
         """
+        # Only compute attention entropy if objective attention is enabled
+        if not self.use_objective_attention:
+            return None
+
         # Check if we have cached attention weights
         if not (
             hasattr(self, "_last_attn_weights") and self._last_attn_weights is not None
@@ -597,6 +601,13 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
 
                 if obs_batch_size == batch_size:
                     # Create mask for current batch
+                    if not hasattr(self.action_net, "max_objectives"):
+                        logger.warning(
+                            "action_net does not have max_objectives attribute. "
+                            "This might indicate objective attention is not properly initialized."
+                        )
+                        return None
+
                     max_objectives = self.action_net.max_objectives
                     mask = torch.zeros(
                         batch_size,

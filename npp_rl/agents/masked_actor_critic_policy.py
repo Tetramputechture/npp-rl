@@ -397,18 +397,12 @@ class MaskedActorCriticPolicy(ActorCriticPolicy):
             ),
         )
 
-        # VALIDATION: Check that masked logits don't contain NaN
-        if torch.isnan(masked_logits).any():
-            raise ValueError(
-                "masked_logits contains NaN after applying mask! "
-                f"Original logits had NaN: {torch.isnan(action_logits).any()}, "
-                f"Mask: {action_mask}"
-            )
-
         return masked_logits
 
     def _validate_action_mask_freshness(
-        self, obs: Union[torch.Tensor, Dict[str, torch.Tensor]], action_mask: Union[torch.Tensor, np.ndarray]
+        self,
+        obs: Union[torch.Tensor, Dict[str, torch.Tensor]],
+        action_mask: Union[torch.Tensor, np.ndarray],
     ) -> None:
         """
         Validate that action_mask matches current observation state.

@@ -99,11 +99,11 @@ train_single_architecture() {
             --enable-auto-curriculum-adjustment \
             --enable-early-stopping \
             --replay-data-dir ../nclone/bc_replays \
-            --bc-epochs 10 \
-            --bc-batch-size 128 \
-            --bc-num-workers 8 \
+            --bc-epochs 5 \
+            --bc-batch-size 256 \
+            --bc-num-workers 16 \
             --hardware-profile auto \
-            --total-timesteps 2000000 \
+            --total-timesteps 10000000 \
             --distributed-backend nccl \
             --record-eval-videos \
             --max-videos-per-category 2 \

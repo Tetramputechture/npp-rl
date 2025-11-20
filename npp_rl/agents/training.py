@@ -54,6 +54,7 @@ from nclone.gym_environment import (
     create_reachability_aware_env,
     create_hierarchical_env,
 )
+from nclone.gym_environment.constants import REACHABILITY_FEATURES_DIM
 from npp_rl.agents.hierarchical_ppo import (
     HierarchicalPPO,
     HierarchicalActorCriticPolicy,
@@ -270,7 +271,7 @@ def train_hierarchical_agent(
         "hgt_output_dim": 256,
         "use_cross_modal_attention": True,
         "use_spatial_attention": True,
-        "reachability_dim": 8,  # 8-dimensional reachability features
+        "reachability_dim": REACHABILITY_FEATURES_DIM,  # From nclone constants (now 7: 4 base + 2 mine + 1 phase)
     }
 
     policy_kwargs = {

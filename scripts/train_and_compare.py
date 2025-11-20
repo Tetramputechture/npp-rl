@@ -801,8 +801,6 @@ def train_architecture(
         if args.use_curriculum:
             curriculum_kwargs = {
                 "starting_stage": args.curriculum_start_stage,
-                "enable_trend_analysis": not args.disable_trend_advancement,
-                "enable_early_advancement": not args.disable_early_advancement,
                 "enable_auto_adjustment": args.enable_auto_curriculum_adjustment,
                 "auto_adjustment_freq": args.curriculum_adjustment_freq,
                 "auto_adjustment_min_threshold": args.curriculum_min_threshold,

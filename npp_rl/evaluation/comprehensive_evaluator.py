@@ -368,6 +368,7 @@ class ComprehensiveEvaluator:
         all_success_rates = []
         all_steps = []
         all_efficiencies = []
+        all_rewards = []
 
         # Evaluate each category
         for category, levels in self.test_levels.items():
@@ -380,6 +381,10 @@ class ComprehensiveEvaluator:
                 n_episodes = num_episodes_per_category.get(category, len(levels))
             else:
                 n_episodes = len(levels)
+
+            if n_episodes == 0:
+                print(f"No episodes in category '{category}', skipping")
+                continue
 
             n_episodes = min(n_episodes, len(levels))
 
@@ -405,13 +410,17 @@ class ComprehensiveEvaluator:
             all_success_rates.append(category_results["success_rate"])
             all_steps.extend(category_results["episode_steps"])
             all_efficiencies.append(category_results["efficiency"])
+            all_rewards.extend(category_results["episode_rewards"])
 
         # Calculate overall metrics
         results["overall"] = {
-            "success_rate": np.mean(all_success_rates),
-            "avg_steps": np.mean(all_steps) if all_steps else 0,
-            "std_steps": np.std(all_steps) if all_steps else 0,
-            "efficiency": np.mean(all_efficiencies),
+            "success_rate": np.mean(all_success_rates)
+            if len(all_success_rates) > 0
+            else 0,
+            "avg_steps": np.mean(all_steps) if len(all_steps) > 0 else 0,
+            "std_steps": np.std(all_steps) if len(all_steps) > 0 else 0,
+            "avg_reward": np.mean(all_rewards) if len(all_rewards) > 0 else 0,
+            "efficiency": np.mean(all_efficiencies) if len(all_efficiencies) > 0 else 0,
             "total_episodes": len(all_steps),
         }
 
@@ -731,9 +740,20 @@ class ComprehensiveEvaluator:
                         print(f"Error closing environment: {cleanup_error}")
 
         # Calculate metrics
-        success_rate = np.mean(successes)
-        avg_steps = np.mean(episode_steps)
-        avg_reward = np.mean(rewards)
+        if len(successes) > 0:
+            success_rate = np.mean(successes)
+        else:
+            success_rate = 0.0
+        if len(episode_steps) > 0:
+            avg_steps = np.mean(episode_steps)
+        else:
+            avg_steps = 0.0
+        if len(rewards) > 0:
+            avg_reward = np.mean(rewards)
+        else:
+            avg_reward = 0.0
+        avg_steps = np.mean(episode_steps) if len(episode_steps) > 0 else 0
+        avg_reward = np.mean(rewards) if len(rewards) > 0 else 0
 
         # Efficiency: success rate / normalized steps
         efficiency = success_rate / (avg_steps / max_steps) if avg_steps > 0 else 0
@@ -745,6 +765,7 @@ class ComprehensiveEvaluator:
             "avg_reward": avg_reward,
             "efficiency": efficiency,
             "episode_steps": episode_steps,
+            "episode_rewards": rewards,
             "successes": successes,
             "n_episodes": len(levels),
         }

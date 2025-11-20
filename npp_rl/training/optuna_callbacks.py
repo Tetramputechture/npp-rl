@@ -45,8 +45,13 @@ class OptunaTrialPruningCallback(BaseCallback):
             try:
                 # Run evaluation on test set
                 eval_results = self.trainer.evaluate(
-                    num_episodes=50,  # Reduced for speed during optimization
+                    num_episodes=10,
                     record_videos=False,
+                    categories_to_evaluate=[
+                        "simplest",
+                        "simplest_few_mines",
+                        "simplest_with_mines",
+                    ],
                 )
 
                 # Calculate metric
@@ -61,10 +66,36 @@ class OptunaTrialPruningCallback(BaseCallback):
                 normalized_reward = max(0.0, min(1.0, (mean_reward + 1000) / 2000))
 
                 # Combined metric (70% success rate, 30% normalized reward)
-                metric = 0.7 * success_rate + 0.3 * normalized_reward
+                metric = 0.5 * success_rate + 0.5 * normalized_reward
 
                 # Report to Optuna (we report positive metric, Optuna will minimize -metric)
                 self.trial.report(metric, self.eval_count)
+
+                # Track auxiliary metrics for attention architecture (if available)
+                # These help diagnose training issues with multi-level attention
+                if hasattr(self.trainer, "model") and self.trainer.model is not None:
+                    model = self.trainer.model
+
+                    # Check for auxiliary predictions (death prediction, time-to-goal, etc.)
+                    if hasattr(model.policy, "get_auxiliary_predictions"):
+                        try:
+                            # Store as trial user attributes for post-analysis
+                            # Note: We can't get predictions without observations, but we can
+                            # check that the model has this capability
+                            self.trial.set_user_attr(
+                                f"has_auxiliary_tasks_step_{self.num_timesteps}", True
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not track auxiliary tasks: {e}")
+
+                    # Check for attention entropy (objective attention policy)
+                    if hasattr(model.policy, "get_attention_entropy"):
+                        try:
+                            self.trial.set_user_attr(
+                                f"has_attention_entropy_step_{self.num_timesteps}", True
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not track attention entropy: {e}")
 
                 # Check if trial should be pruned
                 if self.trial.should_prune():

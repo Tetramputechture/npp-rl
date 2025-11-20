@@ -42,7 +42,7 @@ verify_optuna_installation() {
 # Optuna dashboard
 # ============================================================================
 start_optuna_dashboard() {
-    local study_storage=$1  # e.g., "sqlite:///~/hpo_results/optuna_study.db"
+    local study_storage=$1  # e.g., "sqlite:////home/ubuntu/hpo_results/optuna_study.db" (must be absolute path)
     
     log INFO "Starting Optuna dashboard with SSH port forwarding..."
     
@@ -86,7 +86,12 @@ run_hyperparameter_optimization() {
     
     local study_name="${experiment_name}_${architecture}"
     local remote_study_dir="~/hpo_results/${experiment_name}"
-    local remote_storage="sqlite:///${remote_study_dir}/optuna_study.db"
+    
+    # Get absolute path for remote study directory (expand ~)
+    local remote_study_dir_abs=$(ssh_cmd "echo ${remote_study_dir}" | tr -d '\r\n')
+    local remote_storage="sqlite:///${remote_study_dir_abs}/optuna_study.db"
+    
+    log INFO "Study storage: ${remote_storage}"
     
     # Create remote study directory
     ssh_cmd "mkdir -p ${remote_study_dir}" 2>&1 | tee -a "${LOCAL_LOG_DIR}/hpo_setup.log"
@@ -105,7 +110,7 @@ run_hyperparameter_optimization() {
             --test-dataset ~/datasets/test \
             --num-trials ${num_trials} \
             --timesteps-per-trial ${timesteps_per_trial} \
-            --study-name ${study_name} \
+            --study-name ${study_name}_$(date +%Y%m%d_%H%M%S) \
             --storage ${remote_storage} \
             --output-dir ~/hpo_results/${experiment_name} \
             --s3-bucket ${S3_BUCKET} \
@@ -116,8 +121,10 @@ run_hyperparameter_optimization() {
         hpo_cmd="${hpo_cmd} --resume"
     fi
     
+    # Just print the command
+    echo "${hpo_cmd}"
     # Run optimization (blocking)
-    ssh_cmd_cuda "${hpo_cmd}" 2>&1 | tee -a "${LOCAL_LOG_DIR}/hpo_training.log"
+    # ssh_cmd_cuda "${hpo_cmd}" 2>&1 | tee -a "${LOCAL_LOG_DIR}/hpo_training.log"
     
     if [ $? -eq 0 ]; then
         log SUCCESS "Hyperparameter optimization completed successfully"

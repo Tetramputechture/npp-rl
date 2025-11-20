@@ -151,3 +151,109 @@ class TestSuiteLoader:
             summary["metadata"] = self.metadata
 
         return summary
+
+    def load_all_metadata(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Load metadata for all levels without loading full level data.
+
+        This is much faster than load_all_levels() as it only reads file paths
+        and extracts basic metadata without deserializing the full pickle data.
+
+        Returns:
+            Dictionary mapping category to list of level metadata dicts
+        """
+        all_metadata = {}
+
+        for category in self.CATEGORIES:
+            all_metadata[category] = self.load_category_metadata(category)
+
+        total_count = sum(len(levels) for levels in all_metadata.values())
+        logger.info(
+            f"Loaded metadata for {total_count} total levels across {len(all_metadata)} categories"
+        )
+
+        return all_metadata
+
+    def load_category_metadata(self, category: str) -> List[Dict[str, Any]]:
+        """Load metadata for all levels in a category without loading full data.
+
+        Args:
+            category: Category name ('simple', 'medium', etc.)
+
+        Returns:
+            List of level metadata dictionaries
+        """
+        if category not in self.CATEGORIES:
+            raise ValueError(
+                f"Unknown category '{category}'. Valid categories: {self.CATEGORIES}"
+            )
+
+        category_dir = self.dataset_path / category
+
+        if not category_dir.exists():
+            logger.warning(f"Category directory not found: {category_dir}")
+            return []
+
+        metadata_list = []
+
+        for level_file in sorted(category_dir.glob("*.pkl")):
+            try:
+                # Create metadata without loading full pickle data
+                level_id = level_file.stem  # Filename without extension
+                level_metadata = {
+                    "level_id": level_id,
+                    "category": category,
+                    "file_path": str(level_file),
+                    "metadata": {
+                        "generator": "unknown",  # Will be populated when level is loaded
+                        "category": category,
+                    },
+                }
+                metadata_list.append(level_metadata)
+            except Exception as e:
+                logger.warning(f"Failed to create metadata for level {level_file}: {e}")
+
+        logger.debug(
+            f"Loaded metadata for {len(metadata_list)} levels from category '{category}'"
+        )
+        return metadata_list
+
+    def load_single_level(self, level_path: str) -> Optional[Dict[str, Any]]:
+        """Load a single level by its file path.
+
+        Args:
+            level_path: Path to the level pickle file
+
+        Returns:
+            Level data dictionary, or None if loading failed
+        """
+        try:
+            with open(level_path, "rb") as f:
+                level_data = pickle.load(f)
+            return level_data
+        except Exception as e:
+            logger.warning(f"Failed to load level {level_path}: {e}")
+            return None
+
+    def load_single_level_by_id(
+        self, category: str, level_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Load a single level by category and level ID.
+
+        Args:
+            category: Category name
+            level_id: Level ID (filename without extension)
+
+        Returns:
+            Level data dictionary, or None if loading failed
+        """
+        if category not in self.CATEGORIES:
+            raise ValueError(
+                f"Unknown category '{category}'. Valid categories: {self.CATEGORIES}"
+            )
+
+        level_path = self.dataset_path / category / f"{level_id}.pkl"
+        if not level_path.exists():
+            logger.warning(f"Level file not found: {level_path}")
+            return None
+
+        return self.load_single_level(str(level_path))

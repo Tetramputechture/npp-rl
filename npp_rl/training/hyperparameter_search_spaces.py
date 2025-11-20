@@ -27,8 +27,8 @@ def get_search_space(architecture_name: str) -> Dict[str, Any]:
     # Base PPO search space (applies to all architectures)
     base_space = {
         "learning_rate": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
-        "n_steps": {"type": "categorical", "choices": [512, 1024, 2048, 4096]},
-        "batch_size": {"type": "categorical", "choices": [64, 128, 256, 512]},
+        "n_steps": {"type": "categorical", "choices": [512]},
+        "batch_size": {"type": "categorical", "choices": [64, 128, 256]},
         "gamma": {"type": "float", "low": 0.95, "high": 0.999, "log": False},
         "gae_lambda": {"type": "float", "low": 0.90, "high": 0.99, "log": False},
         "clip_range": {"type": "float", "low": 0.1, "high": 0.4, "log": False},
@@ -39,15 +39,47 @@ def get_search_space(architecture_name: str) -> Dict[str, Any]:
         "n_epochs": {"type": "int", "low": 3, "high": 10},
         # Network architecture
         "net_arch_depth": {"type": "int", "low": 2, "high": 4},
-        "net_arch_width": {"type": "categorical", "choices": [64, 128, 256, 512]},
-        "features_dim": {"type": "categorical", "choices": [256, 512, 768, 1024]},
+        "net_arch_width": {"type": "categorical", "choices": [64, 128, 256]},
+        "features_dim": {"type": "categorical", "choices": [256, 512, 768]},
+        # Policy architecture selection
+        "policy_class": {
+            "type": "categorical",
+            "choices": [
+                "MaskedActorCriticPolicy",
+                "ObjectiveAttentionActorCriticPolicy",
+            ],
+        },
         # Training settings
-        "num_envs": {"type": "categorical", "choices": [32, 64, 128, 256]},
         "lr_schedule": {"type": "categorical", "choices": ["constant", "linear"]},
     }
 
     # Architecture-specific additions
-    if (
+    if architecture_name == "attention":
+        # Attention architecture: Deep 5-level attention with GCN, no visual input
+        # (AttentiveStateMLP → GCN → MultiHeadFusion → ObjectiveAttentionPolicy → Dueling)
+        # ~15-18M parameters requiring specialized hyperparameter ranges
+        base_space.update(
+            {
+                # Higher gradient clipping for deep architecture with residual connections
+                "max_grad_norm": {
+                    "type": "float",
+                    "low": 1.0,
+                    "high": 5.0,
+                    "log": False,
+                },
+                # GCN encoder parameters
+                "gnn_num_layers": {"type": "int", "low": 2, "high": 4},
+                "gnn_hidden_dim": {"type": "categorical", "choices": [128, 256, 384]},
+                # Deep ResNet MLP dimensions (wider than standard for attention capacity)
+                "net_arch_width": {
+                    "type": "categorical",
+                    "choices": [256, 384, 512],
+                },
+                "features_dim": {"type": "categorical", "choices": [512, 768]},
+                # No CNN parameters (vision-free architecture)
+            }
+        )
+    elif (
         "gat" in architecture_name
         or "gcn" in architecture_name
         or "hgt" in architecture_name
@@ -63,7 +95,11 @@ def get_search_space(architecture_name: str) -> Dict[str, Any]:
             base_space["gnn_num_heads"] = {"type": "int", "low": 2, "high": 8}
 
     # Add CNN-specific params if architecture uses vision
-    if "vision_free" not in architecture_name and "mlp" not in architecture_name:
+    if (
+        "vision_free" not in architecture_name
+        and "mlp" not in architecture_name
+        and architecture_name != "attention"
+    ):
         base_space.update(
             {
                 "cnn_base_channels": {"type": "categorical", "choices": [16, 32, 64]},

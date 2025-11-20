@@ -521,9 +521,7 @@ verify_pytorch_cuda_compatibility() {
     # Check if nvidia-smi is available
     if ! ssh_cmd "which nvidia-smi" > /dev/null 2>&1; then
         log WARNING "No GPU detected (nvidia-smi not found). Skipping CUDA verification."
-        # Still install torch-scatter for CPU builds
         log INFO ""
-        install_torch_scatter
         return 0
     fi
     
@@ -550,9 +548,7 @@ verify_pytorch_cuda_compatibility() {
         # Show GPU details
         ssh_cmd "python3 -c 'import torch; [print(f\"  - GPU {i}: {torch.cuda.get_device_name(i)} ({torch.cuda.get_device_properties(i).total_memory/1e9:.1f} GB)\") for i in range(torch.cuda.device_count())]'" 2>/dev/null
         
-        # Install torch-scatter after verifying PyTorch CUDA
         log INFO ""
-        install_torch_scatter
         
         return 0
     else
@@ -576,11 +572,7 @@ verify_pytorch_cuda_compatibility() {
                 # Try to fix automatically
                 if fix_pytorch_cuda_arm64; then
                     log SUCCESS "PyTorch CUDA has been fixed automatically!"
-                    
-                    # Install torch-scatter after fixing PyTorch
                     log INFO ""
-                    install_torch_scatter
-                    
                     return 0
                 else
                     log ERROR ""

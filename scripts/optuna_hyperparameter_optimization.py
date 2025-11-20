@@ -61,12 +61,12 @@ def parse_args():
 
     # Optimization settings
     parser.add_argument(
-        "--num-trials", type=int, default=20, help="Number of Optuna trials"
+        "--num-trials", type=int, default=10, help="Number of Optuna trials"
     )
     parser.add_argument(
         "--timesteps-per-trial",
         type=int,
-        default=500_000,
+        default=1_000_000,
         help="Training timesteps per trial",
     )
     parser.add_argument(
@@ -110,6 +110,14 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
 
     Returns:
         Negative optimization metric (to minimize)
+
+    Note:
+        For 'attention' architecture, ObjectiveAttentionActorCriticPolicy is automatically
+        activated by ArchitectureTrainer. This policy includes:
+        - Deep ResNet MLPs (5-layer policy, 3-layer value)
+        - Objective-specific attention over 1-16 locked doors
+        - Dueling value architecture
+        - Auxiliary death prediction head
     """
     logger.info(f"Starting trial {trial.number}")
 
@@ -195,10 +203,16 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
         "features_dim", search_space["features_dim"]["choices"]
     )
 
-    # Training settings
-    num_envs = trial.suggest_categorical(
-        "num_envs", search_space["num_envs"]["choices"]
+    # Policy architecture selection
+    policy_class = trial.suggest_categorical(
+        "policy_class", search_space["policy_class"]["choices"]
     )
+    hyperparams["policy_class"] = policy_class
+    logger.info(f"Trial {trial.number}: Using policy class: {policy_class}")
+
+    # Training settings
+    num_envs = 4
+    hyperparams["num_envs"] = num_envs
     hyperparams["lr_schedule"] = trial.suggest_categorical(
         "lr_schedule", search_space["lr_schedule"]["choices"]
     )
@@ -235,6 +249,9 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
     trial_output_dir = Path(args.output_dir) / args.study_name / f"trial_{trial.number}"
     trial_output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Determine if using objective attention policy based on sampled policy_class
+    use_objective_attention = policy_class == "ObjectiveAttentionActorCriticPolicy"
+
     # Initialize trainer with sampled hyperparameters
     trainer = ArchitectureTrainer.from_hyperparameter_dict(
         architecture_config=architecture_config,
@@ -243,37 +260,43 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
         test_dataset_path=args.test_dataset,
         output_dir=str(trial_output_dir),
         experiment_name=f"{args.experiment_name}_trial_{trial.number}",
+        use_objective_attention_policy=use_objective_attention,
+        use_curriculum=True,
     )
 
-    # Setup environments
+    trainer.setup_model(**hyperparams)
+
     trainer.setup_environments(
         num_envs=num_envs,
         total_timesteps=args.timesteps_per_trial,
     )
 
-    # Setup model
-    trainer.setup_model(**hyperparams)
-
-    # Create pruning callback
     pruning_callback = OptunaTrialPruningCallback(
         trial=trial,
-        eval_freq=50_000,  # Report every 50K steps
+        eval_freq=250_000,
         trainer=trainer,
         verbose=1,
     )
 
     # Train with pruning
     try:
-        results = trainer.train(
+        trainer.train(
             total_timesteps=args.timesteps_per_trial,
-            eval_freq=50_000,
-            save_freq=250_000,
+            eval_freq=250_000,
+            save_freq=500_000,
             callback_fn=pruning_callback,
         )
 
         # Final evaluation on test set
         logger.info(f"Running final evaluation for trial {trial.number}...")
-        eval_results = trainer.evaluate(num_episodes=250)
+        eval_results = trainer.evaluate(
+            num_episodes=20,
+            categories_to_evaluate=[
+                "simplest",
+                "simplest_few_mines",
+                "simplest_with_mines",
+            ],
+        )
 
         # Calculate optimization metric
         success_rate = eval_results.get("success_rate", 0.0)
@@ -399,7 +422,7 @@ def main():
     # Setup logging
     log_dir = Path(args.output_dir) / args.study_name / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    setup_experiment_logging(log_dir)
+    setup_experiment_logging(log_dir, args.experiment_name)
 
     logger.info("=" * 60)
     logger.info("Hyperparameter Optimization with Optuna")

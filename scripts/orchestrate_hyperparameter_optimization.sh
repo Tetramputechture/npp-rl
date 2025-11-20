@@ -73,7 +73,7 @@ parse_hpo_args() {
     # Defaults
     ARCHITECTURE=""
     NUM_TRIALS=20
-    TIMESTEPS_PER_TRIAL=500000
+    TIMESTEPS_PER_TRIAL=1000000
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -178,9 +178,10 @@ EOF
         exit 1
     fi
     
-    # Update LOCAL_LOG_DIR for HPO
+    # Update LOCAL_LOG_DIR for HPO and create the directory
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     LOCAL_LOG_DIR="./logs/hpo_${EXPERIMENT_NAME}_${TIMESTAMP}"
+    mkdir -p "$LOCAL_LOG_DIR"
 }
 
 # ============================================================================
@@ -297,8 +298,13 @@ main() {
         exit 1
     fi
     
+    # Get absolute path for study storage (expand ~ on remote)
+    local remote_study_dir_abs=$(ssh_cmd "echo ~/hpo_results/${EXPERIMENT_NAME}" | tr -d '\r\n')
+    local study_storage="sqlite:///${remote_study_dir_abs}/optuna_study.db"
+    
+    log INFO "Study storage path: ${study_storage}"
+    
     # Start Optuna dashboard
-    local study_storage="sqlite:///~/hpo_results/${EXPERIMENT_NAME}/optuna_study.db"
     start_optuna_dashboard "${study_storage}"
     
     # Run hyperparameter optimization

@@ -23,6 +23,7 @@ Task 2.4 Requirements:
 import logging
 from stable_baselines3.common.callbacks import BaseCallback
 import warnings
+from npp_rl.training.curriculum_components import CURRICULUM_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +254,7 @@ class CurriculumProgressionCallback(BaseCallback):
         )
 
         # Log performance for all stages (for comparison)
-        for stage_name in self.curriculum_manager.CURRICULUM_ORDER:
+        for stage_name in CURRICULUM_ORDER:
             stage_perf = self.curriculum_manager.get_stage_performance(stage_name)
             self.logger.record(
                 f"curriculum_stages/{stage_name}_success_rate",

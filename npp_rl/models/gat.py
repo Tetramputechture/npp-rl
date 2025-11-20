@@ -25,9 +25,6 @@ try:
     TORCH_SCATTER_AVAILABLE = True
 except ImportError:
     TORCH_SCATTER_AVAILABLE = False
-    import warnings
-
-    warnings.warn("torch_scatter not available, GAT will use slower fallback")
 
 
 class GATLayer(nn.Module):
@@ -83,8 +80,8 @@ class GATLayer(nn.Module):
         GAT forward with batched sparse edge attention.
 
         Args:
-            node_features: [batch_size, max_nodes, in_dim]
-            edge_index: [batch_size, 2, num_edges]
+            node_features: [batch_size, max_nodes, in_dim] - float16 or float32
+            edge_index: [batch_size, 2, num_edges] - uint16 or int32/int64 node indices
             node_mask: [batch_size, max_nodes] (optional)
             edge_mask: [batch_size, num_edges] (optional) - 1 for valid edges, 0 for padding
 
@@ -93,6 +90,16 @@ class GATLayer(nn.Module):
         """
         batch_size, max_nodes, _ = node_features.shape
         device = node_features.device
+
+        # MEMORY OPTIMIZATION: Cast inputs to correct types for computation
+        # node_features: float16 → float32 for training
+        node_features = node_features.float()
+        # edge_index: uint16 → long for PyTorch indexing (done per-batch below)
+        # masks: uint8 → float for arithmetic operations
+        if node_mask is not None:
+            node_mask = node_mask.float()
+        if edge_mask is not None:
+            edge_mask = edge_mask.float()
 
         # Project to Q, K, V
         Q = self.query(node_features)  # [batch, max_nodes, head_dim * num_heads]

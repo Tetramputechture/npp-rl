@@ -8,21 +8,27 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, List
 
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
+from nclone.gym_environment.reward_calculation.reward_config import RewardConfig
+from nclone.gym_environment.constants import (
+    GAME_STATE_CHANNELS,
+    REACHABILITY_FEATURES_DIM,
+)
 from npp_rl.evaluation.comprehensive_evaluator import ComprehensiveEvaluator
 from npp_rl.training.architecture_configs import ArchitectureConfig
 from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
-from npp_rl.training.curriculum_manager import create_curriculum_manager
+
 from npp_rl.training.bc_weight_loader import BCWeightLoader
 from npp_rl.training.environment_factory import EnvironmentFactory
 from npp_rl.training.callback_factory import CallbackFactory
 from npp_rl.agents.masked_actor_critic_policy import MaskedActorCriticPolicy
 from npp_rl.agents.masked_ppo import MaskedPPO
+from npp_rl.training.sparse_rollout_buffer import SparseGraphRolloutBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +120,10 @@ class ArchitectureTrainer:
         self.policy_class = None
         self.hyperparams = None
 
+        # Initialize reward configuration with curriculum-aware lifecycle
+        # Total timesteps will be updated when train() is called
+        self.reward_config = RewardConfig(total_timesteps=10_000_000)
+
         logger.info(f"Initialized trainer for architecture: {architecture_config.name}")
         logger.info(f"Output directory: {self.output_dir}")
         logger.info(f"Train dataset: {self.train_dataset_path}")
@@ -123,6 +133,7 @@ class ArchitectureTrainer:
         logger.info(f"Curriculum learning: {use_curriculum}")
         logger.info("PBRS: ALWAYS ENABLED (mandatory)")
         logger.info(f"  PBRS gamma: {pbrs_gamma}")
+        logger.info(f"Reward Config: {self.reward_config}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
 
@@ -136,6 +147,8 @@ class ArchitectureTrainer:
         output_dir: str,
         experiment_name: str,
         device_id: int = 0,
+        use_objective_attention_policy: Optional[bool] = None,
+        use_curriculum: Optional[bool] = None,
         **kwargs,
     ) -> "ArchitectureTrainer":
         """
@@ -149,6 +162,8 @@ class ArchitectureTrainer:
             output_dir: Output directory for checkpoints/logs
             experiment_name: Experiment name
             device_id: CUDA device ID
+            use_objective_attention_policy: Whether to use ObjectiveAttentionActorCriticPolicy.
+                If None, will be determined from hyperparameters['policy_class'] if present.
             **kwargs: Additional arguments passed to __init__
 
         Returns:
@@ -158,12 +173,20 @@ class ArchitectureTrainer:
         output_path = Path(output_dir) / experiment_name
         output_path.mkdir(parents=True, exist_ok=True)
 
+        # Determine policy class from hyperparameters if not explicitly provided
+        if use_objective_attention_policy is None and "policy_class" in hyperparameters:
+            use_objective_attention_policy = (
+                hyperparameters["policy_class"] == "ObjectiveAttentionActorCriticPolicy"
+            )
+
         trainer = cls(
             architecture_config=architecture_config,
             train_dataset_path=train_dataset_path,
             test_dataset_path=test_dataset_path,
             output_dir=output_path,
             device_id=device_id,
+            use_objective_attention_policy=use_objective_attention_policy or False,
+            use_curriculum=use_curriculum or False,
             **kwargs,
         )
 
@@ -260,7 +283,6 @@ class ArchitectureTrainer:
                     "dropout": ppo_kwargs.pop("dropout", 0.1),
                     "use_objective_attention": True,  # Enable objective attention
                     "use_auxiliary_death_head": True,  # Enable auxiliary death prediction head
-                    # Note: dueling is always enabled in ObjectiveAttentionActorCriticPolicy
                 }
             )
             logger.info(
@@ -355,8 +377,8 @@ class ArchitectureTrainer:
         if modalities.use_game_state:
             logger.info("\n--- State Processing ---")
             state = config.state
-            logger.info(f"  Game State Dim: {state.game_state_dim}")
-            logger.info(f"  Reachability Dim: {state.reachability_dim}")
+            logger.info(f"  Game State Dim: {GAME_STATE_CHANNELS}")
+            logger.info(f"  Reachability Dim: {REACHABILITY_FEATURES_DIM}")
             logger.info(f"  Hidden Dim: {state.hidden_dim}")
             logger.info(f"  Output Dim: {state.output_dim}")
             if hasattr(state, "use_attentive_state_mlp"):
@@ -477,6 +499,14 @@ class ArchitectureTrainer:
         # n_steps reduced from 1024 to 512 for additional memory savings (allows more envs)
         # batch_size increased from 128 to 256 for better GPU utilization
         # n_epochs: 10 for standard PPO (deep networks need fewer epochs to avoid overfitting)
+
+        # Architecture-specific gradient clipping
+        # Attention architecture has 5-level attention (AttentiveStateMLP → GCN → MultiHeadFusion
+        # → ObjectiveAttentionPolicy → Dueling) with ~15-18M parameters, requiring higher max_grad_norm
+        default_max_grad_norm = (
+            2.5 if self.architecture_config.name == "attention" else 1.0
+        )
+
         default_hyperparams = {
             "learning_rate": default_learning_rate,
             "n_steps": 512,  # REDUCED from 1024 for 50% memory savings (allows scaling to 32-64 envs)
@@ -488,7 +518,7 @@ class ArchitectureTrainer:
             "clip_range_vf": None,  # Disable value clipping (recommended by SB3/OpenAI)
             "ent_coef": 0.01,  # Standard PPO value for exploration
             "vf_coef": 0.5,
-            "max_grad_norm": 1.0,  # Larger threshold for deep ResNet + attention
+            "max_grad_norm": default_max_grad_norm,  # Higher for deep attention (2.5) vs standard (1.0)
             "tensorboard_log": str(self.output_dir / "tensorboard"),
             "device": f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         }
@@ -497,10 +527,11 @@ class ArchitectureTrainer:
         # Store schedule separately to apply AFTER model creation
         # (SB3 has issues logging callable learning rates during __init__)
         self._lr_schedule = None
+        self._total_training_steps = None  # Will be set during train() call
         if self.architecture_config.name == "attention":
-            # Warmup: 0.1x LR for first 500k steps, then decay to 1e-5
-            warmup_steps = 500000
-            total_steps = 2000000  # Default training length for attention
+            # Warmup: 0.1x LR for first 25% of training, then decay to 1e-5
+            # Note: total_steps will be determined dynamically during train() call
+            # to avoid hardcoding and ensure schedule matches actual training length
 
             # Extract base learning rate (might already be callable from hardware profile)
             lr_value = default_hyperparams["learning_rate"]
@@ -516,37 +547,51 @@ class ArchitectureTrainer:
             else:
                 base_lr = lr_value
 
-            def warmup_lr_schedule(progress_remaining: float) -> float:
-                """Custom LR schedule with warmup then linear decay.
+            def create_warmup_lr_schedule(total_steps: int):
+                """Create LR schedule with warmup (25% of training) then linear decay.
 
                 Args:
-                    progress_remaining: Progress from 1.0 (start) to 0.0 (end)
+                    total_steps: Total training steps (determined at runtime)
 
                 Returns:
-                    Current learning rate
+                    Learning rate schedule function
                 """
-                # progress_remaining goes from 1.0 (start) to 0.0 (end)
-                progress = 1.0 - progress_remaining
-                current_step = progress * total_steps
+                warmup_steps = int(0.25 * total_steps)  # 25% warmup
 
-                if current_step < warmup_steps:
-                    # Warmup phase: linear ramp from 0.1x to 1.0x
-                    warmup_progress = current_step / warmup_steps
-                    return base_lr * (0.1 + 0.9 * warmup_progress)
-                else:
-                    # Decay phase: linear decay to 1e-5
-                    decay_progress = (current_step - warmup_steps) / (
-                        total_steps - warmup_steps
-                    )
-                    return base_lr * (1.0 - decay_progress) + 1e-5 * decay_progress
+                def warmup_lr_schedule(progress_remaining: float) -> float:
+                    """Custom LR schedule with warmup then linear decay.
 
-            # Store schedule to apply after model creation
-            self._lr_schedule = warmup_lr_schedule
+                    Args:
+                        progress_remaining: Progress from 1.0 (start) to 0.0 (end)
+
+                    Returns:
+                        Current learning rate
+                    """
+                    # progress_remaining goes from 1.0 (start) to 0.0 (end)
+                    progress = 1.0 - progress_remaining
+                    current_step = progress * total_steps
+
+                    if current_step < warmup_steps:
+                        # Warmup phase: linear ramp from 0.1x to 1.0x
+                        warmup_progress = current_step / warmup_steps
+                        return base_lr * (0.1 + 0.9 * warmup_progress)
+                    else:
+                        # Decay phase: linear decay to 1e-5
+                        decay_progress = (current_step - warmup_steps) / (
+                            total_steps - warmup_steps
+                        )
+                        return base_lr * (1.0 - decay_progress) + 1e-5 * decay_progress
+
+                return warmup_lr_schedule
+
+            # Store schedule creator to apply after we know total_timesteps
+            self._lr_schedule_creator = create_warmup_lr_schedule
+            self._base_lr = base_lr
             # Set base_lr back to numeric for model initialization
             default_hyperparams["learning_rate"] = base_lr
             logger.info(
-                f"Using LR warmup schedule for attention architecture: "
-                f"warmup {warmup_steps} steps, base_lr={base_lr:.2e}"
+                f"Attention architecture: Will use LR warmup schedule with dynamic total_steps. "
+                f"base_lr={base_lr:.2e}, warmup=25% of training, decay to 1e-5"
             )
 
         # If Optuna hyperparameters provided, override defaults
@@ -615,8 +660,31 @@ class ArchitectureTrainer:
             # Replace callable with numeric value for model initialization
             ppo_kwargs = {**ppo_kwargs, "learning_rate": base_lr_from_kwargs}
 
-        # Merge with provided hyperparameters (ppo_kwargs takes precedence)
-        self.hyperparams = {**default_hyperparams, **ppo_kwargs}
+        # Filter out architecture-specific parameters that are not valid PPO hyperparameters
+        # These are used to configure the policy/feature extractors but should not be passed to PPO.__init__()
+        architecture_specific_params = {
+            "net_arch_depth",
+            "net_arch_width",
+            "features_dim",
+            "num_envs",
+            "lr_schedule",
+            "policy_class",  # Used to select policy class, not a PPO param
+            "gnn_num_layers",
+            "gnn_hidden_dim",
+            "gnn_num_heads",
+            "cnn_base_channels",
+            "cnn_num_layers",
+            "use_residual",
+            "use_layer_norm",
+            "dropout",
+            "use_curriculum",  # Trainer-level parameter, not a PPO param
+        }
+        filtered_ppo_kwargs = {
+            k: v for k, v in ppo_kwargs.items() if k not in architecture_specific_params
+        }
+
+        # Merge with provided hyperparameters (filtered ppo_kwargs takes precedence)
+        self.hyperparams = {**default_hyperparams, **filtered_ppo_kwargs}
 
         # Log final hyperparameters
         logger.info("Final PPO hyperparameters:")
@@ -640,12 +708,8 @@ class ArchitectureTrainer:
         batch_size = self.hyperparams["batch_size"]
         n_epochs = self.hyperparams.get("n_epochs", 10)
         gradient_updates = (n_steps // batch_size) * n_epochs
-        logger.info(
-            f"  Rollout buffer size: {n_steps} steps (reduced from 1024 for memory)"
-        )
-        logger.info(
-            f"  Batch size: {batch_size} (increased from 128 for GPU utilization)"
-        )
+        logger.info(f"  Rollout buffer size: {n_steps} steps")
+        logger.info(f"  Batch size: {batch_size}")
         logger.info(f"  Gradient updates per rollout: {gradient_updates}")
 
     def setup_environments(
@@ -674,10 +738,18 @@ class ArchitectureTrainer:
 
             # Set up curriculum manager if enabled
             if self.use_curriculum:
-                self.curriculum_manager = create_curriculum_manager(
-                    dataset_path=str(self.train_dataset_path), **self.curriculum_kwargs
+                from npp_rl.training.curriculum_factory import (
+                    create_curriculum_for_parallel_training,
                 )
-                logger.info("Curriculum learning enabled")
+
+                # Automatically select best curriculum implementation based on number of environments
+                self.curriculum_manager, _ = create_curriculum_for_parallel_training(
+                    dataset_path=str(self.train_dataset_path),
+                    num_parallel_envs=num_envs,
+                    **self.curriculum_kwargs,
+                )
+                logger.info("Curriculum learning enabled with optimized implementation")
+                logger.info(f"Number of environments: {num_envs}")
                 logger.info(
                     f"Starting stage: {self.curriculum_manager.get_current_stage()}"
                 )
@@ -693,13 +765,14 @@ class ArchitectureTrainer:
                 pretrained_checkpoint=self.pretrained_checkpoint,
                 test_dataset_path=str(self.test_dataset_path),
                 architecture_config=self.architecture_config,
+                reward_config=self.reward_config,  # Pass curriculum-aware reward config
             )
 
             # Create training environment
             logger.info(f"Creating {num_envs} training environments...")
             self.env = self.environment_factory.create_training_env(
                 num_envs=num_envs,
-                gamma=self.hyperparams.get("gamma", 0.99),
+                gamma=self._get_hyperparameter("gamma", 0.99),
             )
             logger.info(f"✓ Training environment created: {type(self.env).__name__}")
 
@@ -739,6 +812,50 @@ class ArchitectureTrainer:
             print("!" * 60)
             raise
 
+    def _get_hyperparameter(self, key: str, default: Any = None) -> Any:
+        """Safely get hyperparameter value from either hyperparams or _optuna_hyperparameters.
+
+        This helper is needed because during Optuna trials, setup_environments() is called
+        before setup_model(), so self.hyperparams may not be set yet but
+        self._optuna_hyperparameters will contain the sampled values.
+
+        Args:
+            key: Hyperparameter key to retrieve
+            default: Default value if key not found
+
+        Returns:
+            Hyperparameter value or default
+        """
+        if self.hyperparams is not None:
+            return self.hyperparams.get(key, default)
+        elif (
+            hasattr(self, "_optuna_hyperparameters")
+            and self._optuna_hyperparameters is not None
+        ):
+            return self._optuna_hyperparameters.get(key, default)
+        else:
+            return default
+
+    def _get_hyperparameters_dict(self) -> Dict[str, Any]:
+        """Get the full hyperparameters dictionary.
+
+        Returns either self.hyperparams or self._optuna_hyperparameters,
+        depending on which is available. Used for unpacking hyperparams
+        when creating the model.
+
+        Returns:
+            Hyperparameters dictionary, or empty dict if none available
+        """
+        if self.hyperparams is not None:
+            return self.hyperparams
+        elif (
+            hasattr(self, "_optuna_hyperparameters")
+            and self._optuna_hyperparameters is not None
+        ):
+            return self._optuna_hyperparameters
+        else:
+            return {}
+
     def _adjust_hyperparams_for_small_runs(
         self, total_timesteps: int, num_envs: int
     ) -> None:
@@ -748,18 +865,35 @@ class ArchitectureTrainer:
             total_timesteps: Total training timesteps
             num_envs: Number of environments
         """
+        # Get hyperparams from either self.hyperparams or _optuna_hyperparameters
+        # (during Optuna trials, hyperparams may not be set yet)
+        if self.hyperparams is not None:
+            hyperparams = self.hyperparams
+        elif (
+            hasattr(self, "_optuna_hyperparameters")
+            and self._optuna_hyperparameters is not None
+        ):
+            hyperparams = self._optuna_hyperparameters
+        else:
+            # No hyperparameters available yet, skip adjustment
+            return
+
+        # Skip if n_steps not in hyperparams yet
+        if "n_steps" not in hyperparams:
+            return
+
         max_n_steps = max(total_timesteps // num_envs, 1)
-        if self.hyperparams["n_steps"] > max_n_steps:
-            old_n_steps = self.hyperparams["n_steps"]
-            self.hyperparams["n_steps"] = max_n_steps
+        if hyperparams["n_steps"] > max_n_steps:
+            old_n_steps = hyperparams["n_steps"]
+            hyperparams["n_steps"] = max_n_steps
             # Adjust batch_size to be compatible
-            if self.hyperparams["batch_size"] > max_n_steps:
-                self.hyperparams["batch_size"] = max_n_steps
+            if "batch_size" in hyperparams and hyperparams["batch_size"] > max_n_steps:
+                hyperparams["batch_size"] = max_n_steps
             logger.info(
                 f"Adjusted n_steps from {old_n_steps} to {max_n_steps} "
                 f"for total_timesteps={total_timesteps}, num_envs={num_envs}"
             )
-            logger.info(f"Adjusted batch_size to {self.hyperparams['batch_size']}")
+            logger.info(f"Adjusted batch_size to {hyperparams['batch_size']}")
 
     def _create_model(self) -> None:
         """Create PPO instance."""
@@ -800,7 +934,7 @@ class ArchitectureTrainer:
             print(f"Error message: {str(e)}")
             print(f"Architecture: {self.architecture_config.name}")
             print(f"Policy class: {self.policy_class}")
-            print(f"Device: {self.hyperparams.get('device', 'unknown')}")
+            print(f"Device: {self._get_hyperparameter('device', 'unknown')}")
             # print("Full traceback:", exc_info=True)
             print("!" * 60)
             raise
@@ -809,7 +943,7 @@ class ArchitectureTrainer:
         """Create standard PPO model."""
         logger.info("Creating PPO model with training environment...")
         logger.info(f"Policy class: {self.policy_class}")
-        logger.info(f"Device: {self.hyperparams.get('device')}")
+        logger.info(f"Device: {self._get_hyperparameter('device')}")
         logger.info("Feature extractor: ConfigurableMultimodalExtractor")
         logger.info(f"Network architecture: {self.policy_kwargs.get('net_arch')}")
         logger.info("Initializing policy networks and moving to device...")
@@ -826,12 +960,14 @@ class ArchitectureTrainer:
             )
             # Use MaskedPPO instead of standard PPO to ensure action_mask is properly preserved
             # This prevents masked action selection bugs in vectorized environments
+            # Use sparse rollout buffer for ~95% memory reduction on graph observations
             self.model = MaskedPPO(
                 policy=self.policy_class,
                 env=self.env,
                 policy_kwargs=self.policy_kwargs,
                 debug=self.debug_mode,
-                **self.hyperparams,
+                rollout_buffer_class=SparseGraphRolloutBuffer,
+                **self._get_hyperparameters_dict(),
             )
         logger.info("✓ PPO model created successfully")
 
@@ -929,6 +1065,26 @@ class ArchitectureTrainer:
                 "Environments not initialized. Call setup_environments() first"
             )
 
+        # Update reward config with actual total_timesteps for curriculum
+        self.reward_config.total_timesteps = total_timesteps
+        logger.info(f"Reward configuration updated: {self.reward_config}")
+
+        # Apply learning rate schedule with actual total_timesteps for attention architecture
+        # This fixes the bug where hardcoded total_steps caused negative LR after 2M steps
+        if (
+            hasattr(self, "_lr_schedule_creator")
+            and self._lr_schedule_creator is not None
+        ):
+            # Create the schedule with actual total_timesteps
+            self._lr_schedule = self._lr_schedule_creator(total_timesteps)
+            self.model.learning_rate = self._lr_schedule
+            warmup_steps = int(0.25 * total_timesteps)
+            logger.info(
+                f"Applied LR warmup schedule for attention architecture: "
+                f"total_steps={total_timesteps:,}, warmup_steps={warmup_steps:,}, "
+                f"base_lr={self._base_lr:.2e}"
+            )
+
         self._log_training_start(total_timesteps, eval_freq, save_freq)
 
         try:
@@ -974,6 +1130,48 @@ class ArchitectureTrainer:
             print("=" * 60)
             return {"status": "failed", "error": str(e), "error_type": type(e).__name__}
 
+    def update_reward_config(self, timesteps_trained: int, success_rate: float) -> None:
+        """Update reward configuration based on training progress.
+
+        This method should be called by evaluation callbacks to update reward
+        component weights and enable/disable curriculum-controlled components.
+
+        The reward system will automatically transition through phases:
+        - Early (0-1M): Strong PBRS guidance (2.0), no time penalty
+        - Mid (1M-3M): Moderate PBRS (1.0), optional time penalty if success >50%
+        - Late (3M+): Light PBRS (0.5), full time penalty if successful
+
+        NOTE: This method updates the config object, but environments must be
+        recreated or have their reward calculators updated to reflect changes.
+        For proper integration, environments should receive self.reward_config
+        at creation time and have their RewardCalculator.update_config() called
+        during evaluation callbacks.
+
+        Args:
+            timesteps_trained: Current total timesteps trained
+            success_rate: Recent evaluation success rate (0.0-1.0)
+        """
+        old_phase = self.reward_config.training_phase
+        self.reward_config.update(timesteps_trained, success_rate)
+
+        # Log phase transitions
+        if self.reward_config.training_phase != old_phase:
+            logger.info(
+                f"\n{'=' * 60}\n"
+                f"REWARD CURRICULUM TRANSITION\n"
+                f"Phase: {old_phase} → {self.reward_config.training_phase}\n"
+                f"Timesteps: {timesteps_trained:,}\n"
+                f"Success Rate: {success_rate:.1%}\n"
+                f"Active Components:\n"
+                f"  PBRS Weight: {self.reward_config.pbrs_objective_weight:.2f}\n"
+                f"  Time Penalty: {self.reward_config.time_penalty_per_step:.4f}/step\n"
+                f"  Normalization Scale: {self.reward_config.pbrs_normalization_scale:.2f}\n"
+                f"{'=' * 60}\n"
+            )
+
+        # TODO: Call env.reward_calculator.update_config() on all environments
+        # This would require environment access and proper reward calculator exposure
+
     def _log_training_start(
         self, total_timesteps: int, eval_freq: int, save_freq: int
     ) -> None:
@@ -995,10 +1193,10 @@ class ArchitectureTrainer:
             logger.info(f"Distributed training: {self.world_size} GPUs")
             logger.info(f"Current rank: {self.device_id}")
             logger.info(
-                f"Effective batch size: {self.hyperparams.get('batch_size', 'N/A')} (per GPU)"
+                f"Effective batch size: {self._get_hyperparameter('batch_size', 'N/A')} (per GPU)"
             )
             logger.info(
-                f"Global batch size: {self.hyperparams.get('batch_size', 0) * self.world_size}"
+                f"Global batch size: {self._get_hyperparameter('batch_size', 0) * self.world_size}"
             )
             if not is_main_process():
                 logger.info("Worker process - progress bar disabled to avoid conflicts")
@@ -1016,11 +1214,11 @@ class ArchitectureTrainer:
             lr_str = self._format_learning_rate_for_logging(self._lr_schedule)
         else:
             lr_str = self._format_learning_rate_for_logging(
-                self.hyperparams.get("learning_rate")
+                self._get_hyperparameter("learning_rate")
             )
         logger.info(
-            f"PPO hyperparameters: n_steps={self.hyperparams.get('n_steps')}, "
-            f"batch_size={self.hyperparams.get('batch_size')}, "
+            f"PPO hyperparameters: n_steps={self._get_hyperparameter('n_steps')}, "
+            f"batch_size={self._get_hyperparameter('batch_size')}, "
             f"learning_rate={lr_str}"
         )
 
@@ -1061,6 +1259,7 @@ class ArchitectureTrainer:
         max_videos_per_category: int = 10,
         video_fps: int = 30,
         timeout_per_episode: float = 200.0,
+        categories_to_evaluate: Optional[List[str]] = None,
     ) -> Dict[str, float]:
         """Evaluate model on test dataset.
 
@@ -1102,6 +1301,12 @@ class ArchitectureTrainer:
             num_episodes_per_category = {
                 category: num_episodes for category in evaluator.test_levels.keys()
             }
+
+            # replace num_episodes_per_category with 0 for categories not in categories_to_evaluate
+            if categories_to_evaluate is not None:
+                for category in num_episodes_per_category.keys():
+                    if category not in categories_to_evaluate:
+                        num_episodes_per_category[category] = 0
 
             results = evaluator.evaluate_model(
                 model=self.model,

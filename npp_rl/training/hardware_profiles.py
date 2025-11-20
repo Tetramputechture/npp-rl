@@ -225,7 +225,7 @@ def get_hardware_profile(name: str) -> HardwareProfile:
 #
 # Updated estimates for n_steps=1024 (50% reduction from previous n_steps=2048):
 ARCHITECTURE_MEMORY_PROFILES: Dict[str, float] = {
-    "attention": 0.6,  # REDUCED from 2.5 (50% savings)
+    "attention": 0.75,  # REDUCED from 2.5 (50% savings)
     "mlp_cnn": 0.75,  # REDUCED from 1.5
     # GNN variants - graph processing adds memory overhead
     # Estimate ~2x MLP baseline for graph data structures (nodes/edges)
@@ -368,7 +368,7 @@ def auto_detect_profile(
         gpu_memory_gb=gpu_memory_gb,
         num_envs=envs_per_gpu * num_gpus,
         batch_size=max(
-            32, 128 * num_gpus
+            32, 256 * num_gpus
         ),  # REDUCED from 256 to 128 for memory efficiency
         n_steps=n_steps,
         learning_rate=scaled_lr,

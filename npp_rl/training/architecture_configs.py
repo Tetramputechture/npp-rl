@@ -15,6 +15,7 @@ uses graph modality (see ModalityConfig.use_graph).
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from enum import Enum
+from nclone.gym_environment.constants import REACHABILITY_FEATURES_DIM
 
 
 class GraphArchitectureType(Enum):
@@ -126,19 +127,9 @@ class VisualConfig:
 class StateConfig:
     """Configuration for state vector processing."""
 
-    # Dimensions from nclone environment observations
-    # Phase 4: game_state_dim reduced to only ninja physics (29 dims)
-    # Phase 6: reachability_dim reduced from 8 to 6 (4 base + 2 mine context)
-    # All other features (objectives, mines, progress) now in graph
-    game_state_dim: int = 29  # Only ninja physics state
-    reachability_dim: int = (
-        6  # Reachability features from nclone (4 base + 2 mine context)
-    )
-    hidden_dim: int = 128  # Reduced back from 192 since input is smaller
+    hidden_dim: int = 128
     output_dim: int = 128
-    use_attentive_state_mlp: bool = (
-        True  # NEW FIELD: Enable attention-based state encoder
-    )
+    use_attentive_state_mlp: bool = True
 
 
 @dataclass(frozen=True)
@@ -748,8 +739,8 @@ def create_attention_config() -> ArchitectureConfig:
         Comprehensive attention architecture with five levels of attention for robust generalization:
         
         1. AttentiveStateMLP (State Component Attention):
-           - Processes 29-dim game state (ninja physics only) split into 6 semantic physics components
-           - Components: Velocity (3), Movement states (5), Input (2), Buffers (3), Contact (6), Forces (10)
+           - Processes 41-dim game state (enhanced ninja physics + episode) split into 10 semantic components
+           - Components: Velocity (3), Movement states (5), Input (2), Buffers (3), Contact (7), Forces (7), Temporal (6)
            - Each component encoded separately, then projected to uniform 64-dim space
            - Multi-head cross-component attention (4 heads): each component attends to all others
            - Enables: velocity↔contact (ground/wall interaction), forces↔movement (physics state coupling)
@@ -767,7 +758,7 @@ def create_attention_config() -> ArchitectureConfig:
         
         3. MultiHeadFusion (Cross-Modal Attention):
            - Splits concatenated modality features into separate tokens
-           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128, from 29-dim physics), Reachability (64, from 6-dim features)
+           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128, from 41-dim enhanced physics + episode), Reachability (64, from 7-dim features)
            - Projects each to uniform 256-dim, adds learned modality embeddings
            - Multi-head cross-modal attention (8 heads): vision<->graph<->state interactions
            - Feed-forward network per token, mean pooling across modalities
@@ -801,8 +792,8 @@ def create_attention_config() -> ArchitectureConfig:
         - Player Frame CNN: [batch, 84, 84, 1] → 256
         - Global View CNN: [batch, 176, 100, 1] → 128
         - GCN Encoder: [batch, max_nodes, 21] → 256 (global pooling)
-        - AttentiveStateMLP: [batch, 29] → 128
-        - Reachability MLP: [batch, 6] → 64
+        - AttentiveStateMLP: [batch, 32] → 128
+        - Reachability MLP: [batch, 7] → 64
         - Concatenated: 256 + 128 + 256 + 128 + 64 = 832
         - MultiHeadFusion: 832 → 512 (final features_dim)
         
@@ -853,8 +844,6 @@ def create_attention_config() -> ArchitectureConfig:
             use_edge_features=False,  # GCN uses only connectivity, not edge features
         ),
         state=StateConfig(
-            game_state_dim=29,
-            reachability_dim=6,
             hidden_dim=128,
             output_dim=128,
             use_attentive_state_mlp=True,
