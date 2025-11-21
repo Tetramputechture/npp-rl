@@ -253,15 +253,15 @@ class ProgressionManager:
 
     # Stage-specific advancement thresholds
     STAGE_THRESHOLDS = {
-        "simplest": 0.70,
-        "simplest_few_mines": 0.65,
-        "simplest_with_mines": 0.60,
-        "simpler": 0.60,
-        "simple": 0.50,
-        "medium": 0.45,
-        "complex": 0.40,
-        "exploration": 0.35,
-        "mine_heavy": 0.30,
+        "simplest": 0.60,
+        "simplest_few_mines": 0.50,
+        "simplest_with_mines": 0.50,
+        "simpler": 0.40,
+        "simple": 0.40,
+        "medium": 0.35,
+        "complex": 0.30,
+        "exploration": 0.25,
+        "mine_heavy": 0.20,
     }
 
     STAGE_MIN_EPISODES = {

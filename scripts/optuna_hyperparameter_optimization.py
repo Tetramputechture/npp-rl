@@ -211,7 +211,7 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
     logger.info(f"Trial {trial.number}: Using policy class: {policy_class}")
 
     # Training settings
-    num_envs = 4
+    num_envs = 128
     hyperparams["num_envs"] = num_envs
     hyperparams["lr_schedule"] = trial.suggest_categorical(
         "lr_schedule", search_space["lr_schedule"]["choices"]

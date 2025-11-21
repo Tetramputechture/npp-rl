@@ -60,6 +60,8 @@ class ObjectiveAttentionPolicy(nn.Module):
         self.num_heads = num_heads
         self.max_locked_doors = max_locked_doors
         self.num_actions = num_actions
+        # Calculate max_objectives: 1 exit + max_locked_doors doors + max_locked_doors switches
+        self.max_objectives = 1 + 2 * max_locked_doors
 
         # Objective encoders
         # Exit objectives: [switch_x, switch_y, activated, switch_path_dist, door_x, door_y, door_path_dist]

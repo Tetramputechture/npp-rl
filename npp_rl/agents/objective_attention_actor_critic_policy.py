@@ -103,13 +103,12 @@ class ObjectiveAttentionActorCriticPolicy(DeepResNetActorCriticPolicy):
             )
             self.objective_extractor = ObjectiveFeatureExtractor(max_locked_doors=16)
 
-        # Add auxiliary death prediction head for multi-task learning
-        # Uses policy latent features to predict death probability
+        # Add auxiliary death prediction head for representation learning
+        # Uses policy latent features to predict death probability from physics state
         if use_auxiliary_death_head:
             policy_latent_dim = self._get_policy_latent_dim()
             self.auxiliary_heads = AuxiliaryTaskHeads(
                 feature_dim=policy_latent_dim,
-                max_objectives=34,  # 1 exit + 16 locked doors + 16 switches
             )
         else:
             self.auxiliary_heads = None

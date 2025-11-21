@@ -76,7 +76,7 @@ class OptunaTrialPruningCallback(BaseCallback):
                 if hasattr(self.trainer, "model") and self.trainer.model is not None:
                     model = self.trainer.model
 
-                    # Check for auxiliary predictions (death prediction, time-to-goal, etc.)
+                    # Check for auxiliary predictions (death prediction)
                     if hasattr(model.policy, "get_auxiliary_predictions"):
                         try:
                             # Store as trial user attributes for post-analysis

@@ -1,10 +1,8 @@
-"""Callback to compute and log auxiliary death prediction losses.
+"""Callback to monitor auxiliary death prediction performance.
 
-This callback extracts auxiliary predictions from the policy and computes
-losses using death_context observations. Currently logs losses for monitoring.
-
-Note: To integrate auxiliary loss into PPO training, extend PPO.train() method
-to add auxiliary loss to the total loss. This callback provides monitoring only.
+This callback extracts auxiliary predictions from the policy and monitors
+death prediction accuracy for training insights. The main auxiliary loss
+integration is handled directly in MaskedPPO.
 """
 
 from collections import deque
@@ -14,13 +12,10 @@ import torch
 
 
 class AuxiliaryLossCallback(BaseCallback):
-    """Callback to compute and log auxiliary death prediction losses.
+    """Callback to monitor auxiliary death prediction performance.
 
-    This callback extracts auxiliary predictions from the policy and computes
-    losses using death_context observations. Currently logs losses for monitoring.
-
-    Note: To integrate auxiliary loss into PPO training, extend PPO.train() method
-    to add auxiliary loss to the total loss. This callback provides monitoring only.
+    This callback monitors the auxiliary death prediction head performance
+    and logs relevant metrics for training insights.
     """
 
     def __init__(
@@ -41,7 +36,7 @@ class AuxiliaryLossCallback(BaseCallback):
     def _on_rollout_end(self) -> bool:
         """Called after rollout collection, before policy update.
 
-        Computes auxiliary losses from rollout buffer data and logs them.
+        Monitors death prediction performance from rollout buffer data.
         """
         # Check if policy has auxiliary heads
         policy = self.model.policy
@@ -60,124 +55,67 @@ class AuxiliaryLossCallback(BaseCallback):
             # Rollout buffer observations not accessible or structured differently
             return True
 
-        # Check if death_context is available
-        # Handle both dict observations and cases where death_context might not exist
-        death_context = None
-        if isinstance(observations, dict):
-            death_context = observations.get("death_context", None)
-        elif hasattr(observations, "get"):
-            # Try dict-like access
-            death_context = observations.get("death_context", None)
-
-        if death_context is not None:
-            try:
-                # Compute death labels with lookahead
-
-                # Convert to tensor if needed
-                if isinstance(death_context, np.ndarray):
-                    death_context_tensor = torch.from_numpy(death_context).float()
-                elif isinstance(death_context, torch.Tensor):
-                    death_context_tensor = death_context.float()
-                else:
-                    # Unknown type, skip
-                    return True
-
-                # Debug: log death_context shape
-                if self.verbose > 1:
-                    self.logger.info(
-                        f"death_context shape: {death_context_tensor.shape}, "
-                        f"dim: {death_context_tensor.dim()}"
-                    )
-
-                # Handle different shapes: [batch, 9] or [9] (single timestep)
-                if death_context_tensor.dim() == 1:
-                    # Single timestep: shape [9]
-                    # Treat as batch_size=1
-                    batch_size = 1
-                    death_context_tensor = death_context_tensor.unsqueeze(0)  # [1, 9]
-                elif death_context_tensor.dim() == 2:
-                    # Batch of timesteps: shape [batch, 9]
-                    batch_size = death_context_tensor.shape[0]
-                else:
-                    if self.verbose > 0:
-                        self.logger.warn(
-                            f"Unexpected death_context shape: {death_context_tensor.shape}, "
-                            f"dim: {death_context_tensor.dim()}"
-                        )
-                    return True
-
-                # Extract death flags (index 0)
-                # death_context_tensor[:, 0] extracts first feature for all batch elements -> [batch]
-                death_flags = death_context_tensor[:, 0] > 0.5
-
-                # Debug: verify death_flags shape
-                if death_flags.dim() != 1 or death_flags.shape[0] != batch_size:
-                    if self.verbose > 0:
-                        self.logger.warn(
-                            f"death_flags shape mismatch: expected [batch={batch_size}], "
-                            f"got {death_flags.shape}"
-                        )
-                    return True
-
-                # Compute labels: for each timestep, check if death occurs within horizon
-                horizon = 10
-                death_labels = torch.zeros(
-                    batch_size, dtype=torch.float32, device=death_context_tensor.device
-                )
-
-                for i in range(batch_size):
-                    # Verify death_flags[i] is a scalar before calling .item()
-                    flag_tensor = death_flags[i]
-                    if flag_tensor.numel() != 1:
-                        if self.verbose > 0:
-                            self.logger.warn(
-                                f"death_flags[{i}] is not a scalar: shape={flag_tensor.shape}, "
-                                f"numel={flag_tensor.numel()}"
-                            )
-                        continue
-                    if flag_tensor.item():
-                        # Mark previous steps within horizon
-                        start_idx = max(0, i - horizon + 1)
-                        death_labels[start_idx : i + 1] = 1.0
-
-                # Log death label statistics
-                death_rate = death_labels.mean().item()
-                if self.num_timesteps % self.log_freq == 0:
-                    self.logger.record("auxiliary/death_label_rate", death_rate)
-                    self.logger.record(
-                        "auxiliary/death_labels_sum", death_labels.sum().item()
-                    )
-            except (
-                IndexError,
-                AttributeError,
-                TypeError,
-                ValueError,
-                RuntimeError,
-            ) as e:
-                # Handle shape mismatches or other errors gracefully
-                import traceback
-
-                if self.verbose > 0:
-                    self.logger.warn(
-                        f"Error computing auxiliary death labels: {e}\n"
-                        f"Traceback: {traceback.format_exc()}"
-                    )
+        # Monitor death prediction metrics from rollout buffer
+        # The actual death prediction labels are computed in the main training loop
+        # This callback just monitors prediction statistics for insights
+        
+        try:
+            # Simple monitoring of rollout buffer contents
+            buffer_size = rollout_buffer.size()
+            
+            if self.num_timesteps % self.log_freq == 0 and buffer_size > 0:
+                self.logger.record("auxiliary/rollout_buffer_size", buffer_size)
+                
+                # If observations contain game state, log some basic statistics
+                if isinstance(observations, dict):
+                    available_keys = list(observations.keys())
+                    if self.verbose > 1:
+                        self.logger.record("auxiliary/obs_keys_count", len(available_keys))
+                    
+                    # Log if game_state is available (needed for physics-based death prediction)
+                    has_game_state = "game_state" in observations
+                    has_entity_positions = "entity_positions" in observations
+                    self.logger.record("auxiliary/has_game_state", float(has_game_state))
+                    self.logger.record("auxiliary/has_entity_positions", float(has_entity_positions))
+                    
+        except Exception as e:
+            # Handle any errors gracefully
+            if self.verbose > 0:
+                self.logger.warn(f"Error in auxiliary monitoring: {e}")
 
         return True
 
     def _on_step(self) -> bool:
         """Called at each environment step."""
-        # Check if policy has auxiliary predictions from last forward pass
+        # Monitor auxiliary predictions if available
         try:
             policy = self.model.policy
             if hasattr(policy, "get_auxiliary_predictions"):
                 auxiliary_preds = policy.get_auxiliary_predictions()
                 if auxiliary_preds is not None and "death_prob" in auxiliary_preds:
-                    # Log death probability prediction
-                    death_prob = auxiliary_preds["death_prob"].mean().item()
+                    # Log death probability prediction statistics
+                    death_prob = auxiliary_preds["death_prob"]
+                    
                     if self.num_timesteps % self.log_freq == 0:
-                        self.logger.record("auxiliary/death_prob_mean", death_prob)
-        except (AttributeError, KeyError, TypeError):
+                        # Log various statistics of death predictions
+                        death_prob_mean = death_prob.mean().item()
+                        death_prob_max = death_prob.max().item()
+                        death_prob_min = death_prob.min().item()
+                        death_prob_std = death_prob.std().item()
+                        
+                        self.logger.record("auxiliary/death_prob_mean", death_prob_mean)
+                        self.logger.record("auxiliary/death_prob_max", death_prob_max)
+                        self.logger.record("auxiliary/death_prob_min", death_prob_min)
+                        self.logger.record("auxiliary/death_prob_std", death_prob_std)
+                        
+                        # Log how many predictions are above certain thresholds
+                        high_risk_count = (death_prob > 0.5).sum().item()
+                        medium_risk_count = ((death_prob > 0.2) & (death_prob <= 0.5)).sum().item()
+                        
+                        self.logger.record("auxiliary/high_risk_predictions", high_risk_count)
+                        self.logger.record("auxiliary/medium_risk_predictions", medium_risk_count)
+                        
+        except (AttributeError, KeyError, TypeError, RuntimeError):
             # Policy doesn't have auxiliary predictions or error accessing them
             pass
 

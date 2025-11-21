@@ -602,7 +602,7 @@ class MaskedPPO(PPO):
                 # === AUXILIARY LOSSES ===
                 auxiliary_loss = torch.tensor(0.0, device=self.device)
 
-                # 1. Auxiliary task losses (death prediction, time-to-goal, etc.)
+                # 1. Auxiliary task loss (death prediction only)
                 if hasattr(self.policy, "get_auxiliary_predictions"):
                     predictions = self.policy.get_auxiliary_predictions()
                     if predictions is not None and len(predictions) > 0:
@@ -628,27 +628,37 @@ class MaskedPPO(PPO):
                             aux_loss, aux_loss_dict = compute_aux_losses(
                                 predictions,
                                 labels,
-                                weights={"death": 0.05, "time": 0.02, "subgoal": 0.03},
+                                weights={"death": 0.01},  # Reduced weight for stability
                             )
                             auxiliary_loss = auxiliary_loss + aux_loss
 
-                            # Log individual auxiliary losses
+                                        # Log auxiliary losses (simplified for death prediction only)
                             for key, val in aux_loss_dict.items():
                                 self.logger.record(
                                     f"train/auxiliary_{key}_loss", val.item()
                                 )
+                            
+                            # Also log auxiliary predictions for monitoring
+                            if "death_prob" in predictions:
+                                death_prob_mean = predictions["death_prob"].mean().item()
+                                self.logger.record("train/death_prob_mean", death_prob_mean)
 
                         except Exception as e:
                             # Gracefully handle auxiliary loss computation errors
+                            # Continue training without auxiliary loss on failure
+                            auxiliary_loss = torch.tensor(0.0, device=self.device)
+                            
                             if self.debug:
                                 import traceback
-
                                 logger.warning(
-                                    f"Failed to compute auxiliary loss: {e}\n"
+                                    f"Failed to compute death prediction auxiliary loss: {e}\n"
+                                    f"Continuing training without auxiliary loss for this batch.\n"
                                     f"Rollout data type: {type(rollout_data)}\n"
-                                    f"Rollout data attributes: {[a for a in dir(rollout_data) if not a.startswith('_')]}\n"
                                     f"Traceback: {traceback.format_exc()}"
                                 )
+                            else:
+                                # In production mode, just log the error briefly
+                                logger.warning(f"Auxiliary loss computation failed: {e}. Continuing without auxiliary loss.")
 
                 # 2. Attention entropy regularization
                 # Note: We compute entropy from the current minibatch observations
