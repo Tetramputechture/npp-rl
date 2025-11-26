@@ -71,9 +71,29 @@ class EnhancedTensorBoardCallback(BaseCallback):
         self.pbrs_impact_potentials = deque(maxlen=1000)
         self.pbrs_exploration_potentials = deque(maxlen=1000)
 
+        # PBRS diagnostic metrics (for debugging normalization issues)
+        self.pbrs_distance_to_goal = deque(maxlen=1000)
+        self.pbrs_area_scale = deque(maxlen=1000)
+        self.pbrs_normalized_distance = deque(maxlen=1000)
+        self.pbrs_combined_path_distance = deque(maxlen=1000)
+
         # Action tracking
         self.action_counts = defaultdict(int)
         self.total_actions = 0
+
+        # Action persistence tracking (for frame skip analysis)
+        self.action_persistence_buffer = deque(maxlen=10000)  # Store hold durations
+        self.action_change_count = 0
+        self.prev_actions = None  # Track previous actions for each env
+        self.current_action_hold_durations = None  # Current consecutive count per env
+
+        # Action sequence tracking for temporal entropy
+        self.action_sequences = deque(maxlen=1000)  # Store recent action sequences
+        self.current_action_sequence = []  # Current episode's action sequence
+
+        # Decision efficiency tracking
+        self.decisions_per_episode = deque(maxlen=100)  # Track decisions per episode
+        self.rewards_per_decision = deque(maxlen=100)  # Track reward efficiency
 
         # Action name mapping for N++ (indices must match environment action space)
         self.action_names = {
@@ -98,7 +118,11 @@ class EnhancedTensorBoardCallback(BaseCallback):
         # Curriculum tracking
         self.current_curriculum_stage = None
         self.curriculum_stage_episodes = defaultdict(int)  # Episodes per stage
-        self.curriculum_stage_successes = defaultdict(list)  # Success history per stage
+        # MEMORY OPTIMIZATION: Use deque with maxlen instead of unbounded list
+        # to prevent memory leak in long-running training
+        self.curriculum_stage_successes = defaultdict(
+            lambda: deque(maxlen=100)
+        )  # Success history per stage (last 100 episodes)
 
         # Smoothed success rate (EMA with alpha=0.1)
         self.success_rate_ema = None
@@ -145,8 +169,13 @@ class EnhancedTensorBoardCallback(BaseCallback):
         if "actions" in self.locals:
             actions = self.locals["actions"]
 
-            # Track action counts
-            for action in actions:
+            # Initialize persistence tracking on first step
+            if self.prev_actions is None:
+                self.prev_actions = actions.copy()
+                self.current_action_hold_durations = np.ones(len(actions), dtype=int)
+
+            # Track action counts and persistence
+            for i, action in enumerate(actions):
                 action_idx = (
                     int(action)
                     if isinstance(action, (int, np.integer))
@@ -154,6 +183,31 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 )
                 self.action_counts[action_idx] += 1
                 self.total_actions += 1
+
+                # Track action sequences (only for first environment to avoid redundancy)
+                if i == 0:
+                    self.current_action_sequence.append(action_idx)
+
+                # Track action persistence (consecutive same actions)
+                prev_action_idx = (
+                    int(self.prev_actions[i])
+                    if isinstance(self.prev_actions[i], (int, np.integer))
+                    else int(self.prev_actions[i].item())
+                )
+
+                if action_idx == prev_action_idx:
+                    # Same action as previous step - increment hold duration
+                    self.current_action_hold_durations[i] += 1
+                else:
+                    # Action changed - record previous hold duration
+                    self.action_persistence_buffer.append(
+                        self.current_action_hold_durations[i]
+                    )
+                    self.action_change_count += 1
+                    self.current_action_hold_durations[i] = 1
+
+            # Update previous actions for next step
+            self.prev_actions = actions.copy()
 
         # Track value estimates from rollout buffer (more reliable than trying to access obs_tensor)
         # Note: This captures values after they've been computed during rollout collection
@@ -180,6 +234,14 @@ class EnhancedTensorBoardCallback(BaseCallback):
             self._log_scalar_metrics()
             self.last_log_step = self.num_timesteps
 
+        # MEMORY OPTIMIZATION: Periodically reset action counts to prevent
+        # unbounded growth in long-running training (every 50K steps)
+        if self.num_timesteps % 50000 == 0 and self.num_timesteps > 0:
+            # Reset action tracking but preserve ratios (they've already been logged)
+            self.action_counts.clear()
+            self.total_actions = 0
+            self.action_change_count = 0
+
         return True
 
     def _track_pbrs_components(self, info: Dict[str, Any]) -> None:
@@ -188,37 +250,50 @@ class EnhancedTensorBoardCallback(BaseCallback):
         Args:
             info: Step info dictionary that may contain PBRS components
         """
-        if "pbrs_components" not in info:
+        if "pbrs_components" not in info or not info["pbrs_components"]:
             return
 
         pbrs_data = info["pbrs_components"]
 
-        # Track reward components
-        if "navigation_reward" in pbrs_data:
-            self.pbrs_navigation_rewards.append(float(pbrs_data["navigation_reward"]))
-        if "exploration_reward" in pbrs_data:
-            self.pbrs_exploration_rewards.append(float(pbrs_data["exploration_reward"]))
+        # Track main reward components (new structure from RewardCalculator)
         if "pbrs_reward" in pbrs_data:
             self.pbrs_shaping_rewards.append(float(pbrs_data["pbrs_reward"]))
         if "total_reward" in pbrs_data:
             self.pbrs_total_rewards.append(float(pbrs_data["total_reward"]))
 
-        # Track potential components
-        if "pbrs_components" in pbrs_data:
-            potentials = pbrs_data["pbrs_components"]
-            if isinstance(potentials, dict):
-                if "objective" in potentials:
-                    self.pbrs_objective_potentials.append(
-                        float(potentials["objective"])
-                    )
-                if "hazard" in potentials:
-                    self.pbrs_hazard_potentials.append(float(potentials["hazard"]))
-                if "impact" in potentials:
-                    self.pbrs_impact_potentials.append(float(potentials["impact"]))
-                if "exploration" in potentials:
-                    self.pbrs_exploration_potentials.append(
-                        float(potentials["exploration"])
-                    )
+        # Track time penalty separately
+        if "time_penalty" in pbrs_data:
+            # Time penalty is already tracked in episode_time_penalties during _on_step
+            pass
+
+        # Track milestone rewards (switch activation)
+        if "milestone_reward" in pbrs_data and pbrs_data["milestone_reward"] != 0:
+            # Could add milestone tracking if needed
+            pass
+
+        # Track potential information for debugging
+        if "current_potential" in pbrs_data:
+            self.pbrs_objective_potentials.append(float(pbrs_data["current_potential"]))
+
+        # Track diagnostic metrics for PBRS normalization debugging
+        if "distance_to_goal" in pbrs_data:
+            self.pbrs_distance_to_goal.append(float(pbrs_data["distance_to_goal"]))
+        if "area_scale" in pbrs_data:
+            self.pbrs_area_scale.append(float(pbrs_data["area_scale"]))
+        if "normalized_distance" in pbrs_data:
+            self.pbrs_normalized_distance.append(
+                float(pbrs_data["normalized_distance"])
+            )
+        if "combined_path_distance" in pbrs_data:
+            self.pbrs_combined_path_distance.append(
+                float(pbrs_data["combined_path_distance"])
+            )
+
+        # Legacy support for old pbrs_components structure (if any)
+        if "navigation_reward" in pbrs_data:
+            self.pbrs_navigation_rewards.append(float(pbrs_data["navigation_reward"]))
+        if "exploration_reward" in pbrs_data:
+            self.pbrs_exploration_rewards.append(float(pbrs_data["exploration_reward"]))
 
     def _process_episode_end(self, info: Dict[str, Any]) -> None:
         """Process episode completion and extract metrics.
@@ -229,8 +304,21 @@ class EnhancedTensorBoardCallback(BaseCallback):
         # Standard episode metrics
         if "episode" in info:
             episode_info = info["episode"]
-            self.episode_rewards.append(episode_info["r"])
-            self.episode_lengths.append(episode_info["l"])
+            episode_reward = episode_info["r"]
+            episode_length = episode_info["l"]
+            self.episode_rewards.append(episode_reward)
+            self.episode_lengths.append(episode_length)
+
+            # Track decision efficiency (for frame skip analysis)
+            if episode_length > 0:
+                self.decisions_per_episode.append(episode_length)
+                reward_per_decision = episode_reward / episode_length
+                self.rewards_per_decision.append(reward_per_decision)
+
+        # Store action sequence for temporal entropy calculation
+        if len(self.current_action_sequence) > 0:
+            self.action_sequences.append(list(self.current_action_sequence))
+            self.current_action_sequence = []  # Reset for next episode
 
         if "r_ext_episode" in info:
             self.episode_extrinsic_rewards.append(info["r_ext_episode"])
@@ -343,7 +431,9 @@ class EnhancedTensorBoardCallback(BaseCallback):
             # Per-stage success rates for comparison
             for stage, successes in self.curriculum_stage_successes.items():
                 if len(successes) >= 5:  # Only log if we have enough data
-                    stage_success_rate = np.mean(successes[-50:])  # Last 50 episodes
+                    stage_success_rate = np.mean(
+                        successes
+                    )  # Mean of recent episodes (bounded by deque)
                     self.tb_writer.add_scalar(
                         f"curriculum_stages/{stage}_success_rate",
                         stage_success_rate,
@@ -409,6 +499,32 @@ class EnhancedTensorBoardCallback(BaseCallback):
                 step,
             )
 
+        # PBRS diagnostic metrics (for debugging normalization)
+        if self.pbrs_distance_to_goal:
+            self.tb_writer.add_scalar(
+                "pbrs/distance_to_goal",
+                np.mean(self.pbrs_distance_to_goal),
+                step,
+            )
+        if self.pbrs_area_scale:
+            self.tb_writer.add_scalar(
+                "pbrs/area_scale",
+                np.mean(self.pbrs_area_scale),
+                step,
+            )
+        if self.pbrs_normalized_distance:
+            self.tb_writer.add_scalar(
+                "pbrs/normalized_distance",
+                np.mean(self.pbrs_normalized_distance),
+                step,
+            )
+        if self.pbrs_combined_path_distance:
+            self.tb_writer.add_scalar(
+                "pbrs/combined_path_distance",
+                np.mean(self.pbrs_combined_path_distance),
+                step,
+            )
+
         # PBRS contribution analysis
         if self.pbrs_shaping_rewards and self.pbrs_total_rewards:
             pbrs_vals = np.array(self.pbrs_shaping_rewards)
@@ -452,6 +568,53 @@ class EnhancedTensorBoardCallback(BaseCallback):
             action_probs = action_probs + 1e-10  # Avoid log(0)
             action_entropy = -np.sum(action_probs * np.log(action_probs))
             self.tb_writer.add_scalar("actions/entropy", action_entropy, step)
+
+            # Log action persistence metrics (for frame skip analysis)
+            if len(self.action_persistence_buffer) > 0:
+                # Average hold duration (consecutive frames same action)
+                avg_hold_duration = np.mean(self.action_persistence_buffer)
+                self.tb_writer.add_scalar(
+                    "actions/persistence/avg_hold_duration", avg_hold_duration, step
+                )
+
+                # Median hold duration
+                median_hold_duration = np.median(self.action_persistence_buffer)
+                self.tb_writer.add_scalar(
+                    "actions/persistence/median_hold_duration",
+                    median_hold_duration,
+                    step,
+                )
+
+                # Max hold duration (shows longest sustained action)
+                max_hold_duration = np.max(self.action_persistence_buffer)
+                self.tb_writer.add_scalar(
+                    "actions/persistence/max_hold_duration", max_hold_duration, step
+                )
+
+                # Action change frequency (changes per total actions)
+                if self.total_actions > 0:
+                    change_frequency = self.action_change_count / self.total_actions
+                    self.tb_writer.add_scalar(
+                        "actions/persistence/change_frequency", change_frequency, step
+                    )
+
+                    # Inverse metric: average actions per change
+                    actions_per_change = 1.0 / max(change_frequency, 1e-6)
+                    self.tb_writer.add_scalar(
+                        "actions/persistence/actions_per_change",
+                        actions_per_change,
+                        step,
+                    )
+
+                # Distribution percentiles (for understanding spread)
+                p25 = np.percentile(self.action_persistence_buffer, 25)
+                p75 = np.percentile(self.action_persistence_buffer, 75)
+                self.tb_writer.add_scalar(
+                    "actions/persistence/hold_duration_p25", p25, step
+                )
+                self.tb_writer.add_scalar(
+                    "actions/persistence/hold_duration_p75", p75, step
+                )
 
             # Movement-specific metrics
             # Horizontal movement: Left (1) + Right (2) + Jump+Left (4) + Jump+Right (5)
@@ -497,6 +660,78 @@ class EnhancedTensorBoardCallback(BaseCallback):
             # Overall jump frequency (useful for understanding agent behavior)
             jump_freq = total_jumps / self.total_actions
             self.tb_writer.add_scalar("actions/jump/frequency", jump_freq, step)
+
+        # Temporal action entropy (entropy over action sequences, not just distribution)
+        if len(self.action_sequences) > 0:
+            # Compute bigram entropy: H(A_t | A_{t-1})
+            bigram_counts = defaultdict(int)
+            total_bigrams = 0
+
+            for sequence in self.action_sequences:
+                for i in range(len(sequence) - 1):
+                    bigram = (sequence[i], sequence[i + 1])
+                    bigram_counts[bigram] += 1
+                    total_bigrams += 1
+
+            if total_bigrams > 0:
+                # Calculate bigram entropy
+                bigram_probs = np.array(
+                    [count / total_bigrams for count in bigram_counts.values()]
+                )
+                bigram_probs = bigram_probs + 1e-10  # Avoid log(0)
+                temporal_entropy = -np.sum(bigram_probs * np.log(bigram_probs))
+                self.tb_writer.add_scalar(
+                    "actions/temporal_entropy", temporal_entropy, step
+                )
+
+                # Also calculate entropy rate (difference between joint and marginal)
+                # This measures how predictable actions are given previous action
+                if self.total_actions > 0:
+                    marginal_entropy = (
+                        -np.sum(action_probs * np.log(action_probs))
+                        if "action_probs" in locals()
+                        else 0
+                    )
+                    entropy_rate = temporal_entropy - marginal_entropy
+                    self.tb_writer.add_scalar(
+                        "actions/entropy_rate", entropy_rate, step
+                    )
+
+        # Decision efficiency metrics (for frame skip analysis)
+        if self.decisions_per_episode:
+            avg_decisions = np.mean(self.decisions_per_episode)
+            self.tb_writer.add_scalar(
+                "efficiency/decisions_per_episode_mean", avg_decisions, step
+            )
+            self.tb_writer.add_scalar(
+                "efficiency/decisions_per_episode_std",
+                np.std(self.decisions_per_episode),
+                step,
+            )
+
+        if self.rewards_per_decision:
+            avg_reward_per_decision = np.mean(self.rewards_per_decision)
+            self.tb_writer.add_scalar(
+                "efficiency/reward_per_decision_mean", avg_reward_per_decision, step
+            )
+            self.tb_writer.add_scalar(
+                "efficiency/reward_per_decision_std",
+                np.std(self.rewards_per_decision),
+                step,
+            )
+
+            # Effective decision frequency (useful for comparing frame skip values)
+            if self.episode_lengths:
+                avg_episode_length = np.mean(self.episode_lengths)
+                # At 60 FPS, this shows effective decisions per second
+                effective_decision_freq = 60.0 / max(
+                    avg_episode_length / max(avg_decisions, 1), 1.0
+                )
+                self.tb_writer.add_scalar(
+                    "efficiency/effective_decision_frequency_hz",
+                    effective_decision_freq,
+                    step,
+                )
 
         # Value function statistics (cleaned up - removed min/max)
         if self.value_estimates:

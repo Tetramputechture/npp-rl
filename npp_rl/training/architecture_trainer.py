@@ -26,9 +26,7 @@ from npp_rl.feature_extractors import ConfigurableMultimodalExtractor
 from npp_rl.training.bc_weight_loader import BCWeightLoader
 from npp_rl.training.environment_factory import EnvironmentFactory
 from npp_rl.training.callback_factory import CallbackFactory
-from npp_rl.agents.masked_actor_critic_policy import MaskedActorCriticPolicy
 from npp_rl.agents.masked_ppo import MaskedPPO
-from npp_rl.training.sparse_rollout_buffer import SparseGraphRolloutBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +44,22 @@ class ArchitectureTrainer:
         world_size: int = 1,
         tensorboard_writer: Optional[SummaryWriter] = None,
         use_mixed_precision: bool = False,
-        use_objective_attention_policy: bool = False,
         use_curriculum: bool = False,
         curriculum_kwargs: Optional[Dict[str, Any]] = None,
         use_distributed: bool = False,
         frame_stack_config: Optional[Dict[str, Any]] = None,
-        pbrs_gamma: float = 0.99,
+        frame_skip_config: Optional[Dict[str, Any]] = None,
+        pbrs_gamma: float = 1.0,
         enable_early_stopping: bool = False,
         early_stopping_patience: int = 10,
         debug_mode: bool = False,
         production_mode: bool = True,
+        single_level_path: Optional[str] = None,
+        use_path_predictor: bool = False,
+        path_predictor_checkpoint: Optional[str] = None,
+        path_predictor_update_freq: int = 1000,
+        runtime_profiler: Optional[Any] = None,
+        enable_env_profiling: bool = False,
     ):
         """Initialize architecture trainer.
 
@@ -72,8 +76,6 @@ class ArchitectureTrainer:
             tensorboard_writer: DEPRECATED - Not used. SB3's built-in tensorboard
                 logging is used instead. Kept for backward compatibility.
             use_mixed_precision: Enable mixed precision training
-            use_objective_attention_policy: Use ObjectiveAttentionActorCriticPolicy
-                (Deep ResNet + Objective Attention + Dueling, automatically enabled for 'attention' architecture)
             use_curriculum: Enable curriculum learning
             curriculum_kwargs: Curriculum manager configuration
             use_distributed: Enable DistributedDataParallel mode for multi-GPU
@@ -83,6 +85,10 @@ class ArchitectureTrainer:
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str
+            frame_skip_config: Frame skip configuration dict with keys:
+                - enable: bool (default: False)
+                - skip: int (default: 4, recommended for N++ based on input buffers)
+                - accumulate_rewards: bool (default: True)
             pbrs_gamma: Discount factor for PBRS (always enabled)
         """
         self.architecture_config = architecture_config
@@ -96,17 +102,36 @@ class ArchitectureTrainer:
         self.world_size = world_size
         self.tensorboard_writer = tensorboard_writer
         self.use_mixed_precision = use_mixed_precision
-        self.use_objective_attention_policy = use_objective_attention_policy
         self.use_curriculum = use_curriculum
         self.curriculum_kwargs = curriculum_kwargs or {}
         self.use_distributed = use_distributed
         self.frame_stack_config = frame_stack_config or {}
+        self.frame_skip_config = frame_skip_config or {}
         self.pbrs_gamma = pbrs_gamma
         self.enable_early_stopping = enable_early_stopping
         self.early_stopping_patience = early_stopping_patience
         self.debug_mode = debug_mode
         self.production_mode = production_mode
+        self.single_level_path = single_level_path
+        self.use_path_predictor = use_path_predictor
+        self.path_predictor_checkpoint = path_predictor_checkpoint
+        self.path_predictor_update_freq = path_predictor_update_freq
+        self.runtime_profiler = runtime_profiler
+        self.enable_env_profiling = enable_env_profiling
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Validate PBRS gamma matches reward constants for policy invariance
+        from nclone.gym_environment.reward_calculation.reward_constants import (
+            PBRS_GAMMA,
+        )
+
+        if abs(self.pbrs_gamma - PBRS_GAMMA) > 1e-6:
+            logger.warning(
+                f"PBRS gamma mismatch! "
+                f"Trainer: {self.pbrs_gamma}, "
+                f"Reward constants: {PBRS_GAMMA}. "
+                f"This violates PBRS policy invariance guarantee."
+            )
 
         # Training state
         self.model = None
@@ -119,6 +144,7 @@ class ArchitectureTrainer:
         self.policy_kwargs = None
         self.policy_class = None
         self.hyperparams = None
+        self.navigation_system = None  # For path predictor integration
 
         # Initialize reward configuration with curriculum-aware lifecycle
         # Total timesteps will be updated when train() is called
@@ -129,13 +155,31 @@ class ArchitectureTrainer:
         logger.info(f"Train dataset: {self.train_dataset_path}")
         logger.info(f"Test dataset: {self.test_dataset_path}")
         logger.info(f"Device: cuda:{device_id}")
-        logger.info(f"Objective Attention Policy: {use_objective_attention_policy}")
         logger.info(f"Curriculum learning: {use_curriculum}")
         logger.info("PBRS: ALWAYS ENABLED (mandatory)")
-        logger.info(f"  PBRS gamma: {pbrs_gamma}")
+        logger.info(
+            f"  PBRS gamma: {pbrs_gamma} (must match PPO gamma and reward constants)"
+        )
         logger.info(f"Reward Config: {self.reward_config}")
         if frame_stack_config:
             logger.info(f"Frame stacking: {frame_stack_config}")
+        if frame_skip_config and frame_skip_config.get("enable", False):
+            skip = frame_skip_config.get("skip", 4)
+            logger.info(f"Frame skip: ENABLED (skip={skip} frames)")
+            logger.info(
+                f"  → {skip}-frame skip is within all N++ input buffers (jump/floor/wall: 5 frames, launch pad: 4 frames)"
+            )
+            logger.info(
+                f"  → Expected: {(1 - 1 / skip) * 100:.0f}% reduction in agent decisions"
+            )
+        if self.single_level_path:
+            logger.info(f"Single level mode: {self.single_level_path}")
+            logger.info("  → Training and evaluation will use this single level file")
+        if use_path_predictor:
+            logger.info("Path predictor enabled")
+            if path_predictor_checkpoint:
+                logger.info(f"  Checkpoint: {path_predictor_checkpoint}")
+            logger.info(f"  Update frequency: {path_predictor_update_freq} steps")
 
     @classmethod
     def from_hyperparameter_dict(
@@ -147,7 +191,6 @@ class ArchitectureTrainer:
         output_dir: str,
         experiment_name: str,
         device_id: int = 0,
-        use_objective_attention_policy: Optional[bool] = None,
         use_curriculum: Optional[bool] = None,
         **kwargs,
     ) -> "ArchitectureTrainer":
@@ -162,8 +205,6 @@ class ArchitectureTrainer:
             output_dir: Output directory for checkpoints/logs
             experiment_name: Experiment name
             device_id: CUDA device ID
-            use_objective_attention_policy: Whether to use ObjectiveAttentionActorCriticPolicy.
-                If None, will be determined from hyperparameters['policy_class'] if present.
             **kwargs: Additional arguments passed to __init__
 
         Returns:
@@ -173,19 +214,12 @@ class ArchitectureTrainer:
         output_path = Path(output_dir) / experiment_name
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Determine policy class from hyperparameters if not explicitly provided
-        if use_objective_attention_policy is None and "policy_class" in hyperparameters:
-            use_objective_attention_policy = (
-                hyperparameters["policy_class"] == "ObjectiveAttentionActorCriticPolicy"
-            )
-
         trainer = cls(
             architecture_config=architecture_config,
             train_dataset_path=train_dataset_path,
             test_dataset_path=test_dataset_path,
             output_dir=output_path,
             device_id=device_id,
-            use_objective_attention_policy=use_objective_attention_policy or False,
             use_curriculum=use_curriculum or False,
             **kwargs,
         )
@@ -257,56 +291,41 @@ class ArchitectureTrainer:
                     self.architecture_config
                 )
 
-        if self.use_objective_attention_policy:
-            from npp_rl.agents.objective_attention_actor_critic_policy import (
-                ObjectiveAttentionActorCriticPolicy,
-            )
+        # Always use DeepResNet with dueling (no objective attention needed)
+        from npp_rl.agents.deep_resnet_actor_critic_policy import (
+            DeepResNetActorCriticPolicy,
+        )
 
-            self.policy_class = ObjectiveAttentionActorCriticPolicy
+        self.policy_class = DeepResNetActorCriticPolicy
 
-            # Use deeper network architecture (same as DeepResNetActorCriticPolicy)
-            if not hasattr(self, "_optuna_hyperparameters"):
-                # Override default architecture with deeper network
-                default_net_arch = {
-                    "pi": [512, 512, 384, 256, 256],  # 5-layer policy network
-                    "vf": [512, 384, 256],  # 3-layer value network
-                }
-                self.policy_kwargs["net_arch"] = default_net_arch
+        # Use deeper network architecture for attention config
+        if self.architecture_config.name == "attention" and not hasattr(
+            self, "_optuna_hyperparameters"
+        ):
+            # Override default architecture with deeper network
+            default_net_arch = {
+                "pi": [512, 512, 384, 256, 256],  # 5-layer policy network
+                "vf": [512, 384, 256],  # 3-layer value network
+            }
+            self.policy_kwargs["net_arch"] = default_net_arch
 
-            # Add ObjectiveAttentionActorCriticPolicy specific kwargs
-            self.policy_kwargs.update(
-                {
-                    "share_features_extractor": True,  # OPTIMIZED: Shared extractors for 1.3-1.5x speedup
-                    "activation_fn": nn.SiLU,  # Modern activation
-                    "use_residual": ppo_kwargs.pop("use_residual", True),
-                    "use_layer_norm": ppo_kwargs.pop("use_layer_norm", True),
-                    "dropout": ppo_kwargs.pop("dropout", 0.1),
-                    "use_objective_attention": True,  # Enable objective attention
-                    "use_auxiliary_death_head": True,  # Enable auxiliary death prediction head
-                }
-            )
-            logger.info(
-                "Using ObjectiveAttentionActorCriticPolicy (Deep ResNet + Objective Attention + Dueling + Auxiliary Death Head)"
-            )
-            logger.info("  - Deep ResNet MLP: 5-layer policy, 3-layer value")
-            logger.info(
-                "  - Objective-specific attention over variable locked doors (1-16)"
-            )
-            logger.info("  - Dueling architecture (always enabled)")
-            logger.info(
-                "  - Auxiliary death prediction head (learns from death_context)"
-            )
-            logger.info(
-                f"  - Residual connections: {self.policy_kwargs['use_residual']}"
-            )
-            logger.info(f"  - LayerNorm: {self.policy_kwargs['use_layer_norm']}")
-            logger.info("  - Shared feature extractors for policy/value (optimized)")
-        else:
-            # Use MaskedActorCriticPolicy for action masking support
-            self.policy_class = MaskedActorCriticPolicy
-            logger.info(
-                "Using MaskedActorCriticPolicy with action masking for invalid actions"
-            )
+        # Add DeepResNetActorCriticPolicy kwargs
+        self.policy_kwargs.update(
+            {
+                "share_features_extractor": True,  # OPTIMIZED: Shared extractors for 1.3-1.5x speedup
+                "activation_fn": nn.SiLU,  # Modern activation
+                "use_residual": ppo_kwargs.pop("use_residual", True),
+                "use_layer_norm": ppo_kwargs.pop("use_layer_norm", True),
+                "dropout": ppo_kwargs.pop("dropout", 0.1),
+                "dueling": True,  # Keep dueling decomposition
+            }
+        )
+        logger.info("Using DeepResNetActorCriticPolicy (Deep ResNet + Dueling)")
+        logger.info("  - Deep ResNet MLP: 5-layer policy, 3-layer value")
+        logger.info("  - Dueling architecture (always enabled)")
+        logger.info(f"  - Residual connections: {self.policy_kwargs['use_residual']}")
+        logger.info(f"  - LayerNorm: {self.policy_kwargs['use_layer_norm']}")
+        logger.info("  - Shared feature extractors for policy/value (optimized)")
 
         # Configure hyperparameters
         self._configure_hyperparameters(ppo_kwargs)
@@ -481,7 +500,10 @@ class ArchitectureTrainer:
             default_learning_rate = ppo_kwargs.get("learning_rate", 3e-4)
         else:
             # Apply automatic scaling for multi-GPU DDP training
-            base_batch_size = 256  # INCREASED from 128 for better GPU utilization (after n_steps reduction)
+            # Architecture-specific batch size: attention needs smaller batches for more updates
+            base_batch_size = (
+                128 if self.architecture_config.name == "attention" else 256
+            )
             base_learning_rate = 3e-4
 
             if self.world_size > 1 and self.use_distributed:
@@ -501,24 +523,40 @@ class ArchitectureTrainer:
         # n_epochs: 10 for standard PPO (deep networks need fewer epochs to avoid overfitting)
 
         # Architecture-specific gradient clipping
-        # Attention architecture has 5-level attention (AttentiveStateMLP → GCN → MultiHeadFusion
-        # → ObjectiveAttentionPolicy → Dueling) with ~15-18M parameters, requiring higher max_grad_norm
+        # Attention architecture has 5-6 level attention (optional Temporal → AttentiveStateMLP → GCN
+        # → MultiHeadFusion → ObjectiveAttentionPolicy → Dueling) with ~15-18M parameters, requiring higher max_grad_norm
         default_max_grad_norm = (
             2.5 if self.architecture_config.name == "attention" else 1.0
         )
 
+        # Architecture-specific entropy coefficient for exploration
+        # Attention architecture needs stronger exploration pressure due to complex action space
+        default_ent_coef = (
+            0.05 if self.architecture_config.name == "attention" else 0.01
+        )
+
+        # Architecture-specific clip range for policy updates
+        # Attention architecture benefits from larger updates due to high-dimensional feature space
+        default_clip_range = (
+            0.3 if self.architecture_config.name == "attention" else 0.2
+        )
+
+        # Architecture-specific value function coefficient
+        # Attention architecture benefits from stronger value learning to handle complex state space
+        default_vf_coef = 1.0 if self.architecture_config.name == "attention" else 0.5
+
         default_hyperparams = {
             "learning_rate": default_learning_rate,
-            "n_steps": 512,  # REDUCED from 1024 for 50% memory savings (allows scaling to 32-64 envs)
+            "n_steps": 1024,
             "batch_size": default_batch_size,
-            "n_epochs": 10,  # Standard PPO value (4-10 range)
+            "n_epochs": 10,
             "gamma": 0.99,
             "gae_lambda": 0.95,
-            "clip_range": 0.2,
+            "clip_range": default_clip_range,
             "clip_range_vf": None,  # Disable value clipping (recommended by SB3/OpenAI)
-            "ent_coef": 0.01,  # Standard PPO value for exploration
-            "vf_coef": 0.5,
-            "max_grad_norm": default_max_grad_norm,  # Higher for deep attention (2.5) vs standard (1.0)
+            "ent_coef": default_ent_coef,
+            "vf_coef": default_vf_coef,
+            "max_grad_norm": default_max_grad_norm,
             "tensorboard_log": str(self.output_dir / "tensorboard"),
             "device": f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
         }
@@ -677,6 +715,7 @@ class ArchitectureTrainer:
             "use_residual",
             "use_layer_norm",
             "dropout",
+            "dueling",  # DeepResNet policy-specific param, not a PPO param
             "use_curriculum",  # Trainer-level parameter, not a PPO param
         }
         filtered_ppo_kwargs = {
@@ -731,13 +770,23 @@ class ArchitectureTrainer:
         logger.info(f"Setting up {num_envs} training environments...")
         logger.info(f"Frame stacking config: {self.frame_stack_config}")
 
+        # Add warning if both curriculum and custom map are enabled
+        if self.use_curriculum and self.single_level_path:
+            logger.warning("=" * 60)
+            logger.warning("Both curriculum learning and custom_map_path are enabled.")
+            logger.warning(f"Custom map '{self.single_level_path}' will take priority.")
+            logger.warning(
+                "Curriculum logic will be bypassed - all environments will load the same custom map."
+            )
+            logger.warning("=" * 60)
+
         try:
             # Adjust n_steps if total_timesteps is very small (for CPU testing)
             if total_timesteps is not None:
                 self._adjust_hyperparams_for_small_runs(total_timesteps, num_envs)
 
-            # Set up curriculum manager if enabled
-            if self.use_curriculum:
+            # Set up curriculum manager if enabled (skip if using custom map)
+            if self.use_curriculum and not self.single_level_path:
                 from npp_rl.training.curriculum_factory import (
                     create_curriculum_for_parallel_training,
                 )
@@ -753,6 +802,15 @@ class ArchitectureTrainer:
                 logger.info(
                     f"Starting stage: {self.curriculum_manager.get_current_stage()}"
                 )
+            elif self.use_curriculum and self.single_level_path:
+                logger.info("=" * 60)
+                logger.info(
+                    "Curriculum learning disabled: single_level_path takes precedence"
+                )
+                logger.info(f"All environments will use: {self.single_level_path}")
+                logger.info("=" * 60)
+                self.use_curriculum = False
+                self.curriculum_manager = None
 
             # Create environment factory
             logger.info("Creating environment factory...")
@@ -760,12 +818,15 @@ class ArchitectureTrainer:
                 use_curriculum=self.use_curriculum,
                 curriculum_manager=self.curriculum_manager,
                 frame_stack_config=self.frame_stack_config,
+                frame_skip_config=self.frame_skip_config,
                 pbrs_gamma=self.pbrs_gamma,
                 output_dir=self.output_dir,
                 pretrained_checkpoint=self.pretrained_checkpoint,
                 test_dataset_path=str(self.test_dataset_path),
                 architecture_config=self.architecture_config,
                 reward_config=self.reward_config,  # Pass curriculum-aware reward config
+                custom_map_path=self.single_level_path,  # Pass single level path if specified
+                enable_profiling=self.enable_env_profiling,
             )
 
             # Create training environment
@@ -791,12 +852,16 @@ class ArchitectureTrainer:
                 world_size=self.world_size,
                 enable_early_stopping=self.enable_early_stopping,
                 early_stopping_patience=self.early_stopping_patience,
-                use_objective_attention_policy=self.use_objective_attention_policy,
             )
 
             # Create the model with the environment
             logger.info("Creating model with environment...")
             self._create_model()
+
+            # Initialize navigation system with path predictor if enabled
+            if self.use_path_predictor:
+                logger.info("Initializing generalized navigation system...")
+                self._initialize_navigation_system()
 
             logger.info(f"✓ Model fully initialized with {num_envs} environments")
             logger.info("=" * 60)
@@ -906,6 +971,11 @@ class ArchitectureTrainer:
             logger.info(f"✓ Model is on device: {self.model.device}")
             logger.info("=" * 60)
 
+            # MEMORY PROFILING: Record snapshot after model creation
+            if self.runtime_profiler is not None:
+                self.runtime_profiler.record_memory_snapshot("after_model_creation")
+                logger.info("✓ Memory snapshot recorded: after_model_creation")
+
             # Update model's observation space to match frame-stacked environment
             # This ensures evaluation correctly detects frame stacking configuration
             if self.frame_stack_config and (
@@ -966,7 +1036,7 @@ class ArchitectureTrainer:
                 env=self.env,
                 policy_kwargs=self.policy_kwargs,
                 debug=self.debug_mode,
-                rollout_buffer_class=SparseGraphRolloutBuffer,
+                # Use standard DictRolloutBuffer (default) - sparse logic removed
                 **self._get_hyperparameters_dict(),
             )
         logger.info("✓ PPO model created successfully")
@@ -1287,6 +1357,21 @@ class ArchitectureTrainer:
                 )
                 return {"success_rate": 0.0, "skipped_on_worker": True}
 
+        # Handle single level evaluation mode
+        if self.single_level_path:
+            logger.info(
+                f"Single level mode: Evaluating {num_episodes} episodes on {self.single_level_path}"
+            )
+            logger.info("  → Test dataset will NOT be used")
+            return self._evaluate_single_level(
+                num_episodes=num_episodes,
+                record_videos=record_videos,
+                video_output_dir=video_output_dir,
+                max_videos_per_category=max_videos_per_category,
+                video_fps=video_fps,
+                timeout_per_episode=timeout_per_episode,
+            )
+
         logger.info(
             f"Evaluating model on test suite ({num_episodes} episodes per category)..."
         )
@@ -1333,6 +1418,254 @@ class ArchitectureTrainer:
         except Exception as e:
             print(f"Evaluation failed: {e}")
             return {"success_rate": 0.0, "error": str(e)}
+
+    def _evaluate_single_level(
+        self,
+        num_episodes: int,
+        record_videos: bool = False,
+        video_output_dir: Optional[str] = None,
+        max_videos_per_category: int = 10,
+        video_fps: int = 30,
+        timeout_per_episode: float = 200.0,
+    ) -> Dict[str, float]:
+        """Evaluate model on a single level file.
+
+        Args:
+            num_episodes: Number of episodes to run on the single level
+            record_videos: Whether to record videos
+            video_output_dir: Directory to save videos
+            max_videos_per_category: Maximum videos to record
+            video_fps: Video framerate
+            timeout_per_episode: Timeout per episode in seconds
+
+        Returns:
+            Evaluation metrics dictionary
+        """
+        import time
+        import numpy as np
+        from pathlib import Path
+        from stable_baselines3.common.vec_env import DummyVecEnv
+        from nclone.gym_environment.npp_environment import NppEnvironment
+        from nclone.gym_environment.config import EnvironmentConfig
+        from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+        from npp_rl.utils.video_recorder import create_video_recorder
+        from npp_rl.training.distributed_utils import unwrap_policy_for_inference
+
+        logger.info(
+            f"Running {num_episodes} episodes on single level: {self.single_level_path}"
+        )
+
+        successes = []
+        episode_steps = []
+        episode_rewards = []
+        videos_recorded = 0
+
+        # Detect visual modalities
+        visual_modalities = ComprehensiveEvaluator.detect_visual_modalities(self.model)
+        uses_visual = (
+            visual_modalities["uses_player_frame"]
+            or visual_modalities["uses_global_view"]
+        )
+
+        for episode_idx in range(num_episodes):
+            logger.debug(f"Episode {episode_idx + 1}/{num_episodes}")
+            env = None
+            video_recorder = None
+
+            try:
+                # Create environment for this episode
+                def make_env():
+                    config = EnvironmentConfig.for_evaluation(
+                        test_dataset_path=str(self.test_dataset_path),
+                        custom_map_path=self.single_level_path,
+                    )
+
+                    # Disable visual observations if model doesn't use them
+                    if not uses_visual and not record_videos:
+                        config.enable_visual_observations = False
+                    elif record_videos:
+                        config.render.render_mode = "rgb_array"
+                        config.enable_visual_observations = True
+
+                    env = NppEnvironment(config=config)
+
+                    # Apply frame stacking if configured
+                    if self.frame_stack_config and (
+                        self.frame_stack_config.get(
+                            "enable_visual_frame_stacking", False
+                        )
+                        or self.frame_stack_config.get("enable_state_stacking", False)
+                    ):
+                        env = FrameStackWrapper(
+                            env,
+                            visual_stack_size=self.frame_stack_config.get(
+                                "visual_stack_size", 4
+                            ),
+                            state_stack_size=self.frame_stack_config.get(
+                                "state_stack_size", 4
+                            ),
+                            enable_visual_stacking=self.frame_stack_config.get(
+                                "enable_visual_frame_stacking", False
+                            ),
+                            enable_state_stacking=self.frame_stack_config.get(
+                                "enable_state_stacking", False
+                            ),
+                            padding_type=self.frame_stack_config.get(
+                                "padding_type", "zero"
+                            ),
+                        )
+
+                    return env
+
+                env = DummyVecEnv([make_env])
+                obs = env.reset()
+                obs = ComprehensiveEvaluator._filter_observation_for_model(
+                    obs, self.model
+                )
+
+                # Initialize video recorder if needed
+                should_record = (
+                    record_videos
+                    and video_output_dir is not None
+                    and videos_recorded < max_videos_per_category
+                )
+
+                if should_record:
+                    video_path = (
+                        Path(video_output_dir)
+                        / f"single_level_ep{episode_idx:03d}_temp.mp4"
+                    )
+                    video_path.parent.mkdir(parents=True, exist_ok=True)
+                    video_recorder = create_video_recorder(
+                        output_path=str(video_path),
+                        fps=video_fps,
+                    )
+                    if video_recorder:
+                        video_recorder.start_recording()
+                        frame = env.render()
+                        if frame is not None:
+                            if isinstance(frame, (list, tuple)):
+                                frame = frame[0]
+                            if hasattr(frame, "ndim") and frame.ndim == 3:
+                                video_recorder.record_frame(frame)
+
+                # Run episode
+                done = False
+                steps = 0
+                episode_reward = 0
+                start_time = time.time()
+                max_steps = 10000
+
+                while not done and steps < max_steps:
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > timeout_per_episode:
+                        logger.warning(
+                            f"Episode {episode_idx + 1} timed out after {elapsed_time:.1f}s"
+                        )
+                        break
+
+                    # Get action from model
+                    with unwrap_policy_for_inference(self.model):
+                        action, _ = self.model.predict(obs, deterministic=True)
+
+                    # Step environment
+                    obs, reward, done, info = env.step(action)
+                    obs = ComprehensiveEvaluator._filter_observation_for_model(
+                        obs, self.model
+                    )
+                    done = done[0]
+                    reward = reward[0]
+                    info = info[0]
+
+                    # Record frame if needed
+                    if video_recorder and video_recorder.is_recording:
+                        try:
+                            frame = env.render()
+                            if frame is not None:
+                                if isinstance(frame, (list, tuple)):
+                                    frame = frame[0]
+                                if hasattr(frame, "ndim") and frame.ndim == 3:
+                                    video_recorder.record_frame(frame)
+                        except Exception:
+                            pass
+
+                    episode_reward += reward
+                    steps += 1
+
+                # Record results
+                success = info.get("is_success", False) if done else False
+                successes.append(1 if success else 0)
+                episode_steps.append(steps)
+                episode_rewards.append(episode_reward)
+
+                # Save video
+                if video_recorder and video_recorder.is_recording:
+                    video_recorder.stop_recording(save=True)
+                    success_label = "success" if success else "failure"
+                    final_path = (
+                        Path(video_output_dir)
+                        / f"single_level_ep{episode_idx:03d}_{success_label}.mp4"
+                    )
+                    temp_path = (
+                        Path(video_output_dir)
+                        / f"single_level_ep{episode_idx:03d}_temp.mp4"
+                    )
+                    if temp_path.exists():
+                        temp_path.rename(final_path)
+                        videos_recorded += 1
+
+                env.close()
+
+            except Exception as e:
+                logger.error(f"Failed to evaluate episode {episode_idx + 1}: {e}")
+                import traceback
+
+                traceback.print_exc()
+                successes.append(0)
+                episode_steps.append(10000)
+                episode_rewards.append(0)
+            finally:
+                if video_recorder and video_recorder.is_recording:
+                    try:
+                        video_recorder.stop_recording(save=False)
+                    except Exception:
+                        pass
+                if env is not None:
+                    try:
+                        env.close()
+                    except Exception:
+                        pass
+
+        # Calculate metrics
+        success_rate = np.mean(successes) if len(successes) > 0 else 0.0
+        avg_steps = np.mean(episode_steps) if len(episode_steps) > 0 else 0.0
+        avg_reward = np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0
+        std_steps = np.std(episode_steps) if len(episode_steps) > 0 else 0.0
+
+        results = {
+            "success_rate": float(success_rate),
+            "avg_steps": float(avg_steps),
+            "std_steps": float(std_steps),
+            "avg_reward": float(avg_reward),
+            "total_episodes": len(successes),
+            "episode_steps": [int(s) for s in episode_steps],
+            "episode_rewards": [float(r) for r in episode_rewards],
+            "successes": [int(s) for s in successes],
+        }
+
+        # Save results
+        results_path = self.output_dir / "eval_results.json"
+        import json
+
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+
+        logger.info("Single level evaluation complete")
+        logger.info(f"Success rate: {success_rate:.2%}")
+        logger.info(f"Average steps: {avg_steps:.1f} ± {std_steps:.1f}")
+        logger.info(f"Average reward: {avg_reward:.2f}")
+
+        return results
 
     def cleanup(self) -> None:
         """Clean up environments and release resources."""
@@ -1434,6 +1767,44 @@ class ArchitectureTrainer:
         return ComprehensiveEvaluator(
             test_dataset_path=str(self.test_dataset_path),
             device=f"cuda:{self.device_id}" if torch.cuda.is_available() else "cpu",
+        )
+
+    def _initialize_navigation_system(self) -> None:
+        """Initialize generalized navigation system with path predictor.
+
+        Creates and configures the navigation system for reward shaping and
+        online path learning during RL training.
+        """
+        from npp_rl.training.generalized_navigation_system import (
+            GeneralizedNavigationSystem,
+            GeneralizedNavigationConfig,
+        )
+
+        # Create navigation system config
+        nav_config = GeneralizedNavigationConfig(
+            num_path_candidates=4,
+            max_waypoints=20,
+            graph_feature_dim=256,
+            tile_pattern_dim=64,
+            entity_feature_dim=32,
+            path_predictor_checkpoint=self.path_predictor_checkpoint,
+        )
+
+        # Create navigation system
+        self.navigation_system = GeneralizedNavigationSystem(
+            config=nav_config,
+            demonstration_data=None,  # No demonstrations for now
+            save_dir=str(self.output_dir / "navigation_system"),
+            env=self.env.envs[0] if hasattr(self.env, "envs") else self.env,
+        )
+
+        logger.info("✓ Generalized navigation system initialized")
+
+        # Log statistics
+        stats = self.navigation_system.get_system_statistics()
+        logger.info(f"  Path predictor: {stats.get('path_predictor_stats', {})}")
+        logger.info(
+            f"  Pattern database: {stats.get('patterns_in_database', 0)} patterns"
         )
 
     def save_training_state(self, timestep: int) -> Path:

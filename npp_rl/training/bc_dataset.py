@@ -298,9 +298,23 @@ def _simulate_replay_worker(
 
         # Process observations with frame stacking
         for obs_data in observations:
-            observation = _process_observation_worker(
-                obs_data["observation"], architecture_config
-            )
+            # DEBUG: Log observation keys before filtering
+            raw_obs = obs_data["observation"]
+            if len(samples) == 0:  # Log only for first observation
+                logger.debug(
+                    f"Raw observation keys from replay executor: {list(raw_obs.keys())}"
+                )
+                if architecture_config and hasattr(architecture_config, "modalities"):
+                    logger.debug(
+                        f"Architecture config modalities: use_graph={architecture_config.modalities.use_graph}"
+                    )
+
+            observation = _process_observation_worker(raw_obs, architecture_config)
+
+            # DEBUG: Log observation keys after filtering
+            if len(samples) == 0:  # Log only for first observation
+                logger.debug(f"Filtered observation keys: {list(observation.keys())}")
+
             action = obs_data["action"]
 
             # Add to frame buffers
@@ -380,24 +394,20 @@ def _process_observation_worker(obs: Dict, architecture_config: Optional[Any]) -
     if obs is None:
         logger.warning("Received None observation in _process_observation_worker")
         return {}
-    
+
     processed = {}
 
-    # Define all possible observation keys
+    # Define all possible observation keys (GCN-optimized)
     all_keys = {
         "player_frame": "player_frame",
         "global_view": "global_view",
         "game_state": "game_state",
         "reachability_features": "reachability_features",
         "entity_positions": "entity_positions",
-        "death_context": "death_context",  # Death context for auxiliary learning
         "graph_node_feats": "graph_node_feats",
         "graph_edge_index": "graph_edge_index",
-        "graph_edge_feats": "graph_edge_feats",
         "graph_node_mask": "graph_node_mask",
         "graph_edge_mask": "graph_edge_mask",
-        "graph_node_types": "graph_node_types",
-        "graph_edge_types": "graph_edge_types",
     }
 
     # Filter based on architecture config if provided
@@ -425,8 +435,6 @@ def _process_observation_worker(obs: Dict, architecture_config: Optional[Any]) -
                     "graph_edge_types",
                 ]
             )
-        # Always include death_context (part of observation space, not filtered by architecture)
-        required_keys.append("death_context")
     else:
         required_keys = list(all_keys.keys())
 
@@ -490,7 +498,6 @@ def _load_from_cache_worker(cache_path: Path) -> List[Tuple[Dict, int]]:
                 "reachability_features",
                 "player_frame",
                 "entity_positions",
-                "death_context",
                 "graph_node_feats",
                 "graph_edge_index",
                 "graph_edge_feats",
@@ -1054,26 +1061,22 @@ class BCReplayDataset(Dataset):
         if obs is None:
             logger.warning("Received None observation in _process_observation")
             return {}
-        
+
         # Extract only the components needed for training
         # Handle both full environment observations and ReplayExecutor observations
         processed = {}
 
-        # Define all possible observation keys
+        # Define all possible observation keys (GCN-optimized)
         all_keys = {
             "player_frame": "player_frame",
             "global_view": "global_view",
             "game_state": "game_state",
             "reachability_features": "reachability_features",
             "entity_positions": "entity_positions",
-            "death_context": "death_context",  # Death context for auxiliary learning
             "graph_node_feats": "graph_node_feats",
             "graph_edge_index": "graph_edge_index",
-            "graph_edge_feats": "graph_edge_feats",
             "graph_node_mask": "graph_node_mask",
             "graph_edge_mask": "graph_edge_mask",
-            "graph_node_types": "graph_node_types",
-            "graph_edge_types": "graph_edge_types",
         }
 
         # Filter based on architecture config if provided
@@ -1104,8 +1107,6 @@ class BCReplayDataset(Dataset):
                         "graph_edge_types",
                     ]
                 )
-            # Always include death_context (part of observation space, not filtered by architecture)
-            required_keys.append("death_context")
         else:
             # Include all available keys if no architecture config provided
             required_keys = list(all_keys.keys())
@@ -1174,7 +1175,6 @@ class BCReplayDataset(Dataset):
                     "reachability_features",
                     "player_frame",
                     "entity_positions",
-                    "death_context",
                     "graph_node_feats",
                     "graph_edge_index",
                     "graph_edge_feats",

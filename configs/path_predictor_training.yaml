@@ -1,0 +1,240 @@
+# Path Predictor Training Configuration
+# This file configures the training of the ProbabilisticPathPredictor network
+# for learning to predict multiple candidate paths from expert demonstrations.
+
+# Model architecture configuration
+model:
+  # Dimension of graph feature embeddings
+  graph_feature_dim: 256
+  
+  # Dimension of tile pattern features
+  tile_pattern_dim: 64
+  
+  # Dimension of entity (exit, switch, door) features
+  entity_feature_dim: 32
+  
+  # Number of candidate paths to generate per prediction
+  num_path_candidates: 4
+  
+  # Maximum number of waypoints per path
+  max_waypoints: 20
+  
+  # Hidden layer dimension for path decoder
+  hidden_dim: 512
+  
+  # Number of attention heads for multi-head path decoder
+  num_attention_heads: 8
+  
+  # Dropout rate for regularization
+  dropout: 0.1
+
+# Training hyperparameters
+training:
+  # Optimizer learning rate
+  learning_rate: 0.0003
+  
+  # Batch size for training
+  batch_size: 32
+  
+  # Number of training epochs
+  num_epochs: 50
+  
+  # Number of warmup steps for learning rate schedule
+  warmup_steps: 1000
+  
+  # Gradient clipping max norm
+  gradient_clip_norm: 1.0
+  
+  # Loss component weights
+  # Waypoint prediction loss (matching expert trajectories)
+  waypoint_loss_weight: 1.0
+  
+  # Confidence calibration loss (ranking expert path highest)
+  confidence_loss_weight: 0.5
+  
+  # Path diversity loss (encouraging diverse candidates)
+  diversity_loss_weight: 0.3
+  
+  # Graph validation loss (penalizing non-adjacent nodes)
+  graph_validation_weight: 0.1
+  
+  # Optimizer configuration
+  optimizer:
+    type: "adam"
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    weight_decay: 0.0001
+  
+  # Learning rate scheduler
+  scheduler:
+    type: "reduce_on_plateau"
+    mode: "min"
+    factor: 0.5
+    patience: 5
+    min_lr: 1.0e-6
+
+# Dataset configuration
+data:
+  # Extract waypoint every N frames from replay trajectories
+  waypoint_interval: 5
+  
+  # Minimum number of frames required for valid trajectory
+  min_trajectory_length: 20
+  
+  # Enable data augmentation (horizontal flip, position jitter)
+  augmentation: true
+  
+  # Augmentation parameters
+  augmentation_params:
+    horizontal_flip_prob: 0.5
+    position_jitter_std: 2.0  # pixels
+    max_rotation_degrees: 5
+  
+  # Number of dataloader workers
+  num_workers: 4
+  
+  # Pin memory for faster GPU transfer
+  pin_memory: true
+  
+  # Validation split ratio (if no separate val set provided)
+  val_split: 0.1
+
+# Pattern extraction configuration
+pattern_extraction:
+  # Neighborhood sizes to consider (in tiles)
+  neighborhood_sizes: [3, 5]
+  
+  # Radius around entities to extract context (in pixels)
+  entity_context_radius: 24
+  
+  # Minimum observations required to consider a pattern valid
+  min_pattern_observations: 5
+  
+  # Maximum patterns to store in database
+  max_patterns: 10000
+  
+  # Pattern similarity threshold for deduplication
+  similarity_threshold: 0.8
+
+# Online learning configuration (for fine-tuning during RL training)
+online_learning:
+  # Update predictor every N RL timesteps
+  update_freq: 1000
+  
+  # Learning rate for online adaptation
+  adaptation_rate: 0.1
+  
+  # Minimum success rate threshold to update patterns
+  min_success_rate: 0.3
+  
+  # Exponential moving average decay for path preferences
+  ema_decay: 0.99
+  
+  # Exploration bonus for uncertain paths
+  uncertainty_bonus: 0.1
+  
+  # Size of replay buffer for online learning
+  replay_buffer_size: 5000
+
+# Checkpointing and logging
+checkpointing:
+  # Save checkpoint every N epochs
+  save_freq: 10
+  
+  # Keep best N checkpoints
+  keep_top_k: 3
+  
+  # Metric to use for selecting best checkpoint
+  best_metric: "val_loss"
+  
+  # Direction of best metric (minimize or maximize)
+  best_metric_mode: "min"
+
+# Evaluation configuration
+evaluation:
+  # Evaluate on validation set every N epochs
+  eval_freq: 1
+  
+  # Number of samples to visualize per evaluation
+  num_visualizations: 5
+  
+  # Metrics to track
+  metrics:
+    - "waypoint_loss"
+    - "confidence_loss"
+    - "diversity_loss"
+    - "path_feasibility"
+    - "average_path_length"
+    - "prediction_confidence"
+
+# Visualization configuration
+visualization:
+  # Generate visualizations after training completes
+  visualize_after_training: true
+  
+  # Number of validation samples to visualize
+  num_viz_samples: 5
+  
+  # Include expert paths in visualizations
+  show_expert_paths: true
+  
+  # Show confidence scores in visualizations
+  show_confidence_scores: true
+
+# Logging configuration
+logging:
+  # Log training metrics every N batches
+  log_freq: 10
+  
+  # Use tensorboard for logging
+  use_tensorboard: true
+  
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  log_level: "INFO"
+  
+  # Save training curves
+  save_plots: true
+
+# Hardware configuration
+hardware:
+  # Device to use (cuda, cpu, or specific GPU like cuda:0)
+  device: "cuda"
+  
+  # Enable mixed precision training (faster on modern GPUs)
+  mixed_precision: true
+  
+  # Compile model with torch.compile (PyTorch 2.0+)
+  compile_model: false
+  
+  # Number of GPUs for distributed training
+  num_gpus: 1
+
+# Reproducibility
+seed: 42
+
+# Path predictor integration with RL training
+rl_integration:
+  # Enable adaptive multi-path PBRS reward shaping
+  enable_pbrs: true
+  
+  # PBRS learning rate
+  pbrs_learning_rate: 0.05
+  
+  # Uncertainty bonus weight for exploration
+  uncertainty_bonus_weight: 0.1
+  
+  # Minimum confidence threshold for using path predictions
+  min_confidence_threshold: 0.1
+  
+  # Size of path memory for adaptive PBRS
+  path_memory_size: 500
+  
+  # Route discovery exploration factor
+  exploration_factor: 2.0
+  
+  # Minimum exploration probability
+  min_exploration_prob: 0.1
+  
+  # Topology memory size for level classification
+  topology_memory_size: 1000
+

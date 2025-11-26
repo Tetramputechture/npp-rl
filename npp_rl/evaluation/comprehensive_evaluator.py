@@ -718,6 +718,9 @@ class ComprehensiveEvaluator:
                     f"Failed to evaluate level {level_data.get('level_id', 'unknown')}: {e}",
                     exc_info=True,  # Add stack trace for debugging
                 )
+                import traceback
+
+                traceback.print_exc()
                 successes.append(0)
                 episode_steps.append(max_steps)
                 rewards.append(0)

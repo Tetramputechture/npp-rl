@@ -15,7 +15,7 @@ The implementation is designed to be performant and avoid memory bloat by:
 import logging
 import random
 import threading
-from collections import defaultdict, deque
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -91,26 +91,24 @@ class RouteVisualizationCallback(BaseCallback):
 
         # Track which environments are currently being sampled for this episode
         # Maps env_idx -> bool indicating if we're tracking this episode
-        self.tracking_episode = defaultdict(bool)
+        self.tracking_episode = {}
 
         # Episode counter per environment for consistent sampling
-        self.episode_counters = defaultdict(int)
+        self.episode_counters = {}
 
-        # Route tracking per environment
-        # Use deque with maxlen to prevent unbounded memory growth
-        # Max episode length is typically <10000 steps, so 20000 is safe
-        MAX_POSITIONS_PER_ROUTE = 20000
-        self.env_routes = defaultdict(
-            lambda: {
-                "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
-                "level_id": None,
-                "start_time": 0,
-                "tiles": None,
-                "mines": None,
-                "locked_doors": None,
-                "is_success": None,
-            }
-        )
+        # Contamination detection: track episode hashes to detect duplicates
+        # Maps episode_hash -> (env_idx, timestep) for recent episodes
+        self.recent_episode_hashes = {}
+
+        # Per-environment rate limiting: track last save timestep per env
+        # Prevents saving too many near-identical routes from undertrained agents
+        # Maps env_idx -> last_timestep_saved
+        self.last_save_timestep_per_env = {}
+
+        # Minimum timesteps between saves from same environment
+        # With N parallel envs, consecutive episodes from same env are N steps apart
+        # Set to 50 to require ~10 episodes between saves (assuming 5 envs)
+        self.min_timesteps_between_saves = 50
 
         # Statistics
         self.routes_saved_this_checkpoint = 0
@@ -178,7 +176,7 @@ class RouteVisualizationCallback(BaseCallback):
             f"Will visualize up to {self.max_routes_per_checkpoint} routes every {self.visualization_freq} steps"
         )
         logger.info(
-            "⚠️  Route visualization requires PositionTrackingWrapper to be applied to environments"
+            "⚠️  Route visualization requires position tracking (integrated into BaseNppEnvironment)"
         )
         logger.info(
             "   If routes are not being captured, ensure the wrapper is in the environment pipeline"
@@ -187,172 +185,263 @@ class RouteVisualizationCallback(BaseCallback):
     def _on_step(self) -> bool:
         """Called after each environment step.
 
+        Note: With frame skipping, this is called once per ACTION (not per frame).
+        Position tracking is integrated into BaseNppEnvironment automatically.
+
         Returns:
             bool: If False, training will be stopped
         """
-        # Track positions for sampled environments only
         if "dones" in self.locals and "infos" in self.locals:
             dones = self.locals["dones"]
             infos = self.locals["infos"]
 
-            # Try to get positions from the environment directly
-            # This is more reliable than trying to parse observations
             for env_idx, (done, info) in enumerate(zip(dones, infos)):
-                # Check if we should start tracking a new episode
-                # This happens when positions list is empty (new episode starting)
-                # and we haven't already decided to track this episode
+                # Decide whether to sample this episode (only once at episode start)
+                # Detected by checking if we haven't made a decision yet for this env
                 if (
-                    len(self.env_routes[env_idx]["positions"]) == 0
-                    and not self.tracking_episode[env_idx]
+                    env_idx not in self.tracking_episode
+                    or not self.tracking_episode[env_idx]
                 ):
-                    # Decide whether to track this episode based on sampling rate
-                    self.episode_counters[env_idx] += 1
-                    should_track = random.random() < self.episode_sampling_rate
-                    self.tracking_episode[env_idx] = should_track
+                    if env_idx not in self.episode_counters:
+                        self.episode_counters[env_idx] = 0
 
-                # Only track position if we're sampling this episode
-                if self.tracking_episode[env_idx]:
-                    self._track_position_from_env(env_idx, info)
+                    # Only decide on sampling if we're not currently tracking
+                    # (meaning this is a new episode)
+                    if not self.tracking_episode.get(env_idx, False):
+                        self.episode_counters[env_idx] += 1
+                        should_track = random.random() < self.episode_sampling_rate
+                        self.tracking_episode[env_idx] = should_track
 
-                # Check for episode completion
-                if done:
+                        if self.verbose >= 2 and should_track:
+                            logger.debug(
+                                f"Will track episode for env {env_idx} "
+                                f"(episode #{self.episode_counters[env_idx]})"
+                            )
+
+                # Handle episode completion
+                # BaseNppEnvironment adds info["episode_route"] automatically
+                # CRITICAL: Only handle episode end ONCE per episode
+                # VecEnv may report done=True for multiple steps before reset
+                if done and self.tracking_episode.get(env_idx, False):
+                    # Process episode end immediately and clear tracking flag
                     self._handle_episode_end(env_idx, info)
+                    # Clear tracking flag to prevent duplicate processing
+                    self.tracking_episode[env_idx] = False
 
         # Check if it's time to save visualizations
         if self.num_timesteps - self.last_visualization_step >= self.visualization_freq:
             self._process_save_queue()
             self.routes_saved_this_checkpoint = 0
             self.last_visualization_step = self.num_timesteps
+            # Clear contamination detection hashes at each checkpoint to prevent unbounded growth
+            self.recent_episode_hashes.clear()
+            # Clear per-env rate limiting at each checkpoint (start fresh)
+            self.last_save_timestep_per_env.clear()
+
+        # MEMORY OPTIMIZATION: Periodically clean up stale tracking data
+        # to prevent unbounded growth of defaultdicts in long-running training
+        # Check every 10000 timesteps
+        if self.num_timesteps % 10000 == 0:
+            self._cleanup_stale_tracking_data()
 
         return True
-
-    def _track_position_from_env(self, env_idx: int, info: Dict[str, Any]) -> None:
-        """Track agent position for an environment from info dict.
-
-        Args:
-            env_idx: Environment index
-            info: Info dictionary from environment step
-        """
-        try:
-            # Position should be provided by PositionTrackingWrapper in info dict
-            pos = None
-
-            # Check if position is in info dict (added by PositionTrackingWrapper)
-            if "player_position" in info:
-                pos = info["player_position"]
-            elif "ninja_position" in info:
-                pos = info["ninja_position"]
-            elif "position" in info:
-                pos = info["position"]
-
-            # If we got a position, store it
-            if pos is not None:
-                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
-                    pos_x, pos_y = float(pos[0]), float(pos[1])
-
-                    # If this is the first position of a new episode, capture level data
-                    if len(self.env_routes[env_idx]["positions"]) == 0:
-                        self.env_routes[env_idx]["tiles"] = self._get_tile_data(env_idx)
-                        self.env_routes[env_idx]["mines"] = self._get_mine_data(env_idx)
-                        self.env_routes[env_idx]["locked_doors"] = (
-                            self._get_locked_door_data(env_idx)
-                        )
-
-                    self.env_routes[env_idx]["positions"].append((pos_x, pos_y))
-        except Exception as e:
-            logger.info(f"Could not track position for env {env_idx}: {e}")
 
     def _handle_episode_end(self, env_idx: int, info: Dict[str, Any]) -> None:
         """Handle episode completion and potentially save route.
 
+        This is called once per episode end (after frame skipping completes).
+        BaseNppEnvironment provides info["episode_route"] with all positions.
+
         Args:
             env_idx: Environment index
-            info: Episode info dictionary
+            info: Episode info dictionary (includes episode_route from BaseNppEnvironment)
         """
-        # Only process routes if we were tracking this episode
-        if not self.tracking_episode[env_idx]:
-            # Clear tracking flag for next episode
-            self.tracking_episode[env_idx] = False
-            # Still need to clear route data structure
-            MAX_POSITIONS_PER_ROUTE = 20000
-            self.env_routes[env_idx] = {
-                "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
-                "level_id": info.get("level_id", None),
-                "start_time": self.num_timesteps,
-                "tiles": None,
-                "mines": None,
-                "locked_doors": None,
-            }
+        # Check if we were tracking this episode
+        should_save = self.tracking_episode.get(env_idx, False)
+
+        # Always reset tracking flag for next episode
+        # NOTE: Caller (_on_step) already set this to False to prevent duplicate calls
+        if env_idx in self.tracking_episode:
+            del self.tracking_episode[env_idx]
+
+        # Early exit if not tracking this episode
+        if not should_save:
             return
 
+        # Get route from BaseNppEnvironment (added to info at episode end)
         route_positions = info.get("episode_route", None)
 
-        # Fallback to stored positions if episode_route not in info
-        if not route_positions or len(route_positions) == 0:
-            route_positions = list(self.env_routes[env_idx]["positions"])
+        # DEBUG: Log route details to help diagnose duplicate routes with different lengths
+        if self.verbose >= 2:
+            logger.debug(
+                f"Env {env_idx} episode end: {len(route_positions)} positions, "
+                f"first 3: {route_positions[:3]}, last 3: {route_positions[-3:]}"
+            )
 
-        # Only save routes for successful completions with valid position data
-        if route_positions and len(route_positions) > 0:
-            # Check if we should save this route
-            if self.routes_saved_this_checkpoint < self.max_routes_per_checkpoint:
-                self._queue_route_save(env_idx, info, route_positions)
+        # Only save if we haven't hit the checkpoint limit
+        if self.routes_saved_this_checkpoint < self.max_routes_per_checkpoint:
+            # Capture level data at episode end (while we still have access before next reset)
+            # Store temporarily for _queue_route_save to use
+            tiles = self._get_tile_data(env_idx)
+            mines = self._get_mine_data(env_idx)
+            locked_doors = self._get_locked_door_data(env_idx)
+
+            # Add level data to info for queue_route_save to use
+            info["_route_viz_tiles"] = tiles
+            info["_route_viz_mines"] = mines
+            info["_route_viz_locked_doors"] = locked_doors
+
+            was_queued = self._queue_route_save(env_idx, info, route_positions)
+            # Only increment counter if route was actually queued (not a duplicate)
+            if was_queued:
                 self.routes_saved_this_checkpoint += 1
-
-        # Clear route data for this environment
-        MAX_POSITIONS_PER_ROUTE = 20000
-        self.env_routes[env_idx] = {
-            "positions": deque(maxlen=MAX_POSITIONS_PER_ROUTE),
-            "level_id": info.get("level_id", None),
-            "start_time": self.num_timesteps,
-            "tiles": None,
-            "mines": None,
-            "locked_doors": None,
-        }
-
-        # Reset tracking flag for next episode
-        self.tracking_episode[env_idx] = False
 
     def _queue_route_save(
         self,
         env_idx: int,
         info: Dict[str, Any],
         route_positions: List[Tuple[float, float]],
-    ) -> None:
+    ) -> bool:
         """Queue a route for saving.
 
         Args:
             env_idx: Environment index
             info: Episode info dictionary
             route_positions: List of (x, y) position tuples for the route
+
+        Returns:
+            True if route was queued, False if skipped (duplicate)
         """
         exit_switch_pos = info.get("exit_switch_pos", None)
         exit_door_pos = info.get("exit_door_pos", None)
         is_success = info.get("is_success", False)
 
         # Try to get episode reward from various possible locations
-        episode_reward = 0.0
+        # SB3 stores episode info in info["episode"] dict or directly in info
+        if "episode" in info and isinstance(info["episode"], dict):
+            episode_reward = float(info["episode"].get("r", 0.0))
+            episode_length = int(info["episode"].get("l", len(route_positions)))
+        else:
+            episode_reward = float(info.get("r", 0.0))
+            episode_length = int(info.get("l", len(route_positions)))
 
-        episode_reward = float(info["r"])
+            # Debug logging if reward is missing or zero (potential issue)
+            if self.verbose >= 1 and episode_reward == 0.0:
+                logger.warning(
+                    f"Episode reward is 0.0 for env {env_idx}. "
+                    f"is_success={is_success}, "
+                    f"episode_length={episode_length}, "
+                    f"'episode' in info: {'episode' in info}, "
+                    f"'r' in info: {'r' in info}, "
+                    f"info['episode'] if present: {info.get('episode', 'N/A')}, "
+                    f"info['r'] if present: {info.get('r', 'N/A')}, "
+                    f"Available keys: {list(info.keys())[:20]}"
+                )
 
         # Get curriculum stage and generator type (more meaningful than level ID for display)
         curriculum_stage = info.get("curriculum_stage", "unknown")
         curriculum_generator = info.get("curriculum_generator", "unknown")
         level_id = info.get("level_id", f"env_{env_idx}")
 
-        # Get episode length
-        episode_length = info.get("l", len(route_positions))
-
         # Get terminal impact (boolean indicating if ninja died from terminal impact)
         terminal_impact = info.get("terminal_impact", False)
 
-        # Use stored tile, mine, and locked door data (captured at episode start, not end)
+        # Get worker PID if available (for multiprocessing debugging)
+        worker_pid = info.get("worker_pid", None)
+
+        # Get frame skip info if available
+        frame_skip_stats = info.get("frame_skip_stats", {})
+        skip_value = frame_skip_stats.get("skip_value", None)
+
+        # Use level data captured at episode end (added by _handle_episode_end)
         # This ensures we get the correct level data before auto-reset
-        tiles = self.env_routes[env_idx].get("tiles", {})
-        mines = self.env_routes[env_idx].get("mines", [])
-        locked_doors = self.env_routes[env_idx].get("locked_doors", [])
+        tiles = info.get("_route_viz_tiles", {})
+        mines = info.get("_route_viz_mines", [])
+        locked_doors = info.get("_route_viz_locked_doors", [])
+
+        # Calculate episode hash for contamination detection
+        # Use first 5 positions to create a unique identifier
+        episode_hash = self._calculate_episode_hash(route_positions)
+
+        # DEBUG: Check for near-duplicate routes (same env, close in time, similar routes)
+        # This helps diagnose why visually identical routes have different hashes
+        last_save = self.last_save_timestep_per_env.get(env_idx, 0)
+        timesteps_since_last = self.num_timesteps - last_save
+
+        if timesteps_since_last > 0 and timesteps_since_last < 100:
+            # Recent save from same env - check for position tracking issues
+            if self.verbose >= 1:
+                logger.warning(
+                    f"⚠️  Env {env_idx}: New route only {timesteps_since_last} steps after last save. "
+                    f"Route length: {len(route_positions)}, Hash: {episode_hash}. "
+                    f"First 3 pos: {route_positions[:3]}, Last 3 pos: {route_positions[-3:]}. "
+                    f"This may indicate position tracking bugs or undertrained agent repetition."
+                )
+
+        # Check 1: Per-environment rate limiting
+        # Prevent saving too many near-identical routes from undertrained agents
+        if timesteps_since_last < self.min_timesteps_between_saves:
+            if self.verbose >= 1:
+                logger.info(
+                    f"Skipping route from env {env_idx} at step {self.num_timesteps} "
+                    f"(only {timesteps_since_last} steps since last save, "
+                    f"minimum is {self.min_timesteps_between_saves}). "
+                    f"Hash: {episode_hash}"
+                )
+            return False  # Route not queued due to rate limit
+
+        # Check 2: Exact duplicate detection (same hash)
+        should_skip_duplicate = False
+        if episode_hash in self.recent_episode_hashes:
+            prev_env_idx, prev_timestep = self.recent_episode_hashes[episode_hash]
+            if prev_env_idx != env_idx:
+                # Different environment produced same route - critical bug!
+                logger.warning(
+                    f"⚠️  ROUTE CONTAMINATION DETECTED: "
+                    f"Env {env_idx} at step {self.num_timesteps} has IDENTICAL route hash ({episode_hash}) "
+                    f"as env {prev_env_idx} at step {prev_timestep}. "
+                    f"This suggests data sharing or env_idx confusion!"
+                )
+            else:
+                # Same environment produced duplicate route - skip to avoid redundant saves
+                if self.verbose >= 1:
+                    logger.info(
+                        f"Skipping exact duplicate route from env {env_idx} at step {self.num_timesteps} "
+                        f"(hash: {episode_hash}, previous at step {prev_timestep}). "
+                        f"Agent is replaying identical trajectory."
+                    )
+                should_skip_duplicate = True
+
+        # Only save if not a duplicate from same environment
+        if should_skip_duplicate:
+            return False  # Route not queued due to duplicate
+
+        # Store hash for future contamination checks
+        self.recent_episode_hashes[episode_hash] = (env_idx, self.num_timesteps)
+
+        # Update last save timestep for this environment
+        self.last_save_timestep_per_env[env_idx] = self.num_timesteps
+
+        # DEBUG: Check route length before creating route_data
+        route_len_before = len(route_positions)
+        route_list = list(route_positions)
+        route_len_after = len(route_list)
+
+        if route_len_before != route_len_after:
+            logger.error(
+                f"[ROUTE_BUG] Route length changed during list() conversion! "
+                f"Before: {route_len_before}, After: {route_len_after}"
+            )
+
+        if route_len_after < 10:
+            logger.warning(
+                f"[ROUTE_BUG] Very short route being saved: {route_len_after} positions. "
+                f"Positions: {route_list}"
+            )
 
         route_data = {
-            "positions": list(route_positions),
+            "env_idx": env_idx,
+            "positions": route_list,
             "level_id": level_id,
             "curriculum_stage": curriculum_stage,
             "curriculum_generator": curriculum_generator,
@@ -367,6 +456,9 @@ class RouteVisualizationCallback(BaseCallback):
             "is_success": is_success,
             "terminal_impact": terminal_impact,
             "truncated": info.get("truncated", False),
+            "episode_hash": episode_hash,
+            "worker_pid": worker_pid,
+            "skip_value": skip_value,
         }
 
         self.save_queue.append(route_data)
@@ -374,8 +466,44 @@ class RouteVisualizationCallback(BaseCallback):
         if self.verbose >= 1:
             logger.info(
                 f"Queued route visualization for env {env_idx} - "
-                f"Stage: {curriculum_stage}, Level: {level_id}, "
+                f"Stage: {curriculum_stage}, Level: {level_id}, Hash: {episode_hash}"
             )
+
+        return True  # Route successfully queued
+
+    def _calculate_episode_hash(self, positions: List[Tuple[float, float]]) -> str:
+        """Calculate a hash for an episode based on its route positions.
+
+        Uses first 10 positions + last 5 positions + total length to create
+        a compact identifier that can detect identical routes between different
+        environments while minimizing false positives.
+
+        Args:
+            positions: List of (x, y) position tuples
+
+        Returns:
+            Short hex hash string (5 characters)
+        """
+        import hashlib
+
+        # Sample from start and end of route for better uniqueness
+        route_length = len(positions)
+        if route_length <= 15:
+            # Short routes: use all positions
+            sample_positions = positions
+        else:
+            # Longer routes: use first 10 and last 5 positions
+            sample_positions = positions[:10] + positions[-5:]
+
+        # Include route length to differentiate routes with same start/end
+        hash_input = f"{route_length}:{sample_positions}"
+
+        # Convert to bytes for hashing
+        position_bytes = hash_input.encode("utf-8")
+        hash_obj = hashlib.md5(position_bytes)
+
+        # Return first 5 hex characters for compact display
+        return hash_obj.hexdigest()[:5]
 
     def _process_save_queue(self) -> None:
         """Process queued routes and save visualizations."""
@@ -386,6 +514,16 @@ class RouteVisualizationCallback(BaseCallback):
             print("Cannot save route visualizations - matplotlib not available")
             self.save_queue.clear()
             return
+
+        # MEMORY PROTECTION: Limit queue size to prevent unbounded growth
+        # If saves are slower than episode completions, drop oldest routes
+        MAX_QUEUE_SIZE = 1000
+        if len(self.save_queue) > MAX_QUEUE_SIZE:
+            logger.warning(
+                f"Route save queue exceeded {MAX_QUEUE_SIZE} items, "
+                f"dropping {len(self.save_queue) - MAX_QUEUE_SIZE} oldest routes"
+            )
+            self.save_queue = self.save_queue[-MAX_QUEUE_SIZE:]
 
         if (
             self.async_save
@@ -424,9 +562,19 @@ class RouteVisualizationCallback(BaseCallback):
         Args:
             route_data: Route data dictionary
         """
-        positions = np.array(route_data["positions"])
+        # DEBUG: Log route length at visualization time
+        raw_positions = route_data["positions"]
+
+        positions = np.array(raw_positions)
         if len(positions) == 0:
             return
+
+        if len(positions) < 10:
+            logger.warning(
+                f"[ROUTE_VIZ] Short route ({len(positions)} positions) being visualized! "
+                f"First/last: {positions[0] if len(positions) > 0 else 'N/A'} / "
+                f"{positions[-1] if len(positions) > 0 else 'N/A'}"
+            )
 
         # Create figure
         fig, ax = self.plt.subplots(
@@ -487,6 +635,17 @@ class RouteVisualizationCallback(BaseCallback):
                 y_min = min(y_min, door_y - padding)
                 y_max = max(y_max, door_y + padding)
 
+        # Render mines if available
+        # Mines already have visibility culling in the render function
+        if route_data.get("mines"):
+            render_mines_to_axis(
+                ax,
+                route_data["mines"],
+                tile_color="#FF0000",  # Red for dangerous mines
+                safe_color="#44FFFF",  # Cyan for safe mines
+                alpha=0.8,
+            )
+
         # Render tiles if available (must be before route so tiles are behind)
         # Only render tiles within the visible bounds for performance
         if route_data.get("tiles"):
@@ -511,17 +670,6 @@ class RouteVisualizationCallback(BaseCallback):
                 tile_color="#606060",  # Dark gray for tiles
                 alpha=1.0,  # Solid fill
             )
-        # Render mines if available (after tiles, before route)
-        # Mines already have visibility culling in the render function
-        if route_data.get("mines"):
-            render_mines_to_axis(
-                ax,
-                route_data["mines"],
-                tile_color="#FF0000",  # Red for dangerous mines
-                safe_color="#44FFFF",  # Cyan for safe mines
-                alpha=0.8,
-            )
-
         # Render locked doors if available (after mines, before route)
         if route_data.get("locked_doors"):
             for door in route_data["locked_doors"]:
@@ -721,8 +869,27 @@ class RouteVisualizationCallback(BaseCallback):
         ):
             title_parts.append(f"{route_data['curriculum_generator']}")
 
-        # Show episode stats
-        title_parts.append(f"{route_data['episode_length']}")
+        # Show episode stats (clarify frames vs actions)
+        episode_length = route_data["episode_length"]
+        # Try to determine actions from route length or frame skip stats
+        route_positions = len(route_data.get("positions", []))
+        skip_value = route_data.get("skip_value", None)
+
+        if route_positions > 0 and route_positions < episode_length:
+            # Route length suggests frame skip is being used
+            # Show both actions (route length) and frames (episode_length)
+            if skip_value:
+                title_parts.append(
+                    f"{route_positions} acts, {episode_length} frms (skip={skip_value})"
+                )
+            else:
+                title_parts.append(
+                    f"{route_positions} actions ({episode_length} frames)"
+                )
+        else:
+            # No frame skip or unknown - just show frames
+            title_parts.append(f"{episode_length} frames")
+
         title_parts.append(f"Reward: {route_data['episode_reward']:.2f}")
 
         # Show terminal impact info for failed routes only
@@ -737,8 +904,26 @@ class RouteVisualizationCallback(BaseCallback):
             else:
                 title_parts.append("T: terminal_impact")
 
-        # Combine into multi-line title
-        ax.set_title(title_parts[0] + "\n" + " | ".join(title_parts[1:]))
+        # DEBUG INFO: Add environment index, episode hash, and worker PID
+        debug_parts = []
+        env_idx = route_data.get("env_idx", "?")
+        debug_parts.append(f"Env {env_idx}")
+
+        episode_hash = route_data.get("episode_hash", "?????")
+        debug_parts.append(f"Hash: {episode_hash}")
+
+        worker_pid = route_data.get("worker_pid", None)
+        if worker_pid is not None:
+            debug_parts.append(f"PID: {worker_pid}")
+
+        # Combine into multi-line title with debug info on third line
+        ax.set_title(
+            title_parts[0]
+            + "\n"
+            + " | ".join(title_parts[1:])
+            + "\n"
+            + " | ".join(debug_parts)
+        )
         ax.grid(True, alpha=0.3)
 
         # Set axis limits to the calculated bounds (zoomed to route area)
@@ -764,13 +949,14 @@ class RouteVisualizationCallback(BaseCallback):
         ax.set_ylim(y_max, y_min)  # Inverted for N++ coordinate system
 
         # Save figure with curriculum stage in filename
+        # CRITICAL: Include env_idx to prevent filename collisions when multiple
+        # environments finish at same timestep on same level
+        env_idx = route_data.get("env_idx", 0)
         stage = route_data.get("curriculum_stage", "unknown")
         level_id = route_data["level_id"]
         # Sanitize stage name for filename (replace spaces and special chars)
         stage_clean = stage.replace(" ", "_").replace("/", "-")
-        filename = (
-            f"route_step{route_data['timestep']:09d}_{stage_clean}_{level_id}.png"
-        )
+        filename = f"route_env{env_idx:02d}_step{route_data['timestep']:09d}_{stage_clean}_{level_id}.png"
         filepath = self.save_dir / filename
 
         # Set x-axis ticks to appear at the top for a "top-left origin" feel
@@ -826,6 +1012,39 @@ class RouteVisualizationCallback(BaseCallback):
             except Exception as e:
                 print(f"Could not remove old file {old_file}: {e}")
 
+    def _cleanup_stale_tracking_data(self) -> None:
+        """Clean up stale tracking data to prevent memory leaks in long-running training.
+
+        Removes entries from tracking dictionaries that are no longer actively being used.
+        This prevents dicts from accumulating unbounded entries.
+        """
+        # Get currently tracked environment indices
+        active_envs = set(self.tracking_episode.keys())
+
+        # Clean up episode counters for environments that haven't been seen recently
+        # Keep only active environments + recent ones (last 128 env indices)
+        if len(self.episode_counters) > 128:
+            # Find stale entries (not in active set and beyond recent range)
+            max_env_idx = (
+                max(self.episode_counters.keys()) if self.episode_counters else 0
+            )
+            recent_threshold = max_env_idx - 128
+
+            stale_keys = [
+                env_idx
+                for env_idx in self.episode_counters.keys()
+                if env_idx not in active_envs and env_idx < recent_threshold
+            ]
+
+            for key in stale_keys:
+                del self.episode_counters[key]
+
+            if stale_keys and self.verbose >= 2:
+                logger.info(
+                    f"Cleaned up {len(stale_keys)} stale episode counter entries "
+                    f"(kept {len(self.episode_counters)} active entries)"
+                )
+
     def _get_tile_data(self, env_idx: int = 0) -> Dict[Tuple[int, int], int]:
         """Extract tile data from the environment.
 
@@ -849,10 +1068,16 @@ class RouteVisualizationCallback(BaseCallback):
             if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
                 # SubprocVecEnv - call remote method
                 try:
+                    if self.verbose >= 2:
+                        logger.debug(f"Fetching tile data for env_idx={env_idx}")
                     results = venv.env_method(
                         "get_route_visualization_tile_data", indices=[env_idx]
                     )
                     if results and len(results) > 0 and results[0] is not None:
+                        if self.verbose >= 2:
+                            logger.debug(
+                                f"Successfully fetched tile data for env_idx={env_idx}"
+                            )
                         return dict(results[0])
                     else:
                         if self.verbose >= 1:
@@ -923,10 +1148,16 @@ class RouteVisualizationCallback(BaseCallback):
             if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
                 # SubprocVecEnv - call remote method
                 try:
+                    if self.verbose >= 2:
+                        logger.debug(f"Fetching mine data for env_idx={env_idx}")
                     results = venv.env_method(
                         "get_route_visualization_mine_data", indices=[env_idx]
                     )
                     if results and len(results) > 0 and results[0] is not None:
+                        if self.verbose >= 2:
+                            logger.debug(
+                                f"Successfully fetched mine data for env_idx={env_idx}"
+                            )
                         return results[0]
                     else:
                         if self.verbose >= 1:
@@ -1003,10 +1234,16 @@ class RouteVisualizationCallback(BaseCallback):
             if hasattr(venv, "env_method") and not hasattr(venv, "envs"):
                 # SubprocVecEnv - call remote method
                 try:
+                    if self.verbose >= 2:
+                        logger.debug(f"Fetching locked door data for env_idx={env_idx}")
                     results = venv.env_method(
                         "get_route_visualization_locked_door_data", indices=[env_idx]
                     )
                     if results and len(results) > 0 and results[0] is not None:
+                        if self.verbose >= 2:
+                            logger.debug(
+                                f"Successfully fetched locked door data for env_idx={env_idx}"
+                            )
                         return results[0]
                     else:
                         if self.verbose >= 1:

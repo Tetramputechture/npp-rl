@@ -7,8 +7,6 @@ integration is handled directly in MaskedPPO.
 
 from collections import deque
 from stable_baselines3.common.callbacks import BaseCallback
-import numpy as np
-import torch
 
 
 class AuxiliaryLossCallback(BaseCallback):
@@ -48,36 +46,37 @@ class AuxiliaryLossCallback(BaseCallback):
         if rollout_buffer is None or rollout_buffer.size() == 0:
             return True
 
-        # Extract observations (may be dict with death_context)
         try:
             observations = rollout_buffer.observations
         except (AttributeError, KeyError):
             # Rollout buffer observations not accessible or structured differently
             return True
 
-        # Monitor death prediction metrics from rollout buffer
-        # The actual death prediction labels are computed in the main training loop
-        # This callback just monitors prediction statistics for insights
-        
         try:
             # Simple monitoring of rollout buffer contents
             buffer_size = rollout_buffer.size()
-            
+
             if self.num_timesteps % self.log_freq == 0 and buffer_size > 0:
                 self.logger.record("auxiliary/rollout_buffer_size", buffer_size)
-                
+
                 # If observations contain game state, log some basic statistics
                 if isinstance(observations, dict):
                     available_keys = list(observations.keys())
                     if self.verbose > 1:
-                        self.logger.record("auxiliary/obs_keys_count", len(available_keys))
-                    
+                        self.logger.record(
+                            "auxiliary/obs_keys_count", len(available_keys)
+                        )
+
                     # Log if game_state is available (needed for physics-based death prediction)
                     has_game_state = "game_state" in observations
                     has_entity_positions = "entity_positions" in observations
-                    self.logger.record("auxiliary/has_game_state", float(has_game_state))
-                    self.logger.record("auxiliary/has_entity_positions", float(has_entity_positions))
-                    
+                    self.logger.record(
+                        "auxiliary/has_game_state", float(has_game_state)
+                    )
+                    self.logger.record(
+                        "auxiliary/has_entity_positions", float(has_entity_positions)
+                    )
+
         except Exception as e:
             # Handle any errors gracefully
             if self.verbose > 0:
@@ -95,29 +94,34 @@ class AuxiliaryLossCallback(BaseCallback):
                 if auxiliary_preds is not None and "death_prob" in auxiliary_preds:
                     # Log death probability prediction statistics
                     death_prob = auxiliary_preds["death_prob"]
-                    
+
                     if self.num_timesteps % self.log_freq == 0:
                         # Log various statistics of death predictions
                         death_prob_mean = death_prob.mean().item()
                         death_prob_max = death_prob.max().item()
                         death_prob_min = death_prob.min().item()
                         death_prob_std = death_prob.std().item()
-                        
+
                         self.logger.record("auxiliary/death_prob_mean", death_prob_mean)
                         self.logger.record("auxiliary/death_prob_max", death_prob_max)
                         self.logger.record("auxiliary/death_prob_min", death_prob_min)
                         self.logger.record("auxiliary/death_prob_std", death_prob_std)
-                        
+
                         # Log how many predictions are above certain thresholds
                         high_risk_count = (death_prob > 0.5).sum().item()
-                        medium_risk_count = ((death_prob > 0.2) & (death_prob <= 0.5)).sum().item()
-                        
-                        self.logger.record("auxiliary/high_risk_predictions", high_risk_count)
-                        self.logger.record("auxiliary/medium_risk_predictions", medium_risk_count)
-                        
+                        medium_risk_count = (
+                            ((death_prob > 0.2) & (death_prob <= 0.5)).sum().item()
+                        )
+
+                        self.logger.record(
+                            "auxiliary/high_risk_predictions", high_risk_count
+                        )
+                        self.logger.record(
+                            "auxiliary/medium_risk_predictions", medium_risk_count
+                        )
+
         except (AttributeError, KeyError, TypeError, RuntimeError):
             # Policy doesn't have auxiliary predictions or error accessing them
             pass
 
         return True
-

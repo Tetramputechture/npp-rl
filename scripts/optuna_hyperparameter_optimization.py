@@ -203,13 +203,6 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
         "features_dim", search_space["features_dim"]["choices"]
     )
 
-    # Policy architecture selection
-    policy_class = trial.suggest_categorical(
-        "policy_class", search_space["policy_class"]["choices"]
-    )
-    hyperparams["policy_class"] = policy_class
-    logger.info(f"Trial {trial.number}: Using policy class: {policy_class}")
-
     # Training settings
     num_envs = 128
     hyperparams["num_envs"] = num_envs
@@ -248,9 +241,6 @@ def objective(trial: optuna.Trial, args, architecture_config) -> float:
     # Create output directory for this trial
     trial_output_dir = Path(args.output_dir) / args.study_name / f"trial_{trial.number}"
     trial_output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine if using objective attention policy based on sampled policy_class
-    use_objective_attention = policy_class == "ObjectiveAttentionActorCriticPolicy"
 
     # Initialize trainer with sampled hyperparameters
     trainer = ArchitectureTrainer.from_hyperparameter_dict(

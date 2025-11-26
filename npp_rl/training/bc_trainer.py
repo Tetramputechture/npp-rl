@@ -54,6 +54,7 @@ class BCTrainer:
         tensorboard_writer: Optional[SummaryWriter] = None,
         frame_stack_config: Optional[Dict] = None,
         test_dataset_path: Optional[str] = None,
+        checkpoint_frame_stack_config: Optional[Dict] = None,
     ):
         """Initialize BC trainer.
 
@@ -64,7 +65,12 @@ class BCTrainer:
             device: Device to train on ('auto', 'cpu', 'cuda')
             validation_split: Fraction of data to use for validation
             tensorboard_writer: Optional TensorBoard writer
-            frame_stack_config: Frame stacking configuration dict
+            frame_stack_config: Frame stacking configuration dict for training
+            test_dataset_path: Optional path to test dataset
+            checkpoint_frame_stack_config: Frame stacking config to save in checkpoint.
+                If None, uses frame_stack_config. This allows saving the original
+                RL config even when BC training uses a modified config (e.g., disabled
+                state stacking for AttentiveStateMLP architectures).
         """
         self.architecture_config = architecture_config
         self.dataset = dataset
@@ -72,6 +78,10 @@ class BCTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.frame_stack_config = frame_stack_config or {}
         self.test_dataset_path = test_dataset_path
+        # Use checkpoint_frame_stack_config if provided, otherwise use training config
+        self.checkpoint_frame_stack_config = (
+            checkpoint_frame_stack_config or self.frame_stack_config
+        )
 
         # Setup device
         if device == "auto":
@@ -732,7 +742,7 @@ class BCTrainer:
                     epoch=epoch,
                     metrics=val_metrics,
                     architecture_config=self.architecture_config,
-                    frame_stack_config=self.frame_stack_config,
+                    frame_stack_config=self.checkpoint_frame_stack_config,
                 )
 
             # Check for best model
@@ -746,7 +756,7 @@ class BCTrainer:
                     epoch=epoch,
                     metrics=val_metrics,
                     architecture_config=self.architecture_config,
-                    frame_stack_config=self.frame_stack_config,
+                    frame_stack_config=self.checkpoint_frame_stack_config,
                 )
 
                 logger.info(f"  ✓ New best model! Val loss: {val_metrics['loss']:.4f}")
@@ -772,7 +782,7 @@ class BCTrainer:
             epoch=epoch,
             metrics=val_metrics,
             architecture_config=self.architecture_config,
-            frame_stack_config=self.frame_stack_config,
+            frame_stack_config=self.checkpoint_frame_stack_config,
         )
 
         logger.info("=" * 60)

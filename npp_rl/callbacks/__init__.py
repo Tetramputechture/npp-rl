@@ -13,6 +13,7 @@ from .visualization_callback import TrainingVisualizationCallback
 from .enhanced_tensorboard_callback import EnhancedTensorBoardCallback
 from .route_visualization_callback import RouteVisualizationCallback
 from .auxiliary_loss_callback import AuxiliaryLossCallback
+from .pbrs_logging_callback import PBRSLoggingCallback
 
 __all__ = [
     "DistributedProgressCallback",
@@ -21,4 +22,5 @@ __all__ = [
     "EnhancedTensorBoardCallback",
     "RouteVisualizationCallback",
     "AuxiliaryLossCallback",
+    "PBRSLoggingCallback",
 ]

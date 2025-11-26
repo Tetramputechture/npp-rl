@@ -139,6 +139,24 @@ class CurriculumEnv(gym.Wrapper):
         Returns:
             observation, info dict
         """
+        # PRIORITY: If custom_map_path is set, skip curriculum logic entirely
+        # and let the environment's map loader handle the custom map
+        base_env = self.env.unwrapped
+        if hasattr(base_env, "custom_map_path") and base_env.custom_map_path:
+            logger.info(
+                f"Custom map detected: {base_env.custom_map_path} - bypassing curriculum sampling"
+            )
+
+            # Use normal reset flow (environment will load custom map)
+            obs, info = self.env.reset(**kwargs)
+
+            # Add curriculum info (but mark as custom map override)
+            info["curriculum_stage"] = "custom_map_override"
+            info["curriculum_level_id"] = base_env.custom_map_path
+            info["curriculum_generator"] = "custom"
+
+            return obs, info
+
         # Fast curriculum level sampling
         level_data = self.curriculum_manager.sample_level()
 
@@ -237,13 +255,21 @@ class CurriculumEnv(gym.Wrapper):
                 obs[self._str_action_mask] = mask
 
         # Add curriculum info efficiently (use cached values)
-        if self.current_level_stage:
-            info["curriculum_stage"] = self.current_level_stage
+        # Check if custom map is being used
+        base_env = self.env.unwrapped
+        if hasattr(base_env, "custom_map_path") and base_env.custom_map_path:
+            # Custom map mode - use special curriculum info
+            info["curriculum_stage"] = "custom_map_override"
+            info["curriculum_generator"] = "custom"
         else:
-            info["curriculum_stage"] = self._str_unknown
+            # Normal curriculum mode - use cached values
+            if self.current_level_stage:
+                info["curriculum_stage"] = self.current_level_stage
+            else:
+                info["curriculum_stage"] = self._str_unknown
 
-        if self.current_generator_type:
-            info["curriculum_generator"] = self.current_generator_type
+            if self.current_generator_type:
+                info["curriculum_generator"] = self.current_generator_type
 
         # Ensure has_won consistency (fast check)
         player_won = info.get("player_won")

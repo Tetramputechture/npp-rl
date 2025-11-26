@@ -95,8 +95,6 @@ train_single_architecture() {
             --architectures ${arch} \
             --train-dataset ~/datasets/train \
             --test-dataset ~/datasets/test \
-            --use-curriculum \
-            --enable-auto-curriculum-adjustment \
             --enable-early-stopping \
             --replay-data-dir ../nclone/bc_replays \
             --bc-epochs 5 \
@@ -112,7 +110,9 @@ train_single_architecture() {
             --s3-bucket ${S3_BUCKET} \
             --s3-prefix experiments/ \
             --output-dir ~/experiments \
-            --enable-lr-annealing"
+            --enable-lr-annealing \
+            --frame-skip 4 \
+            --single-level '../nclone/nclone/test-single-level/000 the basics'"
 
     echo $train_cmd
     return 0

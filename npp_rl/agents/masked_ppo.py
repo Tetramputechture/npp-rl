@@ -98,44 +98,6 @@ class MaskedPPO(PPO):
                 if action_mask.dtype != np.bool_:
                     action_mask = action_mask.astype(np.bool_)
 
-                # DEFENSIVE FIX: Deep copy action_mask immediately after extraction
-                # This prevents memory sharing issues in SubprocVecEnv where the mask
-                # might be modified by another process via shared memory during IPC.
-                # Without this copy, the mask used by the policy can differ from the
-                # mask that was computed in the environment, leading to masked action bugs.
-                owns_data_before = action_mask.flags["OWNDATA"]
-                action_mask = action_mask.copy()
-
-                # Ensure C-contiguous layout to prevent memory aliasing
-                if not action_mask.flags["C_CONTIGUOUS"]:
-                    action_mask = np.ascontiguousarray(
-                        action_mask, dtype=action_mask.dtype
-                    )
-
-                # Debug logging for action_mask extraction
-                if self.debug:
-                    mask_hash = hash(action_mask.tobytes())
-                    logger.debug(
-                        f"[MaskedPPO.collect_rollouts] [STEP={n_steps}] Extracted action_mask from obs_dict: "
-                        f"shape={action_mask.shape}, dtype={action_mask.dtype}, "
-                        f"hash={mask_hash}, owned_before_copy={owns_data_before}, "
-                        f"owns_data_now={action_mask.flags['OWNDATA']}"
-                    )
-
-                # DIAGNOSTIC: Track mask lifecycle for debugging
-                if self.debug:
-                    for env_idx in range(env.num_envs):
-                        env_mask = (
-                            action_mask[env_idx]
-                            if action_mask.ndim == 2
-                            else action_mask
-                        )
-                        logger.debug(
-                            f"[MASK_TRACK] step={n_steps} env={env_idx} stage=EXTRACT "
-                            f"id={id(env_mask)} owns_data={env_mask.flags['OWNDATA']} "
-                            f"hash={hash(env_mask.tobytes())}"
-                        )
-
                 # CRITICAL VALIDATION: Check action_mask shape matches num_envs
                 if isinstance(action_mask, np.ndarray):
                     if action_mask.ndim == 1:
@@ -239,7 +201,6 @@ class MaskedPPO(PPO):
                         f"[MASK_OWNERSHIP] action_mask does not own its data at step {n_steps}! "
                         f"This indicates potential memory sharing. Forcing defensive copy."
                     )
-                    action_mask = action_mask.copy()
                     # Update obs_tensor with the new copy
                     if isinstance(obs_tensor, dict) and "action_mask" in obs_tensor:
                         action_mask_tensor = torch.as_tensor(
@@ -632,24 +593,29 @@ class MaskedPPO(PPO):
                             )
                             auxiliary_loss = auxiliary_loss + aux_loss
 
-                                        # Log auxiliary losses (simplified for death prediction only)
+                            # Log auxiliary losses (simplified for death prediction only)
                             for key, val in aux_loss_dict.items():
                                 self.logger.record(
                                     f"train/auxiliary_{key}_loss", val.item()
                                 )
-                            
+
                             # Also log auxiliary predictions for monitoring
                             if "death_prob" in predictions:
-                                death_prob_mean = predictions["death_prob"].mean().item()
-                                self.logger.record("train/death_prob_mean", death_prob_mean)
+                                death_prob_mean = (
+                                    predictions["death_prob"].mean().item()
+                                )
+                                self.logger.record(
+                                    "train/death_prob_mean", death_prob_mean
+                                )
 
                         except Exception as e:
                             # Gracefully handle auxiliary loss computation errors
                             # Continue training without auxiliary loss on failure
                             auxiliary_loss = torch.tensor(0.0, device=self.device)
-                            
+
                             if self.debug:
                                 import traceback
+
                                 logger.warning(
                                     f"Failed to compute death prediction auxiliary loss: {e}\n"
                                     f"Continuing training without auxiliary loss for this batch.\n"
@@ -658,7 +624,9 @@ class MaskedPPO(PPO):
                                 )
                             else:
                                 # In production mode, just log the error briefly
-                                logger.warning(f"Auxiliary loss computation failed: {e}. Continuing without auxiliary loss.")
+                                logger.warning(
+                                    f"Auxiliary loss computation failed: {e}. Continuing without auxiliary loss."
+                                )
 
                 # 2. Attention entropy regularization
                 # Note: We compute entropy from the current minibatch observations

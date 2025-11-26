@@ -29,7 +29,6 @@ from npp_rl.models.gcn import GCNEncoder
 from npp_rl.models.gat import GATEncoder
 from npp_rl.models.simplified_hgt import SimplifiedHGTEncoder
 from npp_rl.models.hgt_factory import create_hgt_encoder
-from npp_rl.models.attentive_state_mlp import AttentiveStateMLP
 
 
 logger = logging.getLogger(__name__)
@@ -425,7 +424,7 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
         # Track which modalities are actually available
         self.has_player_frame = "player_frame" in observation_space.spaces
         self.has_global = "global_view" in observation_space.spaces
-        # Graph observations come as separate keys (graph_node_feats, graph_edge_index, etc.)
+        # Graph observations use dense format (simplified - no sparse logic)
         self.has_graph = "graph_node_feats" in observation_space.spaces
         self.has_state = "game_state" in observation_space.spaces
         self.has_reachability = "reachability_features" in observation_space.spaces
@@ -573,32 +572,19 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
             raise ValueError(f"Unknown graph architecture: {arch_type}")
 
     def _create_state_mlp(self, hidden_dim: int, output_dim: int) -> nn.Module:
-        """Create MLP for game state processing with optional attention."""
-        # Check if attentive version should be used
-        use_attentive = getattr(self.config.state, "use_attentive_state_mlp", False)
+        """Create simple MLP for game state processing."""
+        # Determine input dimension (handle frame stacking)
+        default_input_dim = GAME_STATE_CHANNELS
+        if self.frame_stack_config.get("enable_state_stacking", False):
+            stack_size = self.frame_stack_config.get("state_stack_size", 4)
+            default_input_dim = GAME_STATE_CHANNELS * stack_size
 
-        if use_attentive:
-            # Use attention-based encoder (processes NINJA_STATE_DIM features including time_remaining)
-            return AttentiveStateMLP(
-                hidden_dim=hidden_dim,
-                output_dim=output_dim,
-                num_heads=4,
-                dropout=0.1,
-                debug_mode=self.debug_mode,
-            )
-        else:
-            # Fallback to original StateMLP
-            default_input_dim = GAME_STATE_CHANNELS
-            if self.frame_stack_config.get("enable_state_stacking", False):
-                stack_size = self.frame_stack_config.get("state_stack_size", 4)
-                default_input_dim = GAME_STATE_CHANNELS * stack_size
-
-            return StateMLP(
-                hidden_dim,
-                output_dim,
-                default_input_dim=default_input_dim,
-                debug_mode=self.debug_mode,
-            )
+        return StateMLP(
+            hidden_dim,
+            output_dim,
+            default_input_dim=default_input_dim,
+            debug_mode=self.debug_mode,
+        )
 
     def _create_reachability_mlp(self, hidden_dim: int, output_dim: int) -> nn.Module:
         """Create MLP for reachability feature processing."""
@@ -680,132 +666,6 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 nn.Linear(output_dim, output_dim),
             )
 
-    def _convert_sparse_to_dense_graph(
-        self, observations: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        """Convert sparse graph observations to dense format on GPU.
-
-        This method efficiently converts variable-sized sparse graph data (COO format)
-        from the rollout buffer into padded dense tensors expected by GNN models.
-
-        Conversion happens on GPU for performance:
-        - Sparse data arrives on CPU from rollout buffer
-        - Converted to PyTorch tensors and moved to GPU
-        - Padded to fixed size (N_MAX_NODES, E_MAX_EDGES)
-        - Masks generated to indicate valid elements
-
-        This achieves ~95% memory savings in rollout buffer while maintaining
-        mathematically lossless training (exact same values, just different storage).
-
-        Args:
-            observations: Dict with sparse graph observations (lists of numpy arrays)
-
-        Returns:
-            Dict with dense graph observations (padded tensors on device)
-        """
-        from nclone.graph.common import (
-            N_MAX_NODES,
-            E_MAX_EDGES,
-            NODE_FEATURE_DIM,
-            EDGE_FEATURE_DIM,
-        )
-
-        # Extract sparse data (comes as lists of numpy arrays from rollout buffer)
-        sparse_node_feats = observations.get("graph_node_feats_sparse", [])
-        sparse_edge_index = observations.get("graph_edge_index_sparse", [])
-        sparse_edge_feats = observations.get("graph_edge_feats_sparse", [])
-        sparse_node_types = observations.get("graph_node_types_sparse", [])
-        sparse_edge_types = observations.get("graph_edge_types_sparse", [])
-        graph_num_nodes = observations.get("graph_num_nodes", [])
-        graph_num_edges = observations.get("graph_num_edges", [])
-
-        batch_size = len(sparse_node_feats)
-        device = next(self.parameters()).device
-
-        # Initialize dense tensors with padding
-        dense_node_feats = torch.zeros(
-            (batch_size, N_MAX_NODES, NODE_FEATURE_DIM),
-            dtype=torch.float32,
-            device=device,
-        )
-        dense_edge_index = torch.zeros(
-            (batch_size, 2, E_MAX_EDGES), dtype=torch.int32, device=device
-        )
-        dense_edge_feats = torch.zeros(
-            (batch_size, E_MAX_EDGES, EDGE_FEATURE_DIM),
-            dtype=torch.float32,
-            device=device,
-        )
-        dense_node_mask = torch.zeros(
-            (batch_size, N_MAX_NODES), dtype=torch.int32, device=device
-        )
-        dense_edge_mask = torch.zeros(
-            (batch_size, E_MAX_EDGES), dtype=torch.int32, device=device
-        )
-        dense_node_types = torch.zeros(
-            (batch_size, N_MAX_NODES), dtype=torch.int32, device=device
-        )
-        dense_edge_types = torch.zeros(
-            (batch_size, E_MAX_EDGES), dtype=torch.int32, device=device
-        )
-
-        # Fill dense tensors with sparse data (batch by batch)
-        for b in range(batch_size):
-            # Get actual sizes for this sample
-            num_nodes = int(graph_num_nodes[b][0]) if len(graph_num_nodes[b]) > 0 else 0
-            num_edges = int(graph_num_edges[b][0]) if len(graph_num_edges[b]) > 0 else 0
-
-            # Clamp to maximum sizes
-            num_nodes = min(num_nodes, N_MAX_NODES)
-            num_edges = min(num_edges, E_MAX_EDGES)
-
-            # Copy node features
-            if num_nodes > 0 and len(sparse_node_feats[b]) > 0:
-                node_feats_tensor = torch.from_numpy(
-                    sparse_node_feats[b][:num_nodes]
-                ).to(device)
-                dense_node_feats[b, :num_nodes] = node_feats_tensor
-                dense_node_mask[b, :num_nodes] = 1
-
-                # Copy node types if available
-                if len(sparse_node_types[b]) > 0:
-                    node_types_tensor = torch.from_numpy(
-                        sparse_node_types[b][:num_nodes]
-                    ).to(device)
-                    dense_node_types[b, :num_nodes] = node_types_tensor.long()
-
-            # Copy edge features
-            if num_edges > 0 and len(sparse_edge_index[b]) > 0:
-                edge_index_tensor = torch.from_numpy(
-                    sparse_edge_index[b][:, :num_edges]
-                ).to(device)
-                dense_edge_index[b, :, :num_edges] = edge_index_tensor
-                dense_edge_mask[b, :num_edges] = 1
-
-                if len(sparse_edge_feats[b]) > 0:
-                    edge_feats_tensor = torch.from_numpy(
-                        sparse_edge_feats[b][:num_edges]
-                    ).to(device)
-                    dense_edge_feats[b, :num_edges] = edge_feats_tensor
-
-                # Copy edge types if available
-                if len(sparse_edge_types[b]) > 0:
-                    edge_types_tensor = torch.from_numpy(
-                        sparse_edge_types[b][:num_edges]
-                    ).to(device)
-                    dense_edge_types[b, :num_edges] = edge_types_tensor.long()
-
-        # Add dense graph observations to observations dict
-        observations["graph_node_feats"] = dense_node_feats
-        observations["graph_edge_index"] = dense_edge_index
-        observations["graph_edge_feats"] = dense_edge_feats
-        observations["graph_node_mask"] = dense_node_mask
-        observations["graph_edge_mask"] = dense_edge_mask
-        observations["graph_node_types"] = dense_node_types
-        observations["graph_edge_types"] = dense_edge_types
-
-        return observations
-
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Extract features from observations.
@@ -849,83 +709,43 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 )
             features.append(global_features)
 
-        # Process graph
-        # Graph observations come as direct keys in observations (from nclone environment)
-        # Check for sparse or dense graph format
-        has_sparse_graph = "graph_node_feats_sparse" in observations
+        # Process graph (dense format only - simplified)
+        # Graph observations: node_features (7D), edge_index, masks
+        # No edge features or types - all edges are simple adjacency
         has_dense_graph = "graph_node_feats" in observations
 
-        if self.graph_encoder is not None and (has_sparse_graph or has_dense_graph):
-            logger.debug("[EXTRACTOR] Processing graph observations...")
+        if self.graph_encoder is not None and has_dense_graph:
+            logger.debug("[EXTRACTOR] Processing graph observations (dense format)...")
 
-            # Convert sparse to dense if sparse format is present
-            if has_sparse_graph:
-                logger.debug("[EXTRACTOR] Converting sparse graph to dense...")
-                observations = self._convert_sparse_to_dense_graph(observations)
-
-            # Handle different encoder types - some take dict, some take separate args
+            # Handle different encoder types
+            # HGT encoders require edge features and node/edge types which are not provided
+            # in GCN-optimized observation space
             from npp_rl.models.hgt_encoder import HGTEncoder
 
             if isinstance(self.graph_encoder, HGTEncoder):
-                # HGTEncoder expects a dict with graph_* prefix keys
-                # nclone environment already provides these keys directly
-                hgt_graph_obs = {
-                    "graph_node_feats": observations["graph_node_feats"].float(),
-                    "graph_edge_index": observations[
-                        "graph_edge_index"
-                    ].long(),  # Convert for indexing
-                    "graph_edge_feats": observations["graph_edge_feats"].float(),
-                    "graph_node_mask": observations["graph_node_mask"],
-                    "graph_edge_mask": observations["graph_edge_mask"],
-                }
-                # Add type info if available
-                if "graph_node_types" in observations:
-                    hgt_graph_obs["graph_node_types"] = observations["graph_node_types"]
-                if "graph_edge_types" in observations:
-                    hgt_graph_obs["graph_edge_types"] = observations["graph_edge_types"]
-
-                graph_features = self.graph_encoder(hgt_graph_obs)
-                if self.debug_mode and torch.isnan(graph_features).any():
-                    nan_mask = torch.isnan(graph_features)
-                    batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                    raise ValueError(
-                        f"[EXTRACTOR] NaN in graph features (HGT) in batch indices: {batch_indices.tolist()}"
-                    )
+                raise ValueError(
+                    "[EXTRACTOR] HGTEncoder not supported with GCN-optimized observations. "
+                    "Observation space no longer includes graph_edge_feats, graph_node_types, "
+                    "or graph_edge_types. Use GraphArchitectureType.GCN instead."
+                )
             elif isinstance(self.graph_encoder, SimplifiedHGTEncoder):
-                # SimplifiedHGTEncoder takes separate arguments
-                node_features = observations["graph_node_feats"].float()
-                edge_index = observations[
-                    "graph_edge_index"
-                ].long()  # Convert for indexing
-                node_mask = observations["graph_node_mask"]
-                node_types = observations.get(
-                    "graph_node_types",
-                    torch.zeros(
-                        node_features.shape[:2],
-                        dtype=torch.long,
-                        device=node_features.device,
-                    ),
+                raise ValueError(
+                    "[EXTRACTOR] SimplifiedHGTEncoder not supported with GCN-optimized observations. "
+                    "Observation space no longer includes graph_node_types. "
+                    "Use GraphArchitectureType.GCN instead."
                 )
-                _, graph_features = self.graph_encoder(
-                    node_features, edge_index, node_types, node_mask
-                )
-                if self.debug_mode and torch.isnan(graph_features).any():
-                    nan_mask = torch.isnan(graph_features)
-                    batch_indices = torch.where(nan_mask.any(dim=1))[0]
-                    raise ValueError(
-                        f"[EXTRACTOR] NaN in graph features (SimplifiedHGT) in batch indices: {batch_indices.tolist()}"
-                    )
             else:
-                # GAT and GCN take separate arguments (no type information)
+                # GAT and GCN take separate arguments (GCN-optimized)
                 logger.debug("[EXTRACTOR] Using GAT/GCN encoder...")
-                node_features = observations["graph_node_feats"].float()
+                node_features = observations[
+                    "graph_node_feats"
+                ].float()  # 7 dims (was 17)
                 edge_index = observations[
                     "graph_edge_index"
                 ].long()  # Convert for indexing
+                # Masks are now computed in sparse-to-dense conversion (not stored in obs)
                 node_mask = observations["graph_node_mask"]
-                edge_mask = observations.get(
-                    "graph_edge_mask"
-                )  # Get edge mask if available
+                edge_mask = observations.get("graph_edge_mask")
 
                 # Log graph observation shapes for debugging
                 if edge_mask is not None:
@@ -977,6 +797,47 @@ class ConfigurableMultimodalExtractor(BaseFeaturesExtractor):
                 batch_indices = torch.where(nan_mask.any(dim=1))[0]
                 raise ValueError(
                     f"[EXTRACTOR] NaN in graph features in batch indices: {batch_indices.tolist()}"
+                )
+
+            # Diagnostic logging for graph feature quality (Stage 2 debugging)
+            if self.debug_mode:
+                # Log graph size statistics
+                num_valid_nodes = node_mask.sum(dim=1)
+                num_valid_edges = (
+                    edge_mask.sum(dim=1) if edge_mask is not None else torch.tensor([0])
+                )
+
+                logger.debug(
+                    f"[GRAPH_DIAG] Graph nodes per sample: min={num_valid_nodes.min().item():.0f}, "
+                    f"max={num_valid_nodes.max().item():.0f}, mean={num_valid_nodes.float().mean().item():.1f}"
+                )
+                logger.debug(
+                    f"[GRAPH_DIAG] Graph edges per sample: min={num_valid_edges.min().item():.0f}, "
+                    f"max={num_valid_edges.max().item():.0f}, mean={num_valid_edges.float().mean().item():.1f}"
+                )
+
+                # Log raw node feature statistics (before GNN processing)
+                valid_node_feats = node_features[node_mask.bool()]
+                if valid_node_feats.numel() > 0:
+                    logger.debug(
+                        f"[GRAPH_DIAG] Raw node features: mean={valid_node_feats.mean().item():.3f}, "
+                        f"std={valid_node_feats.std().item():.3f}, "
+                        f"min={valid_node_feats.min().item():.3f}, max={valid_node_feats.max().item():.3f}"
+                    )
+
+                    # Check for degenerate features (all zeros or constants)
+                    feature_variance = valid_node_feats.var(dim=0)
+                    num_zero_variance = (feature_variance < 1e-6).sum().item()
+                    if num_zero_variance > 0:
+                        logger.warning(
+                            f"[GRAPH_DIAG] {num_zero_variance}/{valid_node_feats.shape[1]} node features have near-zero variance!"
+                        )
+
+                # Log processed graph features (after GNN)
+                logger.debug(
+                    f"[GRAPH_DIAG] Processed graph features: mean={graph_features.mean().item():.3f}, "
+                    f"std={graph_features.std().item():.3f}, "
+                    f"min={graph_features.min().item():.3f}, max={graph_features.max().item():.3f}"
                 )
 
             features.append(graph_features)

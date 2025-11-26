@@ -6,6 +6,13 @@ Implements GCN layers and encoder based on Kipf & Welling (2017)
 
 This is a simplified baseline for Task 3.1 architecture comparison.
 
+GRAPH REPRESENTATION:
+- Simplified graph structure: All edges represent adjacency between reachable nodes
+- No edge features (EDGE_FEATURE_DIM = 0) - connectivity via edge_index is sufficient
+- No edge types - all edges are treated equally
+- Graph already filtered to reachable nodes from spawn (via flood fill)
+- GCN only uses: node_features (7D), edge_index, masks
+
 PERFORMANCE NOTES (Optimized November 2025):
 - Sparse-aware batching: Handles N_MAX_NODES=4,500 with 90%+ padding efficiently
 - Single vectorized aggregation across entire batch (GPU parallelism)

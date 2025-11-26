@@ -15,7 +15,6 @@ uses graph modality (see ModalityConfig.use_graph).
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from enum import Enum
-from nclone.gym_environment.constants import REACHABILITY_FEATURES_DIM
 
 
 class GraphArchitectureType(Enum):
@@ -82,11 +81,12 @@ class GraphConfig:
     """
     Configuration for graph neural network architecture.
 
-    Note: Input dimensions come from nclone:
-    - node_feature_dim = 21 (NODE_FEATURE_DIM from nclone.graph.common)
-      21 dims: 2 spatial + 7 type + 3 mine + 2 entity_state + 1 reachability + 6 topological
-    - edge_feature_dim = 14 (EDGE_FEATURE_DIM from nclone.graph.common)
-      14 dims: 4 type + 2 connectivity + 4 geometric + 4 mine_danger
+    Note: Input dimensions come from nclone (GCN-optimized):
+    - node_feature_dim = 6 (NODE_FEATURE_DIM from nclone.graph.common)
+      6 dims: 2 spatial + 2 mine + 2 entity_state
+      (reachability removed - all nodes in graph are reachable via flood fill)
+    - edge_feature_dim = 0 (no edge features for GCN)
+    - No node/edge types (GCN learns from features and structure)
     These are used in ConfigurableMultimodalExtractor._create_graph_encoder()
     """
 
@@ -129,7 +129,6 @@ class StateConfig:
 
     hidden_dim: int = 128
     output_dim: int = 128
-    use_attentive_state_mlp: bool = True
 
 
 @dataclass(frozen=True)
@@ -731,100 +730,49 @@ def create_visual_frame_stacked_only_config() -> ArchitectureConfig:
 
 
 def create_attention_config() -> ArchitectureConfig:
-    """Create attention-based architecture with objective-specific attention and dueling."""
+    """Create simplified graph-based architecture with DeepResNet and Dueling."""
     return ArchitectureConfig(
         name="attention",
-        description="Multi-attention architecture with objective-specific attention and dueling",
+        description="Deep ResNet architecture with GNN and Dueling value decomposition",
         detailed_description="""
-        Comprehensive attention architecture with five levels of attention for robust generalization:
+        Simplified architecture focusing on proven improvements:
         
-        1. AttentiveStateMLP (State Component Attention):
-           - Processes 41-dim game state (enhanced ninja physics + episode) split into 10 semantic components
-           - Components: Velocity (3), Movement states (5), Input (2), Buffers (3), Contact (7), Forces (7), Temporal (6)
-           - Each component encoded separately, then projected to uniform 64-dim space
-           - Multi-head cross-component attention (4 heads): each component attends to all others
-           - Enables: velocity↔contact (ground/wall interaction), forces↔movement (physics state coupling)
-           - Output: 128-dim state features
+        1. GCN Graph Encoder (Spatial Aggregation):
+           - Graph Convolutional Network with mean aggregation
+           - 2 layers, 128 hidden, 256 output (optimized for performance)
+           - Input: 7-dim node features (GCN-optimized)
+           - Handles variable graph sizes with masking
         
-        2. GCN Graph Encoder (Spatial Aggregation):
-           - Graph Convolutional Network with simple mean aggregation
-           - Uses normalized adjacency for uniform neighbor weighting (aligns with shortest-path objective)
-           - No attention computation - PBRS already provides directional gradients
-           - Input: 21-dim node features (NODE_FEATURE_DIM from nclone)
-           - Edge connectivity only (14-dim edge features not used by GCN)
-           - 3 layers, 128 hidden dim, 256 output dim
-           - Handles variable graph sizes (robust to level complexity)
-           - Output: 256-dim graph features
+        2. Simple State MLP:
+           - Processes 41-dim game state (ninja physics)
+           - 2-layer MLP: 41 → 128 → 128
+           - Efficient encoding without attention overhead
         
         3. MultiHeadFusion (Cross-Modal Attention):
-           - Splits concatenated modality features into separate tokens
-           - Modalities: Player Frame (256), Global View (128), Graph (256), State (128, from 41-dim enhanced physics + episode), Reachability (64, from 7-dim features)
-           - Projects each to uniform 256-dim, adds learned modality embeddings
-           - Multi-head cross-modal attention (8 heads): vision<->graph<->state interactions
-           - Feed-forward network per token, mean pooling across modalities
+           - Integrates graph, state, and reachability features
+           - Multi-head attention (8 heads)
            - Output: 512-dim final features
         
-        4. ObjectiveAttentionPolicy (Objective Prioritization): **NEW**
-           - Attention over variable objectives (1-16 locked doors + exit)
-           - Permutation invariant over locked doors
-           - Learns sequential goal prioritization dynamically
-           - Each objective type encoded separately (exit switch/door, locked doors, switches)
-           - Multi-head attention (8 heads, 512 attention dim) queries: current state, keys/values: objectives
-           - Handles variable door counts with attention masking
-           - Output: 6 action logits
+        4. DeepResNet Policy/Value Networks:
+           - Policy: [512, 512, 384, 256, 256] with residual connections
+           - Value: [512, 384, 256] with residual connections
+           - SiLU activation, LayerNorm
         
-        5. Dueling Value Head (V(s) + A(s,a)): **NEW**
-           - Separate state value and action advantage streams
-           - State value stream: how good is this state regardless of action?
-           - Advantage stream: how much better is each action than average?
-           - Combines as V(s) + mean(A(s,*)) for stable value estimation
-           - Better gradient flow and faster convergence
-           - Output: scalar state value
+        5. Dueling Value Head:
+           - Separate V(s) and A(s,a) streams
+           - Better value estimation, faster convergence
         
-        Total parameters: ~15-18M
-        - Deep ResNet MLPs: ~6-8M (policy + value with residual connections)
-        - Objective attention: ~1.5M
-        - Dueling in MLP extractor: integrated into ResNet value stream
-        - Feature extractors (separate): ~7M
-        - Baseline (attention without DeepResNet): ~7M
-        
-        Feature Dimension Flow:
-        - Player Frame CNN: [batch, 84, 84, 1] → 256
-        - Global View CNN: [batch, 176, 100, 1] → 128
-        - GCN Encoder: [batch, max_nodes, 21] → 256 (global pooling)
-        - AttentiveStateMLP: [batch, 32] → 128
-        - Reachability MLP: [batch, 7] → 64
-        - Concatenated: 256 + 128 + 256 + 128 + 64 = 832
-        - MultiHeadFusion: 832 → 512 (final features_dim)
-        
-        Policy Stream (Deep ResNet with residual connections):
-        - Features: 512 → Deep ResNet MLP [512, 512, 384, 256, 256] → 256 (policy latent)
-        - ObjectiveAttentionPolicy: 256 + objectives → 6 actions
-        
-        Value Stream (Deep ResNet with dueling):
-        - Features: 512 → Deep ResNet MLP [512, 384, 256] → 256 (value latent)
-        - Dueling: V(s) stream [256, 256, 1] + A(s,a) stream [256, 256, 6]
-        - Combined: V(s) + (A(s,a) - mean(A)) → scalar value
+        Total parameters: ~9-11M (down from 15-18M)
+        - DeepResNet MLPs: ~6-8M
+        - Feature extractors: ~3-4M
+        - 30-40% reduction from attention removal
         
         Design Rationale:
-        - Deep ResNet MLPs: 5-layer policy and 3-layer value networks with residual connections
-          enable deep reasoning chains without gradient degradation
-        - GCN instead of GAT/HGT: simplest graph encoder with uniform aggregation. Node features 
-          (21 dims) already encode type information. PBRS provides directional gradients, making 
-          learned attention weights redundant. GCN's uniform weighting aligns with shortest-path 
-          navigation objective.
-        - Attention at 5 levels enables hierarchical reasoning:
-          * Component-level: understand state relationships (AttentiveStateMLP)
-          * Spatial-level: aggregate graph connectivity (GCN)
-          * Modality-level: integrate multi-modal information (MultiHeadFusion)
-          * Objective-level: prioritize goals dynamically (ObjectiveAttentionPolicy)
-          * Value decomposition: separate state quality from action preferences (Dueling)
-        - Residual connections in MLPs enable deep reasoning without gradient degradation
-        - Robust to variable game complexity (1-16 doors, variable mines, different level sizes)
-        - Permutation invariance over locked doors ensures generalization
-        
-        Training budget: 500k timesteps with curriculum learning
-        Best for: Generalization across 1-16 doors with sequential goal structure
+        - DeepResNet enables deep reasoning without gradient issues
+        - Dueling improves value estimation
+        - GNN encodes spatial structure (shortest paths from graph)
+        - Simple MLP sufficient for 41D physics
+        - No attention redundancy (graph already has shortest paths)
         """,
         modalities=ModalityConfig(
             use_player_frame=False,
@@ -838,7 +786,7 @@ def create_attention_config() -> ArchitectureConfig:
             architecture=GraphArchitectureType.GCN,
             hidden_dim=128,
             output_dim=256,
-            num_layers=3,
+            num_layers=2,  # Reduced from 3 for 33% speedup (profiling showed 44.9% time in GCN)
             dropout=0.1,
             use_type_embeddings=False,
             use_edge_features=False,  # GCN uses only connectivity, not edge features
@@ -846,7 +794,6 @@ def create_attention_config() -> ArchitectureConfig:
         state=StateConfig(
             hidden_dim=128,
             output_dim=128,
-            use_attentive_state_mlp=True,
         ),
         fusion=FusionConfig(
             fusion_type=FusionType.MULTI_HEAD_ATTENTION,

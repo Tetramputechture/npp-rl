@@ -264,20 +264,42 @@ class RuntimeProfiler:
             for i in range(torch.cuda.device_count()):
                 allocated = torch.cuda.memory_allocated(i) / 1e6
                 reserved = torch.cuda.memory_reserved(i) / 1e6
+                # Also track peak allocated memory (not just reserved)
+                peak_allocated = torch.cuda.max_memory_allocated(i) / 1e6
                 snapshot["gpu_memory_mb"][f"gpu_{i}"] = {
                     "allocated": allocated,
                     "reserved": reserved,
+                    "peak_allocated": peak_allocated,
                 }
-                # Track peak memory
-                peak_key = f"gpu_{i}_peak"
-                if peak_key not in self.peak_memory:
-                    self.peak_memory[peak_key] = reserved
+                # Track peak reserved memory
+                peak_reserved_key = f"gpu_{i}_peak_reserved"
+                if peak_reserved_key not in self.peak_memory:
+                    self.peak_memory[peak_reserved_key] = reserved
                 else:
-                    self.peak_memory[peak_key] = max(
-                        self.peak_memory[peak_key], reserved
+                    self.peak_memory[peak_reserved_key] = max(
+                        self.peak_memory[peak_reserved_key], reserved
+                    )
+                # Track peak allocated memory
+                peak_allocated_key = f"gpu_{i}_peak_allocated"
+                if peak_allocated_key not in self.peak_memory:
+                    self.peak_memory[peak_allocated_key] = peak_allocated
+                else:
+                    self.peak_memory[peak_allocated_key] = max(
+                        self.peak_memory[peak_allocated_key], peak_allocated
                     )
 
         self.memory_snapshots.append(snapshot)
+
+    def reset_peak_memory_stats(self) -> None:
+        """Reset PyTorch peak memory statistics for per-phase tracking.
+
+        This is useful to measure peak memory for specific phases by calling
+        reset before the phase and recording a snapshot after.
+        """
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                torch.cuda.reset_peak_memory_stats(i)
+            logger.debug("Reset peak memory statistics for all GPUs")
 
     def _get_cpu_memory_mb(self) -> float:
         """Get current CPU memory usage in MB."""
@@ -306,6 +328,11 @@ class RuntimeProfiler:
                 p.duration or 0.0 for p in self.phases.values() if p.duration
             ),
         }
+
+        # Add PyTorch profiler function-level statistics if available
+        pytorch_stats = self._extract_pytorch_profiler_stats()
+        if pytorch_stats:
+            summary["pytorch_function_stats"] = pytorch_stats
 
         return summary
 
@@ -344,7 +371,9 @@ class RuntimeProfiler:
             }
 
         # Calculate percentages
-        total_component_time = sum(t.total_time for t in self.component_timings.values())
+        total_component_time = sum(
+            t.total_time for t in self.component_timings.values()
+        )
         if total_component_time > 0:
             for name in summary:
                 summary[name]["percentage_of_total"] = (
@@ -375,7 +404,9 @@ class RuntimeProfiler:
                 for phase_name, phase in list(self.phases.items()):
                     if phase.duration is None:
                         phase.finish()
-                        logger.debug(f"Finished incomplete phase '{phase_name}' before save")
+                        logger.debug(
+                            f"Finished incomplete phase '{phase_name}' before save"
+                        )
 
                 summary = self.get_summary()
                 output_path = self.output_dir / filename
@@ -398,9 +429,7 @@ class RuntimeProfiler:
                 # Add metadata about save status
                 summary_serializable["save_metadata"] = {
                     "saved_at": time.time(),
-                    "incomplete": any(
-                        p.duration is None for p in self.phases.values()
-                    ),
+                    "incomplete": any(p.duration is None for p in self.phases.values()),
                     "active_phases": self.active_phases.copy(),
                 }
 
@@ -437,7 +466,9 @@ class RuntimeProfiler:
                 for sub_name, sub_info in phase_info["sub_phases"].items():
                     sub_duration = sub_info["duration"]
                     sub_pct = (sub_duration / duration * 100) if duration > 0 else 0.0
-                    print(f"    └─ {sub_name:26s} {sub_duration:8.2f}s ({sub_pct:5.1f}%)")
+                    print(
+                        f"    └─ {sub_name:26s} {sub_duration:8.2f}s ({sub_pct:5.1f}%)"
+                    )
 
         # Component summary
         print("\n⚙️  COMPONENTS:")
@@ -453,7 +484,7 @@ class RuntimeProfiler:
             pct = comp_info["percentage_of_total"]
             print(
                 f"  {name:30s} {total:8.2f}s ({pct:5.1f}%) "
-                f"[{count} calls, avg: {avg*1000:.2f}ms]"
+                f"[{count} calls, avg: {avg * 1000:.2f}ms]"
             )
 
         # Memory summary
@@ -485,31 +516,195 @@ class RuntimeProfiler:
 
         return None
 
+    def _extract_pytorch_profiler_stats(self) -> Optional[Dict[str, Any]]:
+        """Extract function-level statistics from PyTorch profiler.
 
-def setup_profiler_signal_handlers(profiler: RuntimeProfiler) -> None:
-    """Setup signal handlers to save profiling data on interrupt.
+        Returns:
+            Dictionary with function-level timing statistics, or None if unavailable
+        """
+        if not self.enable_pytorch_profiler or self.pytorch_profiler is None:
+            return None
+
+        try:
+            # Get profiler function events
+            function_events = self.pytorch_profiler.key_averages()
+
+            # Extract top functions by CPU time
+            cpu_stats = []
+            cuda_stats = []
+
+            for event in function_events:
+                # Skip very short events (< 0.1ms)
+                if event.cpu_time_total < 100:  # microseconds
+                    continue
+
+                cpu_stats.append(
+                    {
+                        "name": event.key,
+                        "cpu_time_total_ms": event.cpu_time_total
+                        / 1000.0,  # Convert to ms
+                        "cpu_time_avg_ms": (event.cpu_time_total / event.count) / 1000.0
+                        if event.count > 0
+                        else 0,
+                        "count": event.count,
+                        "percentage": 0.0,  # Will be calculated below
+                    }
+                )
+
+                if event.cuda_time_total > 0:
+                    cuda_stats.append(
+                        {
+                            "name": event.key,
+                            "cuda_time_total_ms": event.cuda_time_total / 1000.0,
+                            "cuda_time_avg_ms": (event.cuda_time_total / event.count)
+                            / 1000.0
+                            if event.count > 0
+                            else 0,
+                            "count": event.count,
+                            "percentage": 0.0,
+                        }
+                    )
+
+            # Calculate percentages
+            if cpu_stats:
+                total_cpu_time = sum(s["cpu_time_total_ms"] for s in cpu_stats)
+                for stat in cpu_stats:
+                    stat["percentage"] = (
+                        (stat["cpu_time_total_ms"] / total_cpu_time * 100)
+                        if total_cpu_time > 0
+                        else 0
+                    )
+
+                # Sort by total time descending
+                cpu_stats.sort(key=lambda x: x["cpu_time_total_ms"], reverse=True)
+
+            if cuda_stats:
+                total_cuda_time = sum(s["cuda_time_total_ms"] for s in cuda_stats)
+                for stat in cuda_stats:
+                    stat["percentage"] = (
+                        (stat["cuda_time_total_ms"] / total_cuda_time * 100)
+                        if total_cuda_time > 0
+                        else 0
+                    )
+
+                cuda_stats.sort(key=lambda x: x["cuda_time_total_ms"], reverse=True)
+
+            result = {}
+            if cpu_stats:
+                result["cpu_top_functions"] = cpu_stats[:50]  # Top 50 functions
+            if cuda_stats:
+                result["cuda_top_functions"] = cuda_stats[:50]
+
+            return result if result else None
+
+        except Exception as e:
+            logger.warning(f"Could not extract PyTorch profiler stats: {e}")
+            return None
+
+
+# Global registry of active profilers for signal handling
+_active_profilers: List[RuntimeProfiler] = []
+_profiler_lock = Lock()
+
+
+def register_profiler(profiler: RuntimeProfiler) -> None:
+    """Register a profiler for signal handling.
 
     Args:
-        profiler: RuntimeProfiler instance
+        profiler: RuntimeProfiler instance to register
     """
     if profiler is None:
         return
 
+    with _profiler_lock:
+        if profiler not in _active_profilers:
+            _active_profilers.append(profiler)
+            logger.debug(f"Registered profiler: {profiler.output_dir}")
+
+
+def unregister_profiler(profiler: RuntimeProfiler) -> None:
+    """Unregister a profiler from signal handling.
+
+    Args:
+        profiler: RuntimeProfiler instance to unregister
+    """
+    if profiler is None:
+        return
+
+    with _profiler_lock:
+        if profiler in _active_profilers:
+            _active_profilers.remove(profiler)
+            logger.debug(f"Unregistered profiler: {profiler.output_dir}")
+
+
+def save_all_active_profilers(force: bool = True) -> int:
+    """Save all active profilers.
+
+    Args:
+        force: Force save even if already saved
+
+    Returns:
+        Number of profilers successfully saved
+    """
+    with _profiler_lock:
+        profilers_to_save = list(_active_profilers)
+
+    if not profilers_to_save:
+        logger.debug("No active profilers to save")
+        return 0
+
+    logger.info(f"Saving {len(profilers_to_save)} active profiler(s)...")
+    saved_count = 0
+
+    for profiler in profilers_to_save:
+        try:
+            logger.info(f"  → Saving profiler: {profiler.output_dir}")
+            profiler.save_summary(force=force)
+            if profiler.enable_pytorch_profiler:
+                profiler.stop_pytorch_profiler()
+            saved_count += 1
+        except Exception as e:
+            logger.error(
+                f"  ✗ Error saving profiler {profiler.output_dir}: {e}", exc_info=True
+            )
+
+    logger.info(
+        f"Successfully saved {saved_count}/{len(profilers_to_save)} profiler(s)"
+    )
+    return saved_count
+
+
+def setup_profiler_signal_handlers(profiler: RuntimeProfiler = None) -> None:
+    """Setup signal handlers to save profiling data on interruption.
+
+    This function sets up signal handlers that will save ALL active profilers
+    when the process receives SIGINT or SIGTERM. If called multiple times,
+    it will only set up handlers once.
+
+    Args:
+        profiler: RuntimeProfiler instance to register (optional, for backwards compatibility)
+    """
+    # Register the profiler if provided
+    if profiler is not None:
+        register_profiler(profiler)
+
+    # Only install signal handlers once
+    if hasattr(setup_profiler_signal_handlers, "_installed"):
+        return
+
     def save_on_signal(signum, frame):
-        """Save profiling data when signal is received."""
+        """Save profiling data for all active profilers when signal is received."""
         try:
             signal_name = signal.Signals(signum).name
         except ValueError:
             signal_name = f"Signal {signum}"
+
         logger.warning(
-            f"Received {signal_name} signal - saving profiling data before exit..."
+            f"Received {signal_name} signal - saving profiling data for all active profilers..."
         )
-        try:
-            profiler.save_summary(force=True)
-            if profiler.enable_pytorch_profiler:
-                profiler.stop_pytorch_profiler()
-        except Exception as e:
-            logger.error(f"Error saving profiling data on signal: {e}", exc_info=True)
+
+        save_all_active_profilers(force=True)
+
         # Re-raise the signal to allow normal cleanup
         signal.signal(signum, signal.SIG_DFL)
         os.kill(os.getpid(), signum)
@@ -518,9 +713,13 @@ def setup_profiler_signal_handlers(profiler: RuntimeProfiler) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             signal.signal(sig, save_on_signal)
+            logger.debug(f"Registered signal handler for {sig}")
         except (ValueError, OSError) as e:
             # Signal may not be available on all platforms
             logger.debug(f"Could not register signal handler for {sig}: {e}")
+
+    # Mark as installed
+    setup_profiler_signal_handlers._installed = True
 
 
 def create_profiler(
@@ -555,4 +754,3 @@ def create_profiler(
         setup_profiler_signal_handlers(profiler)
 
     return profiler
-

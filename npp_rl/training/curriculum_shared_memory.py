@@ -9,7 +9,7 @@ import ctypes
 import logging
 import multiprocessing as mp
 import threading
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any
 
 import numpy as np
 

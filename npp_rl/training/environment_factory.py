@@ -13,14 +13,19 @@ from stable_baselines3.common.vec_env import (
     VecCheckNan,
 )
 
-from nclone.gym_environment.config import EnvironmentConfig
+from nclone.gym_environment.config import EnvironmentConfig, PBRSConfig
 from nclone.gym_environment.frame_stack_wrapper import FrameStackWrapper
+
+# FrameSkipWrapper removed - frame skip now integrated into BaseNppEnvironment
 from nclone.gym_environment.npp_environment import NppEnvironment
 
 from npp_rl.wrappers.curriculum_env import CurriculumVecEnvWrapper, CurriculumEnv
 from npp_rl.wrappers.gpu_observation_wrapper import GPUObservationWrapper
-from npp_rl.wrappers.position_tracking_wrapper import PositionTrackingWrapper
 from npp_rl.training.architecture_configs import ArchitectureConfig
+from npp_rl.vectorization.shared_memory_vecenv import (
+    SharedMemorySubprocVecEnv,
+    SharedMemoryObservationWrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +38,18 @@ class EnvironmentFactory:
         use_curriculum: bool = False,
         curriculum_manager=None,
         frame_stack_config: Optional[Dict[str, Any]] = None,
-        pbrs_gamma: float = 0.99,
+        frame_skip_config: Optional[Dict[str, Any]] = None,
+        pbrs_gamma: float = 1.0,
         output_dir: Optional[Path] = None,
         pretrained_checkpoint: Optional[str] = None,
         test_dataset_path: Optional[str] = None,
         architecture_config: Optional[ArchitectureConfig] = None,
         reward_config=None,  # RewardConfig for curriculum-aware reward system
+        custom_map_path: Optional[
+            str
+        ] = None,  # Single level file path (overrides dataset)
+        enable_profiling: bool = False,  # Enable environment-level profiling
+        use_shared_memory: bool = True,  # Use shared memory for efficient scaling
     ):
         """Initialize environment factory.
 
@@ -49,17 +60,23 @@ class EnvironmentFactory:
             use_curriculum: Enable curriculum learning
             curriculum_manager: Curriculum manager instance
             frame_stack_config: Frame stacking configuration dict
+            frame_skip_config: Frame skip configuration dict with keys:
+                - enable: bool (default: False)
+                - skip: int (default: 4, recommended for N++ based on input buffers)
+                - accumulate_rewards: bool (default: True)
             pbrs_gamma: Discount factor for PBRS (base environment)
             output_dir: Output directory for BC normalization stats
             pretrained_checkpoint: Path to pretrained BC checkpoint (for normalization)
             test_dataset_path: Path to test dataset (for evaluation environments)
             architecture_config: Architecture configuration (used to disable rendering if visual modalities not used)
             reward_config: RewardConfig instance for curriculum-aware reward system
+            custom_map_path: Path to single level file (overrides dataset selection when specified)
         """
         self.use_curriculum = use_curriculum
         self.test_dataset_path = test_dataset_path
         self.curriculum_manager = curriculum_manager
         self.frame_stack_config = frame_stack_config or {}
+        self.frame_skip_config = frame_skip_config or {}
         self.pbrs_gamma = pbrs_gamma
         self.output_dir = output_dir
         self.pretrained_checkpoint = pretrained_checkpoint
@@ -67,6 +84,9 @@ class EnvironmentFactory:
         self.vec_normalize_wrapper = None
         self.architecture_config = architecture_config
         self.reward_config = reward_config
+        self.custom_map_path = custom_map_path
+        self.enable_profiling = enable_profiling
+        self.use_shared_memory = use_shared_memory
 
     def create_training_env(self, num_envs: int, gamma: float = 0.99) -> VecNormalize:
         """Create vectorized training environment.
@@ -80,6 +100,9 @@ class EnvironmentFactory:
         Returns:
             Vectorized training environment with VecNormalize wrapper
         """
+        import time
+
+        _env_setup_start = time.perf_counter()
         logger.info(f"Setting up {num_envs} training environments...")
 
         # Create environment factory function
@@ -91,46 +114,106 @@ class EnvironmentFactory:
             )
 
         # Create vectorized environment
-        # Use SubprocVecEnv for true multiprocessing (bypasses Python GIL)
-        # NOTE: Visualization is never enabled during training (only for video rendering post-hoc)
-        # SubprocVecEnv has IPC overhead, so only use for 4+ envs where parallelism benefit outweighs it
-        use_subproc = num_envs >= 4
+        # Strategy:
+        # - DummyVecEnv: 1-4 envs (IPC overhead not worth it)
+        # - SharedMemorySubprocVecEnv: 5+ envs (zero-copy, scales to 128+)
+        # - Fallback SubprocVecEnv: if shared memory disabled
 
-        if num_envs < 4:
+        import os
+
+        force_dummy = os.environ.get("FORCE_DUMMY_VEC_ENV", "0") == "1"
+
+        # Determine vectorization strategy
+        use_dummy = num_envs <= 4 or force_dummy
+        use_shared_memory_impl = (
+            self.use_shared_memory and num_envs > 4 and not force_dummy
+        )
+
+        if force_dummy and num_envs > 4:
+            logger.warning(
+                f"⚠️  FORCE_DUMMY_VEC_ENV=1: Using DummyVecEnv for {num_envs} environments"
+            )
+        elif use_dummy:
             logger.info(
-                f"Using DummyVecEnv for {num_envs} environments (SubprocVecEnv IPC overhead not worth it for <4 envs)"
+                f"Using DummyVecEnv for {num_envs} environments (sequential execution)"
+            )
+        elif use_shared_memory_impl:
+            logger.info(
+                f"Using SharedMemorySubprocVecEnv for {num_envs} environments "
+                f"(zero-copy observations, scales to 128+)"
             )
         else:
             logger.info(
-                f"Using SubprocVecEnv for {num_envs} environments (true multiprocessing)"
+                f"Using SubprocVecEnv for {num_envs} environments (standard multiprocessing)"
             )
 
-        if use_subproc:
-            # SubprocVecEnv: spawn_context for better compatibility, no visualization
-            env_fns = [make_env(i, visualize=False) for i in range(num_envs)]
-            env = SubprocVecEnv(env_fns, start_method="spawn")
-            logger.info(f"✓ SubprocVecEnv initialized with {num_envs} worker processes")
-        else:
+        env_fns = [make_env(i, visualize=False) for i in range(num_envs)]
+
+        if use_dummy:
             # DummyVecEnv: single process, sequential execution
-            env_fns = [make_env(i, visualize=False) for i in range(num_envs)]
             env = DummyVecEnv(env_fns)
-            logger.info(f"✓ DummyVecEnv initialized with {num_envs} environments")
+            logger.info("✓ DummyVecEnv initialized")
+        elif use_shared_memory_impl:
+            # SharedMemorySubprocVecEnv: zero-copy via shared memory
+            try:
+                # Create dummy env to get observation space
+                dummy_env = env_fns[0]()
+                obs_space = dummy_env.observation_space
+                dummy_env.close()
 
-        # Apply VecNormalize for reward normalization only
-        # Observation normalization handled separately via BC stats
-        logger.info("Applying VecNormalize wrapper for reward normalization...")
+                # Pre-allocate shared memory
+                shared_obs = SharedMemoryObservationWrapper(obs_space, num_envs)
+
+                # Create vectorized env with shared memory
+                # Let SharedMemorySubprocVecEnv auto-select best start method
+                env = SharedMemorySubprocVecEnv(env_fns, shared_memory=shared_obs)
+                logger.info(
+                    f"✓ SharedMemorySubprocVecEnv initialized with {num_envs} workers"
+                )
+            except Exception as e:
+                logger.error(f"Failed to create SharedMemorySubprocVecEnv: {e}")
+                logger.warning("Falling back to standard SubprocVecEnv")
+                # Use fork on Linux for fast startup, spawn elsewhere
+                import sys
+
+                start_method = "fork" if sys.platform == "linux" else "spawn"
+                env = SubprocVecEnv(env_fns, start_method=start_method)
+                logger.info("✓ SubprocVecEnv initialized (fallback)")
+        else:
+            # Standard SubprocVecEnv: pickle serialization
+            # Use fork on Linux for fast startup, spawn elsewhere
+            import sys
+
+            start_method = "fork" if sys.platform == "linux" else "spawn"
+            env = SubprocVecEnv(env_fns, start_method=start_method)
+            logger.info("✓ SubprocVecEnv initialized")
+
+        # Apply VecNormalize for observation wrapper compatibility only
+        # Reward normalization DISABLED - PBRS shaping already provides proper scaling
+        # Normalizing PBRS rewards would compress gradients and violate policy invariance
+        logger.info("Applying VecNormalize wrapper (observation wrapper only)...")
         env = VecNormalize(
             env,
             training=True,
             norm_obs=False,  # Keep False - BC handles this
-            norm_reward=True,
+            norm_reward=False,  # DISABLED: PBRS provides proper scaling
             clip_obs=10.0,
             clip_reward=10.0,
             gamma=gamma,
             epsilon=1e-8,
         )
         self.vec_normalize_wrapper = env
-        logger.info("✓ VecNormalize wrapper applied (reward normalization only)")
+        logger.info("✓ VecNormalize wrapper applied (reward normalization DISABLED)")
+
+        # Log PBRS configuration for verification
+        logger.info("PBRS Configuration:")
+        logger.info(f"  pbrs_gamma: {self.pbrs_gamma}")
+        logger.info(
+            "  VecNormalize reward normalization: DISABLED (PBRS handles scaling)"
+        )
+        logger.info(
+            "  Expected PBRS reward range: [-5.0, +5.0] in early training phase"
+        )
 
         # Add NaN/Inf checking wrapper for early detection and detailed diagnostics
         # Reference: https://stable-baselines3.readthedocs.io/en/master/_modules/stable_baselines3/common/vec_env/vec_check_nan.html
@@ -165,10 +248,14 @@ class EnvironmentFactory:
             )
 
         logger.info(f"✓ Environments created: {num_envs} training")
-        logger.info(f"✓ Using {'DummyVecEnv' if not use_subproc else 'SubprocVecEnv'}")
 
         if self.use_curriculum:
             logger.info("Curriculum tracking enabled across all environments")
+
+        _env_setup_time = time.perf_counter() - _env_setup_start
+        logger.info(
+            f"[TIMING] create_training_env ({num_envs} envs): {_env_setup_time:.3f}s"
+        )
 
         return env
 
@@ -181,9 +268,18 @@ class EnvironmentFactory:
         logger.info("Creating evaluation environment...")
 
         def make_eval_env():
+            # Frame skip is now integrated into the environment
+            frame_skip = 4  # Default
+            if self.frame_skip_config.get("enable", False):
+                frame_skip = self.frame_skip_config.get("skip", 4)
+
             env_config = EnvironmentConfig.for_training(
-                test_dataset_path=self.test_dataset_path
+                test_dataset_path=self.test_dataset_path,
+                custom_map_path=self.custom_map_path,
+                pbrs=PBRSConfig(pbrs_gamma=self.pbrs_gamma),
+                enable_profiling=self.enable_profiling,
             )
+            env_config.frame_skip = frame_skip  # Set frame skip in config
 
             # Disable visual observations if architecture doesn't use visual modalities
             if self.architecture_config is not None:
@@ -196,6 +292,11 @@ class EnvironmentFactory:
                     )
 
             env = NppEnvironment(config=env_config)
+
+            if frame_skip > 1:
+                logger.info(
+                    f"✓ Frame skip integrated in environment: skip={frame_skip} frames"
+                )
 
             # Apply FrameStackWrapper if frame stacking is enabled
             if self.frame_stack_config and (
@@ -240,10 +341,18 @@ class EnvironmentFactory:
             if rank == 0:
                 logger.info("[Env 0] Creating NppEnvironment...")
 
+            # Frame skip is now integrated into the environment
+            frame_skip = 4  # Default
+            if self.frame_skip_config.get("enable", False):
+                frame_skip = self.frame_skip_config.get("skip", 4)
+
             env_config = EnvironmentConfig.for_training(
-                test_dataset_path=self.test_dataset_path
+                test_dataset_path=self.test_dataset_path,
+                custom_map_path=self.custom_map_path,
+                pbrs=PBRSConfig(pbrs_gamma=self.pbrs_gamma),
             )
-            
+            env_config.frame_skip = frame_skip  # Set frame skip in config
+
             # Pass reward_config if available (for curriculum-aware reward system)
             if self.reward_config is not None:
                 env_config.reward_config = self.reward_config
@@ -270,6 +379,16 @@ class EnvironmentFactory:
 
             env = NppEnvironment(config=env_config)
 
+            # Frame skip is now integrated into BaseNppEnvironment
+            if rank == 0 and frame_skip > 1:
+                logger.info(
+                    f"✓ Frame skip integrated in environment: skip={frame_skip} frames"
+                )
+                logger.info(
+                    f"  → Agent decisions reduced by {(1 - 1 / frame_skip) * 100:.0f}% "
+                    f"(4-frame skip is within all N++ input buffers)"
+                )
+
             # Apply FrameStackWrapper if frame stacking is enabled
             if self.frame_stack_config and (
                 self.frame_stack_config.get("enable_visual_frame_stacking", False)
@@ -292,8 +411,7 @@ class EnvironmentFactory:
                 if rank == 0:
                     logger.info("✓ FrameStackWrapper applied to environment")
 
-            # Wrap with position tracking for route visualization
-            env = PositionTrackingWrapper(env)
+            # Position tracking is now integrated into BaseNppEnvironment (no wrapper needed)
 
             # Wrap with curriculum if enabled
             if include_curriculum and self.curriculum_manager:
@@ -406,6 +524,27 @@ class EnvironmentFactory:
                                 logger.info(
                                     f"  ↻ Reshaped '{key}' BC stats from {bc_stats[mean_key].shape} "
                                     f"to {expected_shape} to match flattened observation format"
+                                )
+
+                            # Case 3: BC stats are single state (1D) but environment expects stacked (2D)
+                            # This happens when BC was trained without state stacking but RL uses state stacking
+                            # (e.g., AttentiveStateMLP architectures disable state stacking in BC)
+                            elif (
+                                mean.ndim == 1
+                                and len(expected_shape) == 2
+                                and expected_shape[0] > 1  # Stack size > 1
+                                and mean.size
+                                == expected_shape[1]  # State dimension matches
+                            ):
+                                # Replicate single-state stats across all frames in the stack
+                                stack_size = expected_shape[0]
+                                mean = np.tile(mean, (stack_size, 1))
+                                std = np.tile(std, (stack_size, 1))
+                                reshaped = True
+                                logger.info(
+                                    f"  ↻ Replicated '{key}' BC stats from single state {bc_stats[mean_key].shape} "
+                                    f"to stacked {expected_shape} (BC trained without state stacking, "
+                                    f"RL uses state stacking)"
                                 )
 
                             # If reshaping didn't work (incompatible sizes), skip this key

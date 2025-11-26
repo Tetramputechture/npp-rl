@@ -118,8 +118,7 @@ class GPUObservationWrapper(VecEnvWrapper):
                 )
                 obs["action_mask"] = obs["action_mask"].cpu().numpy()
 
-            # Force copy to prevent reference bugs
-            obs["action_mask"] = obs["action_mask"].copy()
+            # Note: No longer need defensive copy - environment handles immutability
 
         # Pass through unchanged - pinned memory benefit comes from DataLoader/batch processing
         return obs
@@ -141,17 +140,5 @@ class GPUObservationWrapper(VecEnvWrapper):
             Observations are on GPU, rewards/dones/infos remain on CPU
         """
         obs, rewards, dones, infos = self.venv.step_wait()
-
-        # DEFENSIVE FIX: Force deep copy of action_mask before GPU transfer
-        # This prevents CPU-GPU memory aliasing issues and ensures mask independence
-        if isinstance(obs, dict) and "action_mask" in obs:
-            mask = obs["action_mask"]
-            # Force deep copy with proper memory ownership
-            mask = np.array(mask, copy=True)
-            # Ensure C-contiguous layout
-            if not mask.flags["C_CONTIGUOUS"]:
-                mask = np.ascontiguousarray(mask)
-            obs["action_mask"] = mask
-
         gpu_obs = self._transfer_to_gpu(obs)
         return gpu_obs, rewards, dones, infos

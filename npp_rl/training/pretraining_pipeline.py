@@ -38,6 +38,7 @@ class PretrainingPipeline:
         tensorboard_writer: Optional[SummaryWriter] = None,
         frame_stack_config: Optional[Dict] = None,
         test_dataset_path: Optional[str] = None,
+        checkpoint_frame_stack_config: Optional[Dict] = None,
     ):
         """Initialize pretraining pipeline.
 
@@ -46,13 +47,17 @@ class PretrainingPipeline:
             architecture_config: Architecture configuration
             output_dir: Output directory for BC checkpoints
             tensorboard_writer: Optional TensorBoard writer
-            frame_stack_config: Frame stacking configuration dict with keys:
+            frame_stack_config: Frame stacking configuration dict for training with keys:
                 - enable_visual_frame_stacking: bool
                 - visual_stack_size: int
                 - enable_state_stacking: bool
                 - state_stack_size: int
                 - padding_type: str ('zero' or 'repeat')
             test_dataset_path: Path to test dataset
+            checkpoint_frame_stack_config: Frame stacking config to save in checkpoint.
+                If None, uses frame_stack_config. This allows saving the original
+                RL config even when BC training uses a modified config (e.g., disabled
+                state stacking for AttentiveStateMLP architectures).
         """
         self.replay_data_dir = Path(replay_data_dir)
         self.architecture_config = architecture_config
@@ -60,6 +65,9 @@ class PretrainingPipeline:
         self.tensorboard_writer = tensorboard_writer
         self.frame_stack_config = frame_stack_config or {}
         self.test_dataset_path = test_dataset_path
+        self.checkpoint_frame_stack_config = (
+            checkpoint_frame_stack_config or self.frame_stack_config
+        )
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -189,6 +197,7 @@ class PretrainingPipeline:
                 tensorboard_writer=self.tensorboard_writer,
                 frame_stack_config=self.frame_stack_config,
                 test_dataset_path=self.test_dataset_path,
+                checkpoint_frame_stack_config=self.checkpoint_frame_stack_config,
             )
 
             # Run training
@@ -323,39 +332,16 @@ def run_bc_pretraining_if_available(
         return None
 
     try:
-        # Conditionally disable state stacking for AttentiveStateMLP architectures
-        # AttentiveStateMLP expects single 29-dim states (split into 6 physics components)
-        # and cannot handle stacked states
-        bc_frame_stack_config = frame_stack_config
-        if frame_stack_config and frame_stack_config.get(
-            "enable_state_stacking", False
-        ):
-            if hasattr(architecture_config, "state") and hasattr(
-                architecture_config.state, "use_attentive_state_mlp"
-            ):
-                if architecture_config.state.use_attentive_state_mlp:
-                    # Create a modified config with state stacking disabled
-                    bc_frame_stack_config = frame_stack_config.copy()
-                    bc_frame_stack_config["enable_state_stacking"] = False
-                    logger.info(
-                        f"Architecture '{architecture_config.name}' uses AttentiveStateMLP - "
-                        "disabling state stacking for BC pretraining"
-                    )
-                    logger.info(
-                        "  AttentiveStateMLP expects single 29-dim states, not stacked states"
-                    )
-                    logger.info(
-                        f"  Visual frame stacking remains enabled: "
-                        f"{bc_frame_stack_config.get('enable_visual_frame_stacking', False)}"
-                    )
-
+        # Use the same frame stacking config for BC as RL
+        # AttentiveStateMLP handles stacked states by extracting the most recent frame
         pipeline = PretrainingPipeline(
             replay_data_dir=str(replay_data_dir),
             architecture_config=architecture_config,
             output_dir=output_dir,
             tensorboard_writer=tensorboard_writer,
-            frame_stack_config=bc_frame_stack_config,
+            frame_stack_config=frame_stack_config,
             test_dataset_path=test_dataset_path,
+            checkpoint_frame_stack_config=frame_stack_config,  # Same config for BC and RL
         )
 
         # Check for existing checkpoint

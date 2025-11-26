@@ -10,7 +10,7 @@ from npp_rl.training.training_callbacks import VerboseTrainingCallback
 from npp_rl.callbacks import (
     RouteVisualizationCallback,
     EnhancedTensorBoardCallback,
-    AuxiliaryLossCallback,
+    PBRSLoggingCallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ class CallbackFactory:
         world_size: int = 1,
         enable_early_stopping: bool = False,
         early_stopping_patience: int = 10,
-        use_objective_attention_policy: bool = False,
     ):
         """Initialize callback factory.
 
@@ -48,7 +47,6 @@ class CallbackFactory:
         self.world_size = world_size
         self.enable_early_stopping = enable_early_stopping
         self.early_stopping_patience = early_stopping_patience
-        self.use_objective_attention_policy = use_objective_attention_policy
 
     def create_callbacks(
         self, user_callback: Optional[BaseCallback] = None
@@ -75,18 +73,6 @@ class CallbackFactory:
         callbacks.append(verbose_callback)
         logger.info("Added verbose training callback")
 
-        # Add auxiliary loss callback if using ObjectiveAttentionActorCriticPolicy
-        if self.use_objective_attention_policy:
-            auxiliary_callback = AuxiliaryLossCallback(
-                log_freq=100,
-                verbose=1,
-                auxiliary_weight=0.1,
-            )
-            callbacks.append(auxiliary_callback)
-            logger.info("Added auxiliary death prediction loss callback")
-
-        # User callback already added at the beginning
-
         # Add enhanced TensorBoard metrics callback
         enhanced_tb_callback = EnhancedTensorBoardCallback(
             log_freq=200,  # Log scalars every 200 steps (reduced overhead)
@@ -97,10 +83,17 @@ class CallbackFactory:
             "Added enhanced TensorBoard callback (includes PBRS and curriculum metrics)"
         )
 
+        # Add PBRS logging callback for detailed episode-level PBRS metrics
+        pbrs_callback = PBRSLoggingCallback(verbose=0)
+        callbacks.append(pbrs_callback)
+        logger.info(
+            "Added PBRS logging callback (episode-level reward component analysis)"
+        )
+
         routes_dir = self.output_dir / "route_visualizations"
         # Sample 10% of episodes by default to reduce overhead
         # This significantly reduces per-step overhead while still providing useful visualizations
-        episode_sampling_rate = getattr(self, "route_episode_sampling_rate", 0.1)
+        episode_sampling_rate = 0.75
         route_callback = RouteVisualizationCallback(
             save_dir=str(routes_dir),
             max_routes_per_checkpoint=50,
@@ -108,7 +101,7 @@ class CallbackFactory:
             max_stored_routes=200,
             async_save=True,
             image_size=(800, 600),
-            episode_sampling_rate=0.2,
+            episode_sampling_rate=episode_sampling_rate,
             verbose=2,
         )
         callbacks.append(route_callback)

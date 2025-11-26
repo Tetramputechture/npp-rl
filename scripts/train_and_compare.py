@@ -43,12 +43,18 @@ from npp_rl.training.distributed_utils import (
     configure_cuda_for_training,
     barrier,
 )
-from npp_rl.training.runtime_profiler import create_profiler
+from npp_rl.training.runtime_profiler import (
+    create_profiler,
+    save_all_active_profilers,
+    unregister_profiler,
+)
 from npp_rl.training.profiling_callback import RuntimeProfilingCallback
+from npp_rl.training.profiled_policy_wrapper import wrap_policy_with_profiler
 from stable_baselines3.common.callbacks import BaseCallback
 import traceback
 import gc
 import os
+import atexit
 
 
 def parse_args():
@@ -74,6 +80,12 @@ def parse_args():
     )
     parser.add_argument(
         "--test-dataset", type=str, required=True, help="Path to test dataset"
+    )
+    parser.add_argument(
+        "--single-level",
+        type=str,
+        default=None,
+        help="Path to single level file for training and evaluation (replaces dataset selection)",
     )
 
     # Output options
@@ -243,8 +255,8 @@ def parse_args():
     parser.add_argument(
         "--pbrs-gamma",
         type=float,
-        default=0.995,
-        help="Discount factor for PBRS (always enabled, must match PPO gamma for policy invariance)",
+        default=1.0,
+        help="Discount factor for PBRS (always enabled)",
     )
 
     # Curriculum safety options
@@ -349,6 +361,14 @@ def parse_args():
         help="Padding type for initial frames",
     )
 
+    # Frame skip options
+    parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=1,
+        help="Number of frames to repeat each action (1 = no skip, 4 = standard Atari)",
+    )
+
     # Video recording options
     parser.add_argument(
         "--record-eval-videos",
@@ -447,7 +467,7 @@ def parse_args():
     parser.add_argument(
         "--memory-snapshot-freq",
         type=int,
-        default=10000,
+        default=500,
         help="Frequency of memory snapshots during training (in timesteps)",
     )
 
@@ -743,16 +763,16 @@ def train_architecture(
     logger.info(f"Training: {architecture_name}{condition_suffix} on GPU {device_id}")
     logger.info("=" * 70)
 
-    # AUTOMATIC DETECTION: Enable ObjectiveAttentionActorCriticPolicy for 'attention' architecture
-    use_objective_attention_policy = architecture_name == "attention"
-    if use_objective_attention_policy:
-        logger.info("🎯 Detected 'attention' architecture")
-        logger.info("   Automatically enabling: ObjectiveAttentionActorCriticPolicy")
-        logger.info("   - Deep ResNet MLP (5-layer policy, 3-layer value)")
-        logger.info("   - Objective-specific attention over 1-16 locked doors")
-        logger.info("   - Dueling value architecture (always enabled)")
-        logger.info("   - Residual connections + LayerNorm + SiLU")
-        logger.info("   Total parameters: ~15-18M")
+    # Validate single level path if specified
+    single_level_path = None
+    if hasattr(args, "single_level") and args.single_level:
+        single_level_path = Path(args.single_level)
+        if not single_level_path.exists():
+            raise FileNotFoundError(f"Single level file not found: {single_level_path}")
+        if not single_level_path.is_file():
+            raise ValueError(f"Single level path is not a file: {single_level_path}")
+        logger.info(f"Single level mode enabled: {single_level_path}")
+        logger.info("  → Training and evaluation will use this single level file")
 
     # Create condition-specific output directory
     if condition_name:
@@ -776,6 +796,10 @@ def train_architecture(
             pytorch_profiler_repeat=args.profiler_repeat,
         )
         logger.info(f"Runtime profiler enabled: output_dir={profiler_output_dir}")
+        logger.info(
+            "  → Profiling data will be saved even on early cancellation (Ctrl+C)"
+        )
+        logger.info("  → Signal handlers registered for SIGINT and SIGTERM")
     elif profiler is not None:
         arch_profiler = profiler
 
@@ -827,6 +851,21 @@ def train_architecture(
             }
             logger.info(f"Frame stacking configuration: {frame_stack_config}")
 
+        # Log frame skip configuration
+        frame_skip_config = None
+        if args.frame_skip > 1:
+            logger.info(f"Frame skip enabled: {args.frame_skip} frames per action")
+            logger.info(
+                f"  → Effective decision frequency: {60 / args.frame_skip:.1f} Hz (was 60 Hz)"
+            )
+            logger.info(
+                f"  → Computational savings: ~{(1 - 1 / args.frame_skip) * 100:.1f}%"
+            )
+            frame_skip_config = {
+                "enable": True,
+                "skip": args.frame_skip,
+                "accumulate_rewards": True,
+            }
         # Create trainer
         trainer = ArchitectureTrainer(
             architecture_config=architecture_config,
@@ -837,7 +876,6 @@ def train_architecture(
             world_size=args.num_gpus,
             tensorboard_writer=tb_writer.get_writer("training") if tb_writer else None,
             use_mixed_precision=args.mixed_precision,
-            use_objective_attention_policy=use_objective_attention_policy,
             use_curriculum=args.use_curriculum,
             curriculum_kwargs=curriculum_kwargs,
             use_distributed=use_distributed,
@@ -846,6 +884,10 @@ def train_architecture(
             enable_early_stopping=args.enable_early_stopping,
             early_stopping_patience=args.early_stopping_patience,
             debug_mode=args.debug,
+            single_level_path=str(single_level_path) if single_level_path else None,
+            frame_skip_config=frame_skip_config,
+            runtime_profiler=arch_profiler,  # Pass profiler for memory tracking
+            enable_env_profiling=args.enable_profiling,  # Enable environment-level profiling
         )
 
         # Build PPO hyperparameters from hardware profile
@@ -880,23 +922,21 @@ def train_architecture(
                 logger.info(f"Learning rate: {base_lr:.2e} (constant)")
 
         # Add deep ResNet policy kwargs if enabled (or for attention architecture)
-        if args.use_deep_resnet_policy or use_objective_attention_policy:
+        # Note: attention architecture always uses DeepResNet with dueling
+        if args.use_deep_resnet_policy or architecture_name == "attention":
             ppo_kwargs["use_residual"] = args.deep_resnet_use_residual
             ppo_kwargs["use_layer_norm"] = args.deep_resnet_use_layer_norm
             ppo_kwargs["dropout"] = args.deep_resnet_dropout
+            ppo_kwargs["dueling"] = True  # Always enable dueling
 
-            # Note: dueling is always enabled for ObjectiveAttentionActorCriticPolicy
-            if not use_objective_attention_policy:
-                ppo_kwargs["dueling"] = True  # Force dueling for consistency
+            logger.info("Deep ResNet policy enabled:")
+            logger.info(f"  Residual connections: {args.deep_resnet_use_residual}")
+            logger.info(f"  LayerNorm: {args.deep_resnet_use_layer_norm}")
+            logger.info(f"  Dropout: {args.deep_resnet_dropout}")
+            logger.info("  Dueling: True")
 
-            if not use_objective_attention_policy:
-                # Only log for manual deep ResNet policy (attention arch already logged above)
-                logger.info("Deep ResNet policy enabled:")
-                logger.info(f"  Residual connections: {args.deep_resnet_use_residual}")
-                logger.info(f"  LayerNorm: {args.deep_resnet_use_layer_norm}")
-                logger.info(f"  Dropout: {args.deep_resnet_dropout}")
-
-        # Setup model (with profiling)
+        # Setup model configuration (with profiling)
+        # NOTE: This only sets up configuration - actual model is created in setup_environments()
         if mem_profiler:
             mem_profiler.snapshot("before_model_setup")
         if arch_profiler:
@@ -907,14 +947,15 @@ def train_architecture(
                 trainer.setup_model(
                     pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs
                 )
-            arch_profiler.record_memory_snapshot("after_model_setup")
+            # NOTE: Removed "after_model_setup" snapshot - model not created yet!
+            # Actual model creation snapshot added in setup_environments()
         else:
             trainer.setup_model(
                 pretrained_checkpoint=pretrained_checkpoint, **ppo_kwargs
             )
         if mem_profiler:
             mem_profiler.snapshot("after_model_setup")
-            mem_profiler.compare_snapshots("before_model_setup", "after_model_setup")
+            # Don't compare yet - model not actually created
 
         # Setup environments (use per-GPU environment count)
         if mem_profiler:
@@ -938,6 +979,17 @@ def train_architecture(
         if mem_profiler:
             mem_profiler.snapshot("after_env_setup")
             mem_profiler.compare_snapshots("before_env_setup", "after_env_setup")
+
+        # Wrap policy with profiling if enabled
+        if arch_profiler and hasattr(trainer, "model") and trainer.model is not None:
+            logger.info("Wrapping policy with detailed method-level profiling...")
+            wrap_policy_with_profiler(
+                trainer.model, arch_profiler, instrument_modules=True
+            )
+            logger.info("  → All policy methods and submodules will be tracked")
+            logger.info(
+                "  → Profiling summary will include detailed method-level timings"
+            )
 
         # Create visualization callback if enabled
         vis_callback = None
@@ -1007,6 +1059,8 @@ def train_architecture(
         if mem_profiler:
             mem_profiler.snapshot("before_training")
         if arch_profiler:
+            # Reset peak memory stats to accurately measure peak during training
+            arch_profiler.reset_peak_memory_stats()
             arch_profiler.record_memory_snapshot("before_training")
             with arch_profiler.phase(
                 "training",
@@ -1106,16 +1160,13 @@ def train_architecture(
 
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user (KeyboardInterrupt)")
-        # Save profiling data before exiting
-        if arch_profiler:
-            logger.info("Saving profiling data before exit...")
-            try:
-                arch_profiler.save_summary(force=True)
-                if arch_profiler.enable_pytorch_profiler:
-                    arch_profiler.stop_pytorch_profiler()
-                logger.info("Profiling data saved successfully")
-            except Exception as save_error:
-                logger.error(f"Failed to save profiling data: {save_error}")
+        # Save ALL active profiling data before exiting
+        logger.info("Saving all active profilers before exit...")
+        try:
+            save_all_active_profilers(force=True)
+            logger.info("All profiling data saved successfully")
+        except Exception as save_error:
+            logger.error(f"Failed to save profiling data: {save_error}")
         # Clean up environments
         if "trainer" in locals():
             trainer.cleanup()
@@ -1126,15 +1177,12 @@ def train_architecture(
     except Exception as e:
         logger.error(f"Training failed for {architecture_name}{condition_suffix}: {e}")
         logger.error(traceback.format_exc())
-        # Save profiling data even on failure
-        if arch_profiler:
-            logger.info("Saving profiling data after failure...")
-            try:
-                arch_profiler.save_summary(force=True)
-                if arch_profiler.enable_pytorch_profiler:
-                    arch_profiler.stop_pytorch_profiler()
-            except Exception as save_error:
-                logger.error(f"Failed to save profiling data: {save_error}")
+        # Save ALL active profiling data even on failure
+        logger.info("Saving all active profilers after failure...")
+        try:
+            save_all_active_profilers(force=True)
+        except Exception as save_error:
+            logger.error(f"Failed to save profiling data: {save_error}")
         # Clean up environments even on failure (if trainer was initialized)
         if "trainer" in locals():
             trainer.cleanup()
@@ -1148,14 +1196,23 @@ def train_architecture(
             "error": str(e),
         }
     finally:
-        # Ensure profiling data is saved even if something goes wrong
+        # Ensure ALL profiling data is saved even if something goes wrong
+        try:
+            # Check if we have any profilers that haven't been saved
+            from npp_rl.training.runtime_profiler import _active_profilers
+
+            if _active_profilers:
+                logger.info("Saving all active profilers in finally block...")
+                save_all_active_profilers(force=True)
+        except Exception as save_error:
+            logger.error(f"Failed to save profiling data in finally: {save_error}")
+
+        # Unregister this architecture's profiler if it exists
         if arch_profiler:
             try:
-                if not arch_profiler._saved:
-                    logger.info("Saving profiling data in finally block...")
-                    arch_profiler.save_summary(force=True)
-            except Exception as save_error:
-                logger.error(f"Failed to save profiling data in finally: {save_error}")
+                unregister_profiler(arch_profiler)
+            except Exception:
+                pass
 
 
 def train_worker(
@@ -1248,6 +1305,12 @@ def train_worker(
                     output_dir=pretrain_output_dir,
                     enable=True,
                     enable_pytorch_profiler=False,  # Disable PyTorch profiler for pretraining
+                )
+                logger.info(
+                    f"Pretraining profiler enabled: output_dir={pretrain_output_dir}"
+                )
+                logger.info(
+                    "  → Profiling data will be saved even on early cancellation (Ctrl+C)"
                 )
 
             # Determine pretraining conditions (only on rank 0 to avoid conflicts)
@@ -1417,6 +1480,17 @@ def train_worker(
 def main():
     """Main execution function."""
     args = parse_args()
+
+    # Register atexit handler to save all profilers on any exit
+    def save_profilers_on_exit():
+        """Ensure all profilers are saved on program exit."""
+        try:
+            save_all_active_profilers(force=True)
+        except Exception as e:
+            # Use print instead of logger since logging might be shut down
+            print(f"Error saving profilers on exit: {e}", file=sys.stderr)
+
+    atexit.register(save_profilers_on_exit)
 
     # Create experiment directory
     base_output_dir = Path(args.output_dir)
@@ -1645,6 +1719,12 @@ def main():
                 output_dir=pretrain_output_dir,
                 enable=True,
                 enable_pytorch_profiler=False,  # Disable PyTorch profiler for pretraining
+            )
+            logger.info(
+                f"Pretraining profiler enabled: output_dir={pretrain_output_dir}"
+            )
+            logger.info(
+                "  → Profiling data will be saved even on early cancellation (Ctrl+C)"
             )
 
         # Determine pretraining conditions
